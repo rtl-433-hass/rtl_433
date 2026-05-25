@@ -339,10 +339,10 @@ No circular dependencies. T01 and T02 are independent tooling tracks with no dow
 **Parallel Tasks:**
 - ✔️ Task 09: Integration wiring, diagnostics, repairs (depends on: 06, 07, 08) (files: `__init__.py`, `diagnostics.py`, `repairs.py`) — completed
 
-### Phase 6: Testing
-**Parallel Tasks:**
-- Task 10: Unit tests + JSON fixtures (depends on: 05, 06, 07, 08, 09) (files: `tests/` unit + `tests/fixtures/`)
-- Task 11: Containerized integration & screenshot harness (depends on: 09) (files: `tests/integration/`, `.gitmodules`, `screenshots/`)
+### ✅ Phase 6: Testing
+**Parallel Tasks:** (run sequentially by the coordinator — see Noteworthy Events: Task 10 first to validate/harden the integration, then Task 11 against validated code)
+- ✔️ Task 10: Unit tests + JSON fixtures (depends on: 05, 06, 07, 08, 09) (files: `tests/` unit + `tests/fixtures/`) — completed (33 tests, ~89% coverage)
+- ✔️ Task 11: Containerized integration & screenshot harness (depends on: 09) (files: `tests/integration/`, `.gitmodules`, `docs/images/`) — completed (full end-to-end run; 4 screenshots captured)
 
 ### Phase 7: Documentation
 **Parallel Tasks:**
