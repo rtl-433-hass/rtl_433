@@ -1,10 +1,49 @@
 {
   "config": {
-    "step": {},
-    "abort": {},
-    "error": {}
+    "flow_title": "{model} ({device_key})",
+    "step": {
+      "user": {
+        "title": "Connect to an rtl_433 server",
+        "description": "Enter the WebSocket connection details for your rtl_433 HTTP server (started with `-F http`). Use plain `ws://` by default, or enable Secure to use `wss://` through a TLS reverse proxy. No authentication is performed by this integration.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "path": "WebSocket path",
+          "secure": "Secure (use wss://)"
+        },
+        "data_description": {
+          "host": "Hostname or IP address of the rtl_433 server.",
+          "port": "TCP port of the rtl_433 HTTP server (default 8433).",
+          "path": "WebSocket endpoint path on the server (default /ws).",
+          "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy)."
+        }
+      },
+      "confirm": {
+        "title": "Add discovered rtl_433 device",
+        "description": "A new device was observed on your rtl_433 server:\n\n**{model}** (`{device_key}`)\n\nDo you want to add it? Dismiss this card to ignore the device and stop it from being suggested again."
+      }
+    },
+    "abort": {
+      "already_configured": "This device is already configured."
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Check the host, port, and path, and that the rtl_433 server is reachable."
+    }
   },
   "options": {
-    "step": {}
+    "step": {
+      "init": {
+        "title": "rtl_433 options",
+        "description": "Configure discovery and the availability timeout. For a hub, set the new-device discovery toggle and the default availability timeout. For a device, override the availability timeout (leave blank to use the hub default).",
+        "data": {
+          "discovery_enabled": "Discover new devices",
+          "availability_timeout": "Availability timeout (seconds)"
+        },
+        "data_description": {
+          "discovery_enabled": "When on, newly observed devices on this server are surfaced for confirmation.",
+          "availability_timeout": "Mark a device unavailable after this many seconds without an event."
+        }
+      }
+    }
   }
 }
