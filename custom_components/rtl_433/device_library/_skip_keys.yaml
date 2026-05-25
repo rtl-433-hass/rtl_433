@@ -1,0 +1,30 @@
+# Identity / diagnostic / transport keys that must NOT produce entities.
+#
+# The first block is a verbatim port of the upstream `SKIP_KEYS` list from
+# `rtl_433_mqtt_hass.py`. The loader (Task 5) reads `skip_keys` as a flat list
+# and excludes any field whose name appears here before attempting a mapping
+# lookup.
+#
+# `channel`, `id`, `subtype` and `model` form the device identity (used by the
+# normalizer to derive the device key) and so are never measurement entities.
+
+skip_keys:
+  # --- upstream SKIP_KEYS (verbatim) ---
+  - type
+  - model
+  - subtype
+  - channel
+  - id
+  - mic
+  - mod
+  - freq
+  - sequence_num
+  - message_type
+  - exception
+  - raw_msg
+  # --- additional non-measurement / transport keys ---
+  # Secondary frequency / radio-tuning fields emitted by some rtl_433 builds.
+  - freq1
+  - freq2
+  # protocol number and decoder bookkeeping.
+  - protocol

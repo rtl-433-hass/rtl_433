@@ -1,0 +1,22 @@
+# Barometric pressure field mappings.
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+
+pressure_hPa:
+  platform: sensor
+  device_class: pressure
+  unit_of_measurement: hPa
+  state_class: measurement
+  name: Pressure
+  value_transform: { float: true }
+  object_suffix: P
+
+pressure_kPa:
+  platform: sensor
+  device_class: pressure
+  unit_of_measurement: kPa
+  state_class: measurement
+  name: Pressure
+  value_transform: { float: true }
+  object_suffix: P

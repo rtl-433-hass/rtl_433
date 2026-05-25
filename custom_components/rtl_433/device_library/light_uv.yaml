@@ -1,0 +1,40 @@
+# Light (illuminance) and UV field mappings.
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+
+light_lux:
+  platform: sensor
+  device_class: illuminance
+  unit_of_measurement: lx
+  state_class: measurement
+  name: Outside Luminance
+  value_transform: { int: true }
+  object_suffix: lux
+
+lux:
+  platform: sensor
+  device_class: illuminance
+  unit_of_measurement: lx
+  state_class: measurement
+  name: Outside Luminance
+  value_transform: { int: true }
+  object_suffix: lux
+
+uv:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: UV
+  state_class: measurement
+  name: UV Value
+  value_transform: { round: 1 }
+  object_suffix: uv
+
+uvi:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: UV Index
+  state_class: measurement
+  name: UV Index
+  value_transform: { round: 1 }
+  object_suffix: uvi

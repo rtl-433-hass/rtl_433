@@ -1,0 +1,40 @@
+# Rain total and rate field mappings.
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+
+rain_mm:
+  platform: sensor
+  device_class: precipitation
+  unit_of_measurement: mm
+  state_class: total_increasing
+  name: Rain Total
+  value_transform: { round: 2 }
+  object_suffix: RT
+
+rain_in:
+  platform: sensor
+  device_class: precipitation
+  unit_of_measurement: in
+  state_class: total_increasing
+  name: Rain Total
+  value_transform: { round: 2 }
+  object_suffix: RT
+
+rain_rate_mm_h:
+  platform: sensor
+  device_class: precipitation_intensity
+  unit_of_measurement: mm/h
+  state_class: measurement
+  name: Rain Rate
+  value_transform: { float: true }
+  object_suffix: RR
+
+rain_rate_in_h:
+  platform: sensor
+  device_class: precipitation_intensity
+  unit_of_measurement: in/h
+  state_class: measurement
+  name: Rain Rate
+  value_transform: { round: 2 }
+  object_suffix: RR

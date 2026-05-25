@@ -1,0 +1,100 @@
+# Miscellaneous field mappings: battery level, timestamp, radio signal
+# diagnostics, and lightning/storm fields.
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+
+# Battery state. rtl_433 reports a boolean-ish battery_ok (1 == OK, 0 == low).
+# Upstream maps it to a battery *percentage* sensor: 0 -> 1 %, 1 -> 100 %
+# via `((value * 99) round 0) + 1`. We reproduce that with scale+offset, so
+# this is a sensor (not a binary_sensor). See docs/device-library.md.
+battery_ok:
+  platform: sensor
+  device_class: battery
+  unit_of_measurement: "%"
+  state_class: measurement
+  name: Battery
+  value_transform: { scale: 99, offset: 1, round: 0 }
+  entity_category: diagnostic
+  object_suffix: B
+
+# Device-reported timestamp. Disabled by default (diagnostic noise).
+time:
+  platform: sensor
+  device_class: timestamp
+  unit_of_measurement: null
+  state_class: null
+  name: Timestamp
+  entity_category: diagnostic
+  enabled_by_default: false
+  icon: "mdi:clock-in"
+  object_suffix: UTC
+
+# Radio signal diagnostics. Present in the upstream mappings table (not in
+# SKIP_KEYS) and surfaced as diagnostic sensors.
+rssi:
+  platform: sensor
+  device_class: signal_strength
+  unit_of_measurement: dB
+  state_class: measurement
+  name: RSSI
+  value_transform: { round: 2 }
+  entity_category: diagnostic
+  object_suffix: rssi
+
+snr:
+  platform: sensor
+  device_class: signal_strength
+  unit_of_measurement: dB
+  state_class: measurement
+  name: SNR
+  value_transform: { round: 2 }
+  entity_category: diagnostic
+  object_suffix: snr
+
+noise:
+  platform: sensor
+  device_class: signal_strength
+  unit_of_measurement: dB
+  state_class: measurement
+  name: Noise
+  value_transform: { round: 2 }
+  entity_category: diagnostic
+  object_suffix: noise
+
+# Lightning detector fields.
+storm_dist_km:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: km
+  state_class: measurement
+  name: Lightning Distance
+  value_transform: { int: true }
+  object_suffix: stdist
+
+storm_dist:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: mi
+  state_class: measurement
+  name: Lightning Distance
+  value_transform: { int: true }
+  object_suffix: stdist
+
+strike_distance:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: mi
+  state_class: measurement
+  name: Lightning Distance
+  value_transform: { int: true }
+  object_suffix: stdist
+
+strike_count:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: total_increasing
+  name: Lightning Strike Count
+  value_transform: { int: true }
+  object_suffix: strcnt

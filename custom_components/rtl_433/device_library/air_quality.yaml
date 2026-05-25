@@ -1,0 +1,40 @@
+# Air quality field mappings.
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+
+pm2_5_ug_m3:
+  platform: sensor
+  device_class: pm25
+  unit_of_measurement: "µg/m³"
+  state_class: measurement
+  name: PM 2.5 Concentration
+  value_transform: { float: true }
+  object_suffix: PM25
+
+pm10_ug_m3:
+  platform: sensor
+  device_class: pm10
+  unit_of_measurement: "µg/m³"
+  state_class: measurement
+  name: PM 10 Concentration
+  value_transform: { float: true }
+  object_suffix: PM10
+
+estimated_pm10_0_ug_m3:
+  platform: sensor
+  device_class: pm10
+  unit_of_measurement: "µg/m³"
+  state_class: measurement
+  name: Estimated PM 10 Concentration
+  value_transform: { float: true }
+  object_suffix: PM10
+
+co2_ppm:
+  platform: sensor
+  device_class: carbon_dioxide
+  unit_of_measurement: ppm
+  state_class: measurement
+  name: CO2 Concentration
+  value_transform: { int: true }
+  object_suffix: CO2

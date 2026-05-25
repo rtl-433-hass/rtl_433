@@ -1,0 +1,61 @@
+# Humidity and moisture field mappings.
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+
+humidity:
+  platform: sensor
+  device_class: humidity
+  unit_of_measurement: "%"
+  state_class: measurement
+  name: Humidity
+  value_transform: { float: true }
+  object_suffix: H
+
+humidity_1:
+  platform: sensor
+  device_class: humidity
+  unit_of_measurement: "%"
+  state_class: measurement
+  name: Humidity 1
+  value_transform: { float: true }
+  object_suffix: H1
+
+humidity_2:
+  platform: sensor
+  device_class: humidity
+  unit_of_measurement: "%"
+  state_class: measurement
+  name: Humidity 2
+  value_transform: { float: true }
+  object_suffix: H2
+
+moisture:
+  platform: sensor
+  device_class: moisture
+  unit_of_measurement: "%"
+  state_class: measurement
+  name: Moisture
+  value_transform: { float: true }
+  object_suffix: M
+
+# Water leak detector (boolean). 1 == wet.
+detect_wet:
+  platform: binary_sensor
+  device_class: moisture
+  unit_of_measurement: null
+  state_class: null
+  name: Water Sensor
+  payload: { on: "1", off: "0" }
+  force_update: true
+  object_suffix: moisture
+
+# Depth measurement (e.g. snow/water depth sensors).
+depth_cm:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: cm
+  state_class: measurement
+  name: Depth
+  value_transform: { float: true }
+  object_suffix: D

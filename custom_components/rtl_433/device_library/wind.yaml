@@ -1,0 +1,102 @@
+# Wind speed, gust and direction field mappings.
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+#
+# Upstream normalizes several units to km/h via the value_template. Here the
+# m/s variants carry `scale: 3.6` to convert to km/h (matching the unit), while
+# the native km/h and mph variants keep their reported unit unchanged.
+
+wind_speed_km_h:
+  platform: sensor
+  device_class: wind_speed
+  unit_of_measurement: km/h
+  state_class: measurement
+  name: Wind Speed
+  value_transform: { float: true }
+  object_suffix: WS
+
+wind_avg_km_h:
+  platform: sensor
+  device_class: wind_speed
+  unit_of_measurement: km/h
+  state_class: measurement
+  name: Wind Speed
+  value_transform: { float: true }
+  object_suffix: WS
+
+wind_avg_mi_h:
+  platform: sensor
+  device_class: wind_speed
+  unit_of_measurement: mph
+  state_class: measurement
+  name: Wind Speed
+  value_transform: { float: true }
+  object_suffix: WS
+
+# m/s reported; converted to km/h (value * 3.6) to match the unit.
+wind_avg_m_s:
+  platform: sensor
+  device_class: wind_speed
+  unit_of_measurement: km/h
+  state_class: measurement
+  name: Wind Average
+  value_transform: { scale: 3.6, round: 2 }
+  object_suffix: WS
+
+# m/s reported; converted to km/h (value * 3.6) to match the unit.
+wind_speed_m_s:
+  platform: sensor
+  device_class: wind_speed
+  unit_of_measurement: km/h
+  state_class: measurement
+  name: Wind Speed
+  value_transform: { scale: 3.6 }
+  object_suffix: WS
+
+gust_speed_km_h:
+  platform: sensor
+  device_class: wind_speed
+  unit_of_measurement: km/h
+  state_class: measurement
+  name: Gust Speed
+  value_transform: { float: true }
+  object_suffix: GS
+
+wind_max_km_h:
+  platform: sensor
+  device_class: wind_speed
+  unit_of_measurement: km/h
+  state_class: measurement
+  name: Wind max speed
+  value_transform: { float: true }
+  object_suffix: GS
+
+# m/s reported; converted to km/h (value * 3.6) to match the unit.
+wind_max_m_s:
+  platform: sensor
+  device_class: wind_speed
+  unit_of_measurement: km/h
+  state_class: measurement
+  name: Wind max
+  value_transform: { scale: 3.6, round: 2 }
+  object_suffix: GS
+
+# m/s reported; converted to km/h (value * 3.6) to match the unit.
+gust_speed_m_s:
+  platform: sensor
+  device_class: wind_speed
+  unit_of_measurement: km/h
+  state_class: measurement
+  name: Gust Speed
+  value_transform: { scale: 3.6 }
+  object_suffix: GS
+
+wind_dir_deg:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: "°"
+  state_class: measurement
+  name: Wind Direction
+  value_transform: { float: true }
+  object_suffix: WD

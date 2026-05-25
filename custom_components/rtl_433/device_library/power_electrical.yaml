@@ -1,0 +1,92 @@
+# Power, energy and electrical field mappings.
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+
+power_W:
+  platform: sensor
+  device_class: power
+  unit_of_measurement: W
+  state_class: measurement
+  name: Power
+  value_transform: { float: true }
+  object_suffix: watts
+
+energy_kWh:
+  platform: sensor
+  device_class: energy
+  unit_of_measurement: kWh
+  state_class: total_increasing
+  name: Energy
+  value_transform: { float: true }
+  object_suffix: kwh
+
+current_A:
+  platform: sensor
+  device_class: current
+  unit_of_measurement: A
+  state_class: measurement
+  name: Current
+  value_transform: { float: true }
+  object_suffix: A
+
+voltage_V:
+  platform: sensor
+  device_class: voltage
+  unit_of_measurement: V
+  state_class: measurement
+  name: Voltage
+  value_transform: { float: true }
+  object_suffix: V
+
+# Battery voltage in millivolts (diagnostic).
+battery_mV:
+  platform: sensor
+  device_class: voltage
+  unit_of_measurement: mV
+  state_class: measurement
+  name: Battery mV
+  value_transform: { float: true }
+  entity_category: diagnostic
+  object_suffix: mV
+
+# Supercapacitor voltage (diagnostic).
+supercap_V:
+  platform: sensor
+  device_class: voltage
+  unit_of_measurement: V
+  state_class: measurement
+  name: Supercap V
+  value_transform: { float: true }
+  entity_category: diagnostic
+  object_suffix: V
+
+# Utility meter consumption (SCM / ERT). Plain integer counter.
+consumption_data:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: total_increasing
+  name: SCM Consumption Value
+  value_transform: { int: true }
+  object_suffix: consumption
+
+consumption:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: total_increasing
+  name: SCMplus Consumption Value
+  value_transform: { int: true }
+  object_suffix: consumption
+
+# External / mains power present (boolean, diagnostic).
+ext_power:
+  platform: binary_sensor
+  device_class: power
+  unit_of_measurement: null
+  state_class: null
+  name: External Power
+  payload: { on: "1", off: "0" }
+  entity_category: diagnostic
+  object_suffix: extpwr

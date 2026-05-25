@@ -1,0 +1,62 @@
+# Binary state field mappings (contacts, tamper, alarm, battery).
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+#
+# `payload` maps the rtl_433 raw value to Home Assistant on/off. For most
+# fields 1 == on; `closed` is inverted upstream (0 == open).
+
+reed_open:
+  platform: binary_sensor
+  device_class: safety
+  unit_of_measurement: null
+  state_class: null
+  name: Reed Open
+  payload: { on: "1", off: "0" }
+  force_update: true
+  entity_category: diagnostic
+  object_suffix: reed_open
+
+contact_open:
+  platform: binary_sensor
+  device_class: safety
+  unit_of_measurement: null
+  state_class: null
+  name: Contact Open
+  payload: { on: "1", off: "0" }
+  force_update: true
+  entity_category: diagnostic
+  object_suffix: contact_open
+
+tamper:
+  platform: binary_sensor
+  device_class: safety
+  unit_of_measurement: null
+  state_class: null
+  name: Tamper
+  payload: { on: "1", off: "0" }
+  force_update: true
+  entity_category: diagnostic
+  object_suffix: tamper
+
+alarm:
+  platform: binary_sensor
+  device_class: safety
+  unit_of_measurement: null
+  state_class: null
+  name: Alarm
+  payload: { on: "1", off: "0" }
+  force_update: true
+  entity_category: diagnostic
+  object_suffix: alarm
+
+# Door/window state. Upstream inverts: closed == 0 means open.
+closed:
+  platform: binary_sensor
+  device_class: opening
+  unit_of_measurement: null
+  state_class: null
+  name: Opening
+  payload: { on: "0", off: "1" }
+  force_update: true
+  object_suffix: opening

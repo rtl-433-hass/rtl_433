@@ -1,0 +1,60 @@
+# Temperature field mappings.
+#
+# Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
+# table. See docs/device-library.md for the schema reference.
+#
+# Each entry is keyed by the rtl_433 JSON field name.
+
+temperature_C:
+  platform: sensor
+  device_class: temperature
+  unit_of_measurement: "°C"
+  state_class: measurement
+  name: Temperature
+  value_transform: { round: 1 }
+  object_suffix: T
+
+temperature_1_C:
+  platform: sensor
+  device_class: temperature
+  unit_of_measurement: "°C"
+  state_class: measurement
+  name: Temperature 1
+  value_transform: { round: 1 }
+  object_suffix: T1
+
+temperature_2_C:
+  platform: sensor
+  device_class: temperature
+  unit_of_measurement: "°C"
+  state_class: measurement
+  name: Temperature 2
+  value_transform: { round: 1 }
+  object_suffix: T2
+
+temperature_3_C:
+  platform: sensor
+  device_class: temperature
+  unit_of_measurement: "°C"
+  state_class: measurement
+  name: Temperature 3
+  value_transform: { round: 1 }
+  object_suffix: T3
+
+temperature_4_C:
+  platform: sensor
+  device_class: temperature
+  unit_of_measurement: "°C"
+  state_class: measurement
+  name: Temperature 4
+  value_transform: { round: 1 }
+  object_suffix: T4
+
+temperature_F:
+  platform: sensor
+  device_class: temperature
+  unit_of_measurement: "°F"
+  state_class: measurement
+  name: Temperature
+  value_transform: { round: 1 }
+  object_suffix: F
