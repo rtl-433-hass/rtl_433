@@ -45,5 +45,16 @@
         }
       }
     }
+  },
+  "issues": {
+    "server_unreachable": {
+      "title": "rtl_433 server unreachable",
+      "fix_flow": {
+        "abort": {
+          "not_required": "The rtl_433 server is reachable again; no action is required."
+        }
+      },
+      "description": "Home Assistant cannot reach the rtl_433 server for **{title}**. Check that the server is running with `-F http` and that the host, port, and path are correct and reachable. The integration keeps retrying, and this issue clears automatically once the connection is restored."
+    }
   }
 }
