@@ -1,0 +1,19 @@
+# Testing dependencies for the rtl_433 integration.
+#
+# pytest-homeassistant-custom-component pulls in the matching Home Assistant
+# version together with the core pytest stack it ships, including:
+#   - pytest
+#   - pytest-asyncio
+#   - pytest-aiohttp
+#   - pytest-cov
+#   - pytest-timeout
+#   - pytest-xdist (parallel test execution)
+#   - coverage
+#   - freezegun (time mocking)
+#
+# Install with: pip install -r requirements_test.txt
+
+# Testing utilities for Home Assistant custom components.
+# Provides additional fixtures and utilities specifically for custom-component
+# testing, and pins the Home Assistant version used for the test run.
+pytest-homeassistant-custom-component==0.13.320

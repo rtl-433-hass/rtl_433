@@ -1,0 +1,15 @@
+# Generated/runtime files (also ignored by .gitignore but explicit here)
+config/
+custom_components/
+!custom_components/rtl_433/
+
+# Playwright / screenshot artifacts
+screenshots/
+test-results/
+
+# Pinned test-data submodule (project does not vendor or format these)
+tests/rtl_433_tests/
+
+# Dependencies and caches
+node_modules/
+.venv/

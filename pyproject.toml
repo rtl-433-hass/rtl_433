@@ -1,0 +1,103 @@
+# Custom Component pyproject.toml based on Home Assistant Core
+# https://github.com/home-assistant/core/blob/dev/pyproject.toml
+#
+# Sections not included (HA Core specific):
+# - [build-system] - Not published to PyPI (installed via HACS)
+# - [tool.pylint.*] - Optional additional linting (Ruff is sufficient)
+
+[project]
+name = "rtl_433"
+version = "0.1.0"   # Version is managed by release-please (also updates manifest.json)
+description = "Home Assistant custom integration for the rtl_433 WebSocket API"
+requires-python = ">=3.13"
+
+[tool.setuptools]
+packages = ["custom_components.rtl_433"]
+
+[tool.pyright]
+include = ["custom_components/rtl_433"]
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.git",
+    "**/.github",
+    "**/docs",
+    "**/venv",
+    "**/.venv",
+    "**/config",
+]
+typeCheckingMode = "basic"
+reportUnusedImport = "none"
+reportUnusedVariable = "none"
+reportUnusedCoroutine = "none"
+reportMissingTypeStubs = "none"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [".git", "config"]
+log_format = "%(asctime)s.%(msecs)03d %(levelname)-8s %(threadName)s %(name)s:%(filename)s:%(lineno)s %(message)s"
+log_date_format = "%Y-%m-%d %H:%M:%S"
+asyncio_debug = true
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra -q --strict-markers"
+markers = [
+    "unit: Unit tests (fast, no external dependencies)",
+    "integration: Integration tests (may use coordinator/time service)",
+]
+filterwarnings = [
+    # Treat warnings as errors to catch issues early
+    "error",
+    # Ignore specific warnings from third-party libraries as needed
+    # "ignore:.*custom_components.* is using deprecated.*:DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["custom_components/rtl_433"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "@overload",
+]
+
+[tool.ruff]
+# Based on https://github.com/home-assistant/core/blob/dev/pyproject.toml
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "B",   # flake8-bugbear
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "SIM", # flake8-simplify
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501", # line too long (handled by the formatter)
+]
+
+[tool.ruff.lint.isort]
+force-sort-within-sections = true
+known-first-party = ["custom_components", "homeassistant"]
+combine-as-imports = true
+split-on-trailing-comma = false
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "S101",    # assert is fine in tests
+    "PLR2004", # Magic values are fine in tests
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true

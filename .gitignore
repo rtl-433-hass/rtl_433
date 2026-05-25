@@ -1,0 +1,144 @@
+# Home Assistant configuration and runtime (development/testing)
+config/
+!config/configuration.yaml
+
+# Virtual environments (shared dev venv lives at $HOME/rtl433-venv, outside the
+# repo; still ignore any in-repo venv just in case)
+.venv/
+venv/
+.local/
+
+# Node tooling (prettier, markdownlint, playwright)
+node_modules/
+
+# Playwright / screenshot artifacts
+screenshots/
+test-results/
+playwright-report/
+
+# Development tool caches and dependency locks
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+uv.lock
+
+# AI agent / worktree scratch
+.ai-scratch/
+.claude/worktrees
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+### HomeAssistant ###
+# Files with personal details
+*.crt
+*.csr
+*.key
+.cloud
+.HA_VERSION
+.storage
+.uuid
+secrets.yaml
+home-assistant.db
+home-assistant_v2.db
+home-assistant_v2.db-*
+home-assistant.log
+home-assistant.log.*
+
+# Temporary files
+*.db-journal
+*.pid
+tts
+
+# automatically downloaded dependencies
+deps
+
+### Linux ###
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+### macOS ###
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+*.icloud
+
+### Windows ###
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+### Editors ###
+.vscode/*
+!.vscode/settings.default.jsonc
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history/
+*.vsix
+.idea/

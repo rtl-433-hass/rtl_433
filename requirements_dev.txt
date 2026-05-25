@@ -1,0 +1,17 @@
+# Development dependencies for the rtl_433 integration.
+#
+# Includes everything needed to run the test suite plus the local tooling
+# used by pre-commit (ruff lint/format) and the contributor workflow.
+#
+# Install with: pip install -r requirements_dev.txt
+
+-r requirements_test.txt
+
+# Linting and formatting (also run via .pre-commit-config.yaml)
+ruff==0.13.0
+
+# Git hook framework
+pre-commit==4.2.0
+
+# Spell checking (used by the codespell pre-commit hook)
+codespell==2.4.1

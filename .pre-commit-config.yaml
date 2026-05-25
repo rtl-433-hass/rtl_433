@@ -1,0 +1,51 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+#
+# This configuration uses local hooks that rely on packages installed in the
+# project's virtual environment. The shared development venv lives outside the
+# repository at $HOME/rtl433-venv; the hooks below try that location, then a
+# few conventional fallbacks, and skip gracefully if no venv is ready yet.
+repos:
+  - repo: local
+    hooks:
+      # Run the Ruff linter with auto-fix
+      - id: ruff
+        name: ruff
+        entry: bash -c 'VENV_PATHS=("$HOME/rtl433-venv" "$HOME/.local/ha-venv" ".venv"); for venv in "${VENV_PATHS[@]}"; do if [[ -f "$venv/bin/ruff" ]]; then source "$venv/bin/activate" 2>/dev/null || true; ruff check --fix --exit-non-zero-on-fix "$@"; exit $?; fi; done; echo "Skipping ruff (venv not ready)"; exit 0' --
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: true
+
+      # Run the Ruff formatter
+      - id: ruff-format
+        name: ruff format
+        entry: bash -c 'VENV_PATHS=("$HOME/rtl433-venv" "$HOME/.local/ha-venv" ".venv"); for venv in "${VENV_PATHS[@]}"; do if [[ -f "$venv/bin/ruff" ]]; then source "$venv/bin/activate" 2>/dev/null || true; ruff format "$@"; exit $?; fi; done; echo "Skipping ruff format (venv not ready)"; exit 0' --
+        language: system
+        types: [python]
+        require_serial: true
+        pass_filenames: true
+
+      # Spell checking
+      - id: codespell
+        name: codespell
+        entry: bash -c 'VENV_PATHS=("$HOME/rtl433-venv" "$HOME/.local/ha-venv" ".venv"); for venv in "${VENV_PATHS[@]}"; do if [[ -f "$venv/bin/codespell" ]]; then source "$venv/bin/activate" 2>/dev/null || true; codespell --skip="./.*,*.csv,*.json,*.ambr,*.cu8,uv.lock" --quiet-level=2 "$@"; exit $?; fi; done; echo "Skipping codespell (venv not ready)"; exit 0' --
+        language: system
+        types_or: [python, markdown, rst]
+        exclude_types: [csv, json, html]
+        files: ^(custom_components/|tests/|scripts/|README\.md|CONTRIBUTING\.md|AGENTS\.md)
+        pass_filenames: true
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: mixed-line-ending
+        args: [--fix=lf]

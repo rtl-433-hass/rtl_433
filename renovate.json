@@ -1,0 +1,52 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Keep manifest.json requirements in sync with requirements.txt via PyPI",
+      "managerFilePatterns": ["/^custom_components/[^/]+/manifest\\.json$/"],
+      "matchStrings": [
+        "\"(?<depName>[a-zA-Z0-9_.-]+)==(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "pypi"
+    },
+    {
+      "customType": "regex",
+      "description": "Track Python version in pyproject.toml requires-python",
+      "managerFilePatterns": ["/^pyproject\\.toml$/"],
+      "matchStrings": [
+        "requires-python\\s*=\\s*\">=(?<currentValue>[\\d.]+)\""
+      ],
+      "depNameTemplate": "python",
+      "datasourceTemplate": "python-version"
+    }
+  ],
+  "automerge": true,
+  "minimumReleaseAge": "3 days",
+  "packageRules": [
+    {
+      "matchDepNames": ["homeassistant"],
+      "enabled": false,
+      "description": "Home Assistant version should match the homeassistant key in hacs.json"
+    },
+    {
+      "matchDepNames": ["python"],
+      "groupName": "Python version",
+      "automerge": false,
+      "description": "Python version is manually managed to track Home Assistant requirements",
+      "prBodyNotes": [
+        "Do not automerge. This project tracks the Home Assistant Python requirement, which is the previous minor version of Python. Verify the new version matches before merging."
+      ]
+    },
+    {
+      "matchPackageNames": ["ruff", "pre-commit", "codespell"],
+      "groupName": "dev dependencies",
+      "description": "Group developer tooling updates into a single PR"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "automerge": false
+    }
+  ]
+}

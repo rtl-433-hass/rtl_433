@@ -1,0 +1,29 @@
+# Prettier configuration for Home Assistant custom-component development.
+# Aligned with .editorconfig and .markdownlint.json.
+
+printWidth: 120
+tabWidth: 2
+useTabs: false
+semi: true
+singleQuote: false
+quoteProps: "as-needed"
+trailingComma: "es5"
+bracketSpacing: true
+arrowParens: "always"
+proseWrap: "preserve"
+endOfLine: "lf"
+
+# File-specific overrides
+overrides:
+  # Markdown - preserve formatting, avoid conflicts with markdownlint
+  - files: "*.md"
+    options:
+      proseWrap: "preserve"
+      printWidth: 120
+      trailingComma: "none"
+
+  # JSON - Home Assistant manifest, translations
+  - files: "*.json"
+    options:
+      tabWidth: 2
+      trailingComma: "none"
