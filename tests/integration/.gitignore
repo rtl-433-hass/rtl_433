@@ -1,0 +1,6 @@
+# Local-only harness artifacts. The harness is meant to be run on demand; its
+# Node dependencies and any local HA state are not committed.
+node_modules/
+.ha-state/
+# package.json/package-lock.json ARE committed so `npm ci` reproduces the
+# pinned Playwright version; only the installed tree is ignored.

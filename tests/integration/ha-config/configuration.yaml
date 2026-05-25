@@ -1,0 +1,13 @@
+# Minimal Home Assistant config for the containerized screenshot harness.
+# HA fills in everything else on first boot. We keep this lean and just make
+# logs verbose for the integration so the harness can grep for readiness.
+
+default_config:
+
+logger:
+  default: warning
+  logs:
+    custom_components.rtl_433: debug
+
+# Speed up the harness: no analytics, no slow first-boot integrations we don't
+# need. default_config already pulls in frontend, config (UI flows), api, etc.

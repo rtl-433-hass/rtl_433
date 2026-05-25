@@ -1,0 +1,5 @@
+[submodule "tests/integration/rtl_433_tests"]
+	path = tests/integration/rtl_433_tests
+	url = https://github.com/merbanan/rtl_433_tests
+	shallow = true
+	sparse-checkout = tests/acurite/Acurite_592TXR tests/acurite/Acurite_606TX

@@ -1,0 +1,16 @@
+{
+  "name": "rtl_433-integration-harness",
+  "version": "1.0.0",
+  "description": "Containerized integration & screenshot harness for the rtl_433 Home Assistant integration.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "shots": "node ./screenshot.mjs",
+    "probe": "node ./ws-probe.mjs"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "1.49.1",
+    "ws": "8.18.0"
+  }
+}

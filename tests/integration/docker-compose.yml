@@ -1,0 +1,92 @@
+# Containerized integration & screenshot harness for the rtl_433 HA integration.
+#
+# Three services on a private bridge network:
+#
+#   rtl433  - the pinned hertzg/rtl_433 image. Replays a real .cu8 capture from
+#             the rtl_433_tests submodule through a named-pipe FIFO so the single
+#             rtl_433 process stays alive and decodes events continuously
+#             (FIFO keep-alive, see rtl433-entrypoint.sh + Clarification #13). It
+#             writes decoded events as JSON lines to a shared volume.
+#
+#   wsbridge- a small Node service (pinned node image) that tails the shared
+#             JSON-lines file and re-broadcasts each event on ws://0.0.0.0:8433/ws
+#             — the endpoint HA's coordinator expects. This exists because
+#             rtl_433's native `-F http` /ws server does NOT broadcast when
+#             reading from a file/FIFO (test-mode bypasses the HTTP event loop;
+#             see README "Known limitation"). The FIFO replay is unchanged; only
+#             the transport to HA is the bridge instead of native -F http.
+#
+#   homeassistant - the pinned Home Assistant core image with this repo's custom
+#             integration bind-mounted into /config/custom_components. HA reaches
+#             the stream at ws://wsbridge:8433/ws (compose DNS name).
+#
+# Images are pinned by digest. All three digests were resolved on linux/arm64.
+# Bring-up MUST be backgrounded and polled (Clarification #14); see run-harness.sh.
+
+services:
+  rtl433:
+    # hertzg/rtl_433:latest == rtl_433 25.12 (resolved 2026-05-25, linux/arm64)
+    image: hertzg/rtl_433@sha256:bcfd12afa59efc1ae8316ac21757b5e4161d4a42baaa91f609b4bcca9525dcfd
+    container_name: rtl433_harness
+    entrypoint: ["/bin/sh", "/opt/rtl433-entrypoint.sh"]
+    environment:
+      # Acurite-592TXR decodes as "Acurite-Tower": temperature_C + humidity +
+      # battery_ok — exercises a temp sensor (degC/measurement) and a battery
+      # binary_sensor in HA. The capture is sampled at 250k.
+      CAPTURE: /data/acurite-592txr-003.cu8
+      RATE: 250k
+      EVENTS_FILE: /shared/events.jsonl
+      FIFO: /tmp/rtl.fifo
+      LOOP_SLEEP: "1"
+    volumes:
+      - ./rtl433-entrypoint.sh:/opt/rtl433-entrypoint.sh:ro
+      - ./rtl_433_tests/tests/acurite/Acurite_592TXR:/data:ro
+      - shared:/shared
+    networks:
+      - rtl433net
+    restart: "no"
+
+  wsbridge:
+    # node:22-alpine (resolved 2026-05-25, linux/arm64). Pinned by digest.
+    image: node@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920
+    container_name: wsbridge_harness
+    working_dir: /app
+    command: ["node", "/app/ws-bridge.mjs"]
+    environment:
+      WS_PORT: "8433"
+      EVENTS_FILE: /shared/events.jsonl
+    volumes:
+      - ./ws-bridge.mjs:/app/ws-bridge.mjs:ro
+      # Reuse the installed ws module from the host node_modules.
+      - ./node_modules:/app/node_modules:ro
+      - shared:/shared:ro
+    ports:
+      # Exposed on the host too for debugging the WS with ws-probe.mjs.
+      - "8433:8433"
+    depends_on:
+      - rtl433
+    networks:
+      - rtl433net
+    restart: "no"
+
+  homeassistant:
+    # ghcr.io/home-assistant/home-assistant:stable == 2026.5.4 (2026-05-25, arm64)
+    image: ghcr.io/home-assistant/home-assistant@sha256:ceb1202133a5a036e8b03e20a10eb113186cc2f871968323c6fc6c3fc4205716
+    container_name: ha_harness
+    volumes:
+      - ../../custom_components/rtl_433:/config/custom_components/rtl_433:ro
+      - ./ha-config/configuration.yaml:/config/configuration.yaml:ro
+    ports:
+      - "8123:8123"
+    depends_on:
+      - wsbridge
+    networks:
+      - rtl433net
+    restart: "no"
+
+networks:
+  rtl433net:
+    driver: bridge
+
+volumes:
+  shared:
