@@ -46,6 +46,7 @@ from .const import (
     CONF_DEVICE_KEY,
     CONF_HUB_ENTRY_ID,
     CONF_MODEL,
+    DATA_LIBRARY,
     DOMAIN,
     signal_device_update,
 )
@@ -241,6 +242,15 @@ async def async_setup_device_platform(
             f"Hub {hub_entry_id} not loaded yet for device {device_key}"
         )
 
+    # Use the merged registry (shipped library + user overrides) that the hub
+    # loaded in an executor and cached, so descriptor lookups never re-read the
+    # YAML files on the event loop. The hub always populates this before its
+    # coordinator exists, and the coordinator presence is checked above, so the
+    # library is guaranteed to be cached here.
+    registry: dict[str, FieldDescriptor] | None = domain_data.get(
+        DATA_LIBRARY, (None, None)
+    )[0]
+
     # Union persisted fields with whatever the coordinator has already seen so a
     # field observed before this setup ran is not lost.
     observed: set[str] = set(entry.options.get(CONF_OBSERVED_FIELDS, []))
@@ -250,7 +260,7 @@ async def async_setup_device_platform(
 
     def _descriptor_for(field_key: str) -> FieldDescriptor | None:
         """Return a descriptor for this platform, or None to skip the field."""
-        descriptor = lookup(field_key)
+        descriptor = lookup(field_key, registry)
         if descriptor is None or descriptor.platform != platform:
             return None
         return descriptor

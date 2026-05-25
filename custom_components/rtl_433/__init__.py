@@ -38,6 +38,7 @@ from .const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DOMAIN,
     LOGGER,
@@ -45,10 +46,6 @@ from .const import (
 )
 from .coordinator import Rtl433Coordinator
 from .mapping import FieldDescriptor, load_library, load_user_overrides
-
-# Key under ``hass.data[DOMAIN]`` holding the once-loaded mapping library tuple
-# ``(registry, skip_keys)`` shared by the coordinator and entity platforms.
-DATA_LIBRARY = "_library"
 
 # Discovery-info keys carried into the integration-discovery flow. Mirrors the
 # contract documented in ``config_flow.async_step_integration_discovery``.

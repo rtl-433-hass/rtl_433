@@ -266,3 +266,47 @@ async def test_cascade_removal_leaves_no_orphans(
     # The device and its entities are gone (no orphan device / entity).
     assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
     assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is None
+
+
+async def test_entity_setup_uses_cached_registry_not_event_loop_load(
+    hass, hub_entry_builder, device_entry_builder
+):
+    """Entity setup must resolve descriptors via the hub's cached merged registry.
+
+    Regression: the platform previously called ``lookup(field_key)`` with no
+    registry, which triggered the lazy module-level ``load_library`` and opened
+    YAML files on the event loop (Home Assistant flags this as a blocking call).
+    The descriptor lookups during setup and dynamic add must use the registry
+    cached on ``hass.data[DOMAIN][DATA_LIBRARY]`` instead.
+    """
+    from custom_components.rtl_433 import entity as entity_mod
+    from custom_components.rtl_433.const import DATA_LIBRARY
+
+    real_lookup = entity_mod.lookup
+    seen_registries: list = []
+
+    def _recording_lookup(field_key, registry=None):
+        seen_registries.append(registry)
+        return real_lookup(field_key, registry)
+
+    with patch.object(entity_mod, "lookup", _recording_lookup):
+        hub, device, coordinator = await _setup_hub_and_device(
+            hass,
+            hub_entry_builder,
+            device_entry_builder,
+            model="Acurite-606TX",
+            device_key="Acurite-606TX-42",
+        )
+        # A live event drives dynamic entity creation, exercising the lookup path.
+        _feed(
+            coordinator,
+            {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.0},
+        )
+        await hass.async_block_till_done()
+
+    cached_registry = hass.data[DOMAIN][DATA_LIBRARY][0]
+    assert cached_registry is not None
+    assert seen_registries, "expected descriptor lookups during entity setup"
+    # Every lookup used the cached registry object — never None (the lazy,
+    # event-loop file-loading path).
+    assert all(reg is cached_registry for reg in seen_registries)

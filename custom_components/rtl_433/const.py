@@ -52,6 +52,13 @@ CONF_DEVICE_KEY: Final = "device_key"
 # The rtl_433 ``model`` string for the device (e.g. "Acurite-606TXN").
 CONF_MODEL: Final = "model"
 
+# --- hass.data keys ---------------------------------------------------------
+# Key under ``hass.data[DOMAIN]`` holding the once-loaded mapping library tuple
+# ``(registry, skip_keys)``. The library is loaded in an executor during hub
+# setup and shared by the coordinator, the entity platforms, and diagnostics so
+# nothing re-reads the YAML files on the event loop.
+DATA_LIBRARY: Final = "_library"
+
 # --- Defaults ---------------------------------------------------------------
 # Default rtl_433 HTTP server port (the documented "-F http" default).
 DEFAULT_PORT: Final = 8433
