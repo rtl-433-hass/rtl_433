@@ -335,9 +335,9 @@ No circular dependencies. T01 and T02 are independent tooling tracks with no dow
 **Parallel Tasks:**
 - ✔️ Task 08: sensor & binary_sensor platforms + base entity (depends on: 05, 06, 07) (files: `entity.py`, `sensor.py`, `binary_sensor.py`) — completed
 
-### Phase 5: Lifecycle wiring
+### ✅ Phase 5: Lifecycle wiring
 **Parallel Tasks:**
-- Task 09: Integration wiring, diagnostics, repairs (depends on: 06, 07, 08) (files: `__init__.py`, `diagnostics.py`, `repairs.py`)
+- ✔️ Task 09: Integration wiring, diagnostics, repairs (depends on: 06, 07, 08) (files: `__init__.py`, `diagnostics.py`, `repairs.py`) — completed
 
 ### Phase 6: Testing
 **Parallel Tasks:**
