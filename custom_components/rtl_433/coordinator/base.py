@@ -12,12 +12,12 @@ or ``entity.py``. To stay file-disjoint and cycle-free it accepts the pieces it
 needs as injectable attributes:
 
 - ``skip_keys`` — the set of event keys to drop from measurement fields. Defaults
-  to a minimal identity set; Task 9 injects the mapping library's skip-keys.
+  to a minimal identity set; the integration setup injects the library skip-keys.
 - ``new_device_callback`` — called with ``(device_key, model)`` the first time an
-  unknown device is seen while discovery is enabled. Task 9 wires this to the
+  unknown device is seen while discovery is enabled. The integration setup wires this to the
   discovery flow; the coordinator never imports the config flow.
 - ``effective_timeout_resolver`` — called with ``device_key`` to resolve the
-  per-device availability timeout (override → hub default). Task 9 wires this;
+  per-device availability timeout (override → hub default). The integration setup wires this;
   the fallback is the hub default.
 """
 
@@ -83,13 +83,13 @@ class Rtl433Coordinator:
         ``async_start()`` / ``async_stop()`` — lifecycle.
         ``validate_connection(...)`` — staticmethod used by the config flow.
 
-    Injectable attributes (wired by Task 9):
+    Injectable attributes (wired by the integration setup in ``__init__.py``):
         ``skip_keys``: ``set[str]`` of keys excluded from measurement fields.
         ``discovery_enabled``: ``bool`` per-hub new-device discovery toggle.
         ``new_device_callback``: ``Callable[[str, str], None] | None``.
         ``effective_timeout_resolver``: ``Callable[[str], int] | None``.
 
-    Runtime state (read by Task 9 diagnostics):
+    Runtime state (read by ``diagnostics.py``):
         ``devices``: ``dict[str, NormalizedEvent]`` last event per device key.
         ``last_seen``: ``dict[str, datetime]`` last-seen (UTC) per device key.
         ``available``: ``dict[str, bool]`` current availability per device key.
@@ -127,7 +127,7 @@ class Rtl433Coordinator:
             set(skip_keys) if skip_keys is not None else set(DEFAULT_SKIP_KEYS)
         )
 
-        # --- Injectable hooks (wired by Task 9) -------------------------------
+        # --- Injectable hooks (wired by the integration setup) ----------------
         self.new_device_callback: Callable[[str, str], None] | None = None
         self.effective_timeout_resolver: Callable[[str], int] | None = None
 
@@ -269,7 +269,7 @@ class Rtl433Coordinator:
         self.devices[key] = normalized
         self.last_seen[key] = now
 
-        # Track observed field keys for diagnostics (Task 9 surfaces unmatched).
+        # Track observed field keys for diagnostics (surfaced as unmatched keys).
         field_keys = set(normalized.fields)
         self.seen_fields |= field_keys
         self.device_fields.setdefault(key, set()).update(field_keys)

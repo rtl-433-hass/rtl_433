@@ -24,7 +24,7 @@ PLATFORMS: Final[list[Platform]] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 # --- Config-entry "type" discriminator -------------------------------------
 # A single value in entry.data tells the integration whether a config entry is
 # the per-instance hub (owns the WebSocket connection) or a per-device entry
-# (owns one physical device's entities). Task 9 branches on this in
+# (owns one physical device's entities). The integration setup branches on this in
 # async_setup_entry.
 CONF_ENTRY_TYPE: Final = "entry_type"
 ENTRY_TYPE_HUB: Final = "hub"

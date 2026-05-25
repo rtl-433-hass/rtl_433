@@ -6,10 +6,10 @@ set of measurement fields. Normalization derives a *deterministic, stable*
 device key from the identity keys and separates measurement fields from
 identity/skip fields.
 
-This module is deliberately decoupled from the mapping library (Task 5) and the
-config flow (Task 7): it imports nothing from the rest of the integration except
+This module is deliberately decoupled from the mapping library and the
+config flow: it imports nothing from the rest of the integration except
 the constants it shares, and ``normalize`` takes the ``skip_keys`` set as a
-parameter so the caller (the coordinator, wired in Task 9) injects the loaded
+parameter so the caller (the coordinator, wired in ``__init__.py``) injects the loaded
 skip-keys rather than this module importing the loader.
 """
 
@@ -24,7 +24,7 @@ from typing import Any, Final
 IDENTITY_KEYS: Final[tuple[str, ...]] = ("model", "id", "channel", "subtype")
 
 # Minimal default skip-set used when the caller injects nothing. The real
-# skip-keys come from the mapping library (Task 5) at runtime; this fallback
+# skip-keys come from the mapping library at runtime; this fallback
 # keeps the normalizer usable standalone (e.g. in tests) without that loader.
 DEFAULT_SKIP_KEYS: Final[frozenset[str]] = frozenset(
     {"model", "id", "channel", "subtype", "time"}
@@ -112,7 +112,7 @@ def normalize(
         event: The raw decoded JSON event (a flat dict).
         skip_keys: Keys to exclude from ``fields`` in addition to the identity
             keys. When ``None``, ``DEFAULT_SKIP_KEYS`` is used. The coordinator
-            injects the mapping library's skip-keys here (Task 9).
+            injects the mapping library's skip-keys here (in ``__init__.py``).
 
     Returns:
         A ``NormalizedEvent`` whose ``fields`` contains only measurement data

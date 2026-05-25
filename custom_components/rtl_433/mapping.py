@@ -14,12 +14,12 @@ The public surface consumed by later tasks is:
 * :func:`load_user_overrides` -- merge ``<config>/rtl_433_mappings.yaml``.
 * :func:`merge_overrides` -- pure merge helper (used by the loader + tests).
 
-File I/O is synchronous. Async callers (the coordinator / setup, Task 9) must
+File I/O is synchronous. Async callers (the integration setup) must
 run :func:`load_library` and :func:`load_user_overrides` off the event loop via
 ``hass.async_add_executor_job`` because both touch the filesystem.
 
 The YAML schema is documented in ``docs/device-library.md``; this module
-conforms to the attribute names produced by the Task 4 library files.
+conforms to the attribute names used by the ``device_library/`` YAML files.
 """
 
 from __future__ import annotations
