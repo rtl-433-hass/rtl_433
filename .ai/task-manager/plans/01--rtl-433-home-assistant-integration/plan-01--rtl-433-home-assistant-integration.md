@@ -344,9 +344,9 @@ No circular dependencies. T01 and T02 are independent tooling tracks with no dow
 - ✔️ Task 10: Unit tests + JSON fixtures (depends on: 05, 06, 07, 08, 09) (files: `tests/` unit + `tests/fixtures/`) — completed (33 tests, ~89% coverage)
 - ✔️ Task 11: Containerized integration & screenshot harness (depends on: 09) (files: `tests/integration/`, `.gitmodules`, `docs/images/`) — completed (full end-to-end run; 4 screenshots captured)
 
-### Phase 7: Documentation
+### ✅ Phase 7: Documentation
 **Parallel Tasks:**
-- Task 12: README, AGENTS.md, CONTRIBUTING (depends on: 09, 11) (files: `README.md`, `AGENTS.md`, `CONTRIBUTING.md`)
+- ✔️ Task 12: README, AGENTS.md, CONTRIBUTING (depends on: 09, 11) (files: `README.md`, `AGENTS.md`, `CONTRIBUTING.md`) — completed
 
 ### Post-phase Actions
 After each phase: ensure ruff lint passes on changed files, verify each task produced its own conventional commit on `main`, then mark the phase ✅ and its tasks ✔️/`completed` in this document.
