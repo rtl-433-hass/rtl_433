@@ -322,10 +322,10 @@ No circular dependencies. T01 and T02 are independent tooling tracks with no dow
 - ✔️ Task 03: Integration package skeleton (files: `custom_components/rtl_433/{manifest.json,const.py,__init__.py,translations/}`) — completed
 - ✔️ Task 04: Device mapping YAML library + contributor guide (files: `custom_components/rtl_433/device_library/`, `docs/device-library.md`) — completed
 
-### Phase 2: Mapping loader & ingestion
+### ✅ Phase 2: Mapping loader & ingestion
 **Parallel Tasks:**
-- Task 05: Mapping library loader (depends on: 03, 04) (files: `mapping.py`)
-- Task 06: Event normalizer & WebSocket coordinator (depends on: 03) (files: `normalizer.py`, `coordinator/`)
+- ✔️ Task 05: Mapping library loader (depends on: 03, 04) (files: `mapping.py`) — completed
+- ✔️ Task 06: Event normalizer & WebSocket coordinator (depends on: 03) (files: `normalizer.py`, `coordinator/`) — completed
 
 ### Phase 3: Config & discovery flow
 **Parallel Tasks:**
