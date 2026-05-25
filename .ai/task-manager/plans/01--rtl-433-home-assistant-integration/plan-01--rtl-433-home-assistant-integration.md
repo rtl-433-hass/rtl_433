@@ -331,9 +331,9 @@ No circular dependencies. T01 and T02 are independent tooling tracks with no dow
 **Parallel Tasks:**
 - ✔️ Task 07: Config, options & discovery flow (depends on: 03, 06) (files: `config_flow.py`, `translations/en.json`) — completed
 
-### Phase 4: Entities
+### ✅ Phase 4: Entities
 **Parallel Tasks:**
-- Task 08: sensor & binary_sensor platforms + base entity (depends on: 05, 06, 07) (files: `entity.py`, `sensor.py`, `binary_sensor.py`)
+- ✔️ Task 08: sensor & binary_sensor platforms + base entity (depends on: 05, 06, 07) (files: `entity.py`, `sensor.py`, `binary_sensor.py`) — completed
 
 ### Phase 5: Lifecycle wiring
 **Parallel Tasks:**
