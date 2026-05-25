@@ -2,7 +2,7 @@
 id: 4
 group: "mapping-data"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-05-25
 skills:
   - yaml

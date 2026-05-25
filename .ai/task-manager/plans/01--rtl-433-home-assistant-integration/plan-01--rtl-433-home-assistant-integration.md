@@ -315,12 +315,12 @@ No circular dependencies. T01 and T02 are independent tooling tracks with no dow
 
 > Commit cadence for this plan: **one conventional commit per task** (overrides the per-phase default; see Notes / Clarification #12). Parallel tasks within a phase are file-disjoint so per-task commits never conflict. The `PRE_PHASE` feature-branch step is **skipped** — work lands directly on `main` (Clarification #11).
 
-### Phase 1: Foundations
+### ✅ Phase 1: Foundations
 **Parallel Tasks:**
-- Task 01: Repository tooling & root configuration (files: root config) 
-- Task 02: GitHub Actions CI workflows (files: `.github/workflows/`)
-- Task 03: Integration package skeleton (files: `custom_components/rtl_433/{manifest.json,const.py,__init__.py,translations/}`)
-- Task 04: Device mapping YAML library + contributor guide (files: `custom_components/rtl_433/device_library/`, `docs/device-library.md`)
+- ✔️ Task 01: Repository tooling & root configuration (files: root config) — completed
+- ✔️ Task 02: GitHub Actions CI workflows (files: `.github/workflows/`) — completed
+- ✔️ Task 03: Integration package skeleton (files: `custom_components/rtl_433/{manifest.json,const.py,__init__.py,translations/}`) — completed
+- ✔️ Task 04: Device mapping YAML library + contributor guide (files: `custom_components/rtl_433/device_library/`, `docs/device-library.md`) — completed
 
 ### Phase 2: Mapping loader & ingestion
 **Parallel Tasks:**

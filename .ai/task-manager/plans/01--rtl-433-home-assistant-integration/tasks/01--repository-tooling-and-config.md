@@ -2,7 +2,7 @@
 id: 1
 group: "tooling"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-05-25
 skills:
   - python
