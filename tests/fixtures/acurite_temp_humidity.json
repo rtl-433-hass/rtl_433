@@ -1,0 +1,17 @@
+[
+  {
+    "time": "2026-05-25 10:00:00",
+    "model": "Acurite-606TX",
+    "id": 42,
+    "temperature_C": 21.37,
+    "humidity": 55
+  },
+  {
+    "time": "2026-05-25 10:00:36",
+    "model": "Acurite-606TX",
+    "id": 42,
+    "temperature_C": 21.62,
+    "humidity": 56,
+    "battery_ok": 1
+  }
+]

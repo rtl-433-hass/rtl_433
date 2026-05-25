@@ -1,0 +1,11 @@
+[
+  {
+    "time": "2026-05-25 10:02:00",
+    "model": "EnergyMeter-2000",
+    "id": 1234,
+    "power_W": 1450.5,
+    "energy_kWh": 88.21,
+    "voltage_V": 231.4,
+    "current_A": 6.27
+  }
+]

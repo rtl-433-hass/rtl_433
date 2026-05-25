@@ -1,0 +1,14 @@
+[
+  {
+    "time": "2026-05-25 10:06:00",
+    "model": "AcuriteLightning-6045M",
+    "id": 200,
+    "subtype": 2,
+    "temperature_C": 22.0,
+    "humidity": 60,
+    "strike_count": 3,
+    "storm_dist_km": 12,
+    "rssi": -61.5,
+    "battery_ok": 1
+  }
+]

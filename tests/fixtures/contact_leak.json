@@ -1,0 +1,17 @@
+[
+  {
+    "time": "2026-05-25 10:03:00",
+    "model": "GenericDoor-X1",
+    "id": 88,
+    "closed": 0,
+    "tamper": 0,
+    "battery_ok": 1
+  },
+  {
+    "time": "2026-05-25 10:04:00",
+    "model": "LeakDetector-9",
+    "id": 21,
+    "detect_wet": 1,
+    "battery_ok": 1
+  }
+]
