@@ -2,7 +2,7 @@
 id: 7
 group: "core"
 dependencies: [3, 6]
-status: "pending"
+status: "completed"
 created: 2026-05-25
 skills:
   - home-assistant

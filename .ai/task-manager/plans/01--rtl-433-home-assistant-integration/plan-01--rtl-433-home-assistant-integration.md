@@ -327,9 +327,9 @@ No circular dependencies. T01 and T02 are independent tooling tracks with no dow
 - ✔️ Task 05: Mapping library loader (depends on: 03, 04) (files: `mapping.py`) — completed
 - ✔️ Task 06: Event normalizer & WebSocket coordinator (depends on: 03) (files: `normalizer.py`, `coordinator/`) — completed
 
-### Phase 3: Config & discovery flow
+### ✅ Phase 3: Config & discovery flow
 **Parallel Tasks:**
-- Task 07: Config, options & discovery flow (depends on: 03, 06) (files: `config_flow.py`, `translations/en.json`)
+- ✔️ Task 07: Config, options & discovery flow (depends on: 03, 06) (files: `config_flow.py`, `translations/en.json`) — completed
 
 ### Phase 4: Entities
 **Parallel Tasks:**
