@@ -1,0 +1,12 @@
+{
+  "domain": "rtl_433",
+  "name": "rtl_433",
+  "codeowners": ["@deviantintegral"],
+  "config_flow": true,
+  "documentation": "https://github.com/rtl-433-hass/rtl_433",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/rtl-433-hass/rtl_433/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
