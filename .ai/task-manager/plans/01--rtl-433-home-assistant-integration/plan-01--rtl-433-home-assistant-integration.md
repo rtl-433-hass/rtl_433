@@ -268,7 +268,95 @@ Operational directives for executing this plan end-to-end unattended, consumed b
 - **Test data**: `merbanan/rtl_433_tests` is a **pinned git submodule** (shallow/sparse, only needed device dirs); no captures are copied into the repo, and unit-test fixtures are project-authored JSON (see Clarification #6).
 - **Environment is verified capable**: Docker 29.x + compose, Python 3.13, Node 24, git/gh, passwordless sudo, and egress to GitHub/ghcr/Docker Hub/PyPI/Playwright CDN are all present; HA and `hertzg/rtl_433` both publish arm64 images.
 
+## Task Dependency Diagram
+
+```mermaid
+graph TD
+    T01["T01: Repo tooling & config"]
+    T02["T02: GitHub Actions CI"]
+    T03["T03: Package skeleton"]
+    T04["T04: Device mapping YAML library"]
+    T05["T05: Mapping loader"]
+    T06["T06: Normalizer & WS coordinator"]
+    T07["T07: Config/options/discovery flow"]
+    T08["T08: sensor & binary_sensor"]
+    T09["T09: Lifecycle wiring + diagnostics + repairs"]
+    T10["T10: Unit tests + fixtures"]
+    T11["T11: Container & screenshot harness"]
+    T12["T12: Documentation"]
+
+    T03 --> T05
+    T04 --> T05
+    T03 --> T06
+    T03 --> T07
+    T06 --> T07
+    T05 --> T08
+    T06 --> T08
+    T07 --> T08
+    T06 --> T09
+    T07 --> T09
+    T08 --> T09
+    T05 --> T10
+    T06 --> T10
+    T07 --> T10
+    T08 --> T10
+    T09 --> T10
+    T09 --> T11
+    T09 --> T12
+    T11 --> T12
+```
+
+No circular dependencies. T01 and T02 are independent tooling tracks with no downstream code dependencies (verified on the remote CI).
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `config/hooks/POST_PHASE.md`
+
+> Commit cadence for this plan: **one conventional commit per task** (overrides the per-phase default; see Notes / Clarification #12). Parallel tasks within a phase are file-disjoint so per-task commits never conflict. The `PRE_PHASE` feature-branch step is **skipped** — work lands directly on `main` (Clarification #11).
+
+### Phase 1: Foundations
+**Parallel Tasks:**
+- Task 01: Repository tooling & root configuration (files: root config) 
+- Task 02: GitHub Actions CI workflows (files: `.github/workflows/`)
+- Task 03: Integration package skeleton (files: `custom_components/rtl_433/{manifest.json,const.py,__init__.py,translations/}`)
+- Task 04: Device mapping YAML library + contributor guide (files: `custom_components/rtl_433/device_library/`, `docs/device-library.md`)
+
+### Phase 2: Mapping loader & ingestion
+**Parallel Tasks:**
+- Task 05: Mapping library loader (depends on: 03, 04) (files: `mapping.py`)
+- Task 06: Event normalizer & WebSocket coordinator (depends on: 03) (files: `normalizer.py`, `coordinator/`)
+
+### Phase 3: Config & discovery flow
+**Parallel Tasks:**
+- Task 07: Config, options & discovery flow (depends on: 03, 06) (files: `config_flow.py`, `translations/en.json`)
+
+### Phase 4: Entities
+**Parallel Tasks:**
+- Task 08: sensor & binary_sensor platforms + base entity (depends on: 05, 06, 07) (files: `entity.py`, `sensor.py`, `binary_sensor.py`)
+
+### Phase 5: Lifecycle wiring
+**Parallel Tasks:**
+- Task 09: Integration wiring, diagnostics, repairs (depends on: 06, 07, 08) (files: `__init__.py`, `diagnostics.py`, `repairs.py`)
+
+### Phase 6: Testing
+**Parallel Tasks:**
+- Task 10: Unit tests + JSON fixtures (depends on: 05, 06, 07, 08, 09) (files: `tests/` unit + `tests/fixtures/`)
+- Task 11: Containerized integration & screenshot harness (depends on: 09) (files: `tests/integration/`, `.gitmodules`, `screenshots/`)
+
+### Phase 7: Documentation
+**Parallel Tasks:**
+- Task 12: README, AGENTS.md, CONTRIBUTING (depends on: 09, 11) (files: `README.md`, `AGENTS.md`, `CONTRIBUTING.md`)
+
+### Post-phase Actions
+After each phase: ensure ruff lint passes on changed files, verify each task produced its own conventional commit on `main`, then mark the phase ✅ and its tasks ✔️/`completed` in this document.
+
+### Execution Summary
+- Total Phases: 7
+- Total Tasks: 12
+
 ### Change Log
+- 2026-05-25: Generated 12 tasks and the execution blueprint (7 phases) from the PRD.
 - 2026-05-25: Added commit cadence directive (one commit per task, overriding the per-phase default) for this plan.
 - 2026-05-25: Refinement session — resolved deliverable type (HACS integration only; bundling add-on deferred), test-data source (`merbanan/rtl_433_tests` `.cu8` subset → JSON fixtures + Docker replay, with licensing caveat), and connection security (`ws://` default, `wss://` accepted, no in-integration auth). Updated Clarifications (#5–#7), Background, hub config-flow, testing/tooling, risks, Self Validation, and Resource Requirements accordingly.
 - 2026-05-25: Refinement session — resolved config-entry/entity lifecycle: hub deletion cascade-removes child device entries (#8), entities are created dynamically as mapped fields are first seen and persisted across restarts (#9), and entities restore last state on restart then apply the availability timeout (#10). Updated Clarifications (#8–#10), Executive Summary, the discovery/per-device, availability, and entities sections, Implementation Risks, Success Criteria (#9–#11), and Self Validation accordingly.
