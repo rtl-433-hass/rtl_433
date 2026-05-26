@@ -8,10 +8,10 @@
 -r requirements_test.txt
 
 # Linting and formatting (also run via .pre-commit-config.yaml)
-ruff==0.13.0
+ruff==0.15.14
 
 # Git hook framework
-pre-commit==4.2.0
+pre-commit==4.6.0
 
 # Spell checking (used by the codespell pre-commit hook)
-codespell==2.4.1
+codespell==2.4.2
