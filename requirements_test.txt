@@ -16,4 +16,6 @@
 # Testing utilities for Home Assistant custom components.
 # Provides additional fixtures and utilities specifically for custom-component
 # testing, and pins the Home Assistant version used for the test run.
-pytest-homeassistant-custom-component==0.13.320
+# Pinned to the latest release that supports Python 3.13 (0.13.317+ require
+# Python 3.14, which Home Assistant does not yet target).
+pytest-homeassistant-custom-component==0.13.316
