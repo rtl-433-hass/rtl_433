@@ -9,12 +9,16 @@ Home Assistant brand icon/logo for the `rtl_433` integration.
 
 ## Files
 
+The generated images live in
+[`custom_components/rtl_433/brand/`](../custom_components/rtl_433/brand/) — the
+location Home Assistant 2026.3+ serves directly:
+
 | File | Size | Purpose |
 |------|------|---------|
-| `icon.png` | 256×256 | Square avatar icon |
-| `icon@2x.png` | 512×512 | hDPI icon |
-| `logo.png` | 1297×256 | Wordmark logo |
-| `logo@2x.png` | 2593×512 | hDPI logo |
+| `brand/icon.png` | 256×256 | Square avatar icon |
+| `brand/icon@2x.png` | 512×512 | hDPI icon |
+| `brand/logo.png` | 1297×256 | Wordmark logo |
+| `brand/logo@2x.png` | 2593×512 | hDPI logo |
 
 All are PNG, transparent, and trimmed, per the
 [Home Assistant brands](https://github.com/home-assistant/brands) requirements
@@ -24,24 +28,22 @@ All are PNG, transparent, and trimmed, per the
 
 ```bash
 uv pip install pillow         # or: pip install pillow
-python brands/generate_brand_assets.py
+python brands/generate_brand_assets.py   # writes to custom_components/rtl_433/brand/
 ```
 
 Requires the DejaVu Sans Mono Bold font
 (`/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf` on Debian/Ubuntu).
 
-## Publishing the icon to Home Assistant
+## How Home Assistant serves the icon
 
-Home Assistant serves integration icons from
-`https://brands.home-assistant.io/`, not from this repository's `manifest.json`.
-There are two routes:
+1. **In-repo brand images (HA 2026.3.0+)** — the primary mechanism used here.
+   Home Assistant loads `custom_components/rtl_433/brand/{icon,logo}.png`
+   (and `@2x`) directly and they take priority over the brands CDN, with no
+   extra configuration (see the
+   [Brands Proxy API announcement](https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api)).
+2. **`home-assistant/brands` submission** (covers HA < 2026.3): open a PR adding
+   the same four files under `custom_integrations/rtl_433/`. Older Home
+   Assistant fetches integration icons from `https://brands.home-assistant.io/`.
 
-1. **Submit to `home-assistant/brands`** (works on all HA versions): open a PR
-   adding these files under `custom_integrations/rtl_433/`
-   (`icon.png`, `icon@2x.png`, `logo.png`, `logo@2x.png`).
-2. **In-repo brands (HA 2026.3.0+)**: newer Home Assistant can resolve brand
-   images shipped by the custom component via the
-   [Brands Proxy API](https://developers.home-assistant.io/blog/2026/02/24/brands-proxy-api).
-
-Until the icon is published, Home Assistant shows a generic placeholder for the
-integration — this does not affect functionality.
+On Home Assistant versions older than 2026.3 without a brands submission, a
+generic placeholder icon is shown — this does not affect functionality.

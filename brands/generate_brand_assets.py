@@ -6,12 +6,15 @@ produces a simple, recognisable placeholder: a rounded "app tile" icon and a
 wordmark logo built around an RF broadcast glyph "((•))" and the "rtl_433"
 monospace wordmark.
 
-Outputs (Home Assistant brands spec — square icon 256/512, logo shortest side
-128-256 / 256-512, PNG, transparent, trimmed):
-  brands/icon.png        256x256
-  brands/icon@2x.png     512x512
-  brands/logo.png        height 256, trimmed width
-  brands/logo@2x.png     height 512, trimmed width
+Outputs to ``custom_components/rtl_433/brand/`` — the in-repo location Home
+Assistant 2026.3+ serves directly (taking priority over the brands CDN). The
+same files are what a home-assistant/brands submission would use. Per the HA
+brands spec: square icon 256/512, logo shortest side 128-256 / 256-512, PNG,
+transparent, trimmed.
+  brand/icon.png        256x256
+  brand/icon@2x.png     512x512
+  brand/logo.png        height 256, trimmed width
+  brand/logo@2x.png     height 512, trimmed width
 
 Run:  python brands/generate_brand_assets.py
 Requires Pillow and the DejaVu Sans Mono Bold font.
@@ -24,6 +27,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).resolve().parent
+# Live location read by Home Assistant 2026.3+ (custom_components/<domain>/brand/).
+OUT_DIR = HERE.parent / "custom_components" / "rtl_433" / "brand"
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf"
 
 # Palette: an RF/radio blue gradient that reads on both light and dark themes.
@@ -145,8 +150,9 @@ def _save(img: Image.Image, name: str, size) -> None:
     else:  # (height,) -> scale by height, keep aspect
         scale = size[0] / img.height
         target = (max(1, round(img.width * scale)), size[0])
-    img.resize(target, Image.LANCZOS).save(HERE / name)
-    print(f"wrote {name} ({target[0]}x{target[1]})")
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    img.resize(target, Image.LANCZOS).save(OUT_DIR / name)
+    print(f"wrote {OUT_DIR.name}/{name} ({target[0]}x{target[1]})")
 
 
 def main() -> None:
