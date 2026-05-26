@@ -316,9 +316,9 @@ graph TD
 - ✔️ Task 2: Config & options flow rework — `config_flow.py`, `translations/en.json` (depends on: 1)
 - ✔️ Task 3: Hub setup, single-entry platforms & dynamic devices — `__init__.py`, `entity.py`, `sensor.py`, `binary_sensor.py`, `diagnostics.py` (depends on: 1)
 
-### Phase 3: Migration
+### Phase 3: Migration ✅
 **Parallel Tasks:**
-- Task 4: In-place migration from 0.1.0 — `__init__.py` `async_migrate_entry` (depends on: 2, 3)
+- ✔️ Task 4: In-place migration from 0.1.0 — `__init__.py` `async_migrate_entry` (depends on: 2, 3)
 
 ### Phase 4: Tests & docs (file-disjoint, parallel)
 **Parallel Tasks:**
