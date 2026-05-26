@@ -6,17 +6,23 @@
 //
 // Stages (STAGE env var):
 //   add      - log in, add the rtl_433 hub via the config flow (host=wsbridge),
-//              capture the discovery card, accept the device, capture the device
-//              page, then open + capture the hub options flow. Leaves the hub's
-//              availability timeout set low (15s) so the unavailable stage is fast.
+//              then — in the new hub model — the RF device appears AUTOMATICALLY
+//              as a nested device (gated by the per-hub discovery toggle, which
+//              defaults on). There is NO discovery card to accept. Navigate to
+//              the integration's devices, open the nested device, and capture the
+//              device page; then open the options flow MENU (Hub settings /
+//              Device settings), capture it, open Hub settings, set a low
+//              availability timeout (15s) so the unavailable stage is fast, and
+//              capture the hub-settings form too.
 //   unavail  - (after run-harness.sh stops the rtl433 replay and waits past the
 //              timeout) capture the device page with all entities Unavailable.
 //   full     - add, then unavail (the orchestrator stops replay in between).
 //
-// Every capture is gated on a selector/state, never a blind long sleep. Output
-// goes to ../../screenshots. Selectors were validated against HA 2026.5.x; the
-// config-flow form is an ha-form (inputs by name), and per-entry options open via
-// the gear icon on the integration's entries page.
+// Every capture is gated on a selector/state where practical, never a blind long
+// sleep. Output goes to ../../screenshots. Selectors were validated against HA
+// 2026.5.x; the config-flow form is an ha-form (inputs by name), per-entry
+// options open via the gear icon on the integration's entries page, and the
+// options flow is now a menu (async_show_menu with Hub/Device settings).
 
 import { chromium } from "playwright";
 import { fileURLToPath } from "node:url";
@@ -77,48 +83,69 @@ async function addHubAndCapture(page) {
   await page.getByRole("button", { name: /finish|close/i }).first().click({ timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(1500);
 
-  // --- Discovery card -------------------------------------------------------
-  await page.goto(`${BASE}/config/integrations/dashboard`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(3000);
-  await shot(page, "01-discovery-card.png");
-
-  // --- Accept the discovered device ----------------------------------------
-  await page.getByRole("button", { name: /^add$/i }).first().click({ timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(2500);
-  await page.getByRole("button", { name: /submit/i }).first().click({ timeout: 5000 }).catch(() => {});
-  await page.waitForTimeout(2500);
-  // Close the area-assign dialog.
-  await page.getByRole("button", { name: /finish|close/i }).first().click({ timeout: 3000 }).catch(() => {});
-  await page.waitForTimeout(2000);
-
-  // --- Device page with entities -------------------------------------------
+  // --- Nested device page (NEW model) --------------------------------------
+  // There is no discovery card. With discovery on (default), the RF device shows
+  // up automatically as a nested device under the hub. Poll the integration's
+  // device list until it appears, then open it and capture the entities.
   await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(2500);
-  await page.locator("text=Acurite-Tower").last().click();
+  const device = page.locator("text=Acurite-Tower").last();
+  // The coordinator must observe an event and the platform must add the nested
+  // device + entities; bounded poll (~40s) on the device link appearing.
+  for (let i = 0; i < 20 && (await device.count()) === 0; i++) {
+    await page.waitForTimeout(2000);
+    await page.reload({ waitUntil: "domcontentloaded" });
+  }
+  await device.click();
   await page.waitForTimeout(3000);
   await shot(page, "02-device-page.png");
 
-  // --- Hub options flow -----------------------------------------------------
+  // --- Options flow MENU (Hub settings / Device settings) -------------------
   await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
   const hubHeader = page.locator(`text=rtl_433 (${RTL_HOST})`).first();
   const box = await hubHeader.boundingBox();
-  // The gear (options) icon sits at the right edge of the hub group header.
-  await page.mouse.click(1243, box.y + box.height / 2);
-  await page.waitForTimeout(2500);
+  // The gear (options/Configure) icon sits at the right edge of the hub header.
+  if (box) {
+    await page.mouse.click(1243, box.y + box.height / 2);
+  } else {
+    // Fallback: open Configure from a kebab/Configure button if the header
+    // layout shifts.
+    await page.getByRole("button", { name: /configure/i }).first().click({ timeout: 5000 }).catch(() => {});
+  }
+  // The options flow now opens on the menu step (Hub settings / Device settings).
+  // The menu items render as list rows (not button-role), so wait on / click by
+  // text rather than by role.
+  await page
+    .locator("text=Hub settings")
+    .first()
+    .waitFor({ state: "visible", timeout: 8000 })
+    .catch(() => {});
+  await page.waitForTimeout(1500);
   await shot(page, "03-options-flow.png");
 
-  // Set a low availability timeout so the unavailable stage is fast, then submit.
+  // --- Hub settings form: lower the availability timeout, then submit -------
+  // Open Hub settings from the menu, set a low timeout (so the unavailable stage
+  // is fast), and submit. Capturing the menu above already satisfies the docs;
+  // this also exercises the live-options update path. The Hub-settings form has
+  // a discovery checkbox (input[type=checkbox]) and the availability-timeout
+  // field (input[type=number]); we only change the latter.
+  await page.locator("text=Hub settings").first().click({ timeout: 8000 }).catch(() => {});
+  await page.waitForTimeout(2500);
   const tf = page.locator("ha-dialog input[type=number], dialog input[type=number]").first();
-  if (await tf.count()) await tf.fill(SHORT_TIMEOUT);
-  await page.getByRole("button", { name: /submit/i }).first().click().catch(() => {});
+  await tf.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
+  if (await tf.count()) {
+    await tf.fill(SHORT_TIMEOUT);
+    // Blur so the ha-form commits the new value before we submit.
+    await tf.press("Tab");
+  }
+  await page.getByRole("button", { name: /^submit$/i }).first().click({ timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(2500);
 }
 
 async function captureUnavailable(page) {
   await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
-  await page.locator("text=Acurite-Tower (Acurite-Tower-12053-chC)").last().click();
+  await page.locator("text=Acurite-Tower").last().click();
   await page.waitForTimeout(3000);
   await shot(page, "04-unavailable-state.png");
 }
