@@ -60,6 +60,36 @@ from .mapping import FieldDescriptor, load_library, load_user_overrides
 # lives here because it is only ever read by the migration.
 LEGACY_CONF_OBSERVED_FIELDS = "observed_fields"
 
+# Pre-fix versions could persist a phantom device under this key (and a matching
+# registry device ``(DOMAIN, f"{entry_id}:unknown")``) when a frame could not be
+# classified. The frame-routing fix prevents recreation, so the cleanup below
+# converges to a clean state after one run.
+PHANTOM_DEVICE_KEY = "unknown"
+
+
+def _cleanup_phantom_unknown_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_registry: dr.DeviceRegistry
+) -> None:
+    """Remove a pre-fix phantom ``unknown`` device from the map and registry.
+
+    Idempotent: drops the ``unknown`` key from ``entry.data[CONF_DEVICES]`` (only
+    persisting when it changed) and removes the stale registry device
+    ``(DOMAIN, f"{entry_id}:unknown")`` if present. Never touches the hub device
+    or real nested devices. Safe to run on every setup.
+    """
+    devices = entry.data.get(CONF_DEVICES, {})
+    if PHANTOM_DEVICE_KEY in devices:
+        cleaned = {k: v for k, v in devices.items() if k != PHANTOM_DEVICE_KEY}
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_DEVICES: cleaned}
+        )
+
+    phantom = device_registry.async_get_device(
+        identifiers={(DOMAIN, f"{entry.entry_id}:{PHANTOM_DEVICE_KEY}")}
+    )
+    if phantom is not None:
+        device_registry.async_remove_device(phantom.id)
+
 
 def _hub_secure(entry: ConfigEntry) -> bool:
     """Return the hub entry's ``secure`` (wss) flag, defaulting to False."""
@@ -156,6 +186,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name=entry.title,
         model="rtl_433 server",
     )
+    _cleanup_phantom_unknown_device(hass, entry, device_registry)
 
     coordinator = Rtl433Coordinator(
         hass,

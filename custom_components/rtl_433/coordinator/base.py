@@ -46,6 +46,7 @@ from ..const import (
     DEFAULT_PORT,
     LOGGER,
     signal_device_update,
+    signal_hub_update,
 )
 from ..normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent, normalize
 
@@ -60,6 +61,10 @@ _WATCHDOG_INTERVAL = timedelta(seconds=30)
 # Timeout (seconds) for the short-lived connection attempt used by the config
 # flow's reachability check.
 _VALIDATE_TIMEOUT = 10.0
+
+# Identity keys (besides ``model``) that mark a frame as a decoded-device event.
+# Kept in sync with normalizer.IDENTITY_KEYS.
+_EVENT_IDENTITY_KEYS = ("id", "channel", "subtype")
 
 
 class CannotConnect(HomeAssistantError):
@@ -96,6 +101,8 @@ class Rtl433Coordinator:
         ``seen_fields``: ``set[str]`` every measurement field key ever observed.
         ``device_fields``: ``dict[str, set[str]]`` field keys seen per device.
         ``connected``: ``bool`` whether the socket is currently open.
+        ``meta``: ``dict[str, Any]`` latest SDR/meta configuration (HTTP-sourced).
+        ``stats``: ``dict[str, Any]`` latest server-stats payload (HTTP-sourced).
     """
 
     def __init__(
@@ -145,6 +152,12 @@ class Rtl433Coordinator:
         self.seen_fields: set[str] = set()
         self.device_fields: dict[str, set[str]] = {}
         self.connected = False
+
+        # --- Hub-scoped runtime state (rendered by the hub entities) ---------
+        # Latest meta/SDR configuration (assembled from the HTTP getters in Task 2)
+        # and the latest server-stats payload. Populated over HTTP, not the socket.
+        self.meta: dict[str, Any] = {}
+        self.stats: dict[str, Any] = {}
 
         # --- Internal lifecycle handles --------------------------------------
         self._stop_event = asyncio.Event()
@@ -225,6 +238,7 @@ class Rtl433Coordinator:
                     self._ws = ws
                     self.connected = True
                     backoff = _BACKOFF_MIN  # reset after a successful connect
+                    self._emit_hub_update()
                     LOGGER.debug("rtl_433 connected to %s", self.ws_url)
                     await self._read_frames(ws)
             except asyncio.CancelledError:
@@ -234,6 +248,7 @@ class Rtl433Coordinator:
             finally:
                 self._ws = None
                 self.connected = False
+                self._emit_hub_update()
 
             if self._stop_event.is_set():
                 break
@@ -273,7 +288,30 @@ class Rtl433Coordinator:
         if not isinstance(event, dict):
             LOGGER.debug("rtl_433 skipping non-object frame: %r", text[:120])
             return
-        self._process_event(event)
+        self._classify_frame(event)
+
+    def _classify_frame(self, event: dict[str, Any]) -> None:
+        """Route a parsed frame by shape (Plan: Frame Classification)."""
+        is_event = event.get("model") is not None or any(
+            event.get(key) is not None for key in _EVENT_IDENTITY_KEYS
+        )
+        if is_event:
+            self._process_event(event)
+        elif "shutdown" in event:
+            self._handle_shutdown()
+        # All other non-event frames (meta / state / result / error) are ignored:
+        # #2/#3 are sourced over HTTP (Task 2), so nothing else needs handling here.
+
+    def _handle_shutdown(self) -> None:
+        """Handle a ``{"shutdown": ...}`` frame: flip connectivity off."""
+        if self.connected:
+            LOGGER.debug("rtl_433 server announced shutdown for %s", self.ws_url)
+        self.connected = False
+        self._emit_hub_update()
+
+    def _emit_hub_update(self) -> None:
+        """Notify hub entities that connectivity / meta / stats changed."""
+        async_dispatcher_send(self.hass, signal_hub_update(self.entry.entry_id))
 
     # ------------------------------------------------------------------ #
     # Event handling                                                     #

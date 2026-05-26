@@ -2,7 +2,7 @@
 id: 3
 group: "setup"
 dependencies: []
-status: "pending"
+status: "completed"
 created: "2026-05-26"
 skills:
   - python

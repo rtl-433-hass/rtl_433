@@ -110,3 +110,15 @@ SIGNAL_NEW_DEVICE: Final = "rtl_433_new_device_{hub_entry_id}"
 def signal_new_device(hub_entry_id: str) -> str:
     """Return the hub-level new-device dispatcher signal for one hub."""
     return SIGNAL_NEW_DEVICE.format(hub_entry_id=hub_entry_id)
+
+
+# Hub-level "connectivity / SDR meta / server stats changed" signal. The
+# coordinator dispatches this (no payload) whenever the hub's connection state,
+# meta/SDR configuration, or server stats change; the statically-registered hub
+# entities subscribe and re-read the coordinator's hub state.
+SIGNAL_HUB_UPDATE: Final = "rtl_433_hub_update_{hub_entry_id}"
+
+
+def signal_hub_update(hub_entry_id: str) -> str:
+    """Return the hub-level update dispatcher signal for one hub."""
+    return SIGNAL_HUB_UPDATE.format(hub_entry_id=hub_entry_id)
