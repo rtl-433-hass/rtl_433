@@ -8,10 +8,42 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - `custom_components/rtl_433/` — the integration.
   - `device_library/*.yaml` — the shipped, data-driven device mappings.
-  - `config_flow.py`, `coordinator.py`, `__init__.py`, `const.py`,
-    `mapping.py`, `diagnostics.py`, `sensor.py`, `binary_sensor.py`.
+  - `coordinator/` — package (`base.py`) for the push WebSocket coordinator.
+  - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`, `mapping.py`,
+    `normalizer.py`, `diagnostics.py`, `repairs.py`, `sensor.py`,
+    `binary_sensor.py`, `translations/en.json`.
 - `docs/device-library.md` — **authoritative** device-library reference.
 - `tests/` — unit tests. `tests/integration/` — container/screenshot harness.
+
+## Config-entry model (hub + nested devices)
+
+The integration is **rfxtrx-style**, not Battery-Notes-style:
+
+- **One config entry per rtl_433 server** (the hub, `integration_type: "hub"`).
+  Platforms are forwarded once on that entry
+  (`async_forward_entry_setups(entry, PLATFORMS)`).
+- The RF devices it decodes are **device-registry devices nested under the hub
+  entry**, *not* separate config entries. They are recreated on startup from the
+  per-hub `entry.data["devices"]` map (the single source of truth: model,
+  observed mapped fields, optional per-device timeout override) and added at
+  runtime via the new-device dispatcher signal — gated by the hub's discovery
+  toggle (the Quality-Scale `dynamic-devices` rule).
+- `async_remove_config_entry_device` (`__init__.py`) backs the per-device
+  **Delete** affordance (the `stale-devices` rule): it returns `False` for the
+  hub device (so the hub can't be removed out from under its entry) and `True`
+  for nested RF devices, dropping the device from the devices map and **evicting
+  its `device_key` from coordinator runtime state** (`coordinator.forget_device`)
+  so it can re-appear if it transmits again with discovery on. There is no
+  persistent ignore list.
+- `async_migrate_entry` (`__init__.py`, config-entry `VERSION` 1 → 2) performs a
+  **seamless in-place upgrade from 0.1.0**: it re-homes the legacy per-device
+  config entries' registry devices/entities onto the hub entry (preserving
+  unique_ids, entity_ids, and history), folds their state into the hub's devices
+  map, and removes the obsolete per-device entries.
+- Per-device configuration lives in the **hub OptionsFlow** (`config_flow.py`):
+  a menu with a *Hub settings* step (discovery toggle + default timeout, written
+  to `entry.options`) and a *Device settings* step (per-device timeout override,
+  written into `entry.data["devices"]`).
 
 ## Device-library YAML format (summary)
 

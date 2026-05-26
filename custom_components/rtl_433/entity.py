@@ -287,6 +287,9 @@ async def async_setup_hub_platform(
     # Track created unique_ids per device_key so neither the initial build nor the
     # dynamic-add handlers double-create entities for the same field.
     created: dict[str, set[str]] = {}
+    # Per-device ``signal_device_update`` unsubscribe handles, so a removed device's
+    # listener can be torn down (and re-registered cleanly if it re-appears).
+    field_unsubs: dict[str, Callable[[], None]] = {}
 
     def _descriptor_for(field_key: str) -> FieldDescriptor | None:
         """Return a descriptor for this platform, or None to skip the field."""
@@ -315,7 +318,15 @@ async def async_setup_hub_platform(
         return new_entities
 
     def _register_field_listener(device_key: str, model: str) -> None:
-        """Register a per-device listener that adds entities for new fields."""
+        """Register a per-device listener that adds entities for new fields.
+
+        Idempotent: if a listener is already registered for this device_key
+        (e.g. the new-device handler fires again before a removal) it is left in
+        place. The unsubscribe handle is kept in ``field_unsubs`` so a device
+        removal can tear it down (rather than relying solely on entry-unload).
+        """
+        if device_key in field_unsubs:
+            return
 
         @callback
         def _handle_new_fields(event: NormalizedEvent) -> None:
@@ -337,13 +348,38 @@ async def async_setup_hub_platform(
                 async_upsert_device(hass, entry, device_key, fields=mapped)
             )
 
-        entry.async_on_unload(
-            async_dispatcher_connect(
-                hass,
-                signal_device_update(entry.entry_id, device_key),
-                _handle_new_fields,
-            )
+        field_unsubs[device_key] = async_dispatcher_connect(
+            hass,
+            signal_device_update(entry.entry_id, device_key),
+            _handle_new_fields,
         )
+
+    @callback
+    def _remove_device(device_key: str) -> None:
+        """Forget a device's per-platform state when it is removed.
+
+        Drops the dedup cache and tears down the per-device field listener so a
+        later event (with discovery on) recreates the device cleanly rather than
+        being skipped as "already created" (Clarification #4).
+        """
+        created.pop(device_key, None)
+        unsub = field_unsubs.pop(device_key, None)
+        if unsub is not None:
+            unsub()
+
+    # Let ``async_remove_config_entry_device`` reach this platform's per-device
+    # state; deregister on unload so a reloaded entry starts clean.
+    coordinator.device_removers.append(_remove_device)
+
+    @callback
+    def _teardown() -> None:
+        for unsub in list(field_unsubs.values()):
+            unsub()
+        field_unsubs.clear()
+        if _remove_device in coordinator.device_removers:
+            coordinator.device_removers.remove(_remove_device)
+
+    entry.async_on_unload(_teardown)
 
     # --- Initial build from the devices map ------------------------------- #
     for device_key, rec in entry.data.get(CONF_DEVICES, {}).items():

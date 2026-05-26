@@ -131,6 +131,13 @@ class Rtl433Coordinator:
         self.new_device_callback: Callable[[str, str], None] | None = None
         self.effective_timeout_resolver: Callable[[str], int] | None = None
 
+        # Per-device removal callbacks registered by the entity platforms. When a
+        # device is removed (async_remove_config_entry_device) each is called with
+        # the device_key so the platforms can drop their per-device dedup cache and
+        # field listeners; without this the device could not re-appear on a later
+        # event while discovery is on (Clarification #4).
+        self.device_removers: list[Callable[[str], None]] = []
+
         # --- Runtime state, all scoped to this config entry ------------------
         self.devices: dict[str, NormalizedEvent] = {}
         self.last_seen: dict[str, datetime] = {}

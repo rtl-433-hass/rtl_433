@@ -20,9 +20,9 @@ decodes them, so there is no polling and no cloud dependency.
 SDR and can expose decoded events over an HTTP/WebSocket API (`-F http`). This
 integration connects to that endpoint, normalizes each event into a stable
 device identity, and maps the raw fields to Home Assistant entities using a
-data-driven [device library](docs/device-library.md). Newly seen devices are
-surfaced as discovery cards you accept or ignore, much like the Battery Notes
-integration.
+data-driven [device library](docs/device-library.md). You add one hub per
+rtl_433 server, and the devices it decodes appear automatically as nested
+devices under that hub (rfxtrx-style).
 
 You run one rtl_433 server (with your SDR); this integration is the Home
 Assistant side. It does **not** talk to an SDR directly and ships no native
@@ -37,9 +37,10 @@ requirements.
 - **Per-installation user overrides** — drop a
   `<config>/rtl_433_mappings.yaml` file to add or correct mappings without
   editing the integration.
-- **Battery Notes-style discovery** — each newly observed device appears as a
-  discovery card you accept (creating a device entry) or dismiss (ignored, never
-  re-prompted).
+- **Automatic nested devices** — each newly observed device is added
+  automatically as a device-registry device under the hub, gated by a per-hub
+  discovery toggle. Remove one from its device page; with discovery on it
+  re-appears the next time it transmits.
 - **Configurable availability** — entities go `unavailable` after a silence
   window; set a hub-wide default and override it per device.
 - **Multiple servers** — add one hub per rtl_433 server; identities are scoped
@@ -98,18 +99,21 @@ be added twice.
 
 ## Discovery
 
-Discovery follows the Battery Notes pattern:
+RF devices appear automatically as **nested devices under the hub** — there is
+no card to accept or dismiss:
 
-- When the hub sees a device it does not yet have a config entry for, it raises a
-  **discovery card** in **Settings → Devices & Services**.
-- **Accept** the card to confirm it. This creates a per-device config entry and
-  its sensor / binary_sensor entities.
-- **Dismiss** the card to ignore the device. Home Assistant records an ignored
-  entry under the same identity (`SOURCE_IGNORE`), so the device is **not
-  re-surfaced** on later sightings.
+- When the hub decodes a device it does not yet know, it **adds it
+  automatically** as a Home Assistant device under the hub, along with its
+  sensor / binary_sensor entities.
+- To get rid of an unwanted device, open it under **Settings → Devices &
+  Services → rtl_433 → the device → Delete**. There is no persistent ignore
+  list: with discovery **on**, a deleted device **re-appears** the next time it
+  transmits. To keep it gone, turn the hub's discovery toggle off first.
 
 Each hub has its own **discovery toggle** (see options below). Turning discovery
-off stops new cards from that hub without affecting already-accepted devices.
+**off** stops new devices on that hub from being added; devices that already
+exist keep updating. Turning it back **on** lets new (and previously deleted)
+devices appear again as they transmit.
 
 ## Availability
 
@@ -117,11 +121,12 @@ RF devices announce their presence only by transmitting, so the integration uses
 a silence-based availability model: if no event for a device arrives within its
 **availability timeout**, its entities become `unavailable`.
 
-- **Hub default** — set on the hub options flow. The shipped default is **600
-  seconds (10 minutes)**.
-- **Per-device override** — each device entry has an options flow with an
-  optional timeout that overrides the hub default for that device. Leave it
-  empty to fall back to the hub default.
+- **Hub default** — set on the hub options flow (**Hub settings**). The shipped
+  default is **600 seconds (10 minutes)**.
+- **Per-device override** — set through the hub options flow (**Device
+  settings**): pick a device and give it an optional timeout that overrides the
+  hub default for that one device. Leave it empty to clear the override and fall
+  back to the hub default.
 - **Restart behavior** — on a Home Assistant restart, the last known states are
   **restored first**, then the timeout runs from the restart; entities only flip
   to `unavailable` once the (restored) silence window elapses without a fresh
@@ -132,10 +137,13 @@ effect without reloading the hub or tearing down the WebSocket.
 
 ### Editing options
 
-- **Hub options** (**Configure** on the hub entry): the **discovery toggle** and
-  the **default availability timeout**.
-- **Device options** (**Configure** on a device entry): the optional
-  **per-device availability timeout** override.
+Open **Settings → Devices & Services → rtl_433 → Configure** on the hub. The
+options flow presents a menu:
+
+- **Hub settings** — the **discovery toggle** and the **default availability
+  timeout** for this server.
+- **Device settings** — pick a known device and set or clear its **per-device
+  availability-timeout override**.
 
 ## Device library and user overrides
 
@@ -169,24 +177,18 @@ These captures are produced by the containerized harness (see
 [tests/integration/README.md](tests/integration/README.md)) replaying a real
 Acurite capture.
 
-### Discovery card
-
-A discovered device appears at the top of **Settings → Devices & Services**,
-ready to accept or dismiss.
-
-![Discovered-device card in Settings → Devices & Services](docs/images/01-discovery-card.png)
-
 ### Device page
 
-An accepted **Acurite-Tower** device with its temperature, humidity, and battery
-sensors, plus RSSI / SNR / noise diagnostics.
+An auto-added **Acurite-Tower** device, nested under the hub, with its
+temperature, humidity, and battery sensors, plus RSSI / SNR / noise diagnostics.
 
 ![Acurite-Tower device page showing Temperature 26.7 °C, Humidity 74.0%, Battery 100%, and signal diagnostics](docs/images/02-device-page.png)
 
 ### Hub options flow
 
-The hub options flow exposes the discovery toggle and the default availability
-timeout.
+The hub options flow (**Configure** on the hub) exposes the discovery toggle and
+the default availability timeout under **Hub settings**, and per-device timeout
+overrides under **Device settings**.
 
 ![Hub options flow with the discovery toggle and availability-timeout field](docs/images/03-options-flow.png)
 
@@ -206,8 +208,17 @@ You can add **one hub per rtl_433 server**. Each hub:
   **instance-scoped** (`<hub-entry-id>:<device-key>`) — so two servers that
   decode the same model + id produce distinct entities and never collide.
 
-**Cascade removal:** deleting a hub also removes all of its child device entries
-(and therefore their Home Assistant devices and entities), leaving no orphans.
+**Architecture:** there is **one config entry per server** (the hub). The RF
+devices it decodes are **device-registry devices nested under that hub entry**,
+not separate config entries — the same shape Home Assistant's core `rfxtrx`
+integration uses. Deleting the hub removes all of its nested devices and
+entities, leaving no orphans; deleting a single device (from its device page)
+removes just that one.
+
+**Upgrading from 0.1.0:** the upgrade is **seamless and in place** — no
+uninstall. On first start the integration re-homes your existing devices and
+entities onto the hub entry, preserving their entity IDs and history, so
+dashboards and automations keep working.
 
 ## Development and links
 
