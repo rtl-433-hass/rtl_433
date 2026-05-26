@@ -262,6 +262,11 @@ async def async_remove_config_entry_device(
         )
         if coordinator is not None:
             coordinator.forget_device(device_key)
+            # Drop the entity platforms' per-device dedup cache and field
+            # listeners so the device re-appears cleanly if it transmits again
+            # while discovery is on (Clarification #4).
+            for remover in list(coordinator.device_removers):
+                remover(device_key)
 
     return True
 
