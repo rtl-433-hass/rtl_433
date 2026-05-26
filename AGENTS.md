@@ -72,9 +72,14 @@ shipped library (see [User overrides](docs/device-library.md#user-overrides)).
 
 ## Running the unit tests
 
+Dependencies and tools are managed with [uv](https://docs.astral.sh/uv/), the
+same as CI. Install uv with `curl -LsSf https://astral.sh/uv/install.sh | sh`,
+then:
+
 ```bash
-pip install -r requirements_test.txt
-pytest tests/
+uv venv
+uv pip install -r requirements_test.txt
+uv run pytest tests/
 ```
 
 `requirements_test.txt` pins `pytest-homeassistant-custom-component`, which pulls
@@ -82,10 +87,10 @@ in the matching Home Assistant version and the full pytest stack (asyncio, cov,
 timeout, xdist, freezegun). To match CI, include coverage:
 
 ```bash
-pytest --cov=custom_components/rtl_433 tests/
+uv run pytest --cov=custom_components/rtl_433 tests/
 ```
 
-CI runs this matrix across Python 3.12 and 3.13.
+CI runs on Python 3.13 (the minimum Home Assistant 2026.x supports).
 
 ## Running the container / screenshot harness
 

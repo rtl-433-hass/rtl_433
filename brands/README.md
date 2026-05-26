@@ -23,7 +23,7 @@ All are PNG, transparent, and trimmed, per the
 ## Regenerating
 
 ```bash
-pip install pillow            # or: uv pip install pillow
+uv pip install pillow         # or: pip install pillow
 python brands/generate_brand_assets.py
 ```
 

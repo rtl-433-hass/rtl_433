@@ -3,7 +3,7 @@
 # Includes everything needed to run the test suite plus the local tooling
 # used by pre-commit (ruff lint/format) and the contributor workflow.
 #
-# Install with: pip install -r requirements_dev.txt
+# Install with: uv pip install -r requirements_dev.txt
 
 -r requirements_test.txt
 

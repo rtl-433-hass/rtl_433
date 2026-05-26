@@ -11,7 +11,7 @@
 #   - coverage
 #   - freezegun (time mocking)
 #
-# Install with: pip install -r requirements_test.txt
+# Install with: uv pip install -r requirements_test.txt
 
 # Testing utilities for Home Assistant custom components.
 # Provides additional fixtures and utilities specifically for custom-component

@@ -59,17 +59,22 @@ Releases are automated with
 You do not edit the changelog or bump versions by hand — write good conventional
 commits and let release-please do it.
 
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management and
+for running tools, the same as CI. Install it with
+`curl -LsSf https://astral.sh/uv/install.sh | sh` (see the uv docs for other
+methods).
+
 ## Linting and formatting
 
 The project uses [ruff](https://docs.astral.sh/ruff/) for both linting and
 formatting (config in `pyproject.toml`, based on Home Assistant Core's ruff
 setup), plus pre-commit hooks.
 
-Run ruff directly:
+Run ruff directly (`uvx` fetches and runs it without a manual install):
 
 ```bash
-ruff check .          # lint
-ruff format --check . # formatting check (drop --check to auto-format)
+uvx ruff check .          # lint
+uvx ruff format --check . # formatting check (drop --check to auto-format)
 ```
 
 Install and run the pre-commit hooks (ruff, ruff-format, codespell, plus the
@@ -77,22 +82,26 @@ standard hygiene hooks for YAML/JSON/TOML, trailing whitespace, end-of-file,
 and line endings):
 
 ```bash
-pip install pre-commit
-pre-commit install        # run automatically on git commit
+uv tool install pre-commit --with pre-commit-uv   # persistent install
+pre-commit install                                # run automatically on git commit
 pre-commit run --all-files
 ```
+
+For a one-off run without installing, use
+`uvx --with pre-commit-uv pre-commit run --all-files` (this is what CI runs).
 
 ## Tests
 
 ```bash
-pip install -r requirements_test.txt
-pytest tests/
+uv venv
+uv pip install -r requirements_test.txt
+uv run pytest tests/
 ```
 
 To match CI's coverage invocation:
 
 ```bash
-pytest --cov=custom_components/rtl_433 tests/
+uv run pytest --cov=custom_components/rtl_433 tests/
 ```
 
 The containerized end-to-end / screenshot harness is separate and documented in

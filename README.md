@@ -217,9 +217,11 @@ You can add **one hub per rtl_433 server**. Each hub:
 - **Integration & screenshot harness:** [tests/integration/README.md](tests/integration/README.md)
 - **Issue tracker:** <https://github.com/rtl-433-hass/rtl_433/issues>
 
-Run the unit tests locally:
+Run the unit tests locally (dependencies are managed with
+[uv](https://docs.astral.sh/uv/)):
 
 ```bash
-pip install -r requirements_test.txt
-pytest tests/
+uv venv
+uv pip install -r requirements_test.txt
+uv run pytest tests/
 ```
