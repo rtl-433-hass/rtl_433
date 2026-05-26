@@ -15,7 +15,7 @@ from unittest.mock import patch
 from freezegun import freeze_time
 import pytest
 
-from custom_components.rtl_433.const import signal_device_update
+from custom_components.rtl_433.const import signal_device_update, signal_hub_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.util import dt as dt_util
 
@@ -70,6 +70,63 @@ def test_ignores_empty_and_malformed_frames(hass, coordinator):
 
     assert coordinator.devices == {}
     dispatch.assert_not_called()
+
+
+def test_meta_frame_ignored(hass, coordinator):
+    """An SDR/meta frame is not a device event: no device, no seen_fields."""
+    with patch(DISPATCH):
+        coordinator._handle_text_frame(
+            '{"center_frequency": 433920000, "samp_rate": 250000, '
+            '"frequencies": [433920000], "hop_times": [600]}'
+        )
+
+    assert coordinator.devices == {}
+    assert coordinator.seen_fields == set()
+
+
+def test_stats_frame_ignored(hass, coordinator):
+    """A server-stats frame is not a device event: no device, no seen_fields."""
+    with patch(DISPATCH):
+        coordinator._handle_text_frame(
+            '{"enabled": 5, "since": "2026-05-26T10:00:00", '
+            '"frames": {"count": 3, "fsk": 1, "events": 9}}'
+        )
+
+    assert coordinator.devices == {}
+    assert coordinator.seen_fields == set()
+
+
+def test_rpc_result_error_frames_ignored(hass, coordinator):
+    """RPC result/error frames are not device events: no device, no seen_fields."""
+    with patch(DISPATCH):
+        coordinator._handle_text_frame('{"result": "ok"}')
+        coordinator._handle_text_frame('{"error": "bad"}')
+
+    assert coordinator.devices == {}
+    assert coordinator.seen_fields == set()
+
+
+def test_shutdown_frame_flips_connectivity_and_emits(hass, coordinator):
+    """A shutdown frame flips connectivity off and emits the hub-update signal."""
+    coordinator.connected = True
+    with patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame('{"shutdown": "goodbye"}')
+
+    assert coordinator.connected is False
+    assert coordinator.devices == {}
+    assert coordinator.seen_fields == set()
+
+    hub_signal = signal_hub_update(coordinator.entry.entry_id)
+    sent_signals = [call.args[1] for call in dispatch.call_args_list]
+    assert hub_signal in sent_signals
+
+
+def test_model_less_identity_event_creates_device(hass, coordinator):
+    """A frame with an identity key but no model still creates its device."""
+    with patch(DISPATCH):
+        coordinator._handle_text_frame('{"channel": 1, "temperature_C": 5}')
+
+    assert "unknown-ch1" in coordinator.devices
 
 
 def test_new_device_callback_fires_once_when_discovery_enabled(hass, coordinator):

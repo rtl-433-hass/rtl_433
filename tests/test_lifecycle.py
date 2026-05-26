@@ -391,6 +391,52 @@ async def test_entity_setup_uses_cached_registry_not_event_loop_load(
 
 
 # --------------------------------------------------------------------------- #
+# Phantom "unknown" device cleanup on hub setup.                               #
+# --------------------------------------------------------------------------- #
+async def test_phantom_unknown_device_cleaned_up(hass, hub_entry_builder):
+    """A pre-fix phantom ``unknown`` device is dropped from the map + registry."""
+    real_key = "Acurite-606TX-42"
+    hub = hub_entry_builder(
+        availability_timeout=600,
+        devices={
+            "unknown": {CONF_MODEL: "", DEVICE_FIELDS: ["frequencies"]},
+            real_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]},
+        },
+    )
+    hub.add_to_hass(hass)
+
+    dev_reg = dr.async_get(hass)
+    # Pre-seed a stale phantom registry device as a prior version would have.
+    dev_reg.async_get_or_create(
+        config_entry_id=hub.entry_id,
+        identifiers={(DOMAIN, f"{hub.entry_id}:unknown")},
+    )
+
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    # The phantom record + registry device are gone; the real device remains.
+    assert "unknown" not in hub.data.get(CONF_DEVICES, {})
+    assert real_key in hub.data[CONF_DEVICES]
+    assert (
+        dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub.entry_id}:unknown")})
+        is None
+    )
+    # The hub device itself is untouched.
+    assert dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)}) is not None
+
+    # Re-running setup is a no-op (reload) — nothing left to clean.
+    assert await hass.config_entries.async_reload(hub.entry_id)
+    await hass.async_block_till_done()
+    assert "unknown" not in hub.data.get(CONF_DEVICES, {})
+    assert real_key in hub.data[CONF_DEVICES]
+    assert (
+        dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub.entry_id}:unknown")})
+        is None
+    )
+
+
+# --------------------------------------------------------------------------- #
 # 0.1.0 -> nested migration.                                                   #
 # --------------------------------------------------------------------------- #
 async def test_migration_folds_legacy_device_entries_into_hub(hass):

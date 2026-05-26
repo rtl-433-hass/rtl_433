@@ -489,10 +489,10 @@ graph TD
 
 No circular dependencies; every task appears in exactly one phase below.
 
-### Phase 1: Coordinator core fix + setup cleanup
+### ✅ Phase 1: Coordinator core fix + setup cleanup
 **Parallel Tasks:**
-- Task 001: Coordinator frame classification, hub-update signal, and connectivity state (no deps; edits `const.py`, `coordinator/base.py`, `tests/test_coordinator.py`)
-- Task 003: Phantom "unknown" device cleanup on hub setup (no deps; edits `__init__.py`, `tests/test_lifecycle.py`)
+- ✔️ Task 001: Coordinator frame classification, hub-update signal, and connectivity state (no deps; edits `const.py`, `coordinator/base.py`, `tests/test_coordinator.py`)
+- ✔️ Task 003: Phantom "unknown" device cleanup on hub setup (no deps; edits `__init__.py`, `tests/test_lifecycle.py`)
 
 ### Phase 2: HTTP getters + connectivity entity
 **Parallel Tasks:**
