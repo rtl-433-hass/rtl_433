@@ -171,6 +171,19 @@ class Rtl433Coordinator:
         )
         LOGGER.debug("rtl_433 coordinator started for %s", self.ws_url)
 
+    def forget_device(self, device_key: str) -> None:
+        """Drop a device's runtime state so its next event is treated as new.
+
+        Called when a device is removed from its device page
+        (``async_remove_config_entry_device``). Without this eviction the device
+        would stay in ``devices`` and a later event would not be treated as new,
+        so a re-transmitting device could never re-appear while discovery is on.
+        """
+        self.devices.pop(device_key, None)
+        self.last_seen.pop(device_key, None)
+        self.available.pop(device_key, None)
+        self.device_fields.pop(device_key, None)
+
     async def async_stop(self) -> None:
         """Stop the connect loop, close the socket, and cancel the watchdog."""
         self._stop_event.set()
