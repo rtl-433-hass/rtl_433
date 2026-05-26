@@ -1,11 +1,10 @@
-"""Sensor platform for rtl_433 per-device config entries.
+"""Sensor platform for the rtl_433 hub config entry.
 
-``async_setup_entry`` runs for a *device* config entry and delegates to the
-shared :func:`~custom_components.rtl_433.entity.async_setup_device_platform`
-helper, which resolves the parent hub coordinator, builds a :class:`Rtl433Sensor`
-for every observed mapped field whose descriptor ``platform == "sensor"``,
-persists the observed-field set, and wires dynamic creation of new sensors when
-a previously unseen mapped field first arrives (Clarification #9).
+``async_setup_entry`` runs once for the hub config entry and delegates to the
+shared :func:`~custom_components.rtl_433.entity.async_setup_hub_platform`
+helper, which resolves the hub coordinator, builds a :class:`Rtl433Sensor` for
+every device's observed mapped fields whose descriptor ``platform == "sensor"``,
+adds new devices/fields at runtime, and keeps the hub's devices map current.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import Rtl433Entity, async_setup_device_platform
+from .entity import Rtl433Entity, async_setup_hub_platform
 from .mapping import apply_transform
 
 if TYPE_CHECKING:
@@ -77,7 +76,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up rtl_433 sensors for one per-device config entry."""
-    await async_setup_device_platform(
+    """Set up rtl_433 sensors for every device under the hub config entry."""
+    await async_setup_hub_platform(
         hass, entry, async_add_entities, PLATFORM, Rtl433Sensor
     )
