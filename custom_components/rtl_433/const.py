@@ -52,6 +52,19 @@ CONF_DEVICE_KEY: Final = "device_key"
 # The rtl_433 ``model`` string for the device (e.g. "Acurite-606TXN").
 CONF_MODEL: Final = "model"
 
+# --- Hub devices-map keys ---------------------------------------------------
+# Key under a hub entry's ``data`` holding the consolidated per-device map for
+# that hub. Maps ``device_key`` -> a record with the device's model, the set of
+# observed mapped field keys, and an optional per-device availability-timeout
+# override. This map is the single source of truth for recreating nested devices
+# and their entities on startup, for the dynamic-add listeners, the options-flow
+# per-device override, and the 0.1.0 migration.
+CONF_DEVICES: Final = "devices"
+# Sub-keys inside one ``entry.data[CONF_DEVICES][device_key]`` record. The model
+# reuses ``CONF_MODEL`` ("model"); the others are defined here.
+DEVICE_FIELDS: Final = "fields"  # sorted list of observed mapped field keys
+DEVICE_TIMEOUT_OVERRIDE: Final = "timeout_override"  # int seconds, or absent/None
+
 # --- hass.data keys ---------------------------------------------------------
 # Key under ``hass.data[DOMAIN]`` holding the once-loaded mapping library tuple
 # ``(registry, skip_keys)``. The library is loaded in an executor during hub
@@ -84,3 +97,16 @@ def signal_device_update(hub_entry_id: str, device_key: str) -> str:
     rather than formatting the template independently.
     """
     return SIGNAL_DEVICE_UPDATE.format(hub_entry_id=hub_entry_id, device_key=device_key)
+
+
+# Hub-level "a new (previously unknown) device was observed" signal. The
+# coordinator's new-device callback (wired in ``__init__.py``) dispatches this,
+# gated by the per-hub discovery toggle; the entity platforms subscribe to it to
+# create the nested device and its entities at runtime (the ``dynamic-devices``
+# Quality Scale rule). Carries ``(device_key, model)``.
+SIGNAL_NEW_DEVICE: Final = "rtl_433_new_device_{hub_entry_id}"
+
+
+def signal_new_device(hub_entry_id: str) -> str:
+    """Return the hub-level new-device dispatcher signal for one hub."""
+    return SIGNAL_NEW_DEVICE.format(hub_entry_id=hub_entry_id)
