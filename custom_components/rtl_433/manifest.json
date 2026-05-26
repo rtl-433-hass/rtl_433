@@ -1,7 +1,9 @@
 {
   "domain": "rtl_433",
   "name": "rtl_433",
-  "codeowners": ["@deviantintegral"],
+  "codeowners": [
+    "@deviantintegral"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/rtl-433-hass/rtl_433",
   "integration_type": "hub",

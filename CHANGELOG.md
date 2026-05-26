@@ -1,0 +1,32 @@
+# Changelog
+
+## [0.1.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.0.1...v0.1.0) (2026-05-26)
+
+
+### Features
+
+* add config, options and discovery flows ([6af5e9d](https://github.com/rtl-433-hass/rtl_433/commit/6af5e9d60fc4155525ef156502f0aeb2aa57d397))
+* add data-driven device mapping library ([70d1148](https://github.com/rtl-433-hass/rtl_433/commit/70d114834205325e3a1f938c741f3beb15459e72))
+* add device-library YAML loader ([edd9159](https://github.com/rtl-433-hass/rtl_433/commit/edd91596f79adbd0584cfa8e38dbc9241e0f53f0))
+* add event normalizer and websocket coordinator ([9cf49a1](https://github.com/rtl-433-hass/rtl_433/commit/9cf49a10f977642d52a44cb1d46243211ffc5d07))
+* add placeholder brand icon and logo ([87acb93](https://github.com/rtl-433-hass/rtl_433/commit/87acb9330a157d33a3e2c5bc7de01d2713e963bf))
+* add rtl_433 integration package skeleton ([13d5113](https://github.com/rtl-433-hass/rtl_433/commit/13d5113c9a41b0f061a0d08b404a625440015e2c))
+* add sensor and binary_sensor platforms ([2aa8fd9](https://github.com/rtl-433-hass/rtl_433/commit/2aa8fd91c093c8c83780e530fb2a9878c504288e))
+* ship brand images in-repo for HA 2026.3+ local serving ([3e8badd](https://github.com/rtl-433-hass/rtl_433/commit/3e8baddca24ae7f7014c7c851fa0aaa5f66a7449))
+* wire integration lifecycle, diagnostics and repairs ([9d1cf4c](https://github.com/rtl-433-hass/rtl_433/commit/9d1cf4c0ab34b631b01c1c25691e5b6068e00b13))
+
+
+### Bug Fixes
+
+* avoid event-loop YAML load during entity setup ([d29aa89](https://github.com/rtl-433-hass/rtl_433/commit/d29aa899fda3635125fbfb5a785668fdbf2c9c7d))
+* correct server_unreachable repair issue translation for hassfest ([f535aff](https://github.com/rtl-433-hass/rtl_433/commit/f535aff7d556956ced9ce1e0a1bf157824457692))
+
+
+### Documentation
+
+* add Apache-2.0 license ([ab2c6a9](https://github.com/rtl-433-hass/rtl_433/commit/ab2c6a98ac44f31ff2d8ae1a2bc5132f5b134224))
+* add README, AGENTS.md and CONTRIBUTING ([dc0f0c4](https://github.com/rtl-433-hass/rtl_433/commit/dc0f0c41e1e011c0b8fbe224d35dcc007eeb1661))
+* append execution summary to plan 01 ([6fee65d](https://github.com/rtl-433-hass/rtl_433/commit/6fee65d929e2f1e2f707ff48a1b480e7ba8dc75d))
+* initial integration plan ([9dec7f0](https://github.com/rtl-433-hass/rtl_433/commit/9dec7f0ee3167dd909b521bd2c979153c8442385))
+* regenerate README screenshots with brand icon and Demo User ([4732282](https://github.com/rtl-433-hass/rtl_433/commit/4732282f5d7a510d389a52dcd3218e6dee7f8249))
+* use uv instead of pip in instructions ([85d4036](https://github.com/rtl-433-hass/rtl_433/commit/85d40360f19be490ab191e0956bd44e7ced681fc))
