@@ -1,15 +1,14 @@
 """Diagnostics export for the rtl_433 integration.
 
-``async_get_config_entry_diagnostics`` returns a redacted snapshot of a hub's
+``async_get_config_entry_diagnostics`` returns a redacted snapshot of the hub's
 runtime state for support and — crucially — for *contributors* extending the
 device library: the ``unmatched_field_keys`` list surfaces exactly which fields
 the hub has observed that have no mapping descriptor yet (and are not on the
 skip-list), so adding library coverage is a matter of reading the diagnostics
 rather than packet-sniffing.
 
-Diagnostics are offered for hub entries (which own the coordinator and its
-runtime state). A device entry has no coordinator of its own; its diagnostics
-defer to its parent hub.
+Every config entry is a hub entry that owns the coordinator and its runtime
+state; the nested RF devices are device-registry devices, not config entries.
 """
 
 from __future__ import annotations
@@ -20,15 +19,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .config_flow import is_hub_entry
-from .const import (
-    CONF_HOST,
-    CONF_HUB_ENTRY_ID,
-    CONF_PATH,
-    CONF_PORT,
-    DATA_LIBRARY,
-    DOMAIN,
-)
+from .const import CONF_HOST, CONF_PATH, CONF_PORT, DATA_LIBRARY, DOMAIN
 from .coordinator import Rtl433Coordinator
 from .mapping import FieldDescriptor, lookup
 
@@ -42,13 +33,9 @@ def _resolve_coordinator(
 ) -> Rtl433Coordinator | None:
     """Return the coordinator that owns ``entry``'s runtime state, if loaded.
 
-    For a hub entry that is its own coordinator; for a device entry it is the
-    parent hub's coordinator (keyed by ``CONF_HUB_ENTRY_ID``).
+    Every config entry is a hub entry that is its own coordinator.
     """
-    domain_data = hass.data.get(DOMAIN, {})
-    if is_hub_entry(entry):
-        return domain_data.get(entry.entry_id)
-    return domain_data.get(entry.data.get(CONF_HUB_ENTRY_ID))
+    return hass.data.get(DOMAIN, {}).get(entry.entry_id)
 
 
 def _unmatched_field_keys(
@@ -89,8 +76,8 @@ async def async_get_config_entry_diagnostics(
     }
 
     if coordinator is None:
-        # Hub not loaded (or parent hub absent for a device entry): nothing more
-        # to report than the (redacted) static entry data.
+        # Hub not loaded yet: nothing more to report than the (redacted) static
+        # entry data.
         diagnostics["coordinator_loaded"] = False
         return diagnostics
 

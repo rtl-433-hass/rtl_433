@@ -1,57 +1,52 @@
 """The rtl_433 integration.
 
-This module wires the integration's config-entry lifecycle. There are two kinds
-of config entry, discriminated by ``entry.data[CONF_ENTRY_TYPE]``:
+This module wires the integration's config-entry lifecycle. There is one kind of
+config entry: a **hub** entry that owns one rtl_433 server's WebSocket
+connection. Setting one up loads the mapping library (shipped + user overrides),
+instantiates the push
+:class:`~custom_components.rtl_433.coordinator.Rtl433Coordinator`, injects the
+skip-keys, the effective-timeout resolver, and the new-device callback, registers
+the hub device, starts the coordinator, registers an options-update listener so
+toggling discovery / the timeout takes effect live, and forwards the
+``sensor`` / ``binary_sensor`` platforms once on the hub entry. The loaded
+library is cached on ``hass.data[DOMAIN][DATA_LIBRARY]`` so the entity platforms
+reuse it.
 
-* **Hub** entries own one rtl_433 server's WebSocket connection. Setting one up
-  loads the mapping library (shipped + user overrides), instantiates the push
-  :class:`~custom_components.rtl_433.coordinator.Rtl433Coordinator`, injects the
-  skip-keys, the effective-timeout resolver, and the new-device discovery
-  callback, registers the hub device, starts the coordinator, and registers an
-  options-update listener so toggling discovery / the timeout takes effect
-  live. The loaded library is cached on ``hass.data[DOMAIN]["_library"]`` so the
-  entity platforms reuse it.
-
-* **Device** entries own one physical device's entities. Setting one up just
-  forwards the ``sensor`` / ``binary_sensor`` platforms once the parent hub's
-  coordinator is present (otherwise :class:`ConfigEntryNotReady`).
-
-Deleting a hub cascade-removes its child device entries (and thus their HA
-devices and entities), leaving no orphans (Clarification #8).
+RF devices are represented as **device-registry devices nested under the hub
+entry** (rfxtrx-style), not as their own config entries. They are recreated on
+startup from ``entry.data[CONF_DEVICES]`` and added at runtime via the
+new-device dispatcher signal (gated by the discovery toggle). A single nested
+device can be removed from its device page via
+:func:`async_remove_config_entry_device`; deleting the hub entry removes all
+nested devices and entities automatically.
 """
 
 from __future__ import annotations
 
-from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY, ConfigEntry
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers import device_registry as dr, discovery_flow
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from . import repairs
-from .config_flow import is_hub_entry
 from .const import (
     CONF_AVAILABILITY_TIMEOUT,
-    CONF_DEVICE_KEY,
+    CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
     CONF_HOST,
-    CONF_HUB_ENTRY_ID,
-    CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
     DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
+    DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     LOGGER,
     PLATFORMS,
+    signal_new_device,
 )
 from .coordinator import Rtl433Coordinator
 from .mapping import FieldDescriptor, load_library, load_user_overrides
-
-# Discovery-info keys carried into the integration-discovery flow. Mirrors the
-# contract documented in ``config_flow.async_step_integration_discovery``.
-DISCOVERY_HUB_ENTRY_ID = "hub_entry_id"
-DISCOVERY_DEVICE_KEY = "device_key"
-DISCOVERY_MODEL = "model"
 
 
 def _hub_secure(entry: ConfigEntry) -> bool:
@@ -103,62 +98,44 @@ async def _async_load_library(
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up rtl_433 from a config entry (hub or device)."""
+    """Set up an rtl_433 hub config entry.
+
+    Loads the library, registers the hub device, builds and starts the
+    coordinator, wires the reachability watcher and options-update listener, and
+    forwards the entity platforms once on the hub entry.
+    """
     hass.data.setdefault(DOMAIN, {})
 
-    if is_hub_entry(entry):
-        return await _async_setup_hub_entry(hass, entry)
-    return await _async_setup_device_entry(hass, entry)
-
-
-async def _async_setup_hub_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up a hub config entry: library, coordinator, discovery, watchdog."""
     _registry, skip_keys = await _async_load_library(hass)
 
     def effective_timeout_resolver(device_key: str) -> int:
         """Resolve a device's effective timeout (per-device override > hub default).
 
-        Searches this hub's child *device* config entries for the one matching
-        ``device_key`` and reads its ``options[CONF_AVAILABILITY_TIMEOUT]``
-        override; falls back to the hub-level default when none is set.
+        Reads the per-device ``timeout_override`` from the hub's devices map
+        (``entry.data[CONF_DEVICES][device_key]``); falls back to the hub-level
+        default when none is set.
         """
-        for child in hass.config_entries.async_entries(DOMAIN):
-            if (
-                child.data.get(CONF_HUB_ENTRY_ID) == entry.entry_id
-                and child.data.get(CONF_DEVICE_KEY) == device_key
-            ):
-                override = child.options.get(CONF_AVAILABILITY_TIMEOUT)
-                if override is not None:
-                    return int(override)
-                break
+        override = (
+            entry.data.get(CONF_DEVICES, {})
+            .get(device_key, {})
+            .get(DEVICE_TIMEOUT_OVERRIDE)
+        )
+        if override is not None:
+            return int(override)
         return _hub_availability_timeout(entry)
 
     def new_device_callback(device_key: str, model: str) -> None:
-        """Start a discovery flow for a newly observed, not-yet-known device.
+        """Dispatch the hub-level new-device signal for a newly observed device.
 
-        Skips devices that already have a configured *or* user-ignored config
-        entry under unique_id ``{hub_entry_id}:{device_key}`` so repeated
-        sightings never spam the discovery list (Battery-Notes dedup).
+        The coordinator only invokes this when discovery is enabled and the
+        device is genuinely new (its ``is_new`` check dedupes), so the platform
+        listeners can add the nested device + its entities directly.
         """
-        unique_id = f"{entry.entry_id}:{device_key}"
-        for existing in hass.config_entries.async_entries(DOMAIN):
-            if existing.unique_id == unique_id:
-                # Configured (any non-ignore source) or explicitly ignored:
-                # either way the device is accounted for, so do not re-surface.
-                return
-
-        discovery_flow.async_create_flow(
-            hass,
-            DOMAIN,
-            context={"source": SOURCE_INTEGRATION_DISCOVERY},
-            data={
-                DISCOVERY_HUB_ENTRY_ID: entry.entry_id,
-                DISCOVERY_DEVICE_KEY: device_key,
-                DISCOVERY_MODEL: model,
-            },
+        async_dispatcher_send(
+            hass, signal_new_device(entry.entry_id), device_key, model
         )
 
-    # Register the hub device so child devices can link to it via ``via_device``.
+    # Register the hub device so nested devices can link to it via ``via_device``.
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -191,21 +168,6 @@ async def _async_setup_hub_entry(hass: HomeAssistant, entry: ConfigEntry) -> boo
     )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
-    return True
-
-
-async def _async_setup_device_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up a device config entry by forwarding its entity platforms.
-
-    Defers (raises :class:`ConfigEntryNotReady`) when the parent hub coordinator
-    is not loaded yet so Home Assistant retries after the hub comes up.
-    """
-    hub_entry_id = entry.data.get(CONF_HUB_ENTRY_ID)
-    if hub_entry_id not in hass.data.get(DOMAIN, {}):
-        raise ConfigEntryNotReady(
-            f"Parent hub {hub_entry_id} not loaded yet for device "
-            f"{entry.data.get(CONF_DEVICE_KEY)}"
-        )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -236,10 +198,11 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry (hub or device)."""
-    if not is_hub_entry(entry):
-        return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    """Unload the hub config entry.
 
+    Stops the coordinator, drops its runtime state, clears any reachability
+    repair issue, and unloads the forwarded entity platforms.
+    """
     coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
         entry.entry_id
     )
@@ -247,36 +210,52 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_stop()
     hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     repairs.async_clear_hub_unreachable(hass, entry)
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Allow removing a single nested RF device from its device page.
+
+    Refuses to remove the hub device itself (identifier
+    ``(DOMAIN, entry.entry_id)``) so the hub cannot be deleted out from under its
+    config entry. For a nested device, drops it from the hub's devices map and
+    evicts its ``device_key`` from the coordinator's runtime state (so a
+    re-transmitting device is treated as new and can re-appear while discovery is
+    on, Clarification #4).
+    """
+    if (DOMAIN, config_entry.entry_id) in device_entry.identifiers:
+        return False
+
+    # Find this device's device_key from its identifier
+    # ``(DOMAIN, f"{entry_id}:{device_key}")``.
+    device_key: str | None = None
+    for domain, ident in device_entry.identifiers:
+        if domain == DOMAIN and ident.startswith(f"{config_entry.entry_id}:"):
+            device_key = ident.split(":", 1)[1]
+            break
+
+    if device_key is not None:
+        devices = {
+            k: v
+            for k, v in config_entry.data.get(CONF_DEVICES, {}).items()
+            if k != device_key
+        }
+        hass.config_entries.async_update_entry(
+            config_entry, data={**config_entry.data, CONF_DEVICES: devices}
+        )
+        coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
+            config_entry.entry_id
+        )
+        if coordinator is not None:
+            coordinator.forget_device(device_key)
+
     return True
 
 
-async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Cascade-remove a hub's child device entries when the hub is deleted.
-
-    Removing each child config entry takes its HA device and entities with it,
-    so no orphans remain (Clarification #8). Device entries need no special
-    removal handling; only hubs own children.
-    """
-    if not is_hub_entry(entry):
-        return
-
-    children = [
-        child
-        for child in hass.config_entries.async_entries(DOMAIN)
-        if child.data.get(CONF_HUB_ENTRY_ID) == entry.entry_id
-    ]
-    for child in children:
-        LOGGER.debug(
-            "rtl_433 cascade-removing child device entry %s (%s) of hub %s",
-            child.entry_id,
-            child.data.get(CONF_MODEL) or child.data.get(CONF_DEVICE_KEY),
-            entry.entry_id,
-        )
-        await hass.config_entries.async_remove(child.entry_id)
-
-
 __all__: list[str] = [
-    "async_remove_entry",
+    "async_remove_config_entry_device",
     "async_setup_entry",
     "async_unload_entry",
 ]

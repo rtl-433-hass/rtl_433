@@ -1,8 +1,8 @@
-"""Shared base entity and platform-setup helper for the rtl_433 integration.
+"""Shared base entity and hub-wide platform-setup helper for the integration.
 
-Every ``sensor``/``binary_sensor`` entity created for a per-device config entry
-derives from :class:`Rtl433Entity`. The base centralizes the four concerns the
-platforms would otherwise duplicate:
+Every ``sensor``/``binary_sensor`` entity created for a device nested under the
+hub config entry derives from :class:`Rtl433Entity`. The base centralizes the
+four concerns the platforms would otherwise duplicate:
 
 * **Device registry** — a single :class:`DeviceInfo` keyed by
   ``{hub_entry_id}:{device_key}`` and linked to the hub device via
@@ -19,23 +19,25 @@ platforms would otherwise duplicate:
 * **State restoration** — via :class:`RestoreEntity`; the field-specific
   subclasses pull the last state in their own ``async_added_to_hass``.
 
-The module also hosts :func:`async_setup_device_platform`, the shared
+The module also hosts :func:`async_setup_hub_platform`, the shared
 ``async_setup_entry`` body used by both the ``sensor`` and ``binary_sensor``
-platforms: it resolves the parent hub coordinator, builds entities for the
-device's observed mapped fields of one platform, persists the observed-field set
-to ``entry.options`` (Clarification #9), and registers a dispatcher listener that
-adds new entities on the fly as previously unseen mapped fields arrive.
+platforms. It runs once on the single hub config entry and: creates entities for
+every device recorded in ``entry.data[CONF_DEVICES]`` (unioned with the fields
+the coordinator already knows), subscribes to ``signal_new_device`` to add a new
+device's entities at runtime (the ``dynamic-devices`` Quality Scale rule),
+registers a per-device listener on ``signal_device_update`` that adds entities as
+previously unseen mapped fields arrive, and keeps ``entry.data[CONF_DEVICES]``
+current via the idempotent :func:`async_upsert_device` helper.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -43,21 +45,19 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_DEVICE_KEY,
-    CONF_HUB_ENTRY_ID,
+    CONF_DEVICES,
     CONF_MODEL,
     DATA_LIBRARY,
+    DEVICE_FIELDS,
     DOMAIN,
     signal_device_update,
+    signal_new_device,
 )
 from .mapping import FieldDescriptor, lookup
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
     from .normalizer import NormalizedEvent
-
-# Persisted under ``entry.options`` so observed fields survive a restart.
-CONF_OBSERVED_FIELDS = "observed_fields"
 
 
 def _resolve_entity_category(value: str | None) -> EntityCategory | None:
@@ -213,50 +213,80 @@ class Rtl433Entity(RestoreEntity):
 
 
 # --------------------------------------------------------------------------- #
-# Shared per-device platform setup (sensor + binary_sensor use the same flow). #
+# Devices-map helper.                                                          #
 # --------------------------------------------------------------------------- #
-async def async_setup_device_platform(
+async def async_upsert_device(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    device_key: str,
+    *,
+    model: str | None = None,
+    fields: Iterable[str] | None = None,
+) -> None:
+    """Merge a device's model/fields into ``entry.data[CONF_DEVICES]``.
+
+    The devices map is the authoritative source of truth for recreating nested
+    devices/entities on startup. This helper is idempotent and writes only when
+    the stored record actually changes: fields are unioned (and stored sorted for
+    diff-friendly entries), the model is set when provided. Concurrent
+    ``sensor``/``binary_sensor`` setups (and the dynamic-add listeners) converge
+    because every write is a union, never a clobber.
+    """
+    devices = {k: dict(v) for k, v in entry.data.get(CONF_DEVICES, {}).items()}
+    rec = devices.setdefault(device_key, {CONF_MODEL: model or "", DEVICE_FIELDS: []})
+    changed = False
+    if model and rec.get(CONF_MODEL) != model:
+        rec[CONF_MODEL] = model
+        changed = True
+    if fields:
+        merged = sorted(set(rec.get(DEVICE_FIELDS, [])) | set(fields))
+        if merged != rec.get(DEVICE_FIELDS, []):
+            rec[DEVICE_FIELDS] = merged
+            changed = True
+    if changed:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_DEVICES: devices}
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Hub-wide platform setup (sensor + binary_sensor use the same flow).          #
+# --------------------------------------------------------------------------- #
+async def async_setup_hub_platform(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
     platform: str,
     entity_cls: Callable[..., Rtl433Entity],
 ) -> None:
-    """Build entities for one platform of one per-device entry, plus dynamic add.
+    """Set up one entity platform for every device nested under the hub entry.
 
-    Resolves the parent hub coordinator (raising :class:`ConfigEntryNotReady` if
-    the hub has not loaded yet), unions the persisted observed-field set with the
-    fields the coordinator already knows for this device, creates the entities
-    whose descriptor matches ``platform``, then keeps a dispatcher listener alive
-    that adds new entities — and persists the field — as new mapped fields arrive
-    (Clarification #9). Entities are deduped by unique_id within this setup.
+    Runs once on the single hub config entry. It:
+
+    1. creates entities for every device in ``entry.data[CONF_DEVICES]`` (unioned
+       with the fields the coordinator already knows for that device);
+    2. subscribes to ``signal_new_device(entry_id)`` so a newly observed device's
+       entities are created at runtime (gated upstream by the discovery toggle);
+    3. for each device, registers a ``signal_device_update`` listener that adds
+       entities as previously unseen mapped fields arrive; and
+    4. keeps ``entry.data[CONF_DEVICES]`` current via :func:`async_upsert_device`.
+
+    Both the ``sensor`` and ``binary_sensor`` platforms run this independently;
+    each only builds descriptors whose ``platform`` matches, and the devices-map
+    writes are idempotent unions so the two converge.
     """
-    hub_entry_id: str = entry.data[CONF_HUB_ENTRY_ID]
-    device_key: str = entry.data[CONF_DEVICE_KEY]
-    model: str = entry.data.get(CONF_MODEL, "")
-
-    domain_data = hass.data.get(DOMAIN, {})
-    coordinator: Rtl433Coordinator | None = domain_data.get(hub_entry_id)
-    if coordinator is None:
-        raise ConfigEntryNotReady(
-            f"Hub {hub_entry_id} not loaded yet for device {device_key}"
-        )
+    coordinator: Rtl433Coordinator = hass.data[DOMAIN][entry.entry_id]
 
     # Use the merged registry (shipped library + user overrides) that the hub
     # loaded in an executor and cached, so descriptor lookups never re-read the
-    # YAML files on the event loop. The hub always populates this before its
-    # coordinator exists, and the coordinator presence is checked above, so the
-    # library is guaranteed to be cached here.
-    registry: dict[str, FieldDescriptor] | None = domain_data.get(
+    # YAML files on the event loop.
+    registry: dict[str, FieldDescriptor] | None = hass.data[DOMAIN].get(
         DATA_LIBRARY, (None, None)
     )[0]
 
-    # Union persisted fields with whatever the coordinator has already seen so a
-    # field observed before this setup ran is not lost.
-    observed: set[str] = set(entry.options.get(CONF_OBSERVED_FIELDS, []))
-    observed |= coordinator.device_fields.get(device_key, set())
-
-    created_unique_ids: set[str] = set()
+    # Track created unique_ids per device_key so neither the initial build nor the
+    # dynamic-add handlers double-create entities for the same field.
+    created: dict[str, set[str]] = {}
 
     def _descriptor_for(field_key: str) -> FieldDescriptor | None:
         """Return a descriptor for this platform, or None to skip the field."""
@@ -265,74 +295,84 @@ async def async_setup_device_platform(
             return None
         return descriptor
 
-    def _build_for_fields(field_keys: set[str]) -> list[Rtl433Entity]:
+    def _build(
+        device_key: str, model: str, field_keys: Iterable[str]
+    ) -> list[Rtl433Entity]:
         """Build (and dedupe by unique_id) entities for the given field keys."""
+        seen = created.setdefault(device_key, set())
         new_entities: list[Rtl433Entity] = []
         for field_key in field_keys:
             descriptor = _descriptor_for(field_key)
             if descriptor is None:
                 continue
-            unique_id = f"{hub_entry_id}:{device_key}:{descriptor.object_suffix}"
-            if unique_id in created_unique_ids:
+            unique_id = f"{entry.entry_id}:{device_key}:{descriptor.object_suffix}"
+            if unique_id in seen:
                 continue
-            created_unique_ids.add(unique_id)
+            seen.add(unique_id)
             new_entities.append(
-                entity_cls(coordinator, hub_entry_id, device_key, model, descriptor)
+                entity_cls(coordinator, entry.entry_id, device_key, model, descriptor)
             )
         return new_entities
 
-    # Initial set from the unioned observed fields.
-    async_add_entities(_build_for_fields(observed))
+    def _register_field_listener(device_key: str, model: str) -> None:
+        """Register a per-device listener that adds entities for new fields."""
 
-    # Persist the (possibly expanded) observed-field set so a restart recreates
-    # the same entities, including any the coordinator had seen but that were not
-    # yet persisted.
-    await async_persist_observed_fields(hass, entry, observed)
+        @callback
+        def _handle_new_fields(event: NormalizedEvent) -> None:
+            """Add entities for any newly mapped field of this platform."""
+            incoming = set(event.fields)
+            new_entities = _build(device_key, model, incoming)
+            if not new_entities:
+                return
+            async_add_entities(new_entities)
+            # New entities for this platform means at least one previously unseen
+            # mapped field; persist the mapped subset (``async_upsert_device``
+            # unions and only writes when the stored set actually grows).
+            mapped = {
+                field_key
+                for field_key in incoming
+                if _descriptor_for(field_key) is not None
+            }
+            hass.async_create_task(
+                async_upsert_device(hass, entry, device_key, fields=mapped)
+            )
 
+        entry.async_on_unload(
+            async_dispatcher_connect(
+                hass,
+                signal_device_update(entry.entry_id, device_key),
+                _handle_new_fields,
+            )
+        )
+
+    # --- Initial build from the devices map ------------------------------- #
+    for device_key, rec in entry.data.get(CONF_DEVICES, {}).items():
+        model = rec.get(CONF_MODEL, "")
+        union = set(rec.get(DEVICE_FIELDS, [])) | coordinator.device_fields.get(
+            device_key, set()
+        )
+        async_add_entities(_build(device_key, model, union))
+        # Persist any coordinator-known fields not yet stored in the map.
+        await async_upsert_device(hass, entry, device_key, model=model, fields=union)
+        _register_field_listener(device_key, model)
+
+    # --- New-device dynamic add ------------------------------------------- #
     @callback
-    def _handle_new_fields(event: NormalizedEvent) -> None:
-        """On each event, add entities for any newly mapped field of this platform."""
-        incoming = set(event.fields)
-        fresh = {
-            field_key
-            for field_key in incoming
-            if (descriptor := _descriptor_for(field_key)) is not None
-            and f"{hub_entry_id}:{device_key}:{descriptor.object_suffix}"
-            not in created_unique_ids
-        }
-        if fresh:
-            new_entities = _build_for_fields(fresh)
-            if new_entities:
-                async_add_entities(new_entities)
-
-        # Persist the expanded observed-field set (union of everything seen),
-        # even for fields owned by the other platform, so both platforms agree.
-        expanded = set(entry.options.get(CONF_OBSERVED_FIELDS, [])) | incoming
-        if expanded - set(entry.options.get(CONF_OBSERVED_FIELDS, [])):
-            hass.async_create_task(async_persist_observed_fields(hass, entry, expanded))
+    def _handle_new_device(device_key: str, model: str) -> None:
+        """Create a newly observed device's entities for this platform."""
+        fields = coordinator.device_fields.get(device_key, set())
+        new_entities = _build(device_key, model, fields)
+        if new_entities:
+            async_add_entities(new_entities)
+        _register_field_listener(device_key, model)
+        hass.async_create_task(
+            async_upsert_device(hass, entry, device_key, model=model, fields=fields)
+        )
 
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
-            signal_device_update(hub_entry_id, device_key),
-            _handle_new_fields,
+            signal_new_device(entry.entry_id),
+            _handle_new_device,
         )
     )
-
-
-async def async_persist_observed_fields(
-    hass: HomeAssistant, entry: ConfigEntry, observed: set[str]
-) -> None:
-    """Persist the observed-field set into ``entry.options`` if it grew.
-
-    Stored as a sorted list for deterministic, diff-friendly entry options.
-    Only the union is ever written, so concurrent ``sensor``/``binary_sensor``
-    setups (and the dynamic-add listeners) converge without clobbering each
-    other.
-    """
-    current = set(entry.options.get(CONF_OBSERVED_FIELDS, []))
-    union = current | observed
-    if union == current:
-        return
-    new_options = {**entry.options, CONF_OBSERVED_FIELDS: sorted(union)}
-    hass.config_entries.async_update_entry(entry, options=new_options)
