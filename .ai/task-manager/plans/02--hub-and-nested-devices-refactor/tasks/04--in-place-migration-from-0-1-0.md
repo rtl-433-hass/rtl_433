@@ -2,7 +2,7 @@
 id: 4
 group: "core"
 dependencies: [2, 3]
-status: "pending"
+status: "completed"
 created: "2026-05-26"
 skills:
   - python

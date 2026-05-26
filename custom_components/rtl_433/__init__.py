@@ -25,28 +25,40 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from . import repairs
 from .const import (
     CONF_AVAILABILITY_TIMEOUT,
+    CONF_DEVICE_KEY,
     CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
+    CONF_ENTRY_TYPE,
     CONF_HOST,
+    CONF_HUB_ENTRY_ID,
+    CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
     DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
+    DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
+    ENTRY_TYPE_DEVICE,
     LOGGER,
     PLATFORMS,
     signal_new_device,
 )
 from .coordinator import Rtl433Coordinator
 from .mapping import FieldDescriptor, load_library, load_user_overrides
+
+# The 0.1.0 per-device config entries stored the set of observed mapped field
+# keys under this literal options key. It is intentionally *not* exported from
+# const.py (the v2 model uses ``DEVICE_FIELDS`` inside the hub devices map); it
+# lives here because it is only ever read by the migration.
+LEGACY_CONF_OBSERVED_FIELDS = "observed_fields"
 
 
 def _hub_secure(entry: ConfigEntry) -> bool:
@@ -254,7 +266,127 @@ async def async_remove_config_entry_device(
     return True
 
 
+def _rehome_device_objects(
+    hass: HomeAssistant, device_entry: ConfigEntry, hub_entry_id: str
+) -> None:
+    """Re-home a legacy device entry's registry objects onto the hub entry.
+
+    The 0.1.0 registry devices and entities are owned by a per-device config
+    entry. Before that entry can be removed, its device-registry device and all
+    of its entities must be re-associated with the hub config entry, otherwise
+    removing the legacy entry would delete them (and their history). The device
+    identifiers and the entity unique_ids/entity_ids are never touched — only
+    *which config entry owns them* changes — so history is preserved.
+
+    For each device-registry device linked to the legacy entry the hub
+    ``config_entry_id`` is **added first**, then the legacy one removed, so the
+    device is never momentarily orphaned. Then every entity belonging to the
+    legacy entry has its ``config_entry_id`` repointed to the hub. The function
+    is idempotent: if a device/entity has already been re-homed it simply finds
+    nothing left to move.
+    """
+    if hub_entry_id == device_entry.entry_id:
+        return
+
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+
+    for device in list(dev_reg.devices.values()):
+        if device_entry.entry_id in device.config_entries:
+            dev_reg.async_update_device(device.id, add_config_entry_id=hub_entry_id)
+            dev_reg.async_update_device(
+                device.id, remove_config_entry_id=device_entry.entry_id
+            )
+
+    for entity in er.async_entries_for_config_entry(ent_reg, device_entry.entry_id):
+        ent_reg.async_update_entity(entity.entity_id, config_entry_id=hub_entry_id)
+
+
+async def _migrate_hub_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> None:
+    """Consolidate every legacy child device entry into the hub entry.
+
+    The hub entry is the migration anchor. All legacy per-device config entries
+    that recorded this hub as their parent (``CONF_HUB_ENTRY_ID``) are folded
+    into the hub's ``entry.data[CONF_DEVICES]`` map, their registry objects are
+    re-homed onto the hub **before** removal, and the now-obsolete device config
+    entries are removed. The end state: only the hub entry remains, its devices
+    map carries every device's model/fields/optional timeout override, and the
+    re-homed registry devices/entities are owned by the hub.
+
+    Idempotent: re-running finds no remaining children (they were removed) and
+    leaves the already-folded map untouched.
+    """
+    children = [
+        e
+        for e in hass.config_entries.async_entries(DOMAIN)
+        if e.data.get(CONF_HUB_ENTRY_ID) == hub_entry.entry_id
+        and e.entry_id != hub_entry.entry_id
+    ]
+
+    devices = dict(hub_entry.data.get(CONF_DEVICES, {}))
+    for child in children:
+        device_key = child.data[CONF_DEVICE_KEY]
+        model = child.data.get(CONF_MODEL, "")
+        fields = sorted(child.options.get(LEGACY_CONF_OBSERVED_FIELDS, []))
+        record: dict = {CONF_MODEL: model, DEVICE_FIELDS: fields}
+        timeout_override = child.options.get(CONF_AVAILABILITY_TIMEOUT)
+        if timeout_override is not None:
+            record[DEVICE_TIMEOUT_OVERRIDE] = int(timeout_override)
+        devices[device_key] = record
+
+        # Re-home registry objects BEFORE the child entry is removed.
+        _rehome_device_objects(hass, child, hub_entry.entry_id)
+
+    hass.config_entries.async_update_entry(
+        hub_entry, data={**hub_entry.data, CONF_DEVICES: devices}
+    )
+
+    for child in children:
+        await hass.config_entries.async_remove(child.entry_id)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate a config entry from the 0.1.0 per-device model to the hub model.
+
+    Version 1 (0.1.0) stored each RF device as its own config entry carrying a
+    ``CONF_HUB_ENTRY_ID`` back-reference. Version 2 nests all devices under the
+    hub entry's ``entry.data[CONF_DEVICES]`` map. This migration consolidates the
+    legacy entries in place with entity_ids and history preserved.
+
+    The hub entry is the authoritative anchor: when it migrates it folds every
+    legacy child into its devices map, re-homes the children's registry objects
+    onto itself, and removes the children. A legacy *device* entry that Home
+    Assistant happens to migrate first only re-homes its own registry objects to
+    its parent hub (so they survive an early removal) and bumps its version; the
+    hub later folds + removes it. Either ordering converges on the same
+    invariant, and re-running is safe.
+    """
+    if entry.version > 2:
+        # Downgrade from a future schema is unsupported.
+        return False
+
+    if entry.version == 1:
+        is_device = entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_DEVICE
+        if is_device:
+            # A legacy device entry processed on its own: protect its registry
+            # objects by re-homing them to the parent hub before anything can
+            # remove this entry. The hub migration remains responsible for
+            # folding the field/override state and removing this entry.
+            hub_id = entry.data.get(CONF_HUB_ENTRY_ID)
+            if hub_id:
+                _rehome_device_objects(hass, entry, hub_id)
+            hass.config_entries.async_update_entry(entry, version=2)
+            return True
+
+        # Hub entry: consolidate all children into the devices map.
+        await _migrate_hub_entry(hass, entry)
+        hass.config_entries.async_update_entry(entry, version=2)
+
+    return True
+
+
 __all__: list[str] = [
+    "async_migrate_entry",
     "async_remove_config_entry_device",
     "async_setup_entry",
     "async_unload_entry",
