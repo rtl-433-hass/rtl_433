@@ -29,7 +29,7 @@ repos:
       # Spell checking
       - id: codespell
         name: codespell
-        entry: bash -c 'VENV_PATHS=("$HOME/rtl433-venv" "$HOME/.local/ha-venv" ".venv"); for venv in "${VENV_PATHS[@]}"; do if [[ -f "$venv/bin/codespell" ]]; then source "$venv/bin/activate" 2>/dev/null || true; codespell --skip="./.*,*.csv,*.json,*.ambr,*.cu8,uv.lock" --quiet-level=2 "$@"; exit $?; fi; done; echo "Skipping codespell (venv not ready)"; exit 0' --
+        entry: bash -c 'VENV_PATHS=("$HOME/rtl433-venv" "$HOME/.local/ha-venv" ".venv"); for venv in "${VENV_PATHS[@]}"; do if [[ -f "$venv/bin/codespell" ]]; then source "$venv/bin/activate" 2>/dev/null || true; codespell --skip="./.*,*.csv,*.json,*.ambr,*.cu8,uv.lock" --ignore-words-list="hass,keep-alives" --quiet-level=2 "$@"; exit $?; fi; done; echo "Skipping codespell (venv not ready)"; exit 0' --
         language: system
         types_or: [python, markdown, rst]
         exclude_types: [csv, json, html]
