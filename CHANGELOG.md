@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.1.0...v0.2.0) (2026-05-26)
+
+
+### Features
+
+* **rtl_433:** add devices-map contract and coordinator device eviction ([99f6dbc](https://github.com/rtl-433-hass/rtl_433/commit/99f6dbc1bb1985f2c775e66455c4fc46f92e08c8))
+* **rtl_433:** migrate 0.1.0 per-device entries to nested devices ([88b5206](https://github.com/rtl-433-hass/rtl_433/commit/88b520696169552f2e88e535e38f971fd06e5978))
+
+
+### Documentation
+
+* **rtl_433:** recapture screenshots for the nested-devices model ([e2de325](https://github.com/rtl-433-hass/rtl_433/commit/e2de325ba01cb71c76801ca6a6f5dd77365724e6))
+* **tasks:** record plan 02 execution summary and complete the blueprint ([ba8cde8](https://github.com/rtl-433-hass/rtl_433/commit/ba8cde8738efb765550913a39c23a62a0cf7c43c))
+
 ## [0.1.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.0.1...v0.1.0) (2026-05-26)
 
 
