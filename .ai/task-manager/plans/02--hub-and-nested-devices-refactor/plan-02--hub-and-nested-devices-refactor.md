@@ -320,10 +320,10 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 4: In-place migration from 0.1.0 — `__init__.py` `async_migrate_entry` (depends on: 2, 3)
 
-### Phase 4: Tests & docs (file-disjoint, parallel)
+### Phase 4: Tests & docs (file-disjoint, parallel) ✅
 **Parallel Tasks:**
-- Task 5: Test suite realignment — `tests/*` (depends on: 2, 3, 4)
-- Task 6: Documentation & screenshots — `README.md`, `AGENTS.md`, `docs/images/*` (depends on: 2, 3, 4)
+- ✔️ Task 5: Test suite realignment — `tests/*` (depends on: 2, 3, 4)
+- ✔️ Task 6: Documentation & screenshots — `README.md`, `AGENTS.md`, `docs/images/*` (depends on: 2, 3, 4)
 
 ### Post-phase Actions
 Each phase ends with the `POST_PHASE.md` gate: lint passes and a conventional-commit for the phase is created.
@@ -331,3 +331,28 @@ Each phase ends with the `POST_PHASE.md` gate: lint passes and a conventional-co
 ### Execution Summary
 - Total Phases: 4
 - Total Tasks: 6
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-05-26
+
+### Results
+
+Refactored the rtl_433 integration from the per-device-config-entry (Battery Notes) model to the rfxtrx-style single hub config entry with nested device-registry devices. Delivered across 4 phases / 6 tasks on branch `feature/2--hub-and-nested-devices-refactor`:
+
+- **Foundation**: `entry.data["devices"]` contract + `signal_new_device` + `coordinator.forget_device`.
+- **Runtime**: one hub entry forwards platforms once; entities for all devices are created from the devices map; new devices/fields are added dynamically (gated by the discovery toggle); `async_remove_config_entry_device` removes a single nested device (refuses the hub device); per-device timeout override moved to the hub OptionsFlow menu; per-device discovery flow removed; `VERSION` bumped to 2.
+- **Migration**: `async_migrate_entry` (1→2) re-homes 0.1.0 per-device registry objects onto the hub and removes the legacy device entries, preserving unique_ids/entity_ids/history; order-independent and idempotent.
+- **Tests**: suite realigned to the single-hub model — **38 passed, 90% coverage**, lint clean. New coverage: nested-device creation, dynamic add gated by the toggle, remove→re-transmit re-add, hub-device removal refusal, hub/device options flow, and the 0.1.0→2 migration with preserved identifiers.
+- **Docs**: README + AGENTS.md rewritten for the nested model (no Battery Notes / discovery-card / ignore references); screenshots regenerated via the containerized harness against real RF captures (device page nested under the hub, the new options menu, the unavailable state); obsolete discovery-card image removed.
+
+### Noteworthy Events
+
+- **Latent re-add bug found by the new tests and fixed (Clarification #4).** `async_remove_config_entry_device` evicted coordinator runtime state but not the entity platforms' in-memory dedup cache / per-device field listeners, so a removed device could only re-appear after a hub reload. Fixed by adding `coordinator.device_removers`: each platform registers a per-device remover (drops its `created` cache and unsubscribes the field listener) that `async_remove_config_entry_device` invokes. The no-reload re-add is now asserted directly.
+- **Screenshot driver needed updating for the new flow.** `tests/integration/screenshot.mjs` still drove the old discovery-card flow; it was rewritten (auto-appearing nested device; options menu) and the full Docker→HA→Playwright harness ran end-to-end to regenerate the images.
+
+### Necessary follow-ups
+
+- **Release version bump**: `manifest.json` `version` should move to a `0.2.0` minor for the config-entry model change; handled by the project's release-please flow (out of scope here).
+- **Optional**: a manual smoke test against a real 0.1.0 install (beyond the migration unit test) before release, to confirm the in-place upgrade end-to-end in a live Home Assistant.
