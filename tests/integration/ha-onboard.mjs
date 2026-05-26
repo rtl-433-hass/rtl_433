@@ -14,7 +14,7 @@
 const BASE = process.env.HA_BASE || "http://localhost:8123";
 const USERNAME = process.env.HA_USER || "harness";
 const PASSWORD = process.env.HA_PASS || "harness-password-123";
-const NAME = "Harness Owner";
+const NAME = "Demo User";
 const CLIENT_ID = `${BASE}/`;
 
 async function post(path, body, token) {
