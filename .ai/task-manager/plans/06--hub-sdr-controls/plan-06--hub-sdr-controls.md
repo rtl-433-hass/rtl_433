@@ -272,3 +272,56 @@ The control entities attach to the already-registered hub device, so they appear
 
 ### Change Log
 - 2026-05-26: Refinement pass. Resolved the "Plan 3 stays unchanged" vs "suppress folded sensors" contradiction (decision: a guarded skip in Plan 3's hub-sensor builder). Defined toggle re-enable as **re-adopt** (off clears the `Store`; on re-seeds from the server), making the documented re-sync flow work. Corrected the reload assumption (the existing `_async_update_listener` does not reload; extend it to reload only on a management-toggle change). Pinned controls to `EntityCategory.CONFIG` with stable hub-scoped unique_ids. Added a `/cmd` serialization lock, a `translations/en.json` requirement for the new toggle field, and an unauthenticated-write security note. Updated the clarifications table, Current/Target table, success criteria, and self-validation accordingly.
+
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1[Task 1: Settings registry + constants] --> T2[Task 2: Coordinator Store/setter/adoption/enforcement]
+    T1 --> T3[Task 3: Management toggle flow + translations + listener]
+    T1 --> T4[Task 4: Control entity platforms]
+    T2 --> T3
+    T2 --> T4
+    T2 --> T5[Task 5: Suppress folded hub sensors]
+    T2 --> T6[Task 6: Tests]
+    T3 --> T6
+    T4 --> T6
+    T5 --> T6
+    T2 --> T7[Task 7: Documentation]
+    T3 --> T7
+    T4 --> T7
+    T5 --> T7
+```
+
+No circular dependencies; the graph is acyclic.
+
+### Phase 1: Foundation — registry + constants
+**Parallel Tasks:**
+- Task 001: Settings registry module + new `const.py` constants (no dependencies)
+
+### Phase 2: Coordinator control layer
+**Parallel Tasks:**
+- Task 002: Coordinator desired-state `Store`, `set_sdr`, adoption, reconnect enforcement, serialization lock (depends on: 001)
+
+### Phase 3: Flow, control entities, and sensor coexistence
+**Parallel Tasks:**
+- Task 003: Management toggle in config/options flow + translations + reload-on-change listener + wiring (depends on: 001, 002)
+- Task 004: `number`/`select`/`switch` control platforms + `PLATFORMS` update (depends on: 001, 002)
+- Task 005: Suppress the five folded Plan 3 hub sensors in managed mode (depends on: 002)
+
+### Phase 4: Verification and documentation
+**Parallel Tasks:**
+- Task 006: Tests — write path, adoption (normal/hop/`/cmd`-down), enforcement replay, Store persistence, toggle gating + reload, failure isolation/serialization (depends on: 002, 003, 004, 005)
+- Task 007: Documentation — README.md + AGENTS.md (depends on: 002, 003, 004, 005)
+
+### Post-phase Actions
+After each phase: run `uv run ruff check custom_components/rtl_433`, then create a conventional-commit for the phase. Mark tasks `completed` and the phase ✅ in this blueprint before advancing.
+
+### Execution Summary
+- Total Phases: 4
+- Total Tasks: 7
