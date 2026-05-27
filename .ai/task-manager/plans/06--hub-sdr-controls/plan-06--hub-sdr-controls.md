@@ -300,9 +300,9 @@ graph TD
 
 No circular dependencies; the graph is acyclic.
 
-### Phase 1: Foundation — registry + constants
+### ✅ Phase 1: Foundation — registry + constants
 **Parallel Tasks:**
-- Task 001: Settings registry module + new `const.py` constants (no dependencies)
+- ✔️ Task 001: Settings registry module + new `const.py` constants (no dependencies)
 
 ### Phase 2: Coordinator control layer
 **Parallel Tasks:**

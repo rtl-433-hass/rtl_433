@@ -41,6 +41,11 @@ CONF_PORT: Final = "port"
 CONF_PATH: Final = "path"
 # Per-hub toggle for surfacing newly observed devices via discovery flow.
 CONF_DISCOVERY_ENABLED: Final = "discovery_enabled"
+# Per-hub toggle: let Home Assistant manage (adopt + enforce) the SDR settings.
+# When on, the hub exposes number/select/switch controls and re-applies the
+# stored desired state after a reconnect; when off, those controls are not
+# created and the integration leaves the receiver's settings untouched.
+CONF_MANAGE_SETTINGS: Final = "manage_settings"
 # Effective "go unavailable after this many seconds of silence" window.
 # Lives on the hub as the default and may be overridden per device.
 CONF_AVAILABILITY_TIMEOUT: Final = "availability_timeout"
@@ -90,6 +95,22 @@ DEFAULT_PATH: Final = "/ws"
 # reporters while still detecting genuinely offline devices. Configurable per
 # hub and overridable per device, so this is not a magic constant elsewhere.
 DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
+# Default for the per-hub manage-settings toggle. New hubs adopt and manage the
+# SDR settings by default; users can opt out per hub via the options flow.
+DEFAULT_MANAGE_SETTINGS: Final = True
+
+# --- Managed-SDR desired-state Store ---------------------------------------
+# The coordinator persists the desired SDR settings in a
+# ``homeassistant.helpers.storage.Store`` keyed by the hub ``entry_id`` so a
+# value change never churns the config entry. ``SDR_STORE_VERSION`` is the Store
+# schema version; ``sdr_store_key`` builds the per-hub key.
+SDR_STORE_VERSION: Final = 1
+
+
+def sdr_store_key(entry_id: str) -> str:
+    """Return the desired-state Store key for one hub entry."""
+    return f"{DOMAIN}.sdr_{entry_id}"
+
 
 # --- Dispatcher signal -----------------------------------------------------
 # Template for the per-device dispatcher signal. The coordinator sends and the
