@@ -515,3 +515,79 @@ the phase. Mark the phase ✅ and its tasks ✔️ / `completed` before advancin
 ### Execution Summary
 - Total Phases: 4
 - Total Tasks: 6
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-05-26
+
+### Results
+
+All six tasks across four phases completed and committed on branch
+`feature/03--hub-observability-frame-routing`. Final state: **52 tests passing**
+(up from a 38-test baseline), `ruff check` and `ruff format --check` clean, and
+all repo pre-commit doc hooks (codespell, trailing-whitespace, end-of-file,
+mixed-line-ending) green.
+
+Key deliverables:
+- **Frame classification fix** (`coordinator/base.py`): incoming WebSocket frames
+  are classified by shape — a frame is a decoded-device event only when it
+  carries `model` or an identity key (`id`/`channel`/`subtype`); a `shutdown`
+  frame flips connectivity; all other frames (meta/state/stats/RPC) are ignored.
+  This eliminates the phantom `"unknown"` device and stops SDR-config field names
+  polluting `seen_fields`/`unmatched_field_keys`.
+- **Hub-update signal + hub runtime state** (`const.py`, `coordinator/base.py`):
+  `SIGNAL_HUB_UPDATE`/`signal_hub_update`, `coordinator.meta`/`coordinator.stats`,
+  and `_emit_hub_update()` emitted on connect, disconnect, shutdown, and getter
+  refresh.
+- **HTTP `/cmd` getters** (`coordinator/base.py`): on each (re)connect the
+  coordinator fetches `get_meta` + `get_gain` + `get_ppm_error` and `get_stats`
+  from `scheme://host:port/cmd` (server root, never the WS path); `get_stats` is
+  re-polled every 60 s while connected. Failures are swallowed (graceful
+  degradation) and scalar getters are unwrapped from the `{"result": …}` form.
+- **Hub connectivity binary_sensor + `Rtl433HubEntity` base** (`entity.py`,
+  `binary_sensor.py`): a `connectivity`-class diagnostic entity on the hub device,
+  always available, reflecting `coordinator.connected`.
+- **Hub diagnostic sensors** (`sensor.py`): six SDR/meta sensors (center
+  frequency, sample rate, conversion mode, hop interval, gain→"auto" when empty,
+  ppm) and four server-stats sensors (decoded events `total_increasing`, OOK,
+  FSK, enabled decoders), with `frequencies`/`hop_times` and `stats[]`/`since`
+  exposed as attributes.
+- **Phantom cleanup** (`__init__.py`): idempotent removal of a persisted
+  `"unknown"` device record and its stale registry device on setup.
+- **Documentation** (`README.md`, `AGENTS.md`, `WEBSOCKET_API.md`): hub-entities
+  section, frame-classification + `/cmd` getter contracts, and the `get_stats`
+  payload shape.
+
+All seven of the plan's Self-Validation steps were executed and pass, mapped to
+named tests (including the added
+`test_mixed_frame_sequence_classifies_correctly` for Primary Success Criterion
+#1).
+
+### Noteworthy Events
+
+- **Feature branch created manually.** `create-feature-branch.cjs` aborted on an
+  unclean tree (the untracked plan artifacts and `WEBSOCKET_API.md`). The branch
+  `feature/03--hub-observability-frame-routing` was created by hand and the plan
+  artifacts committed; unrelated plans 04/05/06 were left untracked.
+- **Scalar getter envelope discovered during Task 02.** `WEBSOCKET_API.md` shows
+  `get_gain`/`get_ppm_error` return a `{"result": …}` wrapper (not bare scalars);
+  the agent added a defensive `_unwrap_result` that accepts both forms. The
+  `/cmd` request parameter was confirmed as `cmd` from the API doc.
+- **Transient cross-agent race in Phase 2.** While two agents edited concurrently
+  (disjoint files), the connectivity-sensor agent briefly saw a stale-bytecode
+  `AttributeError` from the coordinator file the other agent was mid-writing; it
+  resolved once the edit settled and the full suite passed. No code impact.
+- **Doc lint reality vs. plan.** The plan referenced markdownlint/prettier hooks,
+  but the repo's configured doc hook is codespell (plus whitespace/EOF fixers);
+  those are what was run and they pass.
+- **Markdown wrapping for `<details>` in tasks**: task implementation notes used a
+  `"<param>"` placeholder for the `/cmd` query key, resolved to `cmd`.
+
+### Necessary follow-ups
+
+- None required for this plan. Optional future work (explicitly out of scope
+  here): live SDR control (set frequency/gain/ppm) and per-protocol
+  enable/disable belong to a separate effort (see plan 06). The periodic
+  `get_stats` refresh interval (60 s) is a fixed module constant with no
+  user-facing option, as designed.
