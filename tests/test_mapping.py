@@ -51,6 +51,47 @@ def test_lookup_resolves_representative_descriptors(library):
     assert lookup("totally_unknown_field", registry) is None
 
 
+def test_event_fields_resolve_to_event_platform(library):
+    """The three shipped event fields resolve to ``event`` descriptors.
+
+    Each carries the expected ``EventDeviceClass`` value (a plain string on the
+    descriptor) and keeps its declared object_suffix.
+    """
+    registry, _ = library
+
+    expected = {
+        "button": "button",
+        "motion": "motion",
+        "secret_knock": "doorbell",
+    }
+    for field_key, device_class in expected.items():
+        descriptor = lookup(field_key, registry)
+        assert descriptor is not None, field_key
+        assert descriptor.platform == "event", field_key
+        assert descriptor.device_class == device_class, field_key
+        # Event descriptors stringify the value directly: no transform/payload.
+        assert descriptor.value_transform is None, field_key
+        assert descriptor.payload is None, field_key
+        # The object_suffix is the field key for all three shipped examples.
+        assert descriptor.object_suffix == field_key, field_key
+
+
+def test_event_fields_not_in_skip_set(library):
+    """None of the three event field keys is excluded by the skip-key set."""
+    _, skip_keys = library
+    for field_key in ("button", "motion", "secret_knock"):
+        assert should_skip(field_key, skip_keys) is False, field_key
+
+
+def test_existing_fields_keep_original_platform(library):
+    """Adding the event mappings did not change existing descriptors' platforms."""
+    registry, _ = library
+
+    # A representative sensor and binary_sensor field keep their platform.
+    assert lookup("temperature_C", registry).platform == "sensor"
+    assert lookup("tamper", registry).platform == "binary_sensor"
+
+
 def test_sensor_transform_pipeline(library):
     """``apply_transform`` rounds, scales, offsets, and coerces as configured."""
     registry, _ = library
