@@ -169,6 +169,41 @@ def test_model_less_identity_event_creates_device(hass, coordinator):
     assert "unknown-ch1" in coordinator.devices
 
 
+def test_mixed_frame_sequence_classifies_correctly(hass, coordinator):
+    """Plan Success Criterion #1 / Self-Validation #3 as one sequence.
+
+    Feeding a meta object, a stats frame, an RPC result frame, a shutdown frame,
+    a model-less identity event, and one real model event leaves exactly the two
+    real devices (neither keyed ``"unknown"``) and a ``seen_fields`` containing
+    only those two events' measurement fields — no SDR/meta field-name pollution.
+    """
+    coordinator.connected = True
+    with patch(DISPATCH):
+        coordinator._handle_text_frame(
+            '{"center_frequency": 433920000, "samp_rate": 250000, '
+            '"frequencies": [433920000], "hop_times": [600]}'
+        )  # meta -> ignored
+        coordinator._handle_text_frame(
+            '{"enabled": 5, "frames": {"count": 3, "fsk": 1, "events": 9}}'
+        )  # stats -> ignored
+        coordinator._handle_text_frame('{"result": "ok"}')  # RPC -> ignored
+        coordinator._handle_text_frame('{"shutdown": "goodbye"}')  # -> connectivity
+        coordinator._handle_text_frame(
+            '{"channel": 1, "temperature_C": 5}'
+        )  # model-less identity event
+        coordinator._handle_text_frame(
+            '{"model": "Acurite-606TX", "id": 42, '
+            '"temperature_C": 21.4, "humidity": 55}'
+        )  # real model event
+
+    # Exactly the two real devices; neither is the phantom "unknown" key.
+    assert set(coordinator.devices) == {"unknown-ch1", "Acurite-606TX-42"}
+    assert "unknown" not in coordinator.devices
+    # seen_fields carries only the two events' measurement fields — no meta names
+    # such as frequencies / samp_rate / center_frequency leaked in.
+    assert coordinator.seen_fields == {"temperature_C", "humidity"}
+
+
 def test_new_device_callback_fires_once_when_discovery_enabled(hass, coordinator):
     """The new-device hook fires only on the first sighting of a device."""
     seen: list[tuple[str, str]] = []
