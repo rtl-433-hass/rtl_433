@@ -135,6 +135,13 @@ a silence-based availability model: if no event for a device arrives within its
   **restored first**, then the timeout runs from the restart; entities only flip
   to `unavailable` once the (restored) silence window elapses without a fresh
   event.
+- **Last seen** — every device also gets a diagnostic `timestamp` sensor named
+  **Last seen** (enabled by default) that reports when the device was last heard
+  from. Unlike the measurement sensors — which become `unavailable` after the
+  availability timeout elapses with no transmission — the Last seen sensor
+  **stays available** and keeps showing the last-heard time, so you can build
+  "no signal for N minutes" staleness alerts and dashboards against it. It
+  restores its previous value across restarts.
 
 Both options apply **live** — changing the discovery toggle or a timeout takes
 effect without reloading the hub or tearing down the WebSocket.

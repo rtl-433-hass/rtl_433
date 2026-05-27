@@ -2,7 +2,7 @@
 id: 4
 group: "documentation"
 dependencies: [1, 2]
-status: "pending"
+status: "completed"
 created: "2026-05-26"
 skills:
   - technical-writing

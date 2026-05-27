@@ -24,9 +24,11 @@ Covered:
 
 from __future__ import annotations
 
+from datetime import timedelta
 import json
 from unittest.mock import patch
 
+from freezegun import freeze_time
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -54,6 +56,8 @@ from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.entity import EntityCategory
+from homeassistant.util import dt as dt_util
 
 LEGACY_OBSERVED_FIELDS = "observed_fields"
 
@@ -86,6 +90,18 @@ async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
     assert await hass.config_entries.async_setup(hub.entry_id)
     await hass.async_block_till_done()
     return hub
+
+
+def _ts(value):
+    """Drop sub-second precision for timestamp comparisons.
+
+    A ``device_class=timestamp`` sensor renders its state at whole-second ISO
+    precision, while ``coordinator.last_seen`` keeps the microseconds from
+    ``dt_util.utcnow()``. Comparing both sides truncated to the second keeps the
+    assertions about *which* timestamp is shown without depending on HA's
+    sub-second rendering.
+    """
+    return value.replace(microsecond=0)
 
 
 # --------------------------------------------------------------------------- #
@@ -667,3 +683,176 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
     assert devices[key_a][CONF_MODEL] == "Acurite-606TX"
     assert devices[key_b][DEVICE_FIELDS] == ["power_W"]
     assert devices[key_b][DEVICE_TIMEOUT_OVERRIDE] == 120
+
+
+# --------------------------------------------------------------------------- #
+# Per-device synthetic "Last seen" sensor.                                     #
+# --------------------------------------------------------------------------- #
+async def test_last_seen_created_for_every_device(hass, hub_entry_builder):
+    """Every device gets exactly one enabled diagnostic timestamp Last-seen.
+
+    Covers both the seeded-map setup path (including a device with no mapped
+    fields) and the live-event new-device path with discovery on.
+    """
+    mapped_key = "EnergyMeter-2000-1234"
+    bare_key = "MysteryThing-7"  # no library-mapped fields
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        discovery_enabled=True,
+        devices={
+            mapped_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]},
+            bare_key: {CONF_MODEL: "MysteryThing", DEVICE_FIELDS: []},
+        },
+    )
+
+    ent_reg = er.async_get(hass)
+
+    def last_seen_ids(key: str) -> list[str]:
+        """All sensor-platform entity entries whose unique_id ends in :last_seen."""
+        suffix = f"{hub.entry_id}:{key}:last_seen"
+        return [
+            e.entity_id
+            for e in ent_reg.entities.values()
+            if e.platform == DOMAIN
+            and e.domain == "sensor"
+            and e.unique_id == suffix
+        ]
+
+    # Exactly one Last-seen sensor per seeded device — even the no-field one.
+    for key in (mapped_key, bare_key):
+        ids = last_seen_ids(key)
+        assert len(ids) == 1, (key, ids)
+        entry = ent_reg.async_get(ids[0])
+        assert entry.entity_category is EntityCategory.DIAGNOSTIC
+        assert entry.disabled_by is None  # enabled by default
+
+    # The state exposes the timestamp device_class once added (seeded with a
+    # baseline "now" by the base entity even before any live event).
+    mapped_eid = last_seen_ids(mapped_key)[0]
+    assert hass.states.get(mapped_eid).attributes["device_class"] == "timestamp"
+
+    # A brand-new device fed via a live event (discovery on) also gets exactly
+    # one Last-seen sensor.
+    new_key = "Acurite-606TX-42"
+    _feed(
+        _coordinator(hass, hub),
+        {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4},
+    )
+    await hass.async_block_till_done()
+    assert len(last_seen_ids(new_key)) == 1
+
+
+async def test_last_seen_updates_and_stays_available(hass, hub_entry_builder):
+    """A live event sets Last-seen, and it survives the silence-timeout watchdog.
+
+    After the device falls silent past the 600s timeout, its measurement sensor
+    reads ``unavailable`` while the Last-seen sensor stays available with the
+    unchanged prior timestamp (the always-available override).
+    """
+    device_key = "EnergyMeter-2000-1234"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}},
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    last_seen_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
+    )
+    watts_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:watts"
+    )
+    assert last_seen_eid is not None
+    assert watts_eid is not None
+
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _feed(coordinator, {"model": "EnergyMeter-2000", "id": 1234, "power_W": 5.0})
+        await hass.async_block_till_done()
+
+    # Value equals the coordinator's last_seen (compare parsed tz-aware datetimes).
+    state = hass.states.get(last_seen_eid)
+    assert _ts(dt_util.parse_datetime(state.state)) == _ts(
+        coordinator.last_seen[device_key]
+    )
+    assert state.attributes["device_class"] == "timestamp"
+    seen_at = coordinator.last_seen[device_key]
+
+    # Advance past the 600s timeout and run the watchdog.
+    with freeze_time(start + timedelta(seconds=601)):
+        await coordinator._async_watchdog(dt_util.utcnow())
+        await hass.async_block_till_done()
+
+    # The measurement sensor flips unavailable; Last-seen stays available with
+    # the unchanged timestamp.
+    assert hass.states.get(watts_eid).state == "unavailable"
+    last_seen_state = hass.states.get(last_seen_eid)
+    assert last_seen_state.state != "unavailable"
+    assert _ts(dt_util.parse_datetime(last_seen_state.state)) == _ts(seen_at)
+    assert coordinator.last_seen[device_key] == seen_at
+
+
+async def test_last_seen_restores_prior_not_baseline(hass, hub_entry_builder):
+    """A restored Last-seen shows the prior timestamp, not "now"/the baseline.
+
+    Then a real event overwrites it with the fresh ``coordinator.last_seen``.
+    """
+    device_key = "Acurite-606TX-42"
+    restore_eid = "sensor.acurite_606tx_acurite_606tx_42_last_seen"
+    prior = "2026-05-20T08:30:00+00:00"
+    mock_restore_cache(hass, (State(restore_eid, prior),))
+
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}},
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
+    )
+    assert eid is not None
+    # The hardcoded restore entity_id must match the registry-assigned one, or
+    # the restore cache would not be picked up.
+    assert eid == restore_eid
+
+    # No live event yet: the sensor shows the restored prior time, NOT a fresh
+    # baseline "now". Comparing parsed datetimes guards against ISO formatting.
+    restored_state = hass.states.get(eid)
+    assert dt_util.parse_datetime(restored_state.state) == dt_util.parse_datetime(prior)
+
+    # A real event updates it to the fresh coordinator.last_seen value.
+    _feed(coordinator, {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4})
+    await hass.async_block_till_done()
+    updated_state = hass.states.get(eid)
+    assert _ts(dt_util.parse_datetime(updated_state.state)) == _ts(
+        coordinator.last_seen[device_key]
+    )
+    assert dt_util.parse_datetime(updated_state.state) != dt_util.parse_datetime(prior)
+
+
+async def test_no_last_seen_on_binary_sensor(hass, hub_entry_builder):
+    """No Last-seen on the binary_sensor platform; the sensor one still exists."""
+    device_key = "GenericDoor-X1-88"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={device_key: {CONF_MODEL: "GenericDoor-X1", DEVICE_FIELDS: ["closed"]}},
+    )
+    ent_reg = er.async_get(hass)
+    assert (
+        ent_reg.async_get_entity_id(
+            "binary_sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
+        )
+        is None
+    )
+    # But the sensor-platform Last-seen still exists for the device.
+    assert (
+        ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
+        )
+        is not None
+    )
