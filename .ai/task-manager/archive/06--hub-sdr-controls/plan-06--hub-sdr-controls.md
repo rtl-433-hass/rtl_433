@@ -329,3 +329,26 @@ After each phase: run `uv run ruff check custom_components/rtl_433`, then create
 ### Execution Summary
 - Total Phases: 4
 - Total Tasks: 7
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-05-27
+
+### Results
+All 7 tasks across 4 phases were implemented, validated, and committed on `feature/6--hub-sdr-controls`. The rtl_433 hub gained an HA-managed SDR control layer on top of the Plan 3 read-only foundation:
+
+- **Settings registry** (`sdr_settings.py`) — one declarative entry per controllable field (center frequency, sample rate, ppm, gain, conversion mode, hop interval) carrying the getter source, `/cmd` setter command + arg/val kind, value transforms, target control platform, entity-description metadata, and a capability gate. Gain is a Number(dB) + Auto-gain Switch pair sharing one `gain` command; conversion mode maps `native`/`si`/`customary` ⇄ `0`/`1`/`2`.
+- **Coordinator control layer** (`coordinator/base.py`) — a `Store`-backed desired-state map keyed by entry id, `set_sdr()` write path (persist → send → read-back), first-connect adoption with the hop-mode and `/cmd`-down guards, full enforcement (replay of all managed fields) on every reconnect, a single `asyncio.Lock` serializing all `/cmd` issuance, and `clear_desired_state()`. Commands go only over `/cmd`, never the streaming socket.
+- **Control entities** — new `number`/`select`/`switch` platforms (added to `PLATFORMS`) on the hub device, all `EntityCategory.CONFIG`, created only when management is on, sharing an `Rtl433HubControl` base; optimistic-then-confirmed state via `signal_hub_update`.
+- **Management toggle** — "Manage rtl_433 settings from Home Assistant" (default on) on both the initial connection form and the hub options step, labelled in `translations/en.json`, wired into the coordinator; `_async_update_listener` now reloads the entry only when the toggle changes while still applying discovery/timeout live.
+- **Sensor coexistence** — in managed mode the five folded Plan 3 diagnostic sensors are suppressed (center frequency keeps its actual sensor; stats sensors untouched); unmanaged mode keeps all six.
+- **Tests + docs** — `tests/test_sdr_controls.py` plus updated `test_lifecycle.py` cover all eight Self-Validation areas (82 tests pass, ruff + ruff-format clean). README.md, AGENTS.md, and a WEBSOCKET_API.md note document the controls, the HA-as-authority behavior, and the `off → restart rtl_433 → on` re-sync dance.
+
+### Noteworthy Events
+- **Plan 3 dependency was already merged** before execution (the `/cmd` getters, hub-update signal, and hub diagnostic sensors exist in `coordinator/base.py`/`sensor.py`), so the prerequisite gate was satisfied and execution proceeded.
+- **Planned Phase 3 → Phase 4 coordination:** turning the default test setup into managed mode (toggle defaults on) intentionally broke the pre-existing `test_hub_diagnostic_sensors`, which asserted the now-suppressed sensors. Task 6 split it into managed/unmanaged variants, as anticipated by Task 5's spec.
+- **Cross-task bug caught by the tests and fixed (not worked around):** the `conversion_mode` desired value was represented inconsistently — the Select entity stored an integer while the registry `read`/`to_command` and adoption used a label string, so selecting an option through the real entity raised `ValueError`. Resolved by standardizing on an **int-canonical** representation end-to-end (the Store holds the same integer the `convert` command takes and that `meta` reports; only the Select entity maps to/from a label at its UI boundary). A new end-to-end Select-entity test (`test_select_entity_writes_convert_int_command`) guards the previously-broken path. The obsolete `_conversion_to_command` helper was removed (no dead code left behind).
+
+### Necessary follow-ups
+- None required for this plan. Anticipated (and explicitly out of scope, kept possible by the registry's capability gate): decoder enable/disable, device selection, and multi-frequency hop lists — these become registry entries when upstream wires the commands and (ideally) advertises capabilities. Documented in AGENTS.md.
