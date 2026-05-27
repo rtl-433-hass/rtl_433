@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.2.0...v0.3.0) (2026-05-27)
+
+
+### Features
+
+* **rtl_433:** add HTTP getters and hub connectivity sensor ([e8561fc](https://github.com/rtl-433-hass/rtl_433/commit/e8561fc1b84b9cbc7e9048625e28bc368d5d52ba))
+* **rtl_433:** add hub meta/SDR and server-stats diagnostic sensors ([1dbb835](https://github.com/rtl-433-hass/rtl_433/commit/1dbb835f77bb2ae66baa8fc1eb61317bea651fd0))
+
+
+### Bug Fixes
+
+* **rtl_433:** classify WS frames and clean up phantom unknown device ([c518855](https://github.com/rtl-433-hass/rtl_433/commit/c5188554e439701df55c19b98f8c3da1f7795cee))
+
+
+### Documentation
+
+* **rtl_433:** document hub observability and frame-routing contracts ([9bbbfe7](https://github.com/rtl-433-hass/rtl_433/commit/9bbbfe76c76f39519eb45d38f86b12ad1c89480d))
+* **rtl_433:** require conventional-commit-style PR titles ([53c24b5](https://github.com/rtl-433-hass/rtl_433/commit/53c24b56b80e5dc2307efeeb79c4150bf92348e1))
+* **tasks:** generate task blueprint for plan 03 (hub observability + frame routing) ([555171d](https://github.com/rtl-433-hass/rtl_433/commit/555171d550ac822fd63e0052b6361c4f0e96ff9f))
+
 ## [0.2.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.1.0...v0.2.0) (2026-05-26)
 
 
