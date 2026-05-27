@@ -326,5 +326,10 @@ async def async_setup_entry(
         Rtl433HubSensor(coordinator, entry.entry_id, desc) for desc in HUB_SENSORS
     )
     await async_setup_hub_platform(
-        hass, entry, async_add_entities, PLATFORM, Rtl433Sensor
+        hass,
+        entry,
+        async_add_entities,
+        PLATFORM,
+        Rtl433Sensor,
+        per_device_factory=Rtl433LastSeenSensor,
     )
