@@ -78,7 +78,15 @@ stream — a client must be prepared to receive event frames at any time.
 | Success, no value | `{"result": null}` |
 | Success, signed integer | `{"result": <int>}` |
 | Success, unsigned integer | `{"result": <uint>}` |
-| Success, JSON payload | the raw JSON object/string sent **directly** (not wrapped in `result`) — used by `get_stats`, `get_meta`, `get_protocols`, `get_dev_info` |
+| Success, JSON payload | over **WebSocket**, the raw JSON object/string is sent **directly** (not wrapped in `result`) — used by `get_stats`, `get_meta`, `get_protocols`, `get_dev_info`. **Over HTTP `/cmd` and `/jsonrpc` these are wrapped in `result` too** (see note below). |
+
+> **Framing difference for JSON-payload getters.** The WebSocket responder
+> (`rpc_response_ws`) sends `get_stats`/`get_meta`/`get_protocols`/`get_dev_info`
+> as a **bare** JSON frame, but the HTTP `/cmd` responder
+> (`rpc_response_jsoncmd`) wraps **every** reply — including those — in
+> `{"result": ...}`. A client polling over `/cmd` (as the Home Assistant
+> integration does) must therefore unwrap `result` for *all* getters, not just
+> the scalar ones.
 | Error (command rejected) | `{"error": {"code": <int>, "message": "<msg>"}}` |
 | Error (JSON parse failed) | `{"error":"Invalid command"}` |
 
