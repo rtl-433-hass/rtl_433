@@ -1,0 +1,34 @@
+# Event field mappings (momentary, fire-and-forget RF transmissions).
+#
+# These use `platform: event`: each transmission fires a Home Assistant Event
+# whose event_type is the stringified field value. The valid event_types are
+# auto-populated from observed values (not declared here), and the value is
+# stringified directly (no `payload`, no `value_transform`). `device_class` is
+# an EventDeviceClass. See docs/device-library.md for the schema reference.
+
+# Remote / key-fob button code (e.g. Acurite 606TX and many remotes emit
+# `button`). The value is the pressed-button code, so distinct presses
+# auto-populate several event_types -- the multi-value case.
+button:
+  platform: event
+  device_class: button
+  name: Button
+  object_suffix: button
+
+# PIR / occupancy motion trigger emitted by motion decoders (e.g. Interlogix,
+# Risco Agility, Kerui). Typically a single momentary value -- the
+# single-value case.
+motion:
+  platform: event
+  device_class: motion
+  name: Motion
+  object_suffix: motion
+
+# Doorbell press emitted by the Honeywell ActivLink wireless doorbell decoder
+# (`secret_knock` = 1 when the doorbell is pressed 3x rapidly). A real
+# momentary doorbell-press field, mapped here as the doorbell case.
+secret_knock:
+  platform: event
+  device_class: doorbell
+  name: Doorbell
+  object_suffix: secret_knock
