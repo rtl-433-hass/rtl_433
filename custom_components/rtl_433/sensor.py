@@ -22,17 +22,18 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfFrequency
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
-from .mapping import apply_transform
+from .mapping import FieldDescriptor, apply_transform
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
-    from .mapping import FieldDescriptor
+    from .normalizer import NormalizedEvent
 
 # This platform owns only descriptors whose ``platform`` attribute equals this.
 PLATFORM = "sensor"
@@ -80,6 +81,86 @@ class Rtl433Sensor(Rtl433Entity, SensorEntity):
         last_state = await self.async_get_last_state()
         if last_state is not None and last_state.state not in _NON_RESTORABLE:
             self._attr_native_value = last_state.state
+
+
+# --------------------------------------------------------------------------- #
+# Per-device synthetic "Last seen" timestamp sensor.                           #
+# --------------------------------------------------------------------------- #
+# Sentinel field_key that no rtl_433 event can carry, so the base's
+# field-driven _apply_value path is never triggered for this entity.
+_LAST_SEEN_FIELD = "__last_seen__"
+
+LAST_SEEN_DESCRIPTOR = FieldDescriptor(
+    field_key=_LAST_SEEN_FIELD,
+    platform="sensor",
+    name="Last seen",
+    object_suffix="last_seen",
+    device_class="timestamp",
+    entity_category="diagnostic",
+    enabled_by_default=True,
+)
+
+
+class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
+    """Per-device diagnostic timestamp of when the device was last heard from.
+
+    Synthetic (not field-driven): holds its own ``native_value``, seeded from a
+    real event when one exists, restored otherwise, and updated on dispatch.
+    Stays available once it has a value even after the device falls silent, so
+    "last_seen older than X" staleness automations keep working.
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(
+        self,
+        coordinator: Rtl433Coordinator,
+        hub_entry_id: str,
+        device_key: str,
+        model: str,
+    ) -> None:
+        """Initialize the synthetic last-seen sensor and seed a live value."""
+        super().__init__(
+            coordinator, hub_entry_id, device_key, model, LAST_SEEN_DESCRIPTOR
+        )
+        # Seed only when a *real* event has been seen this session; the presence
+        # of a devices-map entry distinguishes a true timestamp from the base's
+        # startup baseline (which never sets coordinator.devices).
+        if coordinator.devices.get(device_key) is not None:
+            self._attr_native_value = coordinator.last_seen.get(device_key)
+
+    def _apply_value(self, raw_value: Any) -> None:
+        """No-op: the sentinel field_key never appears in an event."""
+
+    async def _async_restore_state(self) -> None:
+        """Restore the prior timestamp as a tz-aware datetime, if not seeded.
+
+        A live value seeded from a real event wins over a restored one.
+        """
+        if self._attr_native_value is not None:
+            return
+        last_state = await self.async_get_last_state()
+        if last_state is None or last_state.state in _NON_RESTORABLE:
+            return
+        restored = dt_util.parse_datetime(last_state.state)
+        if restored is not None:
+            self._attr_native_value = restored
+
+    @callback
+    def _handle_dispatch(self, event: NormalizedEvent) -> None:
+        """Adopt the coordinator's last_seen on a real/watchdog dispatch.
+
+        Overrides the base: the synthetic field is never in ``event.fields``, so
+        instead of the field-driven path we read coordinator.last_seen, which the
+        non-dispatching baseline never reaches.
+        """
+        self._attr_native_value = self._coordinator.last_seen.get(self._device_key)
+        self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        """Available once a real/restored timestamp exists, ignoring the timeout."""
+        return self._attr_native_value is not None
 
 
 # --------------------------------------------------------------------------- #

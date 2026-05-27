@@ -357,9 +357,9 @@ graph TD
     002 --> 004
 ```
 
-### Phase 1: Synthetic entity
+### ✅ Phase 1: Synthetic entity
 **Parallel Tasks:**
-- Task 001: Implement the `Rtl433LastSeenSensor` entity + synthetic descriptor (`sensor.py`)
+- ✔️ Task 001: Implement the `Rtl433LastSeenSensor` entity + synthetic descriptor (`sensor.py`)
 
 ### Phase 2: Lifecycle wiring
 **Parallel Tasks:**
