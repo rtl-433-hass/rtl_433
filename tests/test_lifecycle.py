@@ -45,6 +45,7 @@ from custom_components.rtl_433.const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
@@ -858,3 +859,238 @@ async def test_no_last_seen_on_binary_sensor(hass, hub_entry_builder):
         )
         is not None
     )
+
+
+# --------------------------------------------------------------------------- #
+# Event platform: value-as-type firing, auto-populate, persistence, restore.   #
+# --------------------------------------------------------------------------- #
+async def test_event_fires_value_as_type_and_auto_populates(hass, hub_entry_builder):
+    """A multi-value event field fires each value as its type and grows the set.
+
+    Delivering ``A``, ``B``, ``A`` fires those event types in order, auto-populates
+    ``event_types`` to include both, persists the sorted set to the devices map,
+    and exposes no attributes on the fired event beyond the standard event_type
+    (no custom payload).
+    """
+    device_key = "Acurite-606TX-42"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["button"]}},
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    button_eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:button"
+    )
+    assert button_eid is not None
+
+    # No event yet -> the event entity reads "unknown" with an empty type set.
+    initial = hass.states.get(button_eid)
+    assert initial.state == "unknown"
+    assert initial.attributes["event_types"] == []
+
+    fired: list[str] = []
+    for code in ("A", "B", "A"):
+        _feed(coordinator, {"model": "Acurite-606TX", "id": 42, "button": code})
+        await hass.async_block_till_done()
+        fired.append(hass.states.get(button_eid).attributes["event_type"])
+
+    # The fired event_type tracked each value in order (including the repeat).
+    assert fired == ["A", "B", "A"]
+
+    state = hass.states.get(button_eid)
+    # event_types grew to include both observed values.
+    assert state.attributes["event_types"] == ["A", "B"]
+    # The fired event exposes only the standard event_type beyond the type set;
+    # no custom payload attributes were attached.
+    standard = {"event_types", "event_type", "device_class", "friendly_name"}
+    assert set(state.attributes) <= standard
+    assert state.attributes["device_class"] == "button"
+
+    # Observed types persisted to the devices map (sorted union).
+    entry = hass.config_entries.async_get_entry(hub.entry_id)
+    persisted = entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]
+    assert persisted["button"] == ["A", "B"]
+
+
+async def test_event_single_value_momentary_fires_each_transmission(
+    hass, hub_entry_builder
+):
+    """A single-value momentary event fires its one type on every transmission."""
+    device_key = "Honeywell-Doorbell-7"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Honeywell-Doorbell",
+                DEVICE_FIELDS: ["secret_knock"],
+            }
+        },
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    doorbell_eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:secret_knock"
+    )
+    assert doorbell_eid is not None
+
+    # Two genuine transmissions of the same value each fire (distinct objects).
+    # Freeze the clock at two distinct instants so the fire timestamp advances
+    # on the second transmission (a same-value repeat is a fresh ``normalize()``
+    # object, so the identity dedupe does NOT suppress it — a doorbell pressed
+    # twice fires twice).
+    start = dt_util.utcnow()
+    timestamps: list[str] = []
+    for offset in (0, 5):
+        with freeze_time(start + timedelta(seconds=offset)):
+            _feed(
+                coordinator,
+                {"model": "Honeywell-Doorbell", "id": 7, "secret_knock": 1},
+            )
+            await hass.async_block_till_done()
+        state = hass.states.get(doorbell_eid)
+        assert state.attributes["event_type"] == "1"
+        timestamps.append(state.state)
+
+    # The second transmission fired again (a later, distinct timestamp).
+    assert timestamps[1] != timestamps[0]
+    assert dt_util.parse_datetime(timestamps[1]) > dt_util.parse_datetime(timestamps[0])
+    state = hass.states.get(doorbell_eid)
+    assert state.attributes["event_types"] == ["1"]
+    assert state.attributes["device_class"] == "doorbell"
+
+
+async def test_event_rebuilds_event_types_from_persisted(hass, hub_entry_builder):
+    """A pre-seeded device exposes its persisted event_types before any event.
+
+    Seeding ``DEVICE_EVENT_TYPES`` in the device record makes the rebuilt entity
+    advertise those valid types immediately (HA validates ``_trigger_event``
+    against the list), even though no event has fired yet.
+    """
+    device_key = "Acurite-606TX-42"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["button"],
+                DEVICE_EVENT_TYPES: {"button": ["A", "B"]},
+            }
+        },
+    )
+    ent_reg = er.async_get(hass)
+    button_eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:button"
+    )
+    assert button_eid is not None
+
+    # Before any event arrives, the entity already advertises the persisted types
+    # and has not fired (state "unknown", event_type None).
+    state = hass.states.get(button_eid)
+    assert state.attributes["event_types"] == ["A", "B"]
+    assert state.state == "unknown"
+    assert state.attributes["event_type"] is None
+
+
+async def test_event_always_available_and_no_double_fire_on_watchdog(
+    hass, hub_entry_builder
+):
+    """An event entity stays available past the timeout and does not re-fire.
+
+    A sibling measurement sensor on the same device goes ``unavailable`` once the
+    silence timeout elapses, but the event entity (always-available) does not.
+    The watchdog re-dispatches the cached last event by the same object, so the
+    event entity's identity dedupe suppresses a re-fire: its last-fire state and
+    timestamp are unchanged across the watchdog tick.
+    """
+    device_key = "Acurite-606TX-42"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                # A measurement field (temperature) plus the event field, so the
+                # device has a sibling that *can* time out.
+                DEVICE_FIELDS: ["temperature_C", "button"],
+            }
+        },
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    button_eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:button"
+    )
+    temp_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:T"
+    )
+    assert button_eid is not None
+    assert temp_eid is not None
+
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _feed(
+            coordinator,
+            {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.0, "button": "A"},
+        )
+        await hass.async_block_till_done()
+
+    fired = hass.states.get(button_eid)
+    assert fired.attributes["event_type"] == "A"
+    fired_at = fired.state  # ISO timestamp of the fire
+
+    # Advance past the 600s timeout and run the watchdog, which re-dispatches the
+    # cached last event (same NormalizedEvent object) for the now-stale device.
+    with freeze_time(start + timedelta(seconds=601)):
+        await coordinator._async_watchdog(dt_util.utcnow())
+        await hass.async_block_till_done()
+
+    # The measurement sensor flips unavailable; the event entity does not.
+    assert hass.states.get(temp_eid).state == "unavailable"
+    after = hass.states.get(button_eid)
+    assert after.state != "unavailable"
+    # Identity dedupe suppressed a re-fire: last-fire state/type are unchanged.
+    assert after.state == fired_at
+    assert after.attributes["event_type"] == "A"
+
+
+async def test_event_restores_last_fire_across_reload(hass, hub_entry_builder):
+    """A reload restores the last fired event without firing a new one.
+
+    After firing an event and reloading the entry, the rebuilt entity's state
+    reflects the last fired event (HA restores it) and reload did not itself fire
+    a fresh event (same timestamp / type, no construction-time replay).
+    """
+    device_key = "Acurite-606TX-42"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["button"]}},
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    button_eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:button"
+    )
+    assert button_eid is not None
+
+    _feed(coordinator, {"model": "Acurite-606TX", "id": 42, "button": "A"})
+    await hass.async_block_till_done()
+    before = hass.states.get(button_eid)
+    assert before.attributes["event_type"] == "A"
+    fired_at = before.state
+
+    # Reload the entry: the entity is rebuilt and HA restores the last fired
+    # event. Construction must NOT replay the coordinator's cached event.
+    assert await hass.config_entries.async_reload(hub.entry_id)
+    await hass.async_block_till_done()
+
+    after = hass.states.get(button_eid)
+    # State reflects the last fire, restored verbatim (no new fire on reload).
+    assert after.state == fired_at
+    assert after.attributes["event_type"] == "A"
+    # The persisted event_types survived the reload (seed the rebuilt entity).
+    assert after.attributes["event_types"] == ["A"]

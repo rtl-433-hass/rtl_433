@@ -21,6 +21,7 @@ custom_components/rtl_433/device_library/
 ├── _skip_keys.yaml         # fields that never become entities
 ├── air_quality.yaml        # pm2.5 / pm10 / co2
 ├── binary_states.yaml      # contacts, tamper, alarm, door state
+├── events.yaml             # momentary RF: button, motion, doorbell
 ├── humidity_moisture.yaml  # humidity, moisture, leak, depth
 ├── light_uv.yaml           # illuminance, UV
 ├── misc.yaml               # battery %, timestamp, signal, lightning
@@ -63,8 +64,8 @@ temperature_C:
 
 | Attribute             | Required | Type            | Meaning |
 |-----------------------|----------|-----------------|---------|
-| `platform`            | yes      | `sensor` \| `binary_sensor` | Which Home Assistant platform creates the entity. |
-| `device_class`        | yes (nullable) | string \| `null` | Home Assistant device class (e.g. `temperature`, `humidity`, `safety`). Use `null` when the field has no appropriate device class. |
+| `platform`            | yes      | `sensor` \| `binary_sensor` \| `event` | Which Home Assistant platform creates the entity. See [Event entities](#event-entities) for `event`. |
+| `device_class`        | yes (nullable) | string \| `null` | Home Assistant device class (e.g. `temperature`, `humidity`, `safety`). Use `null` when the field has no appropriate device class. For `event` entries it is an [`EventDeviceClass`](https://www.home-assistant.io/integrations/event/#device-class) (`button`, `motion`, `doorbell`). |
 | `unit_of_measurement` | yes (nullable) | string \| `null` | Unit shown by the entity. `null` for unitless or binary fields. |
 | `state_class`         | yes (nullable) | `measurement` \| `total` \| `total_increasing` \| `null` | Long-term-statistics class. `null` for binary fields and non-numeric sensors. |
 | `name`                | yes      | string          | Human-readable entity name (suffixed to the device name by HA). |
@@ -132,6 +133,48 @@ emits them.
 > `battery_ok` is a `sensor` with `device_class: battery`, `unit: "%"`, and
 > `value_transform: { scale: 99, offset: 1, round: 0 }`. If you prefer a
 > low-battery binary problem sensor, that is a candidate for a user override.
+
+### Event entities
+
+`platform: event` is for **momentary, fire-and-forget** RF fields — a remote
+button, a doorbell press, a motion trip — that have no steady "on" / "off"
+state to track. Each genuine transmission fires **one** Home Assistant
+[event](https://www.home-assistant.io/integrations/event/), and the entity
+stays available between presses (no faked "off"). Event entries live in their
+own themed file, `device_library/events.yaml`:
+
+```yaml
+button:
+  platform: event
+  device_class: button     # an EventDeviceClass
+  name: Button
+  object_suffix: button
+```
+
+How event entries differ from `sensor` / `binary_sensor`:
+
+- **The fired `event_type` is the stringified field value** (`str(value)`).
+  There is **no `payload` and no `value_transform`** — the raw value is
+  stringified directly.
+- **`event_types` are auto-populated, not declared.** Each newly observed value
+  is recorded as a valid type the first time it is seen and **persisted per
+  device**, so after a restart the entity rebuilds knowing the types it has
+  seen before. You never list them in the YAML.
+- A field that only ever emits **one distinct value** (motion, doorbell) is a
+  **momentary single-type trigger** — it fires that one type on every
+  transmission. A field whose value varies (a remote that reports which button
+  was pressed) auto-populates several types.
+- **The fired event carries no extra attributes** — the type is the only
+  payload.
+- `device_class` is an `EventDeviceClass` (`button`, `motion`, `doorbell`).
+
+The shipped `events.yaml` has three examples:
+
+| Field | `device_class` | Notes |
+|-------|----------------|-------|
+| `button` | `button` | Remote / key-fob button code; the value is the pressed code, so distinct presses auto-populate several types. |
+| `motion` | `motion` | PIR / occupancy trip; typically a single momentary value. |
+| `secret_knock` | `doorbell` | Honeywell ActivLink doorbell press; a single momentary value. |
 
 ## The skip-keys file
 
@@ -255,11 +298,10 @@ mappings" need.
 The upstream `mappings` table includes two `device_automation` entries —
 `channel` and `button` — that publish MQTT **device triggers** (e.g.
 `button_short_release`) rather than entities. These have no `sensor` /
-`binary_sensor` equivalent in this schema and are intentionally not ported:
+`binary_sensor` equivalent in this schema:
 
 - `channel` is already a device-identity key and lives in `_skip_keys.yaml`.
-- `button` is not represented; if button-press handling is needed it would be a
-  separate feature (an `event` entity or HA device trigger), not a library
-  mapping.
+- `button` is modelled as an [event entity](#event-entities) instead of an MQTT
+  device trigger — see `device_library/events.yaml`.
 
 Everything else from the upstream table is ported faithfully.

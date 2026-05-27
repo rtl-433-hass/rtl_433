@@ -502,10 +502,10 @@ YAML library file); both are inputs to tests (003) and docs (004).
 - ✔️ Task 001: Event platform — const, persistence helper, entity, and wiring
 - ✔️ Task 002: Three shipped `platform: event` example mappings
 
-### Phase 2: Tests & Documentation
+### Phase 2: Tests & Documentation ✅
 **Parallel Tasks:**
-- Task 003: Tests for the event platform and schema (depends on: 001, 002)
-- Task 004: Document the event platform and schema (depends on: 001, 002)
+- ✔️ Task 003: Tests for the event platform and schema (depends on: 001, 002)
+- ✔️ Task 004: Document the event platform and schema (depends on: 001, 002)
 
 ### Post-phase Actions
 After Phase 2, run the full suite (`uv run pytest tests/`) and

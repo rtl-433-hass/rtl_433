@@ -8,8 +8,8 @@
 A Home Assistant custom integration that connects to an
 [rtl_433](https://github.com/merbanan/rtl_433) HTTP server's WebSocket stream and
 turns the 433 MHz / ISM-band devices it decodes (weather stations, soil/leak
-sensors, door contacts, energy meters, and more) into native Home Assistant
-sensors and binary sensors.
+sensors, door contacts, energy meters, remotes, doorbells, and more) into
+native Home Assistant sensors, binary sensors, and event entities.
 
 It is a **local push** integration: events arrive over a WebSocket as rtl_433
 decodes them, so there is no polling and no cloud dependency.
@@ -142,6 +142,13 @@ a silence-based availability model: if no event for a device arrives within its
   **stays available** and keeps showing the last-heard time, so you can build
   "no signal for N minutes" staleness alerts and dashboards against it. It
   restores its previous value across restarts.
+- **Event entities** — momentary, fire-and-forget RF (remote buttons,
+  doorbells, motion, key fobs) becomes a native HA **event** entity rather than
+  a sensor with a faked "off". Each transmission fires one event whose type is
+  the transmitted value; like the Last seen sensor, event entities **stay
+  available** between presses instead of going `unavailable`. The shipped
+  mappings are in
+  [`device_library/events.yaml`](docs/device-library.md#event-entities).
 
 Both options apply **live** — changing the discovery toggle or a timeout takes
 effect without reloading the hub or tearing down the WebSocket.

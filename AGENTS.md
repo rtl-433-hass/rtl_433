@@ -11,7 +11,7 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
   - `coordinator/` — package (`base.py`) for the push WebSocket coordinator.
   - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`, `mapping.py`,
     `normalizer.py`, `diagnostics.py`, `repairs.py`, `sensor.py`,
-    `binary_sensor.py`, `translations/en.json`.
+    `binary_sensor.py`, `event.py`, `translations/en.json`.
 - `docs/device-library.md` — **authoritative** device-library reference.
 - `tests/` — unit tests. `tests/integration/` — container/screenshot harness.
 
@@ -79,6 +79,40 @@ base `async_added_to_hass` baseline:
   the per-device availability timeout) and can drive "last_seen older than X"
   staleness automations.
 
+## Event platform (`event.py`, value-as-type, auto-populated)
+
+`Rtl433Event` (`event.py`) is the third platform (`Platform.EVENT` in
+`PLATFORMS`). Unlike the Last seen sensor it is **field-driven** — built via
+`async_setup_hub_platform` for descriptors whose `platform == "event"`, with
+**no `per_device_factory`** — using the **unchanged shared 5-arg constructor**.
+Invariants that must survive refactors of `async_setup_hub_platform`, the
+coordinator watchdog, and the devices map:
+
+- **Identity-based watchdog dedupe.** It overrides `_handle_dispatch` to dedupe
+  the watchdog's re-dispatch by **object identity** (`event is
+  self._last_fired_event`), **not value-equality**. The watchdog re-sends the
+  *same cached* `NormalizedEvent` object when a device goes stale; a genuine
+  live repeat (even of the same value) is a *distinct* frozen `NormalizedEvent`
+  from `normalize()` that **must** fire (a doorbell pressed twice fires twice).
+  If this ever became `==`, genuine repeats would be silently dropped.
+- **Auto-populated, persisted `event_types`.** Types are not declared in YAML;
+  each newly seen `str(value)` is appended to `_attr_event_types` **before**
+  firing (HA validates the fired type against the current list) and persisted
+  per device-field under
+  `entry.data[CONF_DEVICES][key][DEVICE_EVENT_TYPES][field]` via
+  `async_upsert_event_types` (idempotent union write, stored sorted). The entity
+  reads the persisted list in `__init__` from `coordinator.entry.data` (a
+  **copy**, so in-place growth never mutates the persisted dict).
+- **Type-only fired event.** `_trigger_event(event_type)` is called with **no
+  extra attributes** (the type is the whole payload); there is **no `payload`
+  and no `value_transform`** — the raw value is stringified directly.
+- **Always available; no construction-time replay.** `available` is always
+  `True` (events are momentary; a timeout would hide the entity almost always).
+  `_async_restore_state` is a **no-op** — HA's
+  `EventEntity.async_internal_added_to_hass` restores the last displayed event.
+  The entity does **not** seed/replay `coordinator.devices[key]` on construction
+  (that would fire a stale event before the entity is added to hass).
+
 ## WebSocket frames & hub observability
 
 Durable contracts for the coordinator's frame routing and the hub diagnostic
@@ -138,7 +172,7 @@ A mapping entry, keyed by the exact rtl_433 field name:
 
 ```yaml
 temperature_C:
-  platform: sensor            # sensor | binary_sensor
+  platform: sensor            # sensor | binary_sensor | event
   device_class: temperature   # HA device class, or null
   unit_of_measurement: "°C"   # unit, or null
   state_class: measurement    # measurement | total | total_increasing | null
@@ -148,8 +182,10 @@ temperature_C:
 ```
 
 `binary_sensor` entries use `payload: { on: "<raw>", off: "<raw>" }` instead of
-`value_transform`. `_skip_keys.yaml` lists fields that must never become
-entities.
+`value_transform`. `event` entries (in `events.yaml`) use neither — the value is
+stringified to the fired `event_type` and `device_class` is an
+`EventDeviceClass`; see the [Event platform](#event-platform-eventpy-value-as-type-auto-populated)
+section above. `_skip_keys.yaml` lists fields that must never become entities.
 
 **Do not invent attributes here.** The full schema — every attribute, the
 `value_transform` keys and their application order, binary payloads, the
