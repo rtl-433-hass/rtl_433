@@ -202,6 +202,77 @@ async def test_hub_connectivity_sensor(hass, hub_entry_builder):
 
 
 # --------------------------------------------------------------------------- #
+# Hub meta/SDR + server-stats diagnostic sensors render coordinator state.     #
+# --------------------------------------------------------------------------- #
+async def test_hub_diagnostic_sensors(hass, hub_entry_builder):
+    """Hub diagnostic sensors render coordinator.meta / coordinator.stats."""
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+    coordinator.meta = {
+        "center_frequency": 433920000,
+        "samp_rate": 250000,
+        "conversion_mode": 1,
+        "hop_interval": 600,
+        "frequencies": [433920000],
+        "hop_times": [600],
+        "gain": "",  # empty string -> rendered as "auto"
+        "ppm_error": 0,
+    }
+    coordinator.stats = {
+        "enabled": 5,
+        "since": "2026-05-26T10:00:00",
+        "frames": {"count": 12, "fsk": 3, "events": 40},
+        "stats": [{"name": "Acurite", "events": 40}],
+    }
+    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+
+    def state(suffix):
+        eid = ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, f"{hub.entry_id}:hub:{suffix}"
+        )
+        assert eid is not None, suffix
+        return hass.states.get(eid)
+
+    # --- SDR/meta sensors ------------------------------------------------- #
+    cf = state("center_frequency")
+    assert cf.state == "433920000"
+    assert cf.attributes["device_class"] == "frequency"
+    assert cf.attributes["unit_of_measurement"] == "Hz"
+    assert state("sample_rate").state == "250000"
+    assert state("conversion_mode").state == "1"
+    assert state("hop_interval").state == "600"
+    assert state("gain").state == "auto"  # empty string -> auto
+    assert state("ppm_error").state == "0"
+
+    # --- Server-stats sensors --------------------------------------------- #
+    events_state = state("decoded_events")
+    assert events_state.state == "40"
+    assert events_state.attributes["state_class"] == "total_increasing"
+    assert state("ook_frames").state == "12"
+    assert state("fsk_frames").state == "3"
+    assert state("enabled_decoders").state == "5"
+
+    # --- Array fields / since are attributes, not their own entities ------ #
+    assert cf.attributes["frequencies"] == [433920000]
+    assert cf.attributes["hop_times"] == [600]
+    assert events_state.attributes["stats"] == [{"name": "Acurite", "events": 40}]
+    assert events_state.attributes["since"] == "2026-05-26T10:00:00"
+
+    # All ten hub sensors are diagnostic and live on the hub device.
+    dev_reg = dr.async_get(hass)
+    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    cf_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:hub:center_frequency"
+    )
+    cf_entry = ent_reg.async_get(cf_eid)
+    assert cf_entry.device_id == hub_device.id
+    assert cf_entry.entity_category == "diagnostic"
+
+
+# --------------------------------------------------------------------------- #
 # Dynamic add of a brand-new device, gated by the discovery toggle.            #
 # --------------------------------------------------------------------------- #
 async def test_new_device_added_when_discovery_on(hass, hub_entry_builder, events):
