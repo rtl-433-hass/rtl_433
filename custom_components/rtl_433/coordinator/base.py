@@ -377,9 +377,12 @@ class Rtl433Coordinator:
     def _unwrap_result(payload: Any) -> Any:
         """Unwrap a ``{"result": <value>}`` getter response to its raw value.
 
-        Scalar getters (``get_gain``/``get_ppm_error``) are wrapped in a
-        ``result`` envelope over the shared command dispatcher, but a bare scalar
-        is accepted too — read defensively.
+        The HTTP ``/cmd`` responder (``rpc_response_jsoncmd``) wraps **every**
+        getter reply in a ``result`` envelope — not just the scalar getters
+        (``get_gain``/``get_ppm_error``) but the JSON-payload getters
+        (``get_meta``/``get_stats``) too. (Only the WebSocket framing sends those
+        two as a bare object; this integration uses ``/cmd``.) A bare value is
+        accepted too, so this is safe across transports — read defensively.
         """
         if isinstance(payload, dict) and "result" in payload:
             return payload["result"]
@@ -387,7 +390,7 @@ class Rtl433Coordinator:
 
     async def _refresh_meta(self) -> None:
         """Fetch ``get_meta`` + ``get_gain`` + ``get_ppm_error`` into ``self.meta``."""
-        meta = await self._fetch_cmd("get_meta")
+        meta = self._unwrap_result(await self._fetch_cmd("get_meta"))
         gain = self._unwrap_result(await self._fetch_cmd("get_gain"))
         ppm = self._unwrap_result(await self._fetch_cmd("get_ppm_error"))
 
@@ -416,7 +419,7 @@ class Rtl433Coordinator:
 
     async def _refresh_stats(self) -> None:
         """Fetch ``get_stats`` into ``self.stats``."""
-        stats = await self._fetch_cmd("get_stats")
+        stats = self._unwrap_result(await self._fetch_cmd("get_stats"))
         if isinstance(stats, dict):
             self.stats = stats
             self._emit_hub_update()

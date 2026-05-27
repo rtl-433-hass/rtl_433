@@ -22,11 +22,13 @@ from homeassistant.util import dt as dt_util
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
 
-# The shape the coordinator's getters expect, matching the rtl_433 ``/cmd``
-# dispatcher: ``get_meta``/``get_stats`` return a raw JSON object, while the
-# scalar getters (``get_gain``/``get_ppm_error``) wrap their value in
-# ``{"result": ...}`` (see WEBSOCKET_API.md).
-_META_BODY = {
+# The shape the rtl_433 HTTP ``/cmd`` dispatcher actually returns: its responder
+# (``rpc_response_jsoncmd``) wraps *every* getter reply in a ``{"result": ...}``
+# envelope -- the JSON-payload getters (``get_meta``/``get_stats``) just as much
+# as the scalar getters (``get_gain``/``get_ppm_error``). Only the WebSocket
+# framing sends ``get_meta``/``get_stats`` as a bare object; this integration
+# uses ``/cmd``, so the coordinator must unwrap ``result`` for all of them.
+_META_RESULT = {
     "center_frequency": 433920000,
     "samp_rate": 250000,
     "conversion_mode": 0,
@@ -35,12 +37,14 @@ _META_BODY = {
     "duration": 0,
     "stats_interval": 0,
 }
-_STATS_BODY = {
+_STATS_RESULT = {
     "enabled": 5,
     "since": "2026-05-26T10:00:00",
     "frames": {"count": 3, "fsk": 1, "events": 9},
     "stats": [],
 }
+_META_BODY = {"result": _META_RESULT}
+_STATS_BODY = {"result": _STATS_RESULT}
 
 
 def _mock_cmd(aioclient_mock, *, gain="32.8", ppm=2):
