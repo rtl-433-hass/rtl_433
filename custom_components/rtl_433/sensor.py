@@ -1,22 +1,33 @@
 """Sensor platform for the rtl_433 hub config entry.
 
-``async_setup_entry`` runs once for the hub config entry and delegates to the
-shared :func:`~custom_components.rtl_433.entity.async_setup_hub_platform`
-helper, which resolves the hub coordinator, builds a :class:`Rtl433Sensor` for
-every device's observed mapped fields whose descriptor ``platform == "sensor"``,
-adds new devices/fields at runtime, and keeps the hub's devices map current.
+``async_setup_entry`` runs once for the hub config entry. It registers the
+hub-level DIAGNOSTIC sensors (SDR/meta configuration and server statistics that
+the coordinator sources over HTTP) and then delegates to the shared
+:func:`~custom_components.rtl_433.entity.async_setup_hub_platform` helper, which
+resolves the hub coordinator, builds a :class:`Rtl433Sensor` for every device's
+observed mapped fields whose descriptor ``platform == "sensor"``, adds new
+devices/fields at runtime, and keeps the hub's devices map current.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfFrequency
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import Rtl433Entity, async_setup_hub_platform
+from .const import DOMAIN
+from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
 from .mapping import apply_transform
 
 if TYPE_CHECKING:
@@ -71,12 +82,168 @@ class Rtl433Sensor(Rtl433Entity, SensorEntity):
             self._attr_native_value = last_state.state
 
 
+# --------------------------------------------------------------------------- #
+# Hub-level DIAGNOSTIC sensors (SDR/meta + server stats).                       #
+# --------------------------------------------------------------------------- #
+def _meta(coordinator: Rtl433Coordinator, key: str) -> Any:
+    """Read a key from ``coordinator.meta`` defensively (missing -> None)."""
+    return coordinator.meta.get(key)
+
+
+def _frames(coordinator: Rtl433Coordinator, key: str) -> Any:
+    """Read a key from the ``frames`` sub-dict of ``coordinator.stats``."""
+    frames = coordinator.stats.get("frames")
+    return frames.get(key) if isinstance(frames, dict) else None
+
+
+def _gain(coordinator: Rtl433Coordinator) -> Any:
+    """Render the SDR gain, mapping an empty string to ``"auto"``."""
+    gain = coordinator.meta.get("gain")
+    if gain is None:
+        return None
+    return "auto" if gain == "" else gain
+
+
+@dataclass(frozen=True, kw_only=True)
+class HubSensorDesc:
+    """Lightweight description of one hub diagnostic sensor.
+
+    ``value`` extracts the native value from the coordinator; ``attrs`` (when
+    set) extracts extra-state attributes. Both read live coordinator state so
+    the entity always reflects the latest HTTP-sourced hub data.
+    """
+
+    suffix: str
+    name: str
+    value: Callable[[Rtl433Coordinator], Any]
+    device_class: SensorDeviceClass | None = None
+    native_unit: str | None = None
+    state_class: SensorStateClass | None = None
+    attrs: Callable[[Rtl433Coordinator], dict[str, Any] | None] | None = None
+
+
+HUB_SENSORS: tuple[HubSensorDesc, ...] = (
+    # --- SDR/meta configuration (from coordinator.meta) ------------------- #
+    HubSensorDesc(
+        suffix="center_frequency",
+        name="Center frequency",
+        value=lambda c: _meta(c, "center_frequency"),
+        device_class=SensorDeviceClass.FREQUENCY,
+        native_unit=UnitOfFrequency.HERTZ,
+        attrs=lambda c: {
+            "frequencies": c.meta.get("frequencies"),
+            "hop_times": c.meta.get("hop_times"),
+        },
+    ),
+    HubSensorDesc(
+        suffix="sample_rate",
+        name="Sample rate",
+        value=lambda c: _meta(c, "samp_rate"),
+        native_unit="Hz",
+    ),
+    HubSensorDesc(
+        suffix="conversion_mode",
+        name="Conversion mode",
+        value=lambda c: _meta(c, "conversion_mode"),
+    ),
+    HubSensorDesc(
+        suffix="hop_interval",
+        name="Hop interval",
+        value=lambda c: _meta(c, "hop_interval"),
+        native_unit="s",
+    ),
+    HubSensorDesc(suffix="gain", name="Gain", value=_gain),
+    HubSensorDesc(
+        suffix="ppm_error",
+        name="Frequency correction",
+        value=lambda c: _meta(c, "ppm_error"),
+    ),
+    # --- Server statistics (from coordinator.stats) ----------------------- #
+    HubSensorDesc(
+        suffix="decoded_events",
+        name="Decoded events",
+        value=lambda c: _frames(c, "events"),
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        attrs=lambda c: {
+            "stats": c.stats.get("stats"),
+            "since": c.stats.get("since"),
+        },
+    ),
+    HubSensorDesc(
+        suffix="ook_frames",
+        name="OOK frames",
+        value=lambda c: _frames(c, "count"),
+    ),
+    HubSensorDesc(
+        suffix="fsk_frames",
+        name="FSK frames",
+        value=lambda c: _frames(c, "fsk"),
+    ),
+    HubSensorDesc(
+        suffix="enabled_decoders",
+        name="Enabled decoders",
+        value=lambda c: c.stats.get("enabled"),
+    ),
+)
+
+
+class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
+    """A diagnostic sensor on the hub device, driven by a :class:`HubSensorDesc`.
+
+    Reads live coordinator state via the description's callables and refreshes on
+    ``signal_hub_update`` (handled by :class:`Rtl433HubEntity`). A missing key
+    yields a ``None`` native value (state ``unknown``) rather than raising.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: Rtl433Coordinator,
+        hub_entry_id: str,
+        desc: HubSensorDesc,
+    ) -> None:
+        """Initialize identity and entity-description fields from ``desc``."""
+        super().__init__(coordinator, hub_entry_id)
+        self._desc = desc
+        self._attr_unique_id = f"{hub_entry_id}:hub:{desc.suffix}"
+        self._attr_name = desc.name
+        self._attr_device_class = desc.device_class
+        self._attr_native_unit_of_measurement = desc.native_unit
+        self._attr_state_class = desc.state_class
+
+    @property
+    def available(self) -> bool:
+        """Always available: a missing value reads ``unknown``, not unavailable."""
+        return True
+
+    @property
+    def native_value(self) -> Any:
+        """Return the latest value extracted from the coordinator."""
+        return self._desc.value(self._coordinator)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra-state attributes, dropping any with a ``None`` value."""
+        if self._desc.attrs is None:
+            return None
+        attrs = self._desc.attrs(self._coordinator)
+        return {k: v for k, v in (attrs or {}).items() if v is not None} or None
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up rtl_433 sensors for every device under the hub config entry."""
+    """Set up rtl_433 sensors for the hub config entry.
+
+    Registers the hub-level diagnostic sensors and then the per-device sensors.
+    """
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities(
+        Rtl433HubSensor(coordinator, entry.entry_id, desc) for desc in HUB_SENSORS
+    )
     await async_setup_hub_platform(
         hass, entry, async_add_entities, PLATFORM, Rtl433Sensor
     )
