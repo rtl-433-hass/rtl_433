@@ -201,3 +201,6 @@ Full runbook:
   latter fans connectivity/meta/stats changes out to the hub entities).
 - Always run `pytest tests/` before proposing a change, and follow the
   conventional-commit and lint rules in [CONTRIBUTING.md](CONTRIBUTING.md).
+- Always open pull requests with a **conventional-commit-style title** that
+  summarizes the branch's changes (e.g. `feat(rtl_433): add hub observability
+  sensors`), matching the commit convention above.
