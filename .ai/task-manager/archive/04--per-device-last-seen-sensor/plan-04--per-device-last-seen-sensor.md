@@ -378,3 +378,62 @@ but touch disjoint files (`tests/test_lifecycle.py` vs. `README.md`/`AGENTS.md`)
 ### Execution Summary
 - Total Phases: 3
 - Total Tasks: 4
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-05-26
+
+### Results
+Delivered the synthetic per-device "Last seen" diagnostic timestamp sensor as
+planned, across three phases on branch `feature/04--per-device-last-seen-sensor`:
+
+- **Phase 1 (entity)** — `Rtl433LastSeenSensor(Rtl433Entity, SensorEntity)` and
+  the module-level synthetic `LAST_SEEN_DESCRIPTOR` (sentinel
+  `field_key="__last_seen__"`, `object_suffix="last_seen"`,
+  `device_class=timestamp`, diagnostic, enabled) in `sensor.py`. Holds its own
+  `native_value` (seeded from `coordinator.last_seen` only when
+  `coordinator.devices` shows a real event), restores a tz-aware datetime via
+  `dt_util.parse_datetime`, adopts `coordinator.last_seen` on dispatch, and
+  overrides `available` to stay available once it has a value.
+- **Phase 2 (wiring)** — an optional `per_device_factory` hook on
+  `async_setup_hub_platform` (`entity.py`) creates exactly one Last-seen sensor
+  per device (deduped via `extra_created`) in both the initial devices-map build
+  and the new-device handler, torn down in `_remove_device`. `sensor.py` supplies
+  `per_device_factory=Rtl433LastSeenSensor`; `binary_sensor.py` supplies none, so
+  it creates no Last-seen sensor. No circular import (`entity.py` never imports a
+  platform module).
+- **Phase 3 (tests + docs)** — four integration tests in `test_lifecycle.py`
+  (creation in both paths incl. a no-field device, value/update, always-available
+  after the watchdog while measurement sensors go unavailable, restore-not-
+  baseline, and no binary_sensor Last-seen), plus README.md (user-facing) and
+  AGENTS.md (the two maintainer invariants) updates.
+
+Validation: `uv run pytest tests/` → **56 passed** (52 prior + 4 new);
+`uv run ruff check` and the full `pre-commit run --all-files` → clean. All plan
+Success Criteria (#1–#6) and Self-Validation steps (#3–#5 as automated tests) are
+satisfied.
+
+### Noteworthy Events
+- **Feature-branch creation** — `create-feature-branch.cjs` aborts on a dirty
+  tree, and the freshly generated (untracked) plan/task files counted as dirty.
+  Created `feature/04--per-device-last-seen-sensor` manually (untracked files
+  carry over) and committed the plan scaffolding first.
+- **Timestamp sub-second rendering** — a `device_class=timestamp` sensor renders
+  its state at whole-second ISO precision while `coordinator.last_seen` keeps
+  microseconds from `dt_util.utcnow()`. The tests truncate both sides to the
+  second (`_ts` helper) for equality, so they assert *which* timestamp is shown
+  without depending on HA's sub-second rendering. No production-code change
+  needed.
+- **`ruff format` fixup** — the implementing agents ran `ruff check` (clean) but
+  not `ruff format`; the repo's `ruff-format` pre-commit hook then rewrapped a
+  few long lines (entity.py signature, two test literals). Folded in as a
+  separate `style:` commit with no logic change.
+- No implementation bugs were found by the tests; no backwards-compat shims or
+  dead code introduced (`_apply_value` is an intentional no-op required by the
+  abstract base contract).
+
+### Necessary follow-ups
+None. The feature is complete, additive, and self-contained. The branch is ready
+for PR. (Out-of-scope items noted in the plan — hub-level entities, frame
+routing, server stats, event platform — remain separate plans.)
