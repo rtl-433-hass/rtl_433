@@ -714,9 +714,7 @@ async def test_last_seen_created_for_every_device(hass, hub_entry_builder):
         return [
             e.entity_id
             for e in ent_reg.entities.values()
-            if e.platform == DOMAIN
-            and e.domain == "sensor"
-            and e.unique_id == suffix
+            if e.platform == DOMAIN and e.domain == "sensor" and e.unique_id == suffix
         ]
 
     # Exactly one Last-seen sensor per seeded device — even the no-field one.
@@ -754,7 +752,9 @@ async def test_last_seen_updates_and_stays_available(hass, hub_entry_builder):
     hub = await _setup_hub(
         hass,
         hub_entry_builder,
-        devices={device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}},
+        devices={
+            device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
+        },
     )
     coordinator = _coordinator(hass, hub)
     ent_reg = er.async_get(hass)
@@ -807,7 +807,9 @@ async def test_last_seen_restores_prior_not_baseline(hass, hub_entry_builder):
     hub = await _setup_hub(
         hass,
         hub_entry_builder,
-        devices={device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}},
+        devices={
+            device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
+        },
     )
     coordinator = _coordinator(hass, hub)
     ent_reg = er.async_get(hass)

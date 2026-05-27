@@ -300,9 +300,7 @@ async def async_setup_hub_platform(
     async_add_entities: AddEntitiesCallback,
     platform: str,
     entity_cls: Callable[..., Rtl433Entity],
-    per_device_factory: Callable[
-        [Rtl433Coordinator, str, str, str], Rtl433Entity
-    ]
+    per_device_factory: Callable[[Rtl433Coordinator, str, str, str], Rtl433Entity]
     | None = None,
 ) -> None:
     """Set up one entity platform for every device nested under the hub entry.
