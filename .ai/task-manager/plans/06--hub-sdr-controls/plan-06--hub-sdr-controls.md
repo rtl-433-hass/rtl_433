@@ -304,9 +304,9 @@ No circular dependencies; the graph is acyclic.
 **Parallel Tasks:**
 - ✔️ Task 001: Settings registry module + new `const.py` constants (no dependencies)
 
-### Phase 2: Coordinator control layer
+### ✅ Phase 2: Coordinator control layer
 **Parallel Tasks:**
-- Task 002: Coordinator desired-state `Store`, `set_sdr`, adoption, reconnect enforcement, serialization lock (depends on: 001)
+- ✔️ Task 002: Coordinator desired-state `Store`, `set_sdr`, adoption, reconnect enforcement, serialization lock (depends on: 001)
 
 ### Phase 3: Flow, control entities, and sensor coexistence
 **Parallel Tasks:**
