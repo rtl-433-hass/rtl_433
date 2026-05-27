@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.5.0...v0.6.0) (2026-05-27)
+
+
+### Features
+
+* **rtl_433:** record stats statistics and gate hop/center controls by mode ([0d310fe](https://github.com/rtl-433-hass/rtl_433/commit/0d310feeab8ec07b707df95098ffa7b505b58b8f))
+
+
+### Bug Fixes
+
+* **rtl_433:** periodically refresh SDR meta so actual sensors don't go stale ([066170a](https://github.com/rtl-433-hass/rtl_433/commit/066170ae14cc359643e4a239165bfb790215d911))
+
 ## [0.5.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.4.0...v0.5.0) (2026-05-27)
 
 
