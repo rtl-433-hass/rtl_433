@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.4.0...v0.5.0) (2026-05-27)
+
+
+### Features
+
+* **rtl_433:** add hub SDR control entities + management toggle ([d3b7af8](https://github.com/rtl-433-hass/rtl_433/commit/d3b7af8d0079954aa94edb5c9fc51cabf4c62d49))
+* **rtl_433:** add SDR settings registry and management constants ([fbec5c3](https://github.com/rtl-433-hass/rtl_433/commit/fbec5c3a93872aa749eebd29aabb8aae71114cfc))
+* **rtl_433:** coordinator desired-state store, write path, adoption, enforcement ([50a9f45](https://github.com/rtl-433-hass/rtl_433/commit/50a9f452cbb6188b20d922fc0f8888a877a956a9))
+
+
+### Documentation
+
+* **tasks:** generate tasks + execution blueprint for plan 06 ([b8c4b27](https://github.com/rtl-433-hass/rtl_433/commit/b8c4b27f9e663904c72c5994bb13984b9f21fad2))
+
 ## [0.4.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.3.0...v0.4.0) (2026-05-27)
 
 
