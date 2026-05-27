@@ -479,6 +479,42 @@ config-flow or config-entry migration is required.
 - **`event_types` is a `cached_property`** backed by `_attr_event_types`; in-place
   append and reassignment are both cache-safe.
 
+## Execution Blueprint
+
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    001[Task 001: Event platform implementation] --> 003[Task 003: Event platform tests]
+    002[Task 002: Example event mappings] --> 003
+    001 --> 004[Task 004: Documentation]
+    002 --> 004
+```
+
+No circular dependencies. Tasks 001 and 002 are independent (production code vs.
+YAML library file); both are inputs to tests (003) and docs (004).
+
+### Phase 1: Implementation & Examples
+**Parallel Tasks:**
+- Task 001: Event platform — const, persistence helper, entity, and wiring
+- Task 002: Three shipped `platform: event` example mappings
+
+### Phase 2: Tests & Documentation
+**Parallel Tasks:**
+- Task 003: Tests for the event platform and schema (depends on: 001, 002)
+- Task 004: Document the event platform and schema (depends on: 001, 002)
+
+### Post-phase Actions
+After Phase 2, run the full suite (`uv run pytest tests/`) and
+`uv run ruff check custom_components/rtl_433` as the final validation gate.
+
+### Execution Summary
+- Total Phases: 2
+- Total Tasks: 4
+
 ### Change Log
 
 - 2026-05-26: Refinement pass. Confirmed always-available (reviewer). Expanded the
