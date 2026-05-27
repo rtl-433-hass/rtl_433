@@ -57,14 +57,16 @@ class Rtl433SelectControl(Rtl433HubControl, SelectEntity):
     def current_option(self) -> str | None:
         """Return the desired option (or the server's actual) as a label.
 
-        The desired value is the integer ``convert`` ``val``; the actual fallback
-        (``setting.read``) is already a label. Either is mapped to a label that is
-        a member of ``options``, or ``None`` when unknown/unset.
+        Both the desired value and the actual fallback (``setting.read``) are the
+        integer ``convert`` ``val``; either is mapped to a label that is a member
+        of ``options``, or ``None`` when unknown/unset.
         """
-        desired = self._coordinator.get_desired(self._setting.key)
-        if desired is not None:
-            return conversion_val_to_label(int(desired))
-        return self._setting.read(self._coordinator.meta)
+        value = self._coordinator.get_desired(self._setting.key)
+        if value is None:
+            value = self._setting.read(self._coordinator.meta)
+        if value is None:
+            return None
+        return conversion_val_to_label(int(value))
 
     async def async_select_option(self, option: str) -> None:
         """Map the label to its int and write it through the coordinator."""

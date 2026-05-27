@@ -42,6 +42,7 @@ from custom_components.rtl_433.const import (
     CONF_ENTRY_TYPE,
     CONF_HOST,
     CONF_HUB_ENTRY_ID,
+    CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
@@ -221,10 +222,30 @@ async def test_hub_connectivity_sensor(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 # Hub meta/SDR + server-stats diagnostic sensors render coordinator state.     #
 # --------------------------------------------------------------------------- #
-async def test_hub_diagnostic_sensors(hass, hub_entry_builder):
-    """Hub diagnostic sensors render coordinator.meta / coordinator.stats."""
+# The five SDR sensors whose concept is folded into a Plan 6 control while
+# management is on, so their diagnostic sensor is suppressed (each concept keeps
+# exactly one entity). Center frequency is intentionally NOT folded, and the
+# server-stats sensors are never folded.
+_FOLDED_SDR_SUFFIXES = (
+    "sample_rate",
+    "ppm_error",
+    "gain",
+    "conversion_mode",
+    "hop_interval",
+)
+
+
+async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
+    """In managed mode (default) the folded SDR sensors are suppressed.
+
+    Only the center-frequency SDR sensor + the four server-stats sensors remain
+    on the hub device; the five folded concepts (sample rate, ppm, gain,
+    conversion mode, hop interval) are now number/select/switch controls, so
+    their diagnostic sensors must be absent.
+    """
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
+    assert coordinator.manage_settings is True
     coordinator.meta = {
         "center_frequency": 433920000,
         "samp_rate": 250000,
@@ -246,6 +267,63 @@ async def test_hub_diagnostic_sensors(hass, hub_entry_builder):
 
     ent_reg = er.async_get(hass)
 
+    def sensor_id(suffix):
+        return ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, f"{hub.entry_id}:hub:{suffix}"
+        )
+
+    # --- The five folded SDR sensors are suppressed in managed mode ------- #
+    for suffix in _FOLDED_SDR_SUFFIXES:
+        assert sensor_id(suffix) is None, suffix
+
+    # --- The center-frequency SDR sensor still renders -------------------- #
+    cf = hass.states.get(sensor_id("center_frequency"))
+    assert cf.state == "433920000"
+    assert cf.attributes["device_class"] == "frequency"
+    assert cf.attributes["unit_of_measurement"] == "Hz"
+    assert cf.attributes["frequencies"] == [433920000]
+    assert cf.attributes["hop_times"] == [600]
+
+    # --- Server-stats sensors are never folded ---------------------------- #
+    events_state = hass.states.get(sensor_id("decoded_events"))
+    assert events_state.state == "40"
+    assert events_state.attributes["state_class"] == "total_increasing"
+    assert hass.states.get(sensor_id("ook_frames")).state == "12"
+    assert hass.states.get(sensor_id("fsk_frames")).state == "3"
+    assert hass.states.get(sensor_id("enabled_decoders")).state == "5"
+    assert events_state.attributes["stats"] == [{"name": "Acurite", "events": 40}]
+    assert events_state.attributes["since"] == "2026-05-26T10:00:00"
+
+    # The surviving hub sensors are diagnostic and live on the hub device.
+    dev_reg = dr.async_get(hass)
+    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    cf_entry = ent_reg.async_get(sensor_id("center_frequency"))
+    assert cf_entry.device_id == hub_device.id
+    assert cf_entry.entity_category == "diagnostic"
+
+
+async def test_hub_diagnostic_sensors_unmanaged(hass, hub_entry_builder):
+    """With management off, all six SDR sensors render and no controls exist."""
+    hub = await _setup_hub(
+        hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
+    )
+    coordinator = _coordinator(hass, hub)
+    assert coordinator.manage_settings is False
+    coordinator.meta = {
+        "center_frequency": 433920000,
+        "samp_rate": 250000,
+        "conversion_mode": 1,
+        "hop_interval": 600,
+        "frequencies": [433920000],
+        "hop_times": [600],
+        "gain": "",  # empty string -> rendered as "auto"
+        "ppm_error": 0,
+    }
+    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+
     def state(suffix):
         eid = ent_reg.async_get_entity_id(
             "sensor", DOMAIN, f"{hub.entry_id}:hub:{suffix}"
@@ -253,40 +331,23 @@ async def test_hub_diagnostic_sensors(hass, hub_entry_builder):
         assert eid is not None, suffix
         return hass.states.get(eid)
 
-    # --- SDR/meta sensors ------------------------------------------------- #
-    cf = state("center_frequency")
-    assert cf.state == "433920000"
-    assert cf.attributes["device_class"] == "frequency"
-    assert cf.attributes["unit_of_measurement"] == "Hz"
+    # All six SDR sensors are present (nothing folded away).
+    assert state("center_frequency").state == "433920000"
     assert state("sample_rate").state == "250000"
     assert state("conversion_mode").state == "1"
     assert state("hop_interval").state == "600"
     assert state("gain").state == "auto"  # empty string -> auto
     assert state("ppm_error").state == "0"
 
-    # --- Server-stats sensors --------------------------------------------- #
-    events_state = state("decoded_events")
-    assert events_state.state == "40"
-    assert events_state.attributes["state_class"] == "total_increasing"
-    assert state("ook_frames").state == "12"
-    assert state("fsk_frames").state == "3"
-    assert state("enabled_decoders").state == "5"
-
-    # --- Array fields / since are attributes, not their own entities ------ #
-    assert cf.attributes["frequencies"] == [433920000]
-    assert cf.attributes["hop_times"] == [600]
-    assert events_state.attributes["stats"] == [{"name": "Acurite", "events": 40}]
-    assert events_state.attributes["since"] == "2026-05-26T10:00:00"
-
-    # All ten hub sensors are diagnostic and live on the hub device.
-    dev_reg = dr.async_get(hass)
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
-    cf_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{hub.entry_id}:hub:center_frequency"
-    )
-    cf_entry = ent_reg.async_get(cf_eid)
-    assert cf_entry.device_id == hub_device.id
-    assert cf_entry.entity_category == "diagnostic"
+    # No SDR control entities exist when management is off.
+    for platform in ("number", "select", "switch"):
+        for suffix in _FOLDED_SDR_SUFFIXES + ("center_frequency", "gain_auto"):
+            assert (
+                ent_reg.async_get_entity_id(
+                    platform, DOMAIN, f"{hub.entry_id}:hub:{suffix}"
+                )
+                is None
+            )
 
 
 # --------------------------------------------------------------------------- #

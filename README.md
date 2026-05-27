@@ -49,6 +49,12 @@ requirements.
   SDR/meta configuration (center frequency, sample rate, gain, ppm, …), and
   server statistics (decoded events, OOK/FSK frames). See
   [Hub entities](#hub-entities).
+- **Managed SDR settings (optional)** — let Home Assistant own the receiver's
+  SDR settings. When on, the hub exposes number/select/switch **controls** for
+  frequency, sample rate, gain, ppm, conversion mode, and hop interval; Home
+  Assistant adopts the server's current values and re-applies them after every
+  reconnect, so your settings survive an rtl_433 restart. See
+  [Managing SDR settings from Home Assistant](#managing-sdr-settings-from-home-assistant).
 - **Diagnostics feedback loop** — downloadable diagnostics list the
   `unmatched_field_keys` a hub has seen, telling you exactly what to add to the
   library.
@@ -85,10 +91,14 @@ Each hub points at one rtl_433 server's WebSocket endpoint.
 | **Port** | `8433` | The rtl_433 HTTP-API port (`-F http` default). |
 | **Path** | `/ws` | The WebSocket path on the rtl_433 HTTP server. |
 | **Secure** | off | When on, connect with `wss://` instead of `ws://` (TLS). |
+| **Manage rtl_433 settings from Home Assistant** | on | When on, expose SDR controls on the hub and let Home Assistant adopt and enforce the receiver's settings. See [Managing SDR settings from Home Assistant](#managing-sdr-settings-from-home-assistant). |
 
 The integration validates that it can reach the WebSocket before creating the
 hub. The hub's identity is derived from `host:port`, so the same server cannot
 be added twice.
+
+The **Manage rtl_433 settings from Home Assistant** toggle can be changed later
+from the hub options (see [Editing options](#editing-options)).
 
 ### `ws://`, `wss://`, and authentication
 
@@ -158,10 +168,15 @@ effect without reloading the hub or tearing down the WebSocket.
 Open **Settings → Devices & Services → rtl_433 → Configure** on the hub. The
 options flow presents a menu:
 
-- **Hub settings** — the **discovery toggle** and the **default availability
-  timeout** for this server.
+- **Hub settings** — the **discovery toggle**, the **default availability
+  timeout**, and the **Manage rtl_433 settings from Home Assistant** toggle for
+  this server.
 - **Device settings** — pick a known device and set or clear its **per-device
   availability-timeout override**.
+
+Changing the **Manage rtl_433 settings from Home Assistant** toggle reloads the
+hub (the SDR controls appear or disappear); changing the discovery toggle or a
+timeout applies live.
 
 ## Hub entities
 
@@ -187,6 +202,63 @@ configured WebSocket path. If a reverse proxy exposes only the WebSocket path an
 not `/cmd`, those sensors gracefully degrade to `unknown` while the event stream
 and the connectivity sensor keep working. The statistics refresh periodically
 while the hub is connected; the SDR/meta values are fetched on each (re)connect.
+
+When **Manage rtl_433 settings from Home Assistant** is on (the default), the
+five SDR/meta diagnostic **sensors** above (sample rate, conversion mode, hop
+interval, gain, ppm) are replaced by the **controls** described below — the
+center-frequency sensor stays, since it still reports the receiver's actual
+tuned frequency.
+
+### Managing SDR settings from Home Assistant
+
+By default a new hub adopts and manages the receiver's SDR settings. With
+**Manage rtl_433 settings from Home Assistant** on, the hub gains a set of
+**controls** (under the hub device, in the config-entity category):
+
+- **Center frequency** (number, Hz)
+- **Sample rate** (number, Hz)
+- **Frequency correction** (number, ppm)
+- **Gain** (number, dB) paired with an **Auto gain** switch — with Auto gain
+  **on**, gain is set to automatic and the dB value is ignored; with it **off**,
+  the **Gain** number's value is sent.
+- **Conversion mode** (select: `native` / `si` / `customary`)
+- **Hop interval** (number, seconds; `0` disables hopping)
+
+What "managed" means:
+
+- On the **first connect** Home Assistant **adopts** the server's current
+  settings into its desired state, then **re-applies all managed settings on
+  every reconnect**, so your values survive an rtl_433 restart.
+- **Home Assistant becomes the authority.** Once a hub is managed, change these
+  settings **in Home Assistant**, not in the rtl_433 config file — Home
+  Assistant re-applies its stored values on the next reconnect and will override
+  a direct edit you made to the rtl_433 config.
+
+**Re-syncing from the rtl_433 config (the only way).** There is deliberately no
+"re-adopt" button or service. If you have changed the rtl_433 config directly
+and want Home Assistant to pick up those values, do this dance:
+
+1. Turn **Manage rtl_433 settings from Home Assistant** **off** (this clears
+   Home Assistant's stored desired state).
+2. **Restart rtl_433** so it loads its config.
+3. Turn the toggle back **on** — on the next connect Home Assistant re-adopts
+   the server's now-current settings from scratch.
+
+**Requirements and caveats:**
+
+- The controls need the server's **`/cmd` endpoint reachable** at the server
+  root, `http(s)://host:port/cmd` (independent of the WebSocket path). Behind a
+  reverse proxy that hides `/cmd`, commands cannot be sent.
+- **Hopping setups** (more than one configured frequency) keep **center
+  frequency unmanaged**, so Home Assistant never pins a hopping receiver to a
+  single frequency.
+- **Multi-stage gain strings** are not supported by the single gain control —
+  manage those through the rtl_433 config (or turn the toggle off).
+
+**Turning management off** removes all the controls, stops Home Assistant from
+sending any commands, and clears its stored desired state; the six read-only
+SDR/meta diagnostic [Hub entities](#hub-entities) sensors come back. The
+receiver's settings are left untouched.
 
 ## Device library and user overrides
 
