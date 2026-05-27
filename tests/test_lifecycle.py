@@ -288,9 +288,17 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
     events_state = hass.states.get(sensor_id("decoded_events"))
     assert events_state.state == "40"
     assert events_state.attributes["state_class"] == "total_increasing"
-    assert hass.states.get(sensor_id("ook_frames")).state == "12"
-    assert hass.states.get(sensor_id("fsk_frames")).state == "3"
-    assert hass.states.get(sensor_id("enabled_decoders")).state == "5"
+    # Frame counters are cumulative -> TOTAL_INCREASING (records statistics);
+    # enabled decoders is a gauge -> MEASUREMENT.
+    ook_state = hass.states.get(sensor_id("ook_frames"))
+    assert ook_state.state == "12"
+    assert ook_state.attributes["state_class"] == "total_increasing"
+    fsk_state = hass.states.get(sensor_id("fsk_frames"))
+    assert fsk_state.state == "3"
+    assert fsk_state.attributes["state_class"] == "total_increasing"
+    enabled_state = hass.states.get(sensor_id("enabled_decoders"))
+    assert enabled_state.state == "5"
+    assert enabled_state.attributes["state_class"] == "measurement"
     assert events_state.attributes["stats"] == [{"name": "Acurite", "events": 40}]
     assert events_state.attributes["since"] == "2026-05-26T10:00:00"
 

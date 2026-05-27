@@ -287,6 +287,16 @@ class Rtl433HubControl(Rtl433HubEntity):
         self._attr_unique_id = f"{hub_entry_id}:hub:{setting.object_suffix}"
         self._attr_name = setting.name
 
+    @property
+    def available(self) -> bool:
+        """Apply the setting's runtime availability gate to the current meta.
+
+        Re-evaluated on every ``signal_hub_update`` (inherited repaint), so a
+        control like ``hop_interval`` / ``center_frequency`` appears or hides as
+        the server's frequency configuration changes. Defaults to available.
+        """
+        return self._setting.available(self._coordinator.meta)
+
 
 # --------------------------------------------------------------------------- #
 # Devices-map helper.                                                          #

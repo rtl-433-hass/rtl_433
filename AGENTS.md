@@ -150,10 +150,11 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   - `get_gain` → string (empty ⇒ auto); `get_ppm_error` → int.
   - `get_stats` → `{"enabled": <int>, "since": <str>, "frames": {"count":
     <ook>, "fsk": <fsk>, "events": <decoded>}, "stats": [<per-protocol>...]}`.
-    Hub sensors map `frames.events` → decoded events
-    (`TOTAL_INCREASING`, tolerates resets), `frames.count` → OOK frames,
-    `frames.fsk` → FSK frames, `enabled` → enabled decoders, with `stats[]` /
-    `since` surfaced as attributes.
+    Hub sensors map `frames.events` → decoded events, `frames.count` → OOK
+    frames, and `frames.fsk` → FSK frames, all **`TOTAL_INCREASING`** (cumulative
+    since-start counters that tolerate the server-restart reset, so HA records
+    long-term statistics); `enabled` → enabled decoders is a gauge →
+    **`MEASUREMENT`**; `stats[]` / `since` are surfaced as attributes.
 - **Phantom-unknown cleanup.** `async_setup_entry` (`__init__.py`) calls
   `_cleanup_phantom_unknown_device`, which **idempotently** removes a legacy
   persisted `"unknown"` device from `entry.data["devices"]` and the matching
@@ -198,6 +199,17 @@ contributor-facing.
   ranges. Each entry carries a **`capability` gate** (`Callable[[meta], bool]`,
   today always `_always`) so future per-server capability advertisement can
   hide unsupported fields without touching consumers.
+  - **Runtime `available` gate** (`Callable[[meta], bool]`, default `_always`):
+    distinct from `capability` (evaluated once at setup to decide whether the
+    entity is *created*), `available` is read by `Rtl433HubControl.available` on
+    **every `signal_hub_update`** to decide whether the *created* control reports
+    available for the current `meta`. Two fields override it, keyed on
+    `len(meta["frequencies"])` (unknown/pre-connect ⇒ available): `hop_interval`
+    is available **only when hopping** (`> 1` frequency — a single frequency has
+    nothing to hop between), and `center_frequency` is available **only when not
+    hopping** (`≤ 1`), mirroring the adoption hop-mode guard so a hopping receiver
+    is never pinned. The API has no command to set the frequency *list*, so these
+    modes are mutually exclusive and set in the rtl_433 config.
 - **Adoption + full enforcement on reconnect** (`coordinator/base.py`,
   `_connect_loop`). When `manage_settings` is on: on first connect (when
   `_desired` is empty) `_adopt_from_server()` seeds the desired state from
