@@ -75,9 +75,13 @@ _VALIDATE_TIMEOUT = 10.0
 # Timeout (seconds) for each one-shot ``/cmd`` getter HTTP request.
 _GETTER_TIMEOUT = 10.0
 
-# How often ``get_stats`` is re-fetched over HTTP while connected, so the hub's
-# throughput stays live without depending on the streaming socket.
-_STATS_REFRESH_INTERVAL = timedelta(seconds=60)
+# How often ``get_meta`` + ``get_stats`` are re-fetched over HTTP while
+# connected, so the hub's SDR config and throughput stay live without depending
+# on the streaming socket. Re-polling meta (not only on connect / right after a
+# write) lets the "actual" SDR sensors converge to the server's truth within this
+# window even when a value changes outside a Home Assistant write or a single
+# post-write read-back raced the SDR retune.
+_REFRESH_INTERVAL = timedelta(seconds=60)
 
 # Identity keys (besides ``model``) that mark a frame as a decoded-device event.
 # Kept in sync with normalizer.IDENTITY_KEYS.
@@ -226,7 +230,7 @@ class Rtl433Coordinator:
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._watchdog_unsub: Callable[[], None] | None = None
-        self._stats_unsub: Callable[[], None] | None = None
+        self._refresh_unsub: Callable[[], None] | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
 
     @property
@@ -256,11 +260,11 @@ class Rtl433Coordinator:
             _WATCHDOG_INTERVAL,
             name=f"rtl_433 watchdog {self.entry.entry_id}",
         )
-        self._stats_unsub = async_track_time_interval(
+        self._refresh_unsub = async_track_time_interval(
             self.hass,
-            self._async_stats_tick,
-            _STATS_REFRESH_INTERVAL,
-            name=f"rtl_433 stats {self.entry.entry_id}",
+            self._async_refresh_tick,
+            _REFRESH_INTERVAL,
+            name=f"rtl_433 refresh {self.entry.entry_id}",
         )
         LOGGER.debug("rtl_433 coordinator started for %s", self.ws_url)
 
@@ -285,9 +289,9 @@ class Rtl433Coordinator:
             self._watchdog_unsub()
             self._watchdog_unsub = None
 
-        if self._stats_unsub is not None:
-            self._stats_unsub()
-            self._stats_unsub = None
+        if self._refresh_unsub is not None:
+            self._refresh_unsub()
+            self._refresh_unsub = None
 
         if self._ws is not None and not self._ws.closed:
             await self._ws.close()
@@ -486,9 +490,16 @@ class Rtl433Coordinator:
             self.stats = stats
             self._emit_hub_update()
 
-    async def _async_stats_tick(self, _now: datetime) -> None:
-        """Re-fetch ``get_stats`` on the interval, only while connected."""
+    async def _async_refresh_tick(self, _now: datetime) -> None:
+        """Re-fetch meta + stats on the interval, only while connected.
+
+        Refreshing meta here (not just on connect / right after a write) lets the
+        hub's "actual" SDR sensors converge to the server's current values within
+        the interval, even when a setting changes outside a Home Assistant write
+        or a single post-write read-back raced the SDR retune.
+        """
         if self.connected:
+            await self._refresh_meta()
             await self._refresh_stats()
 
     # ------------------------------------------------------------------ #
