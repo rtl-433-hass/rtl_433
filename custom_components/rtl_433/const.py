@@ -23,6 +23,9 @@ PLATFORMS: Final[list[Platform]] = [
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
     Platform.EVENT,
+    Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SWITCH,
 ]
 
 # --- Config-entry "type" discriminator -------------------------------------

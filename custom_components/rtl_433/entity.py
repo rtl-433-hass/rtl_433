@@ -60,6 +60,7 @@ from .mapping import FieldDescriptor, lookup
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
     from .normalizer import NormalizedEvent
+    from .sdr_settings import SdrSetting
 
 
 def _resolve_entity_category(value: str | None) -> EntityCategory | None:
@@ -253,6 +254,38 @@ class Rtl433HubEntity(Entity):
     def _handle_hub_update(self) -> None:
         """Re-read hub state and write the entity state."""
         self.async_write_ha_state()
+
+
+class Rtl433HubControl(Rtl433HubEntity):
+    """Shared base for the managed SDR control entities on the hub device.
+
+    The ``number`` / ``select`` / ``switch`` control platforms each subclass this
+    (alongside the matching HA entity mixin) so the four concerns common to every
+    control live in one place: attachment to the hub device (inherited from
+    :class:`Rtl433HubEntity`), the :data:`EntityCategory.CONFIG` category, the
+    stable unique_id ``f"{hub_entry_id}:hub:{object_suffix}"``, and the
+    device-relative entity name — all sourced from the field's
+    :class:`~custom_components.rtl_433.sdr_settings.SdrSetting`.
+
+    Read-back/repaint is inherited too: :class:`Rtl433HubEntity` subscribes to
+    ``signal_hub_update`` and its ``_handle_hub_update`` calls
+    ``async_write_ha_state``, so after a write the coordinator's post-read-back
+    ``signal_hub_update`` repaints the control with the server's actual value.
+    """
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: Rtl433Coordinator,
+        hub_entry_id: str,
+        setting: SdrSetting,
+    ) -> None:
+        """Attach to the hub device and adopt the setting's identity/name."""
+        super().__init__(coordinator, hub_entry_id)
+        self._setting = setting
+        self._attr_unique_id = f"{hub_entry_id}:hub:{setting.object_suffix}"
+        self._attr_name = setting.name
 
 
 # --------------------------------------------------------------------------- #
