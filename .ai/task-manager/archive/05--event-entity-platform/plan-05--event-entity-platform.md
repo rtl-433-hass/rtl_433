@@ -527,3 +527,71 @@ After Phase 2, run the full suite (`uv run pytest tests/`) and
   corrected restore mechanism (`async_internal_added_to_hass`), and the
   no-`__init__`-replay rule. Updated the mermaid runtime flow, the clarifications
   table, success criteria (now 8), and self-validation accordingly.
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-05-26
+
+### Results
+
+The `event` entity platform is implemented, tested, and documented across two
+phases (4 tasks). Deliverables:
+
+- **`const.py`** — `Platform.EVENT` is forwarded for the hub entry; new
+  `DEVICE_EVENT_TYPES` devices-map sub-key (`{field_key: sorted list[str]}`).
+- **`entity.py`** — new `async_upsert_event_types` idempotent union-write helper
+  (writes only when the per-field type set grows); `async_upsert_device`
+  unchanged.
+- **`event.py`** (new) — thin platform wrapper with
+  `Rtl433Event(Rtl433Entity, EventEntity)`. Fires one HA event per genuine
+  transmission with `str(value)` as the `event_type` and no extra attributes;
+  auto-populates and persists `event_types`; dedupes the watchdog re-dispatch by
+  **object identity** (a real repeat is a fresh `NormalizedEvent` and still
+  fires); always available; no construction-time replay (HA restores the last
+  displayed event).
+- **`device_library/events.yaml`** (new) — three representative `platform: event`
+  mappings, one per `EventDeviceClass`: `button` → `button` (multi-value),
+  `motion` → `motion` (single-value PIR), and `secret_knock` → `doorbell` (the
+  Honeywell ActivLink wireless-doorbell field). Each is a real rtl_433 field that
+  was neither mapped nor skipped.
+- **Tests** — 3 schema tests (`test_mapping.py`) + 5 lifecycle tests
+  (`test_lifecycle.py`) covering value-as-type firing with `event_types` growth
+  and persistence, single-value momentary firing, rebuild-from-persisted types,
+  always-available + no-double-fire on the watchdog tick, and last-fire restore
+  across reload. Full suite: **64 passed** (up from 56).
+- **Docs** — `docs/device-library.md` (event platform + schema + three
+  examples), `README.md` (event among produced entity types), `AGENTS.md`
+  (value-as-type/auto-populate, `DEVICE_EVENT_TYPES` persistence,
+  always-available, identity-based watchdog dedupe). `WEBSOCKET_API.md` reviewed
+  and intentionally unchanged.
+
+All 8 primary success criteria are met. Validation gates: `uv run pytest tests/`
+green (64 passed); `ruff check` / `ruff format` clean; full `pre-commit run
+--all-files` green.
+
+### Noteworthy Events
+
+- **No loader change was required.** `mapping.py` is permissive about the
+  `platform` string and tolerates the `device_class` value, so `platform: event`
+  descriptors flow through `lookup` unchanged — the "schema/loader support" layer
+  collapsed into shipping `events.yaml`, and the implementation task focused on
+  the entity/persistence/wiring instead.
+- **Doorbell field choice.** No rtl_433 field is literally named `doorbell`. The
+  example uses `secret_knock` from the Honeywell ActivLink wireless-doorbell
+  decoder (`merbanan/rtl_433` `honeywell_wdb.c`), a real momentary doorbell-press
+  field, mapped with `device_class: doorbell`.
+- **Minor implementation deviation.** The unused `EventDeviceClass` import in the
+  task's `event.py` sketch was dropped (ruff F401); `_attr_device_class` is set
+  from the descriptor's plain string, which HA accepts. No behavior change.
+- **Test timestamp nuance.** HA's `EventEntity` rounds the fire timestamp to
+  milliseconds, so the single-value momentary test advances the frozen clock 5 s
+  between transmissions to make "fired again" robust. The watchdog re-dispatch
+  behaved exactly as designed (same cached object → identity dedupe suppressed
+  the re-fire); no production bugs surfaced.
+
+### Necessary follow-ups
+
+- None required for this plan. A future optional value-to-type mapping attribute
+  could make integer-coded event types friendlier (noted in the plan as an
+  accepted, documented limitation), but it is out of scope and not needed now.
