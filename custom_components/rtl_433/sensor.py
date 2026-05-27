@@ -254,16 +254,23 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
         suffix="ook_frames",
         name="OOK frames",
         value=lambda c: _frames(c, "count"),
+        # Cumulative since the server started; resets when it restarts, which
+        # TOTAL_INCREASING tolerates (same shape as decoded events).
+        state_class=SensorStateClass.TOTAL_INCREASING,
     ),
     HubSensorDesc(
         suffix="fsk_frames",
         name="FSK frames",
         value=lambda c: _frames(c, "fsk"),
+        state_class=SensorStateClass.TOTAL_INCREASING,
     ),
     HubSensorDesc(
         suffix="enabled_decoders",
         name="Enabled decoders",
         value=lambda c: c.stats.get("enabled"),
+        # A current count of enabled decoders (a gauge that moves up/down as
+        # decoders are toggled), not a running total -> MEASUREMENT.
+        state_class=SensorStateClass.MEASUREMENT,
     ),
 )
 

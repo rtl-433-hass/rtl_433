@@ -37,6 +37,7 @@ from custom_components.rtl_433.const import (
     CONF_MANAGE_SETTINGS,
     DOMAIN,
     sdr_store_key,
+    signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.sdr_settings import (
@@ -47,7 +48,9 @@ from custom_components.rtl_433.sdr_settings import (
     KEY_PPM_ERROR,
     KEY_SAMPLE_RATE,
 )
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
@@ -383,6 +386,39 @@ async def test_controls_present_and_config_category_when_managed(
         )
         assert eid is not None, (platform, suffix)
         assert ent_reg.async_get(eid).entity_category is EntityCategory.CONFIG
+
+
+async def test_center_and_hop_availability_track_frequencies(hass, hub_entry_builder):
+    """Center frequency and hop interval availability track the hop mode.
+
+    Single frequency: center frequency is controllable, hop interval is inert
+    (unavailable). Hopping (>1 frequency): hop interval applies, while pinning a
+    single center frequency would break hopping, so that control is hidden.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)  # managed by default
+    coordinator = hass.data[DOMAIN][hub.entry_id]
+    ent_reg = er.async_get(hass)
+
+    def num_state(suffix):
+        eid = ent_reg.async_get_entity_id(
+            "number", DOMAIN, f"{hub.entry_id}:hub:{suffix}"
+        )
+        assert eid is not None, suffix
+        return hass.states.get(eid).state
+
+    # Single frequency -> center frequency available, hop interval hidden.
+    coordinator.meta = dict(_META_SINGLE)
+    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    await hass.async_block_till_done()
+    assert num_state("center_frequency") != STATE_UNAVAILABLE
+    assert num_state("hop_interval") == STATE_UNAVAILABLE
+
+    # Hopping -> hop interval available, center frequency hidden.
+    coordinator.meta = dict(_META_HOPPING)
+    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    await hass.async_block_till_done()
+    assert num_state("hop_interval") != STATE_UNAVAILABLE
+    assert num_state("center_frequency") == STATE_UNAVAILABLE
 
 
 async def test_select_entity_writes_convert_int_command(

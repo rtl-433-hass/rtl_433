@@ -95,6 +95,35 @@ def _always(_meta: dict[str, Any]) -> bool:
     return True
 
 
+def _frequency_count(meta: dict[str, Any]) -> int | None:
+    """Number of configured frequencies, or None when unknown (pre-connect)."""
+    freqs = meta.get("frequencies")
+    return len(freqs) if isinstance(freqs, list) else None
+
+
+def _available_when_not_hopping(meta: dict[str, Any]) -> bool:
+    """Center frequency is meaningful only with a single configured frequency.
+
+    Under hop mode (more than one frequency) the API cannot represent the hop
+    list and setting a single ``center_frequency`` would collapse hopping, so the
+    control is hidden. Unknown frequency count (before the first connect) defaults
+    to available.
+    """
+    count = _frequency_count(meta)
+    return count is None or count <= 1
+
+
+def _available_when_hopping(meta: dict[str, Any]) -> bool:
+    """Hop interval only takes effect when more than one frequency is configured.
+
+    With a single frequency there is nothing to hop between, so the control is
+    hidden. Unknown frequency count (before the first connect) defaults to
+    available.
+    """
+    count = _frequency_count(meta)
+    return count is None or count > 1
+
+
 @dataclass(frozen=True, kw_only=True)
 class SdrSetting:
     """One controllable SDR field, described once for all consumers.
@@ -104,7 +133,11 @@ class SdrSetting:
     the current value from ``coordinator.meta``; ``to_command`` maps a desired
     Python value to the value/arg actually sent on ``/cmd`` (carried as ``val``
     when ``arg_kind == "val"``, else as ``arg``). ``capability`` gates whether the
-    field is offered for a given meta (today always ``True``).
+    field is offered for a given meta (today always ``True``). ``available`` is a
+    runtime-state gate read on every ``signal_hub_update`` (vs ``capability``,
+    evaluated once at setup): it decides whether the *created* control entity
+    reports as available for the current ``meta`` — used to hide ``hop_interval``
+    when the server is not hopping and ``center_frequency`` when it is.
     """
 
     # Identity / contract.
@@ -133,6 +166,8 @@ class SdrSetting:
 
     # Capability gate (today always True; future: per-server capability).
     capability: Callable[[dict[str, Any]], bool] = field(default=_always)
+    # Runtime availability gate (always available unless a field overrides it).
+    available: Callable[[dict[str, Any]], bool] = field(default=_always)
 
 
 # --------------------------------------------------------------------------- #
@@ -222,6 +257,9 @@ SDR_SETTINGS: tuple[SdrSetting, ...] = (
         native_unit=UnitOfFrequency.HERTZ,
         mode=NumberMode.BOX,
         device_class=NumberDeviceClass.FREQUENCY,
+        # Hidden under hop mode: a single value cannot represent the hop list and
+        # setting it would collapse hopping (also why adoption leaves it unmanaged).
+        available=_available_when_not_hopping,
     ),
     SdrSetting(
         key=KEY_SAMPLE_RATE,
@@ -310,6 +348,9 @@ SDR_SETTINGS: tuple[SdrSetting, ...] = (
         native_step=1,
         native_unit="s",
         mode=NumberMode.BOX,
+        # Only meaningful with more than one configured frequency; hidden when the
+        # server is not hopping (a single frequency has nothing to hop between).
+        available=_available_when_hopping,
     ),
 )
 

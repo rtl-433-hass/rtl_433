@@ -215,14 +215,17 @@ By default a new hub adopts and manages the receiver's SDR settings. With
 **Manage rtl_433 settings from Home Assistant** on, the hub gains a set of
 **controls** (under the hub device, in the config-entity category):
 
-- **Center frequency** (number, Hz)
+- **Center frequency** (number, Hz) — shown only when the receiver uses a
+  **single** frequency (see the hopping note below).
 - **Sample rate** (number, Hz)
 - **Frequency correction** (number, ppm)
 - **Gain** (number, dB) paired with an **Auto gain** switch — with Auto gain
   **on**, gain is set to automatic and the dB value is ignored; with it **off**,
   the **Gain** number's value is sent.
 - **Conversion mode** (select: `native` / `si` / `customary`)
-- **Hop interval** (number, seconds; `0` disables hopping)
+- **Hop interval** (number, seconds) — the dwell time per frequency, so it
+  applies only when the receiver hops between **multiple** frequencies; with a
+  single frequency there is nothing to hop between and the control is hidden.
 
 What "managed" means:
 
@@ -251,7 +254,10 @@ and want Home Assistant to pick up those values, do this dance:
   reverse proxy that hides `/cmd`, commands cannot be sent.
 - **Hopping setups** (more than one configured frequency) keep **center
   frequency unmanaged**, so Home Assistant never pins a hopping receiver to a
-  single frequency.
+  single frequency — and the **Center frequency** control is hidden
+  (unavailable) while the **Hop interval** control becomes available. With a
+  single frequency it is the reverse. The frequency *list* itself can only be
+  set in the rtl_433 config; the API has no command for it.
 - **Multi-stage gain strings** are not supported by the single gain control —
   manage those through the rtl_433 config (or turn the toggle off).
 
