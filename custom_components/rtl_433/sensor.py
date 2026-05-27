@@ -268,6 +268,15 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
 )
 
 
+# SDR sensors whose concept is folded into a Plan 6 control in managed mode; their
+# diagnostic sensor is suppressed so each concept has exactly one entity. Center
+# frequency is intentionally NOT folded (its actual can diverge from the desired
+# value under hopping), and the server-stats sensors are never folded.
+_FOLDED_HUB_SENSOR_SUFFIXES = frozenset(
+    {"sample_rate", "ppm_error", "gain", "conversion_mode", "hop_interval"}
+)
+
+
 class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
     """A diagnostic sensor on the hub device, driven by a :class:`HubSensorDesc`.
 
@@ -322,8 +331,11 @@ async def async_setup_entry(
     Registers the hub-level diagnostic sensors and then the per-device sensors.
     """
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    managed = coordinator.manage_settings
     async_add_entities(
-        Rtl433HubSensor(coordinator, entry.entry_id, desc) for desc in HUB_SENSORS
+        Rtl433HubSensor(coordinator, entry.entry_id, desc)
+        for desc in HUB_SENSORS
+        if not (managed and desc.suffix in _FOLDED_HUB_SENSOR_SUFFIXES)
     )
     await async_setup_hub_platform(
         hass,

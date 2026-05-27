@@ -308,11 +308,13 @@ No circular dependencies; the graph is acyclic.
 **Parallel Tasks:**
 - ✔️ Task 002: Coordinator desired-state `Store`, `set_sdr`, adoption, reconnect enforcement, serialization lock (depends on: 001)
 
-### Phase 3: Flow, control entities, and sensor coexistence
+### ✅ Phase 3: Flow, control entities, and sensor coexistence
 **Parallel Tasks:**
-- Task 003: Management toggle in config/options flow + translations + reload-on-change listener + wiring (depends on: 001, 002)
-- Task 004: `number`/`select`/`switch` control platforms + `PLATFORMS` update (depends on: 001, 002)
-- Task 005: Suppress the five folded Plan 3 hub sensors in managed mode (depends on: 002)
+- ✔️ Task 003: Management toggle in config/options flow + translations + reload-on-change listener + wiring (depends on: 001, 002)
+- ✔️ Task 004: `number`/`select`/`switch` control platforms + `PLATFORMS` update (depends on: 001, 002)
+- ✔️ Task 005: Suppress the five folded Plan 3 hub sensors in managed mode (depends on: 002)
+
+> Phase-3 boundary note: one pre-existing Plan 3 test (`tests/test_lifecycle.py::test_hub_diagnostic_sensors`) now fails because the default test setup runs in managed mode where the five folded SDR sensors are intentionally suppressed. This is the planned Task 5 → Task 6 coordination point; Task 006 updates the test to cover managed (suppressed) and unmanaged (all six present) modes. Lint is clean.
 
 ### Phase 4: Verification and documentation
 **Parallel Tasks:**

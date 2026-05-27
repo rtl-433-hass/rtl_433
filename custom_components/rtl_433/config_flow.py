@@ -46,10 +46,12 @@ from .const import (
     CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
     CONF_HOST,
+    CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
     DEFAULT_AVAILABILITY_TIMEOUT,
+    DEFAULT_MANAGE_SETTINGS,
     DEFAULT_PATH,
     DEFAULT_PORT,
     DEVICE_TIMEOUT_OVERRIDE,
@@ -75,6 +77,7 @@ STEP_USER_SCHEMA = vol.Schema(
         vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
         vol.Required(CONF_PATH, default=DEFAULT_PATH): str,
         vol.Optional(CONF_SECURE, default=False): bool,
+        vol.Optional(CONF_MANAGE_SETTINGS, default=DEFAULT_MANAGE_SETTINGS): bool,
     }
 )
 
@@ -98,6 +101,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             port: int = user_input[CONF_PORT]
             path: str = user_input[CONF_PATH]
             secure: bool = user_input[CONF_SECURE]
+            manage_settings: bool = user_input[CONF_MANAGE_SETTINGS]
 
             try:
                 await Rtl433Coordinator.validate_connection(
@@ -115,6 +119,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_PORT: port,
                         CONF_PATH: path,
                         CONF_SECURE: secure,
+                        CONF_MANAGE_SETTINGS: manage_settings,
                     },
                 )
 
@@ -167,6 +172,10 @@ class Rtl433OptionsFlow(OptionsFlow):
             CONF_AVAILABILITY_TIMEOUT,
             entry.data.get(CONF_AVAILABILITY_TIMEOUT, DEFAULT_AVAILABILITY_TIMEOUT),
         )
+        manage_default = entry.options.get(
+            CONF_MANAGE_SETTINGS,
+            entry.data.get(CONF_MANAGE_SETTINGS, DEFAULT_MANAGE_SETTINGS),
+        )
 
         schema = vol.Schema(
             {
@@ -174,6 +183,7 @@ class Rtl433OptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_AVAILABILITY_TIMEOUT, default=timeout_default
                 ): vol.All(int, vol.Range(min=1)),
+                vol.Required(CONF_MANAGE_SETTINGS, default=manage_default): bool,
             }
         )
         return self.async_show_form(step_id="hub", data_schema=schema)

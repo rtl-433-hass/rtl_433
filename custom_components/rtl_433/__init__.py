@@ -38,11 +38,13 @@ from .const import (
     CONF_ENTRY_TYPE,
     CONF_HOST,
     CONF_HUB_ENTRY_ID,
+    CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
     DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
+    DEFAULT_MANAGE_SETTINGS,
     DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
@@ -112,6 +114,16 @@ def _hub_availability_timeout(entry: ConfigEntry) -> int:
         entry.options.get(
             CONF_AVAILABILITY_TIMEOUT,
             entry.data.get(CONF_AVAILABILITY_TIMEOUT, DEFAULT_AVAILABILITY_TIMEOUT),
+        )
+    )
+
+
+def _hub_manage_settings(entry: ConfigEntry) -> bool:
+    """Resolve the hub's manage-settings toggle (options > data > default)."""
+    return bool(
+        entry.options.get(
+            CONF_MANAGE_SETTINGS,
+            entry.data.get(CONF_MANAGE_SETTINGS, DEFAULT_MANAGE_SETTINGS),
         )
     )
 
@@ -196,6 +208,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         path=entry.data[CONF_PATH],
         secure=_hub_secure(entry),
         discovery_enabled=_hub_discovery_enabled(entry),
+        manage_settings=_hub_manage_settings(entry),
         availability_timeout=_hub_availability_timeout(entry),
         skip_keys=skip_keys,
     )
@@ -219,15 +232,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Push changed hub options into the running coordinator.
 
-    Discovery-toggle and availability-timeout changes are applied live (the
-    coordinator reads ``discovery_enabled`` / ``availability_timeout`` on every
-    event and watchdog tick). No reload is required for these, so we avoid the
-    disruption of tearing the socket down.
+    The manage-settings toggle changes the entity set (the SDR control entities
+    appear / disappear) and the coordinator's adoption/enforcement behaviour, so
+    a change there requires a full reload to rebuild everything. The running
+    coordinator holds the *previous* effective value as
+    ``coordinator.manage_settings``; comparing it against the new effective value
+    detects the change without persisting extra bookkeeping.
+
+    Discovery-toggle and availability-timeout changes are applied live instead
+    (the coordinator reads ``discovery_enabled`` / ``availability_timeout`` on
+    every event and watchdog tick), so no reload is required for those and we
+    avoid the disruption of tearing the socket down.
     """
     coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
         entry.entry_id
     )
     if coordinator is None:
+        return
+
+    new_manage = _hub_manage_settings(entry)
+    if new_manage != coordinator.manage_settings:
+        # The entity set changes (SDR controls appear / disappear) and the
+        # coordinator's adoption/enforcement flips, so reload to rebuild.
+        await hass.config_entries.async_reload(entry.entry_id)
         return
 
     coordinator.discovery_enabled = _hub_discovery_enabled(entry)

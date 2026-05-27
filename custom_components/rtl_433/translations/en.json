@@ -8,13 +8,15 @@
           "host": "Host",
           "port": "Port",
           "path": "WebSocket path",
-          "secure": "Secure (use wss://)"
+          "secure": "Secure (use wss://)",
+          "manage_settings": "Manage rtl_433 settings from Home Assistant"
         },
         "data_description": {
           "host": "Hostname or IP address of the rtl_433 server.",
           "port": "TCP port of the rtl_433 HTTP server (default 8433).",
           "path": "WebSocket endpoint path on the server (default /ws).",
-          "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy)."
+          "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy).",
+          "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched."
         }
       }
     },
@@ -40,11 +42,13 @@
         "description": "Configure new-device discovery and the default availability timeout for this rtl_433 server.",
         "data": {
           "discovery_enabled": "Discover new devices",
-          "availability_timeout": "Availability timeout (seconds)"
+          "availability_timeout": "Availability timeout (seconds)",
+          "manage_settings": "Manage rtl_433 settings from Home Assistant"
         },
         "data_description": {
           "discovery_enabled": "When on, newly observed devices on this server are added automatically as nested devices.",
-          "availability_timeout": "Mark a device unavailable after this many seconds without an event."
+          "availability_timeout": "Mark a device unavailable after this many seconds without an event.",
+          "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched."
         }
       },
       "device": {
