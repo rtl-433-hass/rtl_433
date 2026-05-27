@@ -170,13 +170,18 @@ def _read_gain_auto(meta: dict[str, Any]) -> bool | None:
     return gain == ""
 
 
-def _read_conversion_mode(meta: dict[str, Any]) -> str | None:
-    """Read the conversion mode as a label (maps the meta integer to a label)."""
+def _read_conversion_mode(meta: dict[str, Any]) -> int | None:
+    """Read the conversion mode as the integer ``convert`` ``val``.
+
+    The desired value is stored as the integer the ``convert`` command takes
+    (and that ``meta`` natively reports); only the Select entity maps it to/from
+    a human label at its UI boundary.
+    """
     raw = meta.get("conversion_mode")
     if raw is None:
         return None
     try:
-        return conversion_val_to_label(int(raw))
+        return int(raw)
     except (TypeError, ValueError):
         return None
 
@@ -192,11 +197,6 @@ def _read_hop_interval(meta: dict[str, Any]) -> Any:
 def _int_command(value: Any) -> int:
     """Coerce a desired numeric value to the integer sent on ``val``."""
     return int(value)
-
-
-def _conversion_to_command(label: str) -> int:
-    """Map a desired conversion-mode label to the ``convert`` command ``val``."""
-    return conversion_label_to_val(label)
 
 
 # --------------------------------------------------------------------------- #
@@ -292,7 +292,7 @@ SDR_SETTINGS: tuple[SdrSetting, ...] = (
         command="convert",
         arg_kind="val",
         read=_read_conversion_mode,
-        to_command=_conversion_to_command,
+        to_command=_int_command,
         options=CONVERSION_MODES,
     ),
     SdrSetting(

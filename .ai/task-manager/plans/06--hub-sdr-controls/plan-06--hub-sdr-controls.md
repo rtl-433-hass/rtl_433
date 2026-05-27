@@ -316,10 +316,12 @@ No circular dependencies; the graph is acyclic.
 
 > Phase-3 boundary note: one pre-existing Plan 3 test (`tests/test_lifecycle.py::test_hub_diagnostic_sensors`) now fails because the default test setup runs in managed mode where the five folded SDR sensors are intentionally suppressed. This is the planned Task 5 → Task 6 coordination point; Task 006 updates the test to cover managed (suppressed) and unmanaged (all six present) modes. Lint is clean.
 
-### Phase 4: Verification and documentation
+### ✅ Phase 4: Verification and documentation
 **Parallel Tasks:**
-- Task 006: Tests — write path, adoption (normal/hop/`/cmd`-down), enforcement replay, Store persistence, toggle gating + reload, failure isolation/serialization (depends on: 002, 003, 004, 005)
-- Task 007: Documentation — README.md + AGENTS.md (depends on: 002, 003, 004, 005)
+- ✔️ Task 006: Tests — write path, adoption (normal/hop/`/cmd`-down), enforcement replay, Store persistence, toggle gating + reload, failure isolation/serialization (depends on: 002, 003, 004, 005)
+- ✔️ Task 007: Documentation — README.md + AGENTS.md (depends on: 002, 003, 004, 005)
+
+> Phase-4 integration fix: writing tests exposed a cross-task inconsistency in the `conversion_mode` representation — Task 4's Select entity stored the desired value as an **int** while Task 1's registry `read`/`to_command` and Task 2's adoption treated it as a **label string**, so selecting an option through the real entity raised `ValueError`. Resolved by making the representation consistently **int-canonical** (`sdr_settings._read_conversion_mode` returns the integer `convert` val and `to_command` is the shared int coercion; `select.py` maps the int to/from a label only at its UI boundary). Added `test_select_entity_writes_convert_int_command` to drive the previously-broken path end-to-end. Full suite: 82 passed; ruff + ruff-format clean.
 
 ### Post-phase Actions
 After each phase: run `uv run ruff check custom_components/rtl_433`, then create a conventional-commit for the phase. Mark tasks `completed` and the phase ✅ in this blueprint before advancing.

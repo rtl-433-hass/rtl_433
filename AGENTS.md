@@ -160,6 +160,95 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   registry device `(DOMAIN, f"{entry_id}:unknown")`. Safe on every setup; the
   classifier above prevents recreation.
 
+## Hub SDR controls (HA-managed settings)
+
+Durable contracts for the optional HA-managed SDR controls (`sdr_settings.py`,
+`coordinator/base.py`, `__init__.py`, the `number`/`select`/`switch` platforms).
+End-user docs live in
+[README](README.md#managing-sdr-settings-from-home-assistant) — keep this
+contributor-facing.
+
+- **Settings-registry contract** (`sdr_settings.py`, the single source of truth
+  for the control set; import-disjoint like `mapping.py`). `SDR_SETTINGS` is the
+  authoritative list; each `SdrSetting` is pure data plus tiny callables so the
+  coordinator and the platforms can iterate it **without importing each other**.
+  Six fields (gain is a **pair** sharing one command — seven registry entries):
+  - `center_frequency` → number, command `center_frequency`, `val` = Hz; read
+    `meta["center_frequency"]`.
+  - `sample_rate` → number, command `sample_rate`, `val` = Hz; read
+    `meta["samp_rate"]` (the meta key differs from the registry key).
+  - `ppm_error` → number, command `ppm_error`, `val` = int; read
+    `meta["ppm_error"]`.
+  - `gain` → number (dB), command `gain`, `arg` = dB string; read parsed from
+    the gain string.
+  - `gain_auto` → switch, command `gain`, `arg`; read `gain == ""`. **The gain
+    pair shares the one `gain` command**: the coordinator stores two desired
+    keys (`gain` dB float + `gain_auto` bool) but composes a single `arg` via
+    `gain_command_arg()` (empty ⇒ auto, else `f"{db:g}"`) and **emits `gain`
+    exactly once** per write/replay.
+  - `conversion_mode` → select (`native`/`si`/`customary`), command `convert`,
+    `val` = int. The option **index is the `val`** — tuple order is load-bearing
+    (`native`→0, `si`→1, `customary`→2; `conversion_label_to_val` /
+    `conversion_val_to_label`).
+  - `hop_interval` → number, command `hop_interval`, `val` = seconds; read
+    `hop_times[0]`.
+  Commands and arg/val kinds follow [WEBSOCKET_API.md](WEBSOCKET_API.md)
+  exactly — **do not invent fields**. Number bounds are deliberately wide
+  (`NumberMode.BOX`); the server clamps/rejects, HA is not the authority on
+  ranges. Each entry carries a **`capability` gate** (`Callable[[meta], bool]`,
+  today always `_always`) so future per-server capability advertisement can
+  hide unsupported fields without touching consumers.
+- **Adoption + full enforcement on reconnect** (`coordinator/base.py`,
+  `_connect_loop`). When `manage_settings` is on: on first connect (when
+  `_desired` is empty) `_adopt_from_server()` seeds the desired state from
+  `self.meta`; then `_enforce_all()` **replays every managed field on every
+  (re)connect**, so values survive an rtl_433 restart. Both run after
+  `_refresh_meta`, are wrapped so a failure can never kill the connect loop, and
+  every `/cmd` is best-effort.
+  - **Hop-mode guard:** adoption **skips `center_frequency` when
+    `len(frequencies) > 1`** so HA never pins a hopping receiver to one freq.
+  - **`/cmd`-down guard:** if `self.meta` is empty (getters failed / proxy hides
+    `/cmd`) adoption seeds **nothing** and leaves the Store empty — never raises.
+  - **Serialization lock:** all issuance (user write, reconnect replay,
+    read-back) goes through `_send_cmd` under `self._cmd_lock`, so a user write
+    and a reconnect replay can never interleave requests to the same server.
+    `arg` is sent **verbatim including the empty string** (the gain "auto"
+    sentinel), so the gain command always passes `arg` and never omits it.
+- **`Store` persistence (keyed by entry id, NOT `entry.options`).** Desired
+  state persists in a `homeassistant.helpers.storage.Store` keyed by
+  `sdr_store_key(entry_id)` (`const.py`, `SDR_STORE_VERSION`), as
+  `{"values": {...}, "managed": [...]}`. It is **deliberately not** stored in
+  `entry.options`: an options write churns the config entry (reloads), and a
+  desired-state value change must not. The public entity API is
+  `get_desired(field)`, `is_managed(field)`, `set_sdr(field, value)` (persist
+  first, then enforce if connected — a failed send **keeps** the desired value),
+  and `clear_desired_state()`.
+- **Management-toggle behavior** (`CONF_MANAGE_SETTINGS = "manage_settings"`,
+  `const.py`; default `DEFAULT_MANAGE_SETTINGS = True`). Offered on the initial
+  connection form **and** in hub options. ON ⇒ controls created, adopt + enforce
+  as above, and the five folded SDR/meta diagnostic **sensors** are replaced by
+  their controls (center-frequency keeps its actual sensor). OFF ⇒ no controls,
+  no commands; `async_load_desired_state` **wipes the Store on load**
+  (`async_remove`) so a later re-enable re-adopts from scratch, and all six Plan
+  3 read-only sensors remain.
+- **Reload-only-on-toggle-change listener** (`_async_update_listener`,
+  `__init__.py`). The listener compares the new effective `manage_settings`
+  against the running `coordinator.manage_settings` and **reloads the entry only
+  when the toggle changed** (the entity set + adopt/enforce behaviour flips);
+  discovery-toggle and timeout changes are applied live with no reload.
+- **HA is the authority; no re-adopt action — by design.** Once managed, HA
+  re-applies its stored values on reconnect and **overrides later direct edits**
+  to the rtl_433 config. There is deliberately **no re-adopt button/service**.
+  The **only** re-sync path is the toggle dance: **off → restart rtl_433 → on**
+  (the now-empty Store re-adopts the live config value on the next connect).
+  Document any change to this in the README in lockstep.
+- **Out of scope but anticipated** (the `capability` gate exists for these):
+  decoder enable/disable, device selection, and multi-frequency **hop lists** —
+  some unimplemented upstream. Multi-stage gain strings are likewise out of
+  scope for the single gain control. If implementing these, the cleaner path is
+  to have **upstream advertise capabilities** that the gate can consult, rather
+  than probing.
+
 ## Device-library YAML format (summary)
 
 Device support is data, not code: each rtl_433 JSON field name maps to one Home

@@ -125,6 +125,10 @@ Return the current value; no side effects.
 These call into the SDR driver and take effect on the running receiver.
 Each returns `{"result": "Ok"}` on success.
 
+> The Home Assistant integration exercises these live SDR control and the
+> configuration-setter commands below over `/cmd` for its HA-managed SDR
+> controls (see [AGENTS.md](AGENTS.md#hub-sdr-controls-ha-managed-settings)).
+
 | `cmd` | Argument | Effect |
 |-------|----------|--------|
 | `center_frequency` | `val` (Hz) | Retune center frequency |
