@@ -38,6 +38,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..const import (
@@ -45,10 +46,19 @@ from ..const import (
     DEFAULT_PATH,
     DEFAULT_PORT,
     LOGGER,
+    SDR_STORE_VERSION,
+    sdr_store_key,
     signal_device_update,
     signal_hub_update,
 )
 from ..normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent, normalize
+from ..sdr_settings import (
+    KEY_GAIN_AUTO,
+    KEY_GAIN_DB,
+    SDR_SETTINGS,
+    SDR_SETTINGS_BY_KEY,
+    gain_command_arg,
+)
 
 # Backoff bounds for the reconnect loop (seconds). Starts at 1s, doubles on
 # each consecutive failure, capped at 60s so the loop never spins hot.
@@ -110,6 +120,12 @@ class Rtl433Coordinator:
     Injectable attributes (wired by the integration setup in ``__init__.py``):
         ``skip_keys``: ``set[str]`` of keys excluded from measurement fields.
         ``discovery_enabled``: ``bool`` per-hub new-device discovery toggle.
+        ``manage_settings``: ``bool`` per-hub toggle for adopting + enforcing the
+            managed SDR settings. When ``True`` the coordinator adopts the
+            server's current settings on first connect, persists the desired
+            state to a ``Store``, and replays it on every reconnect; when
+            ``False`` the desired-state ``Store`` is wiped on load and the
+            receiver's settings are left untouched.
         ``new_device_callback``: ``Callable[[str, str], None] | None``.
         ``effective_timeout_resolver``: ``Callable[[str], int] | None``.
 
@@ -122,6 +138,15 @@ class Rtl433Coordinator:
         ``connected``: ``bool`` whether the socket is currently open.
         ``meta``: ``dict[str, Any]`` latest SDR/meta configuration (HTTP-sourced).
         ``stats``: ``dict[str, Any]`` latest server-stats payload (HTTP-sourced).
+
+    Managed-SDR desired state (restart-surviving, persisted to a ``Store`` keyed
+    by ``sdr_store_key(entry_id)``):
+        ``_desired``: ``dict[str, Any]`` desired value per managed registry key
+            (gain is two keys: ``gain`` dB float + ``gain_auto`` bool).
+        ``_managed``: ``set[str]`` registry keys Home Assistant is managing.
+        The public read API for the control entities is ``get_desired(field)``,
+        ``is_managed(field)``, plus ``set_sdr(field, value)`` to write and
+        ``clear_desired_state()`` to drop management.
     """
 
     def __init__(
@@ -134,6 +159,7 @@ class Rtl433Coordinator:
         path: str = DEFAULT_PATH,
         secure: bool = False,
         discovery_enabled: bool = True,
+        manage_settings: bool = True,
         availability_timeout: int = DEFAULT_AVAILABILITY_TIMEOUT,
         skip_keys: set[str] | frozenset[str] | None = None,
     ) -> None:
@@ -148,6 +174,9 @@ class Rtl433Coordinator:
 
         # --- Per-hub configuration (may be updated by the options flow) -------
         self.discovery_enabled = discovery_enabled
+        # Default ``True`` so every existing construction site (including tests
+        # and pre-Task-3 wiring) keeps adopting + enforcing the SDR settings.
+        self.manage_settings = manage_settings
         self.availability_timeout = availability_timeout
         self.skip_keys: set[str] = (
             set(skip_keys) if skip_keys is not None else set(DEFAULT_SKIP_KEYS)
@@ -178,6 +207,21 @@ class Rtl433Coordinator:
         self.meta: dict[str, Any] = {}
         self.stats: dict[str, Any] = {}
 
+        # --- Managed-SDR desired state (restart-surviving) -------------------
+        # ``_desired`` maps a registry key -> the desired value HA wants applied;
+        # ``_managed`` is the subset of registry keys HA is actively managing.
+        # Both are persisted to a per-hub ``Store`` keyed by ``entry_id`` so a
+        # value change never churns the config entry, and loaded once at start.
+        # All ``/cmd`` issuance (write path, enforcement replay, read-back) is
+        # serialized through ``_cmd_lock`` so a user write and a reconnect replay
+        # can never interleave requests to the same server.
+        self._desired: dict[str, Any] = {}
+        self._managed: set[str] = set()
+        self._cmd_lock = asyncio.Lock()
+        self._store: Store[dict[str, Any]] = Store(
+            hass, SDR_STORE_VERSION, sdr_store_key(entry.entry_id)
+        )
+
         # --- Internal lifecycle handles --------------------------------------
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
@@ -197,6 +241,9 @@ class Rtl433Coordinator:
         """Start the connect loop and the availability watchdog."""
         if self._task is not None:
             return
+        # Load the persisted desired state (or wipe it when management is off)
+        # before the connect loop can run adoption/enforcement against it.
+        await self.async_load_desired_state()
         self._stop_event.clear()
         self._task = self.entry.async_create_background_task(
             self.hass,
@@ -275,6 +322,21 @@ class Rtl433Coordinator:
                     # (e.g. behind a proxy) cannot break the connection.
                     await self._refresh_meta()
                     await self._refresh_stats()
+                    # Adopt the server's settings on first connect, then replay
+                    # the managed desired state on every (re)connect. Both are
+                    # best-effort and swallow their own ``/cmd`` errors, but wrap
+                    # here too so nothing can break the connection / event stream.
+                    if self.manage_settings:
+                        try:
+                            if not self._desired:
+                                await self._adopt_from_server()
+                            await self._enforce_all()
+                        except Exception as err:  # noqa: BLE001 - never kill loop
+                            LOGGER.debug(
+                                "rtl_433 SDR adopt/enforce failed for %s: %s",
+                                self.ws_url,
+                                err,
+                            )
                     await self._read_frames(ws)
             except asyncio.CancelledError:
                 raise
@@ -428,6 +490,195 @@ class Rtl433Coordinator:
         """Re-fetch ``get_stats`` on the interval, only while connected."""
         if self.connected:
             await self._refresh_stats()
+
+    # ------------------------------------------------------------------ #
+    # Managed SDR settings: desired-state Store, write path, adoption,    #
+    # and reconnect enforcement.                                          #
+    # ------------------------------------------------------------------ #
+    async def async_load_desired_state(self) -> None:
+        """Load the persisted desired state, or wipe it when management is off.
+
+        Called from :meth:`async_start` before the connect loop is created. When
+        ``manage_settings`` is ``False`` the Store is removed so a later re-enable
+        re-adopts the server's then-current settings from scratch; otherwise the
+        ``{"values": ..., "managed": [...]}`` payload is loaded into
+        ``self._desired`` / ``self._managed``.
+        """
+        if not self.manage_settings:
+            await self._store.async_remove()  # re-enable will re-adopt
+            self._desired, self._managed = {}, set()
+            return
+        data = await self._store.async_load() or {}
+        self._desired = dict(data.get("values", {}))
+        self._managed = set(data.get("managed", []))
+
+    async def _persist_desired(self) -> None:
+        """Persist the desired-state map + managed-set to the per-hub Store."""
+        await self._store.async_save(
+            {"values": self._desired, "managed": sorted(self._managed)}
+        )
+
+    async def _send_cmd(
+        self, command: str, *, val: int | None = None, arg: str | None = None
+    ) -> bool:
+        """Issue one setter ``/cmd`` over HTTP; return ``True`` on success.
+
+        Mirrors :meth:`_fetch_cmd` (shared session, server-root URL, never the WS
+        ``path``) but adds the ``val``/``arg`` query params and serializes the
+        send under ``_cmd_lock`` so a user write and a reconnect replay can never
+        interleave. ``val`` is stringified as an integer; ``arg`` is sent
+        verbatim — including the empty string, which is the gain "auto" sentinel
+        (so the gain command must always pass ``arg``, never omit it). Any
+        HTTP/parse error is caught, logged at debug, and returns ``False``.
+        Commands go only over ``/cmd`` — never the streaming WebSocket.
+        """
+        session = async_get_clientsession(self.hass)
+        url = _build_cmd_url(self.host, self.port, secure=self.secure)
+        params: dict[str, str] = {"cmd": command}
+        if val is not None:
+            params["val"] = str(int(val))
+        if arg is not None:
+            params["arg"] = arg
+        async with self._cmd_lock:
+            try:
+                async with session.get(
+                    url, params=params, timeout=_GETTER_TIMEOUT
+                ) as resp:
+                    resp.raise_for_status()
+                return True
+            except Exception as err:  # noqa: BLE001 - never kill the loop
+                LOGGER.debug("rtl_433 /cmd %s failed at %s: %s", command, url, err)
+                return False
+
+    def _command_args(self, key: str) -> tuple[str, int | None, str | None] | None:
+        """Build the ``(command, val, arg)`` to send for one managed field.
+
+        Returns ``None`` when the field has no desired value to send. Gain is two
+        desired keys (``gain`` dB + ``gain_auto`` bool) but one ``gain`` command,
+        so its ``arg`` is composed from the *combined* desired state via
+        :func:`gain_command_arg`; both gain keys resolve to the same command and
+        the caller is responsible for emitting it only once.
+        """
+        if key in (KEY_GAIN_DB, KEY_GAIN_AUTO):
+            arg = gain_command_arg(
+                self._desired.get(KEY_GAIN_DB),
+                bool(self._desired.get(KEY_GAIN_AUTO, False)),
+            )
+            return ("gain", None, arg)
+        setting = SDR_SETTINGS_BY_KEY.get(key)
+        if setting is None or key not in self._desired:
+            return None
+        sent = setting.to_command(self._desired[key])
+        if setting.arg_kind == "val":
+            return (setting.command, int(sent), None)
+        return (setting.command, None, str(sent))
+
+    async def set_sdr(self, field: str, value: Any) -> None:
+        """Write a desired SDR value: persist it, then enforce it if connected.
+
+        Updates ``self._desired[field]``, marks the field managed, and persists
+        the Store first so the intent survives a restart even if the live send
+        fails. If connected, the mapped setter command is issued (under the lock)
+        and ``self.meta`` is reconciled via a best-effort ``_refresh_meta``; a
+        ``/cmd`` failure is swallowed and **leaves the desired value intact**.
+        """
+        self._desired[field] = value
+        self._managed.add(field)
+        await self._persist_desired()
+        if self.connected:
+            await self._enforce_field(field)
+
+    async def _enforce_field(self, field: str) -> None:
+        """Send one managed field's command, then read it back (best effort)."""
+        args = self._command_args(field)
+        if args is None:
+            return
+        command, val, arg = args
+        await self._send_cmd(command, val=val, arg=arg)
+        # Reconcile self.meta from the server; swallow its own failures.
+        await self._refresh_meta()
+
+    async def _adopt_from_server(self) -> None:
+        """Seed the desired state from the server's current ``self.meta``.
+
+        Runs once (when ``_desired`` is empty) on first connect. If the getters
+        produced nothing (``self.meta`` empty / ``/cmd`` hidden behind a proxy)
+        we adopt nothing and leave the Store empty — the reachability repair on
+        the getter path already surfaces that; we never raise here. Guard: skip
+        ``center_frequency`` while the server is in hop mode
+        (``len(frequencies) > 1``) so HA does not pin a single frequency. The
+        gain pair is seeded explicitly: ``gain_auto`` from ``gain == ""`` and the
+        ``gain`` dB value parsed from the gain string when not auto.
+        """
+        meta = self.meta
+        if not meta:  # /cmd unreachable -> adopt nothing
+            return
+        hopping = len(meta.get("frequencies", []) or []) > 1
+        for setting in SDR_SETTINGS:
+            if setting.key in (KEY_GAIN_DB, KEY_GAIN_AUTO):
+                continue  # handled as a pair below
+            if setting.key == "center_frequency" and hopping:
+                continue
+            current = setting.read(meta)
+            if current is None:
+                continue
+            self._desired[setting.key] = current
+            self._managed.add(setting.key)
+
+        # Gain pair: only adopt when the server reported a gain string at all.
+        if "gain" in meta:
+            gain = meta["gain"]
+            auto = gain == ""
+            self._desired[KEY_GAIN_AUTO] = auto
+            self._managed.add(KEY_GAIN_AUTO)
+            if not auto:
+                try:
+                    self._desired[KEY_GAIN_DB] = float(gain)
+                    self._managed.add(KEY_GAIN_DB)
+                except (TypeError, ValueError):
+                    pass
+
+        await self._persist_desired()
+
+    async def _enforce_all(self) -> None:
+        """Replay every managed field's setter command (gain emitted once).
+
+        Best-effort: each send swallows its own ``/cmd`` errors and never raises,
+        so a reconnect replay cannot disturb the connect loop or the event
+        stream. The gain pair shares one ``gain`` command, so it is composed from
+        the combined desired values and emitted exactly once.
+        """
+        gain_managed = bool(self._managed & {KEY_GAIN_DB, KEY_GAIN_AUTO})
+        for key in sorted(self._managed):
+            if key in (KEY_GAIN_DB, KEY_GAIN_AUTO):
+                continue  # emitted once below
+            args = self._command_args(key)
+            if args is None:
+                continue
+            command, val, arg = args
+            await self._send_cmd(command, val=val, arg=arg)
+        if gain_managed:
+            arg = gain_command_arg(
+                self._desired.get(KEY_GAIN_DB),
+                bool(self._desired.get(KEY_GAIN_AUTO, False)),
+            )
+            await self._send_cmd("gain", arg=arg)
+
+    # ------------------------------------------------------------------ #
+    # Public read API for the control entities                           #
+    # ------------------------------------------------------------------ #
+    def get_desired(self, field: str) -> Any:
+        """Return the current desired value for a field (``None`` if unset)."""
+        return self._desired.get(field)
+
+    def is_managed(self, field: str) -> bool:
+        """Return whether Home Assistant is actively managing a field."""
+        return field in self._managed
+
+    async def clear_desired_state(self) -> None:
+        """Drop all desired state and remove the Store (management turned off)."""
+        self._desired, self._managed = {}, set()
+        await self._store.async_remove()
 
     # ------------------------------------------------------------------ #
     # Event handling                                                     #
