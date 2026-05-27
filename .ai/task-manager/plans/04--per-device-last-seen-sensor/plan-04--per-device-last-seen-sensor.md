@@ -365,10 +365,10 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 002: Add the `per_device_factory` hook to `async_setup_hub_platform` and create one Last-seen sensor per device in both setup paths (depends on: 001)
 
-### Phase 3: Verification & docs
+### ✅ Phase 3: Verification & docs
 **Parallel Tasks:**
-- Task 003: Integration tests for creation/value/restore-not-baseline/always-available/no-binary-sensor (depends on: 001, 002)
-- Task 004: README.md + AGENTS.md documentation (depends on: 001, 002)
+- ✔️ Task 003: Integration tests for creation/value/restore-not-baseline/always-available/no-binary-sensor (depends on: 001, 002)
+- ✔️ Task 004: README.md + AGENTS.md documentation (depends on: 001, 002)
 
 ### Post-phase Actions
 After each phase, run the `POST_PHASE.md` validation gate (`uv run pytest tests/`

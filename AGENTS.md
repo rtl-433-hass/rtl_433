@@ -45,6 +45,40 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   to `entry.options`) and a *Device settings* step (per-device timeout override,
   written into `entry.data["devices"]`).
 
+## Per-device "Last seen" sensor (synthetic, non-field-driven)
+
+The per-device **Last seen** sensor (`Rtl433LastSeenSensor`, `sensor.py`) is
+**synthetic** — it is *not* driven by a device-library field. Two invariants
+must survive any refactor of `async_setup_hub_platform` (`entity.py`) and of the
+base `async_added_to_hass` baseline:
+
+- **Created unconditionally, once per device, on the `sensor` platform only.**
+  It is built from a small synthetic `FieldDescriptor` (`LAST_SEEN_DESCRIPTOR`:
+  sentinel `field_key="__last_seen__"` that no rtl_433 event can carry,
+  `object_suffix="last_seen"`, `device_class=timestamp`, diagnostic,
+  `enabled_by_default=True`) and added via the **`per_device_factory` hook** of
+  `async_setup_hub_platform` (`async_setup_entry` passes
+  `per_device_factory=Rtl433LastSeenSensor`). The `binary_sensor` platform
+  passes **no** factory, so it creates none. The factory runs exactly once per
+  `device_key` across both the initial devices-map build and the new-device
+  handler (`_build_extra` / `extra_created`), and is passed as a callable so
+  `entity.py` never imports the platform modules.
+- **Holds its OWN `native_value`, never the base startup baseline.** The
+  sentinel `field_key` is never in `event.fields`, so `_apply_value` is a no-op
+  and the field-driven path never fires. The value is sourced from
+  `coordinator.last_seen[device_key]` **only when `coordinator.devices` has an
+  entry for that device** (a real event this session) — the presence of a
+  devices-map entry is what distinguishes a true timestamp from the base's
+  `async_added_to_hass` "baseline last_seen = now". Otherwise it restores the
+  prior value as a **tz-aware datetime** (`dt_util.parse_datetime`), and it
+  re-reads `coordinator.last_seen` on every dispatch (overridden
+  `_handle_dispatch`). If it ever adopted the baseline it would read "now" after
+  every restart.
+- **Always-available override.** It overrides `available` to be true whenever it
+  has a value, so it stays readable after the device falls silent (it ignores
+  the per-device availability timeout) and can drive "last_seen older than X"
+  staleness automations.
+
 ## WebSocket frames & hub observability
 
 Durable contracts for the coordinator's frame routing and the hub diagnostic
