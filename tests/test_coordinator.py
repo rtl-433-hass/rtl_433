@@ -360,3 +360,38 @@ def test_getter_failure_leaves_values_intact(hass, coordinator, aioclient_mock):
     assert coordinator.connected is True
     # No successful getter -> no hub-update emitted.
     dispatch.assert_not_called()
+
+
+def test_refresh_tick_refreshes_meta_and_stats_while_connected(
+    hass, coordinator, aioclient_mock
+):
+    """The periodic tick re-polls meta + stats so the actual sensors converge.
+
+    Without this, meta was only read on connect / right after a write, so a
+    change made on the server (or a post-write read-back that raced the retune)
+    left the hub's actual SDR sensors stale until the next reconnect.
+    """
+    _mock_cmd(aioclient_mock, gain="40", ppm=7)
+    coordinator.connected = True
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._async_refresh_tick(dt_util.utcnow()))
+
+    # Meta was re-polled (not just stats).
+    assert coordinator.meta["center_frequency"] == 433920000
+    assert coordinator.meta["gain"] == "40"
+    assert coordinator.meta["ppm_error"] == 7
+    assert coordinator.stats["frames"]["events"] == 9
+
+
+def test_refresh_tick_noop_while_disconnected(hass, coordinator, aioclient_mock):
+    """The tick issues no HTTP and changes nothing when not connected."""
+    _mock_cmd(aioclient_mock)
+    coordinator.connected = False
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._async_refresh_tick(dt_util.utcnow()))
+
+    assert coordinator.meta == {}
+    assert coordinator.stats == {}
+    assert aioclient_mock.mock_calls == []

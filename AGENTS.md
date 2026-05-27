@@ -139,9 +139,13 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   `get_gain` + `get_ppm_error` + `get_stats`. **Gain and ppm are absent from
   `get_meta`** — they come from `get_gain` (string; empty ⇒ `auto`) and
   `get_ppm_error` (int) respectively. **Hop interval = `hop_times[0]`.**
-  `_refresh_stats` re-polls `get_stats` on a fixed interval
-  (`_STATS_REFRESH_INTERVAL`, 60 s) while connected; `_refresh_meta` runs once
-  per (re)connect.
+  `_async_refresh_tick` re-polls **both** `_refresh_meta` and `_refresh_stats`
+  on a fixed interval (`_REFRESH_INTERVAL`, 60 s) while connected, on top of the
+  once-per-(re)connect refresh and the post-write read-back. Re-polling meta on
+  the interval is what lets the "actual" SDR sensors converge to the server's
+  current values within the window — a single post-write read-back can race the
+  SDR retune, so without the tick the actual sensor could stay stale until the
+  next reconnect.
 - **Verified Data Contracts** (do not invent fields — see
   [WEBSOCKET_API.md](WEBSOCKET_API.md)):
   - `get_meta` → `center_frequency`, `samp_rate`, `conversion_mode`,
