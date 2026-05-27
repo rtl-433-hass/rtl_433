@@ -48,6 +48,7 @@ from .const import (
     CONF_DEVICES,
     CONF_MODEL,
     DATA_LIBRARY,
+    DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DOMAIN,
     signal_device_update,
@@ -289,6 +290,36 @@ async def async_upsert_device(
         hass.config_entries.async_update_entry(
             entry, data={**entry.data, CONF_DEVICES: devices}
         )
+
+
+async def async_upsert_event_types(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    device_key: str,
+    field_key: str,
+    types: Iterable[str],
+) -> None:
+    """Union observed event types into the hub devices map, stored sorted.
+
+    Writes ``entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES][field_key]``
+    only when the stored set for that field actually grows (a no-op otherwise),
+    mirroring :func:`async_upsert_device`'s idempotent union-write so concurrent
+    writes converge. Tolerates a record with no ``DEVICE_EVENT_TYPES`` key yet
+    (treated as ``{}``) and deep-copies the per-field dict so the stored data is
+    never mutated in place.
+    """
+    devices = {k: dict(v) for k, v in entry.data.get(CONF_DEVICES, {}).items()}
+    rec = devices.setdefault(device_key, {CONF_MODEL: "", DEVICE_FIELDS: []})
+    by_field = {k: list(v) for k, v in rec.get(DEVICE_EVENT_TYPES, {}).items()}
+    merged = sorted(set(by_field.get(field_key, [])) | set(types))
+    if merged == by_field.get(field_key, []):
+        return
+    by_field[field_key] = merged
+    rec[DEVICE_EVENT_TYPES] = by_field
+    devices[device_key] = rec
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_DEVICES: devices}
+    )
 
 
 # --------------------------------------------------------------------------- #

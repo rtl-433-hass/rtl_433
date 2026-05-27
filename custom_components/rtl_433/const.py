@@ -19,7 +19,11 @@ DOMAIN: Final = "rtl_433"
 LOGGER: Final[logging.Logger] = logging.getLogger(__package__)
 
 # Platforms forwarded for each per-device config entry.
-PLATFORMS: Final[list[Platform]] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS: Final[list[Platform]] = [
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
+    Platform.EVENT,
+]
 
 # --- Config-entry "type" discriminator -------------------------------------
 # A single value in entry.data tells the integration whether a config entry is
@@ -64,6 +68,10 @@ CONF_DEVICES: Final = "devices"
 # reuses ``CONF_MODEL`` ("model"); the others are defined here.
 DEVICE_FIELDS: Final = "fields"  # sorted list of observed mapped field keys
 DEVICE_TIMEOUT_OVERRIDE: Final = "timeout_override"  # int seconds, or absent/None
+# Maps ``{field_key: sorted list[str]}`` per device record: the event types
+# observed for each event-platform field, persisted so the event entity's
+# ``event_types`` survives a restart.
+DEVICE_EVENT_TYPES: Final = "event_types"
 
 # --- hass.data keys ---------------------------------------------------------
 # Key under ``hass.data[DOMAIN]`` holding the once-loaded mapping library tuple

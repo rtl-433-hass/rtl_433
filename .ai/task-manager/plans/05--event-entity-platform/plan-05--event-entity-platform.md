@@ -497,10 +497,10 @@ graph TD
 No circular dependencies. Tasks 001 and 002 are independent (production code vs.
 YAML library file); both are inputs to tests (003) and docs (004).
 
-### Phase 1: Implementation & Examples
+### Phase 1: Implementation & Examples ✅
 **Parallel Tasks:**
-- Task 001: Event platform — const, persistence helper, entity, and wiring
-- Task 002: Three shipped `platform: event` example mappings
+- ✔️ Task 001: Event platform — const, persistence helper, entity, and wiring
+- ✔️ Task 002: Three shipped `platform: event` example mappings
 
 ### Phase 2: Tests & Documentation
 **Parallel Tasks:**
