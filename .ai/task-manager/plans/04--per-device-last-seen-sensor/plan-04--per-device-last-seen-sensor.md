@@ -361,9 +361,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 001: Implement the `Rtl433LastSeenSensor` entity + synthetic descriptor (`sensor.py`)
 
-### Phase 2: Lifecycle wiring
+### ✅ Phase 2: Lifecycle wiring
 **Parallel Tasks:**
-- Task 002: Add the `per_device_factory` hook to `async_setup_hub_platform` and create one Last-seen sensor per device in both setup paths (depends on: 001)
+- ✔️ Task 002: Add the `per_device_factory` hook to `async_setup_hub_platform` and create one Last-seen sensor per device in both setup paths (depends on: 001)
 
 ### Phase 3: Verification & docs
 **Parallel Tasks:**

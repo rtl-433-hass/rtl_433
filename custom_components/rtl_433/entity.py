@@ -300,6 +300,10 @@ async def async_setup_hub_platform(
     async_add_entities: AddEntitiesCallback,
     platform: str,
     entity_cls: Callable[..., Rtl433Entity],
+    per_device_factory: Callable[
+        [Rtl433Coordinator, str, str, str], Rtl433Entity
+    ]
+    | None = None,
 ) -> None:
     """Set up one entity platform for every device nested under the hub entry.
 
@@ -316,6 +320,16 @@ async def async_setup_hub_platform(
     Both the ``sensor`` and ``binary_sensor`` platforms run this independently;
     each only builds descriptors whose ``platform`` matches, and the devices-map
     writes are idempotent unions so the two converge.
+
+    ``per_device_factory`` is an optional caller-supplied hook for a single
+    "extra" per-device entity that is not field-driven (e.g. the sensor
+    platform's synthetic Last-seen sensor). When set, it is invoked once per
+    device — in both the initial devices-map build and the new-device handler —
+    as ``per_device_factory(coordinator, entry.entry_id, device_key, model)``.
+    Passing it as a callable (rather than importing the entity class here) keeps
+    the dependency direction clean: ``entity.py`` does not import from the
+    platform modules. Callers that omit it (e.g. ``binary_sensor``) create no
+    extra entity.
     """
     coordinator: Rtl433Coordinator = hass.data[DOMAIN][entry.entry_id]
 
@@ -332,6 +346,9 @@ async def async_setup_hub_platform(
     # Per-device ``signal_device_update`` unsubscribe handles, so a removed device's
     # listener can be torn down (and re-registered cleanly if it re-appears).
     field_unsubs: dict[str, Callable[[], None]] = {}
+    # ``device_key``s whose optional ``per_device_factory`` extra entity has been
+    # created, so it is made exactly once per device across both creation paths.
+    extra_created: set[str] = set()
 
     def _descriptor_for(field_key: str) -> FieldDescriptor | None:
         """Return a descriptor for this platform, or None to skip the field."""
@@ -358,6 +375,18 @@ async def async_setup_hub_platform(
                 entity_cls(coordinator, entry.entry_id, device_key, model, descriptor)
             )
         return new_entities
+
+    def _build_extra(device_key: str, model: str) -> list[Rtl433Entity]:
+        """Build the optional once-per-device extra entity (e.g. Last-seen).
+
+        Returns the single extra entity the first time it is asked for a given
+        ``device_key`` (and only when a factory was supplied), then ``[]`` on any
+        later call so both creation paths can append it unconditionally.
+        """
+        if per_device_factory is None or device_key in extra_created:
+            return []
+        extra_created.add(device_key)
+        return [per_device_factory(coordinator, entry.entry_id, device_key, model)]
 
     def _register_field_listener(device_key: str, model: str) -> None:
         """Register a per-device listener that adds entities for new fields.
@@ -405,6 +434,7 @@ async def async_setup_hub_platform(
         being skipped as "already created" (Clarification #4).
         """
         created.pop(device_key, None)
+        extra_created.discard(device_key)
         unsub = field_unsubs.pop(device_key, None)
         if unsub is not None:
             unsub()
@@ -429,7 +459,9 @@ async def async_setup_hub_platform(
         union = set(rec.get(DEVICE_FIELDS, [])) | coordinator.device_fields.get(
             device_key, set()
         )
-        async_add_entities(_build(device_key, model, union))
+        async_add_entities(
+            _build(device_key, model, union) + _build_extra(device_key, model)
+        )
         # Persist any coordinator-known fields not yet stored in the map.
         await async_upsert_device(hass, entry, device_key, model=model, fields=union)
         _register_field_listener(device_key, model)
@@ -439,7 +471,9 @@ async def async_setup_hub_platform(
     def _handle_new_device(device_key: str, model: str) -> None:
         """Create a newly observed device's entities for this platform."""
         fields = coordinator.device_fields.get(device_key, set())
-        new_entities = _build(device_key, model, fields)
+        new_entities = _build(device_key, model, fields) + _build_extra(
+            device_key, model
+        )
         if new_entities:
             async_add_entities(new_entities)
         _register_field_listener(device_key, model)
