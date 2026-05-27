@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.3.0...v0.4.0) (2026-05-27)
+
+
+### Features
+
+* **rtl_433:** add event entity platform for momentary RF transmissions ([c440f64](https://github.com/rtl-433-hass/rtl_433/commit/c440f6437f9c3b47e6df785d43126d8c6de8d292))
+* **rtl_433:** add synthetic per-device "Last seen" timestamp sensor ([f477144](https://github.com/rtl-433-hass/rtl_433/commit/f477144b9e62c8ba595151ac73a66169dac1b6fd))
+* **rtl_433:** create a Last-seen sensor for every device ([cff7fc3](https://github.com/rtl-433-hass/rtl_433/commit/cff7fc3eb49a25c8f616de2bb80b07fb0b3f676e))
+
+
+### Bug Fixes
+
+* **rtl_433:** unwrap result envelope for get_meta/get_stats over /cmd ([92d750d](https://github.com/rtl-433-hass/rtl_433/commit/92d750deeabd18dab5b28666ea056c4acd413318))
+
 ## [0.3.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.2.0...v0.3.0) (2026-05-27)
 
 
