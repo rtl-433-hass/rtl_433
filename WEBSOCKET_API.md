@@ -207,6 +207,26 @@ Sent on connect and via `get_meta`:
 }
 ```
 
+> The meta object carries **neither gain nor ppm**. Read those from `get_gain`
+> (string; empty ⇒ auto) and `get_ppm_error` (int) instead.
+
+### stats object
+
+Returned by `get_stats`, sent as a raw frame:
+
+```json
+{
+  "enabled": 234,
+  "since": "2024-01-01T00:00:00",
+  "frames": { "count": 0, "fsk": 0, "events": 0 },
+  "stats": [ /* per-protocol stat entries */ ]
+}
+```
+
+`enabled` is the count of enabled decoders; `frames.count` is OOK frames,
+`frames.fsk` is FSK frames, and `frames.events` is the cumulative decoded-event
+count (it may reset when the server restarts).
+
 ### protocols object
 
 Returned by `get_protocols`. Contains a `protocols` array; each registered

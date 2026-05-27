@@ -45,6 +45,53 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   to `entry.options`) and a *Device settings* step (per-device timeout override,
   written into `entry.data["devices"]`).
 
+## WebSocket frames & hub observability
+
+Durable contracts for the coordinator's frame routing and the hub diagnostic
+entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
+
+- **Frame classification** (`_classify_frame`). A streamed frame is treated as a
+  decoded-device event **iff** it has a `model` key **or** an identity key
+  (`id` / `channel` / `subtype`, kept in sync with `normalizer.IDENTITY_KEYS`).
+  A `{"shutdown": ...}` frame drives the **connectivity** sensor (flips it off).
+  **Every other frame is ignored** on the socket (`meta`, periodic state/stats,
+  RPC `result`/`error`). This is why non-event frames no longer create a phantom
+  `"unknown"` device or pollute `seen_fields` / the diagnostics
+  `unmatched_field_keys`.
+- **Hub observability data source.** SDR/meta and server stats are **not** read
+  from the socket. They come from one-shot HTTP GETs to `scheme://host:port/cmd`
+  at the **server root** (`https` when `secure`/`wss`, else `http`) —
+  `_build_cmd_url` never derives from the configured WS `path`, so a proxy that
+  hides `/cmd` degrades gracefully (the stream + connectivity sensor stay up; the
+  meta/stats/gain/ppm sensors read `unknown`). Each getter swallows its own
+  errors (`_fetch_cmd`) so it can never raise into the connect loop or watchdog.
+  The request uses the `cmd` query param; scalar getters are read defensively
+  through a `{"result": ...}` unwrap (`_unwrap_result`).
+- **Exact getter set** (`_refresh_meta` + `_refresh_stats`): `get_meta` +
+  `get_gain` + `get_ppm_error` + `get_stats`. **Gain and ppm are absent from
+  `get_meta`** — they come from `get_gain` (string; empty ⇒ `auto`) and
+  `get_ppm_error` (int) respectively. **Hop interval = `hop_times[0]`.**
+  `_refresh_stats` re-polls `get_stats` on a fixed interval
+  (`_STATS_REFRESH_INTERVAL`, 60 s) while connected; `_refresh_meta` runs once
+  per (re)connect.
+- **Verified Data Contracts** (do not invent fields — see
+  [WEBSOCKET_API.md](WEBSOCKET_API.md)):
+  - `get_meta` → `center_frequency`, `samp_rate`, `conversion_mode`,
+    `frequencies[]`, `hop_times[]`, `duration`, `stats_interval`, `report_*`
+    flags (**no `gain`, no `ppm`**).
+  - `get_gain` → string (empty ⇒ auto); `get_ppm_error` → int.
+  - `get_stats` → `{"enabled": <int>, "since": <str>, "frames": {"count":
+    <ook>, "fsk": <fsk>, "events": <decoded>}, "stats": [<per-protocol>...]}`.
+    Hub sensors map `frames.events` → decoded events
+    (`TOTAL_INCREASING`, tolerates resets), `frames.count` → OOK frames,
+    `frames.fsk` → FSK frames, `enabled` → enabled decoders, with `stats[]` /
+    `since` surfaced as attributes.
+- **Phantom-unknown cleanup.** `async_setup_entry` (`__init__.py`) calls
+  `_cleanup_phantom_unknown_device`, which **idempotently** removes a legacy
+  persisted `"unknown"` device from `entry.data["devices"]` and the matching
+  registry device `(DOMAIN, f"{entry_id}:unknown")`. Safe on every setup; the
+  classifier above prevents recreation.
+
 ## Device-library YAML format (summary)
 
 Device support is data, not code: each rtl_433 JSON field name maps to one Home
@@ -149,6 +196,8 @@ Full runbook:
 - Keep `object_suffix` values **stable** — changing one orphans existing
   entities.
 - Keep `const.py` the single source of truth for config keys and defaults
-  (`DEFAULT_PORT=8433`, `DEFAULT_PATH="/ws"`, `DEFAULT_AVAILABILITY_TIMEOUT=600`).
+  (`DEFAULT_PORT=8433`, `DEFAULT_PATH="/ws"`, `DEFAULT_AVAILABILITY_TIMEOUT=600`)
+  and for the dispatcher signals (`SIGNAL_NEW_DEVICE`, `SIGNAL_HUB_UPDATE` — the
+  latter fans connectivity/meta/stats changes out to the hub entities).
 - Always run `pytest tests/` before proposing a change, and follow the
   conventional-commit and lint rules in [CONTRIBUTING.md](CONTRIBUTING.md).

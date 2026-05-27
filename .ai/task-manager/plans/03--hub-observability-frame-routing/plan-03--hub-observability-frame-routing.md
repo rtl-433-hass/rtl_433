@@ -503,9 +503,9 @@ No circular dependencies; every task appears in exactly one phase below.
 **Parallel Tasks:**
 - ✔️ Task 005: Hub meta/SDR + server-stats diagnostic sensors (depends on: 002, 004; edits `sensor.py`, `tests/test_lifecycle.py`)
 
-### Phase 4: Documentation
+### ✅ Phase 4: Documentation
 **Parallel Tasks:**
-- Task 006: README hub entities + AGENTS frame/getter contracts (depends on: 001, 002, 003, 004, 005; edits `README.md`, `AGENTS.md`, optionally `WEBSOCKET_API.md`)
+- ✔️ Task 006: README hub entities + AGENTS frame/getter contracts (depends on: 001, 002, 003, 004, 005; edits `README.md`, `AGENTS.md`, optionally `WEBSOCKET_API.md`)
 
 ### Post-phase Actions
 After each phase: run `uv run ruff check custom_components/rtl_433` and the
