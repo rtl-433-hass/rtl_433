@@ -17,9 +17,49 @@ import pytest
 
 from custom_components.rtl_433.const import signal_device_update, signal_hub_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import _build_cmd_url
 from homeassistant.util import dt as dt_util
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
+
+# The shape the coordinator's getters expect, matching the rtl_433 ``/cmd``
+# dispatcher: ``get_meta``/``get_stats`` return a raw JSON object, while the
+# scalar getters (``get_gain``/``get_ppm_error``) wrap their value in
+# ``{"result": ...}`` (see WEBSOCKET_API.md).
+_META_BODY = {
+    "center_frequency": 433920000,
+    "samp_rate": 250000,
+    "conversion_mode": 0,
+    "frequencies": [433920000, 868000000],
+    "hop_times": [600, 30],
+    "duration": 0,
+    "stats_interval": 0,
+}
+_STATS_BODY = {
+    "enabled": 5,
+    "since": "2026-05-26T10:00:00",
+    "frames": {"count": 3, "fsk": 1, "events": 9},
+    "stats": [],
+}
+
+
+def _mock_cmd(aioclient_mock, *, gain="32.8", ppm=2):
+    """Register per-command ``/cmd`` GET stubs keyed by the ``cmd`` query param.
+
+    The mocker matches a registered response when every query component in the
+    matcher is present in the request, so a distinct ``params={"cmd": ...}`` per
+    getter routes each request to its own body even though all share one URL.
+    """
+    url = "http://rtl433.local:8433/cmd"
+    aioclient_mock.get(url, params={"cmd": "get_meta"}, json=_META_BODY)
+    aioclient_mock.get(url, params={"cmd": "get_gain"}, json={"result": gain})
+    aioclient_mock.get(url, params={"cmd": "get_ppm_error"}, json={"result": ppm})
+    aioclient_mock.get(url, params={"cmd": "get_stats"}, json=_STATS_BODY)
+
+
+def _run(hass, coro):
+    """Drive an async coordinator method to completion on the hass loop."""
+    return hass.loop.run_until_complete(coro)
 
 
 @pytest.fixture
@@ -201,3 +241,83 @@ def test_effective_timeout_falls_back_on_resolver_error(hass, coordinator):
 
     coordinator.effective_timeout_resolver = boom
     assert coordinator._effective_timeout("any") == 600
+
+
+# --------------------------------------------------------------------------- #
+# HTTP /cmd getters                                                           #
+# --------------------------------------------------------------------------- #
+def test_cmd_url_ignores_ws_path():
+    """The /cmd URL is the server root, never derived from the WS path."""
+    host, port = "rtl433.local", 8433
+    # A proxy-style WS path must not leak into the /cmd URL.
+    assert _build_cmd_url(host, port, secure=False) == "http://rtl433.local:8433/cmd"
+    assert _build_cmd_url(host, port, secure=True) == "https://rtl433.local:8433/cmd"
+
+
+def test_refresh_meta_populates_state(hass, coordinator, aioclient_mock):
+    """get_meta + get_gain + get_ppm_error assemble coordinator.meta and emit."""
+    _mock_cmd(aioclient_mock, gain="32.8", ppm=2)
+
+    with patch(DISPATCH) as dispatch:
+        _run(hass, coordinator._refresh_meta())
+
+    meta = coordinator.meta
+    assert meta["center_frequency"] == 433920000
+    assert meta["samp_rate"] == 250000
+    assert meta["conversion_mode"] == 0
+    assert meta["frequencies"] == [433920000, 868000000]
+    assert meta["hop_times"] == [600, 30]
+    assert meta["hop_interval"] == 600  # derived = hop_times[0]
+    assert meta["gain"] == "32.8"
+    assert meta["ppm_error"] == 2
+
+    # A populated refresh emits the hub-update signal.
+    hub_signal = signal_hub_update(coordinator.entry.entry_id)
+    sent = [call.args[1] for call in dispatch.call_args_list]
+    assert hub_signal in sent
+
+
+def test_refresh_meta_empty_gain_preserved(hass, coordinator, aioclient_mock):
+    """An empty gain string is preserved verbatim (rendered as 'auto' later)."""
+    _mock_cmd(aioclient_mock, gain="")
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._refresh_meta())
+
+    assert coordinator.meta["gain"] == ""
+
+
+def test_refresh_stats_populates_state(hass, coordinator, aioclient_mock):
+    """get_stats populates coordinator.stats and emits the hub-update signal."""
+    _mock_cmd(aioclient_mock)
+
+    with patch(DISPATCH) as dispatch:
+        _run(hass, coordinator._refresh_stats())
+
+    assert coordinator.stats["frames"]["events"] == 9
+    assert coordinator.stats["frames"]["count"] == 3
+    assert coordinator.stats["frames"]["fsk"] == 1
+
+    hub_signal = signal_hub_update(coordinator.entry.entry_id)
+    sent = [call.args[1] for call in dispatch.call_args_list]
+    assert hub_signal in sent
+
+
+def test_getter_failure_leaves_values_intact(hass, coordinator, aioclient_mock):
+    """A failing /cmd leaves prior meta/stats intact and never flips connected."""
+    coordinator.meta = {"gain": "32.8"}
+    coordinator.stats = {"frames": {"events": 1}}
+    coordinator.connected = True
+
+    # Every getter 500s; raise_for_status() turns this into a swallowed failure.
+    aioclient_mock.get("http://rtl433.local:8433/cmd", status=500)
+
+    with patch(DISPATCH) as dispatch:
+        _run(hass, coordinator._refresh_meta())
+        _run(hass, coordinator._refresh_stats())
+
+    assert coordinator.meta == {"gain": "32.8"}
+    assert coordinator.stats == {"frames": {"events": 1}}
+    assert coordinator.connected is True
+    # No successful getter -> no hub-update emitted.
+    dispatch.assert_not_called()

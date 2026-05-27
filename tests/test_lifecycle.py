@@ -48,10 +48,12 @@ from custom_components.rtl_433.const import (
     DOMAIN,
     ENTRY_TYPE_DEVICE,
     ENTRY_TYPE_HUB,
+    signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 LEGACY_OBSERVED_FIELDS = "observed_fields"
 
@@ -166,6 +168,37 @@ async def test_seeded_binary_sensor_created(hass, hub_entry_builder):
     # closed == 0 inverts to "on" (open).
     assert state.state == "on"
     assert state.attributes["device_class"] == "opening"
+
+
+# --------------------------------------------------------------------------- #
+# Hub connectivity binary_sensor follows coordinator.connected.                #
+# --------------------------------------------------------------------------- #
+async def test_hub_connectivity_sensor(hass, hub_entry_builder):
+    """The hub connectivity binary_sensor tracks ``coordinator.connected``."""
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+
+    ent_reg = er.async_get(hass)
+    entity_id = ent_reg.async_get_entity_id(
+        "binary_sensor", DOMAIN, f"{hub.entry_id}:hub:connectivity"
+    )
+    assert entity_id is not None
+
+    # Mark connected and notify -> state on.
+    coordinator.connected = True
+    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "on"
+
+    # A shutdown frame flips it back off (Task 1 path).
+    _feed(coordinator, {"shutdown": "goodbye"})
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "off"
+
+    # The entity belongs to the hub device.
+    dev_reg = dr.async_get(hass)
+    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    assert ent_reg.async_get(entity_id).device_id == hub_device.id
 
 
 # --------------------------------------------------------------------------- #

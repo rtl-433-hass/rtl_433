@@ -494,10 +494,10 @@ No circular dependencies; every task appears in exactly one phase below.
 - ✔️ Task 001: Coordinator frame classification, hub-update signal, and connectivity state (no deps; edits `const.py`, `coordinator/base.py`, `tests/test_coordinator.py`)
 - ✔️ Task 003: Phantom "unknown" device cleanup on hub setup (no deps; edits `__init__.py`, `tests/test_lifecycle.py`)
 
-### Phase 2: HTTP getters + connectivity entity
+### ✅ Phase 2: HTTP getters + connectivity entity
 **Parallel Tasks:**
-- Task 002: Coordinator HTTP getters (/cmd) on connect + periodic stats refresh (depends on: 001; edits `coordinator/base.py`, coordinator tests)
-- Task 004: Hub connectivity binary_sensor + hub entity base (depends on: 001; edits `entity.py`, `binary_sensor.py`, `tests/test_lifecycle.py`)
+- ✔️ Task 002: Coordinator HTTP getters (/cmd) on connect + periodic stats refresh (depends on: 001; edits `coordinator/base.py`, coordinator tests)
+- ✔️ Task 004: Hub connectivity binary_sensor + hub entity base (depends on: 001; edits `entity.py`, `binary_sensor.py`, `tests/test_lifecycle.py`)
 
 ### Phase 3: Hub diagnostic sensors
 **Parallel Tasks:**

@@ -62,6 +62,13 @@ _WATCHDOG_INTERVAL = timedelta(seconds=30)
 # flow's reachability check.
 _VALIDATE_TIMEOUT = 10.0
 
+# Timeout (seconds) for each one-shot ``/cmd`` getter HTTP request.
+_GETTER_TIMEOUT = 10.0
+
+# How often ``get_stats`` is re-fetched over HTTP while connected, so the hub's
+# throughput stays live without depending on the streaming socket.
+_STATS_REFRESH_INTERVAL = timedelta(seconds=60)
+
 # Identity keys (besides ``model``) that mark a frame as a decoded-device event.
 # Kept in sync with normalizer.IDENTITY_KEYS.
 _EVENT_IDENTITY_KEYS = ("id", "channel", "subtype")
@@ -77,6 +84,18 @@ def _build_ws_url(host: str, port: int, path: str, *, secure: bool = False) -> s
     if not path.startswith("/"):
         path = f"/{path}"
     return f"{scheme}://{host}:{port}{path}"
+
+
+def _build_cmd_url(host: str, port: int, *, secure: bool = False) -> str:
+    """Build the ``http(s)://host:port/cmd`` URL (server root, never the WS path).
+
+    The ``/cmd`` endpoint always lives at the server root regardless of the
+    configured WebSocket ``path``; graceful degradation behind a proxy that hides
+    ``/cmd`` depends on this never being derived from ``self.path``. ``secure``
+    maps ``wss`` ⇒ ``https`` and ``ws`` ⇒ ``http``.
+    """
+    scheme = "https" if secure else "http"
+    return f"{scheme}://{host}:{port}/cmd"
 
 
 class Rtl433Coordinator:
@@ -163,6 +182,7 @@ class Rtl433Coordinator:
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._watchdog_unsub: Callable[[], None] | None = None
+        self._stats_unsub: Callable[[], None] | None = None
         self._ws: aiohttp.ClientWebSocketResponse | None = None
 
     @property
@@ -189,6 +209,12 @@ class Rtl433Coordinator:
             _WATCHDOG_INTERVAL,
             name=f"rtl_433 watchdog {self.entry.entry_id}",
         )
+        self._stats_unsub = async_track_time_interval(
+            self.hass,
+            self._async_stats_tick,
+            _STATS_REFRESH_INTERVAL,
+            name=f"rtl_433 stats {self.entry.entry_id}",
+        )
         LOGGER.debug("rtl_433 coordinator started for %s", self.ws_url)
 
     def forget_device(self, device_key: str) -> None:
@@ -211,6 +237,10 @@ class Rtl433Coordinator:
         if self._watchdog_unsub is not None:
             self._watchdog_unsub()
             self._watchdog_unsub = None
+
+        if self._stats_unsub is not None:
+            self._stats_unsub()
+            self._stats_unsub = None
 
         if self._ws is not None and not self._ws.closed:
             await self._ws.close()
@@ -240,6 +270,11 @@ class Rtl433Coordinator:
                     backoff = _BACKOFF_MIN  # reset after a successful connect
                     self._emit_hub_update()
                     LOGGER.debug("rtl_433 connected to %s", self.ws_url)
+                    # Seed SDR/meta config and stats over HTTP (never the socket).
+                    # Each getter swallows its own failures, so a hidden ``/cmd``
+                    # (e.g. behind a proxy) cannot break the connection.
+                    await self._refresh_meta()
+                    await self._refresh_stats()
                     await self._read_frames(ws)
             except asyncio.CancelledError:
                 raise
@@ -312,6 +347,84 @@ class Rtl433Coordinator:
     def _emit_hub_update(self) -> None:
         """Notify hub entities that connectivity / meta / stats changed."""
         async_dispatcher_send(self.hass, signal_hub_update(self.entry.entry_id))
+
+    # ------------------------------------------------------------------ #
+    # HTTP ``/cmd`` getters (SDR/meta config + server stats)             #
+    # ------------------------------------------------------------------ #
+    async def _fetch_cmd(self, command: str) -> Any | None:
+        """GET one ``/cmd`` getter; return parsed JSON or None on any failure.
+
+        Uses the shared Home Assistant aiohttp session against the server root
+        (never the WS ``path``). Any HTTP/parse error is caught and logged at
+        debug so a single getter — or a proxy that hides ``/cmd`` — can never
+        raise into the connect loop or the watchdog.
+        """
+        session = async_get_clientsession(self.hass)
+        url = _build_cmd_url(self.host, self.port, secure=self.secure)
+        try:
+            async with session.get(
+                url, params={"cmd": command}, timeout=_GETTER_TIMEOUT
+            ) as resp:
+                resp.raise_for_status()
+                # rtl_433 may not set a strict ``application/json`` content-type
+                # for scalar getters, so do not require one.
+                return await resp.json(content_type=None)
+        except Exception as err:  # noqa: BLE001 - getters must never kill the loop
+            LOGGER.debug("rtl_433 getter %s failed at %s: %s", command, url, err)
+            return None
+
+    @staticmethod
+    def _unwrap_result(payload: Any) -> Any:
+        """Unwrap a ``{"result": <value>}`` getter response to its raw value.
+
+        Scalar getters (``get_gain``/``get_ppm_error``) are wrapped in a
+        ``result`` envelope over the shared command dispatcher, but a bare scalar
+        is accepted too — read defensively.
+        """
+        if isinstance(payload, dict) and "result" in payload:
+            return payload["result"]
+        return payload
+
+    async def _refresh_meta(self) -> None:
+        """Fetch ``get_meta`` + ``get_gain`` + ``get_ppm_error`` into ``self.meta``."""
+        meta = await self._fetch_cmd("get_meta")
+        gain = self._unwrap_result(await self._fetch_cmd("get_gain"))
+        ppm = self._unwrap_result(await self._fetch_cmd("get_ppm_error"))
+
+        new_meta: dict[str, Any] = {}
+        if isinstance(meta, dict):
+            for key in (
+                "center_frequency",
+                "samp_rate",
+                "conversion_mode",
+                "frequencies",
+                "hop_times",
+            ):
+                if key in meta:
+                    new_meta[key] = meta[key]
+            hop_times = meta.get("hop_times")
+            if isinstance(hop_times, list) and hop_times:
+                new_meta["hop_interval"] = hop_times[0]
+        if isinstance(gain, str):
+            new_meta["gain"] = gain
+        if isinstance(ppm, int) and not isinstance(ppm, bool):
+            new_meta["ppm_error"] = ppm
+
+        if new_meta:
+            self.meta = {**self.meta, **new_meta}
+            self._emit_hub_update()
+
+    async def _refresh_stats(self) -> None:
+        """Fetch ``get_stats`` into ``self.stats``."""
+        stats = await self._fetch_cmd("get_stats")
+        if isinstance(stats, dict):
+            self.stats = stats
+            self._emit_hub_update()
+
+    async def _async_stats_tick(self, _now: datetime) -> None:
+        """Re-fetch ``get_stats`` on the interval, only while connected."""
+        if self.connected:
+            await self._refresh_stats()
 
     # ------------------------------------------------------------------ #
     # Event handling                                                     #

@@ -17,12 +17,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import Rtl433Entity, async_setup_hub_platform
+from .const import DOMAIN
+from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
 from .mapping import apply_transform
 
 if TYPE_CHECKING:
@@ -77,12 +82,37 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
         self._attr_is_on = last_state.state == "on"
 
 
+class Rtl433HubConnectivity(Rtl433HubEntity, BinarySensorEntity):
+    """Reports whether the hub's WebSocket connection is currently open."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "Connectivity"
+
+    def __init__(self, coordinator: Rtl433Coordinator, hub_entry_id: str) -> None:
+        """Initialize the connectivity entity with a stable unique_id."""
+        super().__init__(coordinator, hub_entry_id)
+        self._attr_unique_id = f"{hub_entry_id}:hub:connectivity"
+
+    @property
+    def is_on(self) -> bool:
+        """Return True while the hub's WebSocket connection is open."""
+        return self._coordinator.connected
+
+    @property
+    def available(self) -> bool:
+        """Always available: the entity reports connection state itself."""
+        return True
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up rtl_433 binary sensors for every device under the hub entry."""
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities([Rtl433HubConnectivity(coordinator, entry.entry_id)])
     await async_setup_hub_platform(
         hass, entry, async_add_entities, PLATFORM, Rtl433BinarySensor
     )

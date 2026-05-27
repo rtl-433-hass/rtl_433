@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.helpers.entity import DeviceInfo, Entity, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
@@ -51,6 +51,7 @@ from .const import (
     DEVICE_FIELDS,
     DOMAIN,
     signal_device_update,
+    signal_hub_update,
     signal_new_device,
 )
 from .mapping import FieldDescriptor, lookup
@@ -210,6 +211,47 @@ class Rtl433Entity(RestoreEntity):
     async def _async_restore_state(self) -> None:
         """Re-apply the last known state on startup. Overridden."""
         raise NotImplementedError
+
+
+class Rtl433HubEntity(Entity):
+    """Base for statically-registered entities on the hub device itself.
+
+    Unlike :class:`Rtl433Entity` (one per device field, availability gated by the
+    per-device timeout), hub entities are one-per-hub, attach to the hub device,
+    and re-read the coordinator's hub state on every ``signal_hub_update``.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(self, coordinator: Rtl433Coordinator, hub_entry_id: str) -> None:
+        """Attach to the hub device and remember the coordinator."""
+        self._coordinator = coordinator
+        self._hub_entry_id = hub_entry_id
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, hub_entry_id)},
+        )
+        self._unsub_hub: Callable[[], None] | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to the hub-update dispatcher signal."""
+        await super().async_added_to_hass()
+        self._unsub_hub = async_dispatcher_connect(
+            self.hass,
+            signal_hub_update(self._hub_entry_id),
+            self._handle_hub_update,
+        )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Tear down the hub-update subscription."""
+        if self._unsub_hub is not None:
+            self._unsub_hub()
+            self._unsub_hub = None
+
+    @callback
+    def _handle_hub_update(self) -> None:
+        """Re-read hub state and write the entity state."""
+        self.async_write_ha_state()
 
 
 # --------------------------------------------------------------------------- #
