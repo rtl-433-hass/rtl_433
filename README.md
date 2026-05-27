@@ -45,6 +45,10 @@ requirements.
   window; set a hub-wide default and override it per device.
 - **Multiple servers** — add one hub per rtl_433 server; identities are scoped
   per hub so two servers that see the same device model never collide.
+- **Hub observability** — each hub gets diagnostic entities for its connection,
+  SDR/meta configuration (center frequency, sample rate, gain, ppm, …), and
+  server statistics (decoded events, OOK/FSK frames). See
+  [Hub entities](#hub-entities).
 - **Diagnostics feedback loop** — downloadable diagnostics list the
   `unmatched_field_keys` a hub has seen, telling you exactly what to add to the
   library.
@@ -144,6 +148,31 @@ options flow presents a menu:
   timeout** for this server.
 - **Device settings** — pick a known device and set or clear its **per-device
   availability-timeout override**.
+
+## Hub entities
+
+Besides the per-device sensors, each hub exposes its own **diagnostic entities**
+on the hub device so you can watch the server itself:
+
+- **Connectivity** (binary_sensor) — `on` while the hub's WebSocket connection is
+  open, `off` otherwise. It flips `off` immediately when the server announces a
+  shutdown, rather than waiting for a silence timeout.
+- **SDR / meta diagnostics** (sensors) — the receiver's current configuration:
+  **center frequency**, **sample rate**, **conversion mode**, **hop interval**,
+  **gain** (an empty value reads `auto`), and **frequency correction** (ppm). The
+  configured `frequencies` and `hop_times` arrays are exposed as attributes on
+  the center-frequency sensor.
+- **Server statistics** (sensors) — **decoded events** (cumulative; tolerates the
+  server's counter resetting), **OOK frames**, **FSK frames**, and **enabled
+  decoders**. The per-protocol `stats[]` breakdown and the `since` timestamp are
+  exposed as attributes on the decoded-events sensor.
+
+These hub sensors fetch their data over HTTP from the rtl_433 server's `/cmd`
+endpoint at the **server root** — `http(s)://host:port/cmd` — independent of the
+configured WebSocket path. If a reverse proxy exposes only the WebSocket path and
+not `/cmd`, those sensors gracefully degrade to `unknown` while the event stream
+and the connectivity sensor keep working. The statistics refresh periodically
+while the hub is connected; the SDR/meta values are fetched on each (re)connect.
 
 ## Device library and user overrides
 
