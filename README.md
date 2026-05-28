@@ -185,7 +185,8 @@ options flow presents a menu:
   timeout**, and the **Manage rtl_433 settings from Home Assistant** toggle for
   this server.
 - **Device settings** — pick a known device and set or clear its **per-device
-  availability-timeout override**.
+  availability-timeout override** and, for utility meters, its **consumption
+  calibration** (see [Utility-meter calibration](#utility-meter-calibration)).
 
 Changing the **Manage rtl_433 settings from Home Assistant** toggle reloads the
 hub (the SDR controls appear or disappear); changing the discovery toggle or a
@@ -309,6 +310,52 @@ over shipped entries (full replacement), new fields are added, and `skip_keys`
 are unioned. See [User overrides](docs/device-library.md#user-overrides) for the
 details and examples. Changes are picked up on the next reload of the
 integration (or a Home Assistant restart).
+
+## Utility-meter calibration
+
+Utility meters (electricity, gas, and water meters decoded by the SCM / ERT /
+SCMplus protocols) report a raw **consumption counter**, but the RF signal does
+**not** carry that counter's unit or scale — different meters report in different
+granularities (e.g. some in 1 kWh, others in 10 Wh), so the integration cannot
+derive it automatically. Out of the box the consumption sensor is therefore a
+plain, unitless `total_increasing` counter, which is **not** eligible for Home
+Assistant's Energy dashboard.
+
+To make it Energy-dashboard-eligible, calibrate the device. Open **Settings →
+Devices & Services → rtl_433 → Configure → Device settings**, pick the meter, and
+set its **consumption calibration**:
+
+- **Commodity** — `none` / `energy` / `gas` / `water`. This sets the sensor's
+  `device_class`. Choosing `none` clears any calibration and the sensor reverts
+  to the unitless counter. When the meter reports a `MeterType` (or `ert_type`)
+  hint, the commodity is **pre-filled** from it; you can always override it.
+- **Base unit** — the unit the calibrated counter is expressed in, constrained to
+  the units Home Assistant recognizes as convertible for that commodity
+  (energy → Wh/kWh/MWh; gas/water → m³/ft³/L/…). Picking a convertible base unit
+  is what makes the sensor Energy-dashboard-eligible.
+- **Scale** — a multiplier applied to the raw counter so the stored value is in
+  the chosen base unit (raw × scale).
+
+Once calibrated, the consumption sensor gains a real `device_class`, the base
+unit, and `state_class: total_increasing`, so you can add it to the **Energy
+dashboard**. You do **not** need to pick your display unit here: with a
+convertible base unit set, Home Assistant does its **own per-entity display-unit
+conversion** — switch a water meter from L to gal (or a gas meter between m³ and
+ft³) in the entity's settings and HA converts it for you. The integration ships
+no conversion engine of its own.
+
+> **Recalibration orphans prior long-term statistics.** Changing the commodity,
+> base unit, or scale changes the sensor's native unit / device class, which Home
+> Assistant treats as a non-convertible change to a counter it has been recording.
+> The entity keeps its ID, but its **previous long-term statistics are orphaned**
+> (and the first time a previously-unitless sensor gains a unit the recorder may
+> flag the change once). This is inherent to Home Assistant, not specific to this
+> integration — calibrate intentionally, ideally once. Saving a calibration
+> reloads the hub so the sensor is rebuilt with the new unit/class.
+
+For models whose unit/scale *is* known, a contributor can ship a model-scoped
+mapping in the [device library](docs/device-library.md#model-scoped-mappings-models)
+so those meters work with no per-device calibration at all.
 
 ## Screenshot gallery
 

@@ -176,6 +176,120 @@ The shipped `events.yaml` has three examples:
 | `motion` | `motion` | PIR / occupancy trip; typically a single momentary value. |
 | `secret_knock` | `doorbell` | Honeywell ActivLink doorbell press; a single momentary value. |
 
+## Model-scoped mappings (`models:`)
+
+The top-level keys above are the **global** defaults: a `temperature_C` entry
+applies to *every* device that emits `temperature_C`. Some fields, though, need
+a different descriptor depending on the **device model** — most notably the
+utility-meter consumption counters (`consumption`, `consumption_data`), whose
+unit and scale are *not* carried in the RF signal and differ between meter
+models. For those, a file may carry an optional top-level **`models:`** block
+that overrides the global descriptor for one specific rtl_433 `model` string.
+
+`models:` is keyed by the exact rtl_433 `model` value, and each model maps to a
+table of `field_key → descriptor` using the **same per-field attribute schema**
+as the global entries (`platform`, `device_class`, `unit_of_measurement`,
+`state_class`, `name`, `object_suffix`, `value_transform`, …):
+
+```yaml
+# top-level global defaults (unchanged) live here ...
+temperature_C:
+  platform: sensor
+  device_class: temperature
+  unit_of_measurement: "°C"
+  state_class: measurement
+  name: Temperature
+  value_transform: { round: 1 }
+  object_suffix: T
+
+# ... and an optional model-scoped block sits alongside them:
+models:
+  Some-Model-Name:            # an exact rtl_433 `model` string
+    consumption_data:
+      platform: sensor
+      device_class: energy
+      unit_of_measurement: kWh
+      state_class: total_increasing
+      name: Consumption
+      value_transform: { scale: 1 }
+      object_suffix: consumption
+```
+
+The `models:` block is **additive and optional**: every existing themed file
+parses exactly as before, and the flat top-level keys remain the global default.
+It may appear in any themed file (most naturally `power_electrical.yaml`) and in
+the [user-override file](#user-overrides). `models` is a reserved top-level key —
+the loader intercepts it, so you cannot have a *field* literally named `models`.
+
+### Lookup resolution order
+
+When the integration builds an entity for a field on a device, it resolves the
+descriptor **most-specific first**:
+
+1. The **model-scoped** entry for `(model, field_key)`, if the device's model has
+   a `models:` block with that field.
+2. Otherwise the **global** flat entry for `field_key`.
+3. Otherwise the field is unmapped → no entity.
+
+So a `models:` entry only affects the model it names; every other model keeps the
+global descriptor for that same field.
+
+### Precedence (specificity-first)
+
+Combined with [user overrides](#user-overrides) and the per-device meter
+calibration (the options-flow *Device settings* step), the full precedence for a
+single field on a single device is, **highest to lowest**:
+
+1. **Per-device calibration** (commodity + base unit + scale, set in the options
+   flow) — applies only to the consumption field(s) of the one calibrated device.
+2. **Model-scoped** entry — user-override `models:` entry, else shipped
+   `models:` entry.
+3. **Global** flat entry — user-override flat key, else shipped flat key.
+4. Unmapped → no entity.
+
+The rule is **specificity-first**: a model-scoped entry always beats a global one
+*regardless of source*. In particular a **shipped** `models:` entry outranks a
+**user-override global** entry for a matching model. Within each tier the user
+file beats the shipped library. (This falls out naturally from the merge: the
+user override replaces the shipped entry *within* a tier, and the lookup checks
+the model tier before the global tier.)
+
+> **No speculative real-meter mappings ship.** Because a meter's consumption
+> unit/scale is not knowable from the signal, the shipped library does **not**
+> carry a guessed `models:` consumption mapping for any real model — a wrong
+> scale would silently corrupt real Energy data. The example below is purely
+> illustrative; for a real meter use the per-device calibration step in the
+> options flow (see the README) until a model's unit/scale is authoritatively
+> known.
+
+### Worked example (ILLUSTRATIVE — not a real meter mapping)
+
+> ⚠️ **This is a made-up model name and does not match any real device.** Do
+> **not** copy it into a live library expecting it to scale a real meter
+> correctly. It exists only to show the `models:` schema end-to-end; for a real
+> meter, calibrate per device in the options flow instead.
+
+The example below makes a consumption counter Energy-dashboard-eligible for one
+illustrative model by attaching a real `device_class`, a convertible base unit,
+`state_class: total_increasing`, and a `scale`:
+
+```yaml
+models:
+  ACME-NotAReal-Meter-9000:     # ILLUSTRATIVE model string — not a real device
+    consumption_data:
+      platform: sensor
+      device_class: energy           # makes it Energy-dashboard-eligible
+      unit_of_measurement: kWh       # a convertible base unit for `energy`
+      state_class: total_increasing  # required for the Energy dashboard
+      name: Consumption
+      value_transform: { scale: 0.01 }   # raw counter × 0.01 (illustrative)
+      object_suffix: consumption
+```
+
+For any device whose model is *not* `ACME-NotAReal-Meter-9000`, `consumption_data`
+keeps the shipped global descriptor (the unitless `total_increasing` counter), and
+unrelated fields like `temperature_C` are unaffected on every model.
+
 ## The skip-keys file
 
 `_skip_keys.yaml` lists fields that must never produce an entity — device
@@ -252,7 +366,9 @@ files** by dropping a YAML file at:
 (`<config>` is your Home Assistant configuration directory — the one containing
 `configuration.yaml`.) This file uses the **same schema** as the themed library
 files: top-level keys are rtl_433 field names, values are entry mappings. It may
-optionally include a `skip_keys:` list to add extra skip entries.
+optionally include a `skip_keys:` list to add extra skip entries, and an optional
+[`models:` block](#model-scoped-mappings-models) to add or override model-scoped
+descriptors.
 
 The loader layers this file **on top of** the shipped library:
 
@@ -262,6 +378,12 @@ The loader layers this file **on top of** the shipped library:
 - A field present only in the override: it is **added** as a new mapping.
 - `skip_keys` entries in the override are **unioned** with the shipped skip
   list.
+- A `models:` block in the override is **merged per `(model, field_key)`**: an
+  override model-scoped entry replaces the shipped one for the same model and
+  field, while other shipped model fields are preserved. Per the
+  [precedence rules](#precedence-specificity-first), a model-scoped entry (from
+  either source) always beats a global one — so a **shipped** `models:` entry
+  outranks a **user-override global** entry for a matching model.
 
 Example override that adds an unmapped field and re-classifies `battery_ok` as a
 low-battery binary problem sensor:
