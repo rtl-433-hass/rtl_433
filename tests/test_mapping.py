@@ -30,7 +30,7 @@ def test_lookup_resolves_representative_descriptors(library):
     """A handful of representative fields resolve to the expected descriptors."""
     registry, _ = library
 
-    temp = lookup("temperature_C", registry)
+    temp = lookup("temperature_C", registry=registry)
     assert temp is not None
     assert temp.platform == "sensor"
     assert temp.device_class == "temperature"
@@ -38,17 +38,17 @@ def test_lookup_resolves_representative_descriptors(library):
     assert temp.state_class == "measurement"
     assert temp.object_suffix == "T"
 
-    power = lookup("power_W", registry)
+    power = lookup("power_W", registry=registry)
     assert power is not None
     assert power.device_class == "power"
     assert power.unit_of_measurement == "W"
 
-    energy = lookup("energy_kWh", registry)
+    energy = lookup("energy_kWh", registry=registry)
     assert energy is not None
     assert energy.state_class == "total_increasing"
 
     # A field that has no mapping returns None.
-    assert lookup("totally_unknown_field", registry) is None
+    assert lookup("totally_unknown_field", registry=registry) is None
 
 
 def test_event_fields_resolve_to_event_platform(library):
@@ -65,7 +65,7 @@ def test_event_fields_resolve_to_event_platform(library):
         "secret_knock": "doorbell",
     }
     for field_key, device_class in expected.items():
-        descriptor = lookup(field_key, registry)
+        descriptor = lookup(field_key, registry=registry)
         assert descriptor is not None, field_key
         assert descriptor.platform == "event", field_key
         assert descriptor.device_class == device_class, field_key
@@ -88,8 +88,8 @@ def test_existing_fields_keep_original_platform(library):
     registry, _ = library
 
     # A representative sensor and binary_sensor field keep their platform.
-    assert lookup("temperature_C", registry).platform == "sensor"
-    assert lookup("tamper", registry).platform == "binary_sensor"
+    assert lookup("temperature_C", registry=registry).platform == "sensor"
+    assert lookup("tamper", registry=registry).platform == "binary_sensor"
 
 
 def test_sensor_transform_pipeline(library):
@@ -97,20 +97,20 @@ def test_sensor_transform_pipeline(library):
     registry, _ = library
 
     # round: 1
-    temp = lookup("temperature_C", registry)
+    temp = lookup("temperature_C", registry=registry)
     assert apply_transform(temp, 21.37) == 21.4
 
     # scale: 3.6, round: 2 -> m/s converted to km/h.
-    wind = lookup("wind_avg_m_s", registry)
+    wind = lookup("wind_avg_m_s", registry=registry)
     assert apply_transform(wind, 3.5) == 12.6
 
     # int: true forces integer coercion.
-    co2 = lookup("co2_ppm", registry)
+    co2 = lookup("co2_ppm", registry=registry)
     assert apply_transform(co2, "812") == 812
     assert isinstance(apply_transform(co2, "812"), int)
 
     # battery_ok is a *percentage sensor*: scale 99, offset 1, round 0.
-    battery = lookup("battery_ok", registry)
+    battery = lookup("battery_ok", registry=registry)
     assert battery.platform == "sensor"
     assert apply_transform(battery, 1) == 100
     assert apply_transform(battery, 0) == 1
@@ -126,14 +126,14 @@ def test_binary_payload_mapping(library):
     registry, _ = library
 
     # detect_wet: on == "1".
-    wet = lookup("detect_wet", registry)
+    wet = lookup("detect_wet", registry=registry)
     assert wet.platform == "binary_sensor"
     assert apply_transform(wet, 1) is True
     assert apply_transform(wet, "1") is True
     assert apply_transform(wet, 0) is False
 
     # closed: inverted -> on == "0" (0 means the contact is open).
-    closed = lookup("closed", registry)
+    closed = lookup("closed", registry=registry)
     assert closed.device_class == "opening"
     assert apply_transform(closed, 0) is True
     assert apply_transform(closed, 1) is False
@@ -188,12 +188,12 @@ def test_user_override_merges_and_adds(tmp_path, library):
     merged, merged_skips = load_user_overrides(tmp_path, registry, skip_keys)
 
     # Override replaced the shipped descriptor.
-    overridden = lookup("temperature_C", merged)
+    overridden = lookup("temperature_C", registry=merged)
     assert overridden.unit_of_measurement == "K"
     assert overridden.name == "Kelvin Temp"
 
     # New field is present.
-    added = lookup("vendor_special_field", merged)
+    added = lookup("vendor_special_field", registry=merged)
     assert added is not None
     assert added.object_suffix == "SPC"
 
@@ -201,7 +201,7 @@ def test_user_override_merges_and_adds(tmp_path, library):
     assert "vendor_noise" in merged_skips
 
     # The base registry is untouched (pure merge).
-    assert lookup("temperature_C", registry).unit_of_measurement == "°C"
+    assert lookup("temperature_C", registry=registry).unit_of_measurement == "°C"
 
 
 def test_user_override_absent_is_noop(tmp_path, library):
@@ -227,5 +227,5 @@ def test_merge_overrides_ignores_malformed_entry(library):
             },
         },
     )
-    assert lookup("bad_entry", merged) is None
-    assert lookup("good_entry", merged) is not None
+    assert lookup("bad_entry", registry=merged) is None
+    assert lookup("good_entry", registry=merged) is not None

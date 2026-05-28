@@ -55,7 +55,7 @@ from .const import (
     signal_hub_update,
     signal_new_device,
 )
-from .mapping import FieldDescriptor, lookup
+from .mapping import FieldDescriptor, Registry, lookup
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
@@ -412,9 +412,7 @@ async def async_setup_hub_platform(
     # Use the merged registry (shipped library + user overrides) that the hub
     # loaded in an executor and cached, so descriptor lookups never re-read the
     # YAML files on the event loop.
-    registry: dict[str, FieldDescriptor] | None = hass.data[DOMAIN].get(
-        DATA_LIBRARY, (None, None)
-    )[0]
+    registry: Registry | None = hass.data[DOMAIN].get(DATA_LIBRARY, (None, None))[0]
 
     # Track created unique_ids per device_key so neither the initial build nor the
     # dynamic-add handlers double-create entities for the same field.
@@ -426,9 +424,13 @@ async def async_setup_hub_platform(
     # created, so it is made exactly once per device across both creation paths.
     extra_created: set[str] = set()
 
-    def _descriptor_for(field_key: str) -> FieldDescriptor | None:
-        """Return a descriptor for this platform, or None to skip the field."""
-        descriptor = lookup(field_key, registry)
+    def _descriptor_for(field_key: str, model: str) -> FieldDescriptor | None:
+        """Return a descriptor for this platform, or None to skip the field.
+
+        ``model`` makes the lookup model-aware: a model-scoped library entry for
+        ``(model, field_key)`` wins over the global flat entry.
+        """
+        descriptor = lookup(field_key, model, registry)
         if descriptor is None or descriptor.platform != platform:
             return None
         return descriptor
@@ -440,7 +442,7 @@ async def async_setup_hub_platform(
         seen = created.setdefault(device_key, set())
         new_entities: list[Rtl433Entity] = []
         for field_key in field_keys:
-            descriptor = _descriptor_for(field_key)
+            descriptor = _descriptor_for(field_key, model)
             if descriptor is None:
                 continue
             unique_id = f"{entry.entry_id}:{device_key}:{descriptor.object_suffix}"
@@ -489,7 +491,7 @@ async def async_setup_hub_platform(
             mapped = {
                 field_key
                 for field_key in incoming
-                if _descriptor_for(field_key) is not None
+                if _descriptor_for(field_key, model) is not None
             }
             hass.async_create_task(
                 async_upsert_device(hass, entry, device_key, fields=mapped)

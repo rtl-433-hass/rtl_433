@@ -54,7 +54,7 @@ from .const import (
     signal_new_device,
 )
 from .coordinator import Rtl433Coordinator
-from .mapping import FieldDescriptor, load_library, load_user_overrides
+from .mapping import Registry, load_library, load_user_overrides
 
 # The 0.1.0 per-device config entries stored the set of observed mapped field
 # keys under this literal options key. It is intentionally *not* exported from
@@ -130,7 +130,7 @@ def _hub_manage_settings(entry: ConfigEntry) -> bool:
 
 async def _async_load_library(
     hass: HomeAssistant,
-) -> tuple[dict[str, FieldDescriptor], set[str]]:
+) -> tuple[Registry, set[str]]:
     """Load (and cache) the shipped library merged with user overrides.
 
     Both the glob/parse and the override merge touch the filesystem, so they run

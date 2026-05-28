@@ -551,9 +551,9 @@ async def test_entity_setup_uses_cached_registry_not_event_loop_load(
     real_lookup = entity_mod.lookup
     seen_registries: list = []
 
-    def _recording_lookup(field_key, registry=None):
+    def _recording_lookup(field_key, model=None, registry=None):
         seen_registries.append(registry)
-        return real_lookup(field_key, registry)
+        return real_lookup(field_key, model, registry)
 
     with patch.object(entity_mod, "lookup", _recording_lookup):
         hub = await _setup_hub(
