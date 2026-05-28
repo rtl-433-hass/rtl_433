@@ -716,6 +716,31 @@ class Rtl433Coordinator:
         self._desired, self._managed = {}, set()
         await self._store.async_remove()
 
+    async def async_resync_sdr(self) -> None:
+        """Re-adopt the server's current SDR settings into managed desired state.
+
+        Replaces the documented off → restart → on dance with one operation.
+        **Refresh-first**: re-fetch the server's meta first; if ``self.meta`` is
+        still empty (the server's ``/cmd`` is unreachable and was never fetched)
+        this **returns early without clearing**, so the existing desired state and
+        Store are left intact — there is no data-loss window. Only when meta is
+        present does it clear the stale desired state, re-adopt from the server
+        (hop-mode ``center_frequency`` guard preserved by ``_adopt_from_server``),
+        and re-enforce the adopted managed fields.
+
+        Best-effort: composes methods that already swallow their own ``/cmd``
+        errors, so a press never raises into Home Assistant. **No outer
+        ``_cmd_lock``** is taken — ``_refresh_meta`` is lock-free and each setter
+        send in ``_enforce_all`` self-serializes through the non-reentrant
+        ``_cmd_lock`` per call (an outer lock would deadlock at the first send).
+        """
+        await self._refresh_meta()
+        if not self.meta:
+            return
+        await self.clear_desired_state()
+        await self._adopt_from_server()
+        await self._enforce_all()
+
     # ------------------------------------------------------------------ #
     # Event handling                                                     #
     # ------------------------------------------------------------------ #
