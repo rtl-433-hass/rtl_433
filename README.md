@@ -166,6 +166,12 @@ a silence-based availability model: if no event for a device arrives within its
   available** between presses instead of going `unavailable`. The shipped
   mappings are in
   [`device_library/events.yaml`](docs/device-library.md#event-entities).
+- **No late event replays** — on reconnect or a Home Assistant restart, rtl_433
+  replays its recent event history. Momentary RF events that occurred **while HA
+  was disconnected** are intentionally **not re-fired**, so a doorbell or motion
+  event from an hour ago can't trigger your automations late (they are logged at
+  INFO instead). Their latest readings still seed the corresponding sensors. No
+  configuration; nothing to set up.
 
 Both options apply **live** — changing the discovery toggle or a timeout takes
 effect without reloading the hub or tearing down the WebSocket.

@@ -10,6 +10,7 @@ entities.
 from __future__ import annotations
 
 from datetime import timedelta
+import json
 from unittest.mock import patch
 
 from freezegun import freeze_time
@@ -17,7 +18,10 @@ import pytest
 
 from custom_components.rtl_433.const import signal_device_update, signal_hub_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
-from custom_components.rtl_433.coordinator.base import _build_cmd_url
+from custom_components.rtl_433.coordinator.base import (
+    REPLAY_STALE_THRESHOLD,
+    _build_cmd_url,
+)
 from homeassistant.util import dt as dt_util
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
@@ -397,3 +401,232 @@ def test_refresh_tick_noop_while_disconnected(hass, coordinator, aioclient_mock)
     assert coordinator.meta == {}
     assert coordinator.stats == {}
     assert aioclient_mock.mock_calls == []
+
+
+# --------------------------------------------------------------------------- #
+# Replay suppression: timestamp parsing + frame classification.                #
+# --------------------------------------------------------------------------- #
+# A doorbell event device (``secret_knock`` maps to an ``event`` platform entity)
+# used by the classification tests; the coordinator reads raw ``time`` for the
+# replay decision, so each frame controls its own ``time`` value.
+_DOORBELL_KEY = "Honeywell-Doorbell-7"
+
+
+def _doorbell_frame(event_time: str, *, value: int = 1) -> str:
+    """Build a doorbell event frame string with the given ``time`` value."""
+    payload = {"model": "Honeywell-Doorbell", "id": 7, "secret_knock": value}
+    if event_time is not None:
+        payload["time"] = event_time
+    return json.dumps(payload)
+
+
+def _dispatched_replay_flags(dispatch) -> list[bool]:
+    """Pull the ``is_replay`` flag off each per-device dispatched event."""
+    return [
+        call.args[2].is_replay
+        for call in dispatch.call_args_list
+        if call.args[1].startswith("rtl_433_device_update")
+    ]
+
+
+def test_parse_event_time_handles_format_variance():
+    """Parsing tolerates local-naive, ISO/``Z``, and offset; junk yields None.
+
+    The unit-level guarantee behind the classifier: a usable timestamp parses to a
+    comparable UTC instant regardless of format, and a missing/blank/garbage value
+    yields ``None`` (so the frame is later treated as live) and never raises.
+    """
+    parse = Rtl433Coordinator._parse_event_time
+
+    # Local naive "YYYY-MM-DD HH:MM:SS" -> interpreted in HA's configured time zone
+    # and reduced to UTC. Compare against the same tz-aware reduction so the test
+    # is robust to whatever DEFAULT_TIME_ZONE the harness set (HA test default is
+    # US/Pacific, not UTC).
+    naive = parse("2026-05-25 10:00:00")
+    assert naive is not None
+    assert naive.tzinfo is not None  # reduced to an aware (UTC) instant
+    expected_naive = dt_util.as_utc(dt_util.parse_datetime("2026-05-25T10:00:00"))
+    assert naive == expected_naive
+    # Optional fractional seconds parse too.
+    assert parse("2026-05-25 10:00:00.5") is not None
+
+    # ISO-8601 with a ``Z`` suffix is unambiguous UTC regardless of HA's tz.
+    assert parse("2026-05-25T10:00:00Z") == dt_util.parse_datetime(
+        "2026-05-25T10:00:00+00:00"
+    )
+    # ISO-8601 with a numeric offset reduces to the same UTC basis.
+    assert parse("2026-05-25T12:00:00+02:00") == dt_util.parse_datetime(
+        "2026-05-25T10:00:00+00:00"
+    )
+
+    # Missing / blank / garbage -> None, never raising.
+    assert parse(None) is None
+    assert parse("") is None
+    assert parse("   ") is None
+    assert parse("not a timestamp") is None
+    assert parse(12345) is None  # non-string
+
+
+def test_classifies_local_iso_and_unparseable_times(hass, coordinator):
+    """A local, an ISO/``Z``, and an unparseable frame each classify as expected.
+
+    Drives the classifier through ``_handle_text_frame`` with ``now`` frozen so
+    age is deterministic: a recent local-naive time and a recent ISO/``Z`` time
+    are LIVE; a blank/garbage ``time`` is treated as LIVE ("never drop a real
+    one") and the frame loop never raises.
+    """
+    # A local-naive frame is interpreted in HA's configured tz; freeze ``now`` a
+    # few seconds after the frame's true UTC instant so its age stays under the
+    # threshold regardless of that tz (HA test default is US/Pacific, not UTC).
+    local_frame_utc = dt_util.as_utc(dt_util.parse_datetime("2026-05-25T10:00:00"))
+    with freeze_time(local_frame_utc + timedelta(seconds=10)), patch(DISPATCH) as d1:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25 10:00:00"))
+    assert _dispatched_replay_flags(d1) == [False]  # recent local time -> live
+
+    # An ISO/``Z`` (unambiguous UTC) frame; freeze at a matching recent instant.
+    # Use a strictly newer instant than the prior mark so the mark does not gate.
+    iso_now = dt_util.parse_datetime("2026-05-25T20:00:10+00:00")
+    with freeze_time(iso_now), patch(DISPATCH) as d2:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T20:00:05Z"))
+        # Blank ``time`` -> unparseable -> treated as live, never raises.
+        coordinator._handle_text_frame(_doorbell_frame(""))
+        # Garbage ``time`` -> unparseable -> live, never raises.
+        coordinator._handle_text_frame(_doorbell_frame("garbage"))
+    assert _dispatched_replay_flags(d2) == [False, False, False]
+
+
+def test_gap_event_after_reconnect_is_suppressed(hass, coordinator):
+    """A reconnect replay frame newer than the mark but stale is a gap event.
+
+    Feed a live event (advances the high-water mark), then — simulating a
+    reconnect — feed a frame whose ``time`` is newer than the mark (HA never saw
+    it) but older than ``REPLAY_STALE_THRESHOLD``. It must classify as a replay
+    (``is_replay=True``) so the event entity does not fire, while still advancing
+    the mark so it is not reconsidered.
+    """
+    # Use unambiguous UTC (``Z``) timestamps so age is tz-independent.
+    with freeze_time("2026-05-25T10:00:00+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:00Z"))
+    assert _dispatched_replay_flags(dispatch) == [False]
+
+    # Reconnect: a gap event stamped at 10:01:00 arrives at 10:05:00 -> newer than
+    # the 10:00:00 mark but 240s old, comfortably beyond the staleness threshold
+    # -> stale gap event -> suppressed.
+    assert timedelta(seconds=240) > REPLAY_STALE_THRESHOLD
+    with freeze_time("2026-05-25T10:05:00+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:01:00Z"))
+    assert _dispatched_replay_flags(dispatch) == [True]
+    # The mark advanced to the gap event's time so it is not reconsidered.
+    assert coordinator._event_high_water == dt_util.parse_datetime(
+        "2026-05-25T10:01:00+00:00"
+    )
+
+
+def test_no_double_fire_on_blip_replay(hass, coordinator):
+    """Replaying the SAME frame (``time <= mark``) is an already-seen replay.
+
+    A brief blip re-sends the recently-fired buffer tail on reconnect; the
+    high-water mark recognises those frames as already-seen so they do not
+    re-fire (``is_replay=True``).
+    """
+    frame = _doorbell_frame("2026-05-25T10:00:00Z")
+    with freeze_time("2026-05-25T10:00:00+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(frame)  # live -> fires
+    assert _dispatched_replay_flags(dispatch) == [False]
+
+    # Same frame re-sent on reconnect (time == mark) -> already-seen replay.
+    with freeze_time("2026-05-25T10:00:02+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(frame)
+    assert _dispatched_replay_flags(dispatch) == [True]
+
+
+def test_fresh_event_at_reconnect_and_steady_repeat_are_live(hass, coordinator):
+    """A fresh post-reconnect event and a steady-state repeat both classify live.
+
+    With the mark already set, a frame whose ``time`` is newer than the mark and
+    within ``REPLAY_STALE_THRESHOLD`` of ``now`` is a genuine live transmission
+    ("never drop a real one") — there is no suppression window. A later genuine
+    repeat of the SAME value is likewise live.
+    """
+    # Prior live event sets the mark at 10:00:00 (UTC ``Z`` so age is tz-free).
+    with freeze_time("2026-05-25T10:00:00+00:00"), patch(DISPATCH):
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:00Z"))
+
+    # Fresh event right after a reconnect: time == now, well within the threshold.
+    assert timedelta(seconds=10) < REPLAY_STALE_THRESHOLD
+    with freeze_time("2026-05-25T10:00:10+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:10Z"))
+    assert _dispatched_replay_flags(dispatch) == [False]
+
+    # Steady-state repeat of the same value, seconds later -> still live.
+    with freeze_time("2026-05-25T10:00:20+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:20Z", value=1))
+    assert _dispatched_replay_flags(dispatch) == [False]
+
+
+def test_offline_device_not_resurrected_by_replay(hass, coordinator):
+    """Replayed / stale frames do not flip an offline device back to available.
+
+    Bring a device online, let the watchdog mark it unavailable past the timeout,
+    then feed replayed/stale frames: ``available`` stays ``False`` and
+    ``last_seen`` is unchanged. Only a fresh live frame restores availability.
+    """
+    key = _DOORBELL_KEY
+
+    start = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
+    with freeze_time(start), patch(DISPATCH):
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:00Z"))
+    assert coordinator.available[key] is True
+    online_seen = coordinator.last_seen[key]
+
+    # Past the 600s timeout: the watchdog flips it unavailable.
+    with freeze_time(start + timedelta(seconds=601)), patch(DISPATCH):
+        _run(hass, coordinator._async_watchdog(dt_util.utcnow()))
+    assert coordinator.available[key] is False
+
+    # A reconnect replays the buffer tail (already-seen) AND a gap event (stale).
+    # Neither must resurrect the device or restamp last_seen.
+    with freeze_time(start + timedelta(seconds=602)), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:00Z"))  # seen
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:05:00Z"))  # gap
+    assert _dispatched_replay_flags(dispatch) == [True, True]
+    assert coordinator.available[key] is False
+    assert coordinator.last_seen[key] == online_seen
+
+    # A genuinely-fresh live frame (time ~ now) restores availability.
+    fresh = start + timedelta(seconds=700)
+    with freeze_time(fresh), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(
+            _doorbell_frame(fresh.strftime("%Y-%m-%dT%H:%M:%SZ"))  # == now, recent
+        )
+    assert _dispatched_replay_flags(dispatch) == [False]
+    assert coordinator.available[key] is True
+    assert coordinator.last_seen[key] != online_seen
+
+
+def test_sensor_seeds_from_replay_without_stamping_last_seen(hass, coordinator):
+    """A stale frame for a fresh sensor device seeds fields but not liveness.
+
+    Feeding ONLY a stale replayed frame for a never-before-seen sensor device
+    still records the device snapshot + field values (so its sensors can seed on
+    reconnect/restart), but must NOT stamp ``last_seen`` or set ``available`` —
+    the device stays governed by liveness until a live frame arrives.
+    """
+    key = "Acurite-606TX-42"
+    # ``now`` is far ahead of the frame time (UTC ``Z``), so this is a stale gap
+    # / replay event with no prior live frame for the device.
+    with freeze_time("2026-05-25T10:30:00+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(
+            '{"time": "2026-05-25T10:00:00Z", "model": "Acurite-606TX", '
+            '"id": 42, "temperature_C": 21.4, "humidity": 55}'
+        )
+
+    # Classified as a replay (suppressed for events), yet the snapshot seeded.
+    assert _dispatched_replay_flags(dispatch) == [True]
+    assert key in coordinator.devices
+    assert coordinator.devices[key].fields == {"temperature_C": 21.4, "humidity": 55}
+    assert coordinator.device_fields[key] == {"temperature_C", "humidity"}
+    assert coordinator.seen_fields >= {"temperature_C", "humidity"}
+    # Liveness was NOT refreshed: no last_seen stamp, no availability set True.
+    assert key not in coordinator.last_seen
+    assert coordinator.available.get(key) is not True

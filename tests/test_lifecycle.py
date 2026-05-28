@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import json
+import logging
 from unittest.mock import patch
 
 from freezegun import freeze_time
@@ -1163,3 +1164,198 @@ async def test_event_restores_last_fire_across_reload(hass, hub_entry_builder):
     assert after.attributes["event_type"] == "A"
     # The persisted event_types survived the reload (seed the rebuilt entity).
     assert after.attributes["event_types"] == ["A"]
+
+
+# --------------------------------------------------------------------------- #
+# Replay suppression: event entities don't re-fire on reconnect replay, while  #
+# sensors still seed; a genuinely-fresh event at reconnect still fires.        #
+# --------------------------------------------------------------------------- #
+async def _doorbell_hub(hass, hub_entry_builder):
+    """Set up a hub with a seeded Honeywell doorbell event device + its eid."""
+    device_key = "Honeywell-Doorbell-7"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Honeywell-Doorbell",
+                DEVICE_FIELDS: ["secret_knock"],
+            }
+        },
+    )
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:secret_knock"
+    )
+    assert eid is not None
+    return hub, _coordinator(hass, hub), eid
+
+
+def _doorbell_press(events, event_time: str) -> dict:
+    """Return the recorded doorbell-press fixture frame with ``time`` overridden.
+
+    Uses the project event fixture (a real Honeywell-Doorbell ``secret_knock``
+    frame) so the replay tests exercise a genuine event-device shape; the per-frame
+    ``time`` is the only thing each scenario varies.
+    """
+    frame = dict(events("doorbell_event.json")[0])
+    frame["time"] = event_time
+    return frame
+
+
+async def test_gap_event_is_suppressed_and_logged(
+    hass, hub_entry_builder, events, caplog
+):
+    """A stale gap event after reconnect does NOT fire and is logged at INFO.
+
+    Feed a live press (advances the mark, fires once), then — as a reconnect would
+    — feed a frame whose ``time`` is newer than the mark but older than
+    ``REPLAY_STALE_THRESHOLD`` (a transmission missed during the disconnect). The
+    event entity must NOT fire (its last-fire state/timestamp are unchanged) yet
+    the suppression is recorded at INFO so the user sees the real-but-stale press.
+    """
+    hub, coordinator, eid = await _doorbell_hub(hass, hub_entry_builder)
+
+    # Live press at 10:00:00 UTC fires once (use ``Z`` so age is tz-independent).
+    with freeze_time("2026-05-25T10:00:00+00:00"):
+        _feed(coordinator, _doorbell_press(events, "2026-05-25T10:00:00Z"))
+        await hass.async_block_till_done()
+    fired = hass.states.get(eid)
+    assert fired.attributes["event_type"] == "1"
+    fired_at = fired.state
+
+    # Reconnect: a gap event at 10:01:00 arrives at 10:05:00 -> 240s old -> stale.
+    with (
+        freeze_time("2026-05-25T10:05:00+00:00"),
+        caplog.at_level(logging.INFO, logger="custom_components.rtl_433"),
+    ):
+        _feed(coordinator, _doorbell_press(events, "2026-05-25T10:01:00Z"))
+        await hass.async_block_till_done()
+
+    # The event entity did NOT fire again: last-fire state/timestamp unchanged.
+    after = hass.states.get(eid)
+    assert after.state == fired_at
+    assert after.attributes["event_type"] == "1"
+    # The suppression was logged at INFO (mentions the suppressed transmission).
+    assert any(
+        "suppressed" in r.message and r.levelno == logging.INFO for r in caplog.records
+    )
+
+
+async def test_no_double_fire_on_blip_replay(hass, hub_entry_builder, events):
+    """Replaying the same frame (``time <= mark``) does NOT re-fire the event.
+
+    A brief blip re-sends the recently-fired buffer tail; the high-water mark
+    recognises it as already-seen so the event entity does not fire again.
+    """
+    hub, coordinator, eid = await _doorbell_hub(hass, hub_entry_builder)
+
+    with freeze_time("2026-05-25T10:00:00+00:00"):
+        _feed(coordinator, _doorbell_press(events, "2026-05-25T10:00:00Z"))
+        await hass.async_block_till_done()
+    fired_at = hass.states.get(eid).state
+
+    # Reconnect replays the exact same frame (time == mark) -> no re-fire.
+    with freeze_time("2026-05-25T10:00:03+00:00"):
+        _feed(coordinator, _doorbell_press(events, "2026-05-25T10:00:00Z"))
+        await hass.async_block_till_done()
+
+    after = hass.states.get(eid)
+    assert after.state == fired_at  # unchanged -> did not re-fire
+    assert after.attributes["event_type"] == "1"
+
+
+async def test_fresh_event_at_reconnect_still_fires(hass, hub_entry_builder, events):
+    """A genuinely-fresh event at reconnect fires ("never drop a real one").
+
+    With the mark already set by a prior live press, a frame whose ``time`` is
+    within ``REPLAY_STALE_THRESHOLD`` of ``now`` is live and must fire even though
+    it arrives right after a reconnect — there is no fixed suppression window.
+    """
+    hub, coordinator, eid = await _doorbell_hub(hass, hub_entry_builder)
+
+    with freeze_time("2026-05-25T10:00:00+00:00"):
+        _feed(coordinator, _doorbell_press(events, "2026-05-25T10:00:00Z"))
+        await hass.async_block_till_done()
+    first_fired_at = hass.states.get(eid).state
+
+    # Fresh press 10s later (time ~ now) -> live -> fires (new, later timestamp).
+    with freeze_time("2026-05-25T10:00:10+00:00"):
+        _feed(coordinator, _doorbell_press(events, "2026-05-25T10:00:10Z"))
+        await hass.async_block_till_done()
+
+    after = hass.states.get(eid)
+    assert after.attributes["event_type"] == "1"
+    assert after.state != first_fired_at
+    assert dt_util.parse_datetime(after.state) > dt_util.parse_datetime(first_fired_at)
+
+
+async def test_sensor_seeds_from_replay_but_event_does_not_fire(
+    hass, hub_entry_builder, caplog
+):
+    """A reconnect replay seeds a sensor's value while the event stays unfired.
+
+    A device with both a measurement field (temperature) and an event field
+    (button) is fed ONLY a stale replayed frame (no prior live frame). The sensor
+    must seed its value and the device snapshot must record it, but the event
+    entity must stay ``unknown`` (never fired) and ``last_seen`` is NOT stamped.
+    """
+    device_key = "Acurite-606TX-42"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        discovery_enabled=True,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C", "button"],
+            }
+        },
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    temp_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:T"
+    )
+    button_eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:button"
+    )
+    assert temp_eid is not None
+    assert button_eid is not None
+
+    # The base entity baselines ``last_seen`` to "now" at setup (so a restored
+    # value shows until the timeout). A replay must not *advance* it, so capture
+    # the baseline and assert the replayed frame leaves it untouched.
+    baseline_seen = coordinator.last_seen[device_key]
+
+    # Stale frame (frame time far behind now) -> replay: seeds sensor, no fire.
+    with (
+        freeze_time("2026-05-25T10:30:00+00:00"),
+        caplog.at_level(logging.INFO, logger="custom_components.rtl_433"),
+    ):
+        _feed(
+            coordinator,
+            {
+                "model": "Acurite-606TX",
+                "id": 42,
+                "temperature_C": 21.4,
+                "button": "A",
+                "time": "2026-05-25T10:00:00Z",
+            },
+        )
+        await hass.async_block_till_done()
+
+    # The sensor seeded its value from the replay.
+    assert hass.states.get(temp_eid).state == "21.4"
+    assert coordinator.devices[device_key].fields["temperature_C"] == 21.4
+    # The event entity never fired (still unknown, no event_type).
+    button_state = hass.states.get(button_eid)
+    assert button_state.state == "unknown"
+    assert button_state.attributes["event_type"] is None
+    # Liveness was NOT refreshed by the replay: last_seen unchanged from the
+    # setup baseline (the replay must not stamp it to the frame/now time).
+    assert coordinator.last_seen[device_key] == baseline_seen
+    # The suppressed event-field transmission was logged at INFO.
+    assert any(
+        "suppressed" in r.message and r.levelno == logging.INFO for r in caplog.records
+    )

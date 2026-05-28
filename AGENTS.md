@@ -132,6 +132,26 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   RPC `result`/`error`). This is why non-event frames no longer create a phantom
   `"unknown"` device or pollute `seen_fields` / the diagnostics
   `unmatched_field_keys`.
+- **Replay/stale suppression** (`_process_event`, `_parse_event_time`). On every
+  (re)connect the server replays up to its last 100 events, so the coordinator
+  reads the raw `time` **before `normalize()`** (which drops it) and classifies
+  each frame via **two signals**: a **high-water mark** of the max event `time`
+  ever parsed (a frame at or below it is an **already-seen replay**) plus the
+  event **age vs `REPLAY_STALE_THRESHOLD`** (30 s — an unseen-but-old frame is a
+  **stale gap event** that occurred while HA was disconnected). Either outcome
+  **seeds sensor values** (and still fires the new-device callback so a
+  replay-discovered device's entities exist) but must **NOT** fire `event`
+  entities or refresh `last_seen` / `available`, so a genuinely-offline device is
+  not resurrected by the replay. A suppressed `event` transmission logs **once at
+  INFO** (`Rtl433Event._handle_dispatch`). The classification rides on the
+  dispatch carrier: `NormalizedEvent.is_replay` / `event_time` (stamped via
+  `dataclasses.replace` after `normalize`; live is the default), so dispatch
+  needs no extra signature. The **watchdog re-dispatch passes `is_replay=False`**
+  so its unavailable re-paint of a cached (maybe-replay) event is never
+  suppressed. **Assumes the server and HA clocks are roughly NTP-synced**
+  (local-naive `time` is read in HA's time zone). **Limitation:** with server
+  timestamps disabled (`report_meta notime`) there is no usable `time`, so every
+  frame is treated as live and **events fire on replay**.
 - **Hub observability data source.** SDR/meta and server stats are **not** read
   from the socket. They come from one-shot HTTP GETs to `scheme://host:port/cmd`
   at the **server root** (`https` when `secure`/`wss`, else `http`) —
