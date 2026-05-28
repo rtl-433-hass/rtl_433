@@ -17,6 +17,12 @@ from unittest.mock import patch
 
 from custom_components.rtl_433 import async_remove_config_entry_device
 from custom_components.rtl_433.const import (
+    CALIBRATION_COMMODITY,
+    CALIBRATION_SCALE,
+    CALIBRATION_UNIT,
+    COMMODITY_GAS,
+    COMMODITY_NONE,
+    COMMODITY_WATER,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
@@ -25,14 +31,30 @@ from custom_components.rtl_433.const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    DEVICE_CALIBRATION,
     DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
 from homeassistant.config_entries import SOURCE_USER
+from homeassistant.const import UnitOfVolume
 from homeassistant.data_entry_flow import FlowResultType
 
 VALIDATE = "custom_components.rtl_433.config_flow.Rtl433Coordinator.validate_connection"
+
+
+def _schema_default(result, key: str):
+    """Return the rendered default for a form field key, or ``None``.
+
+    Voluptuous stores a field's default as a zero-arg callable on the marker; this
+    pulls the option flow form's commodity pre-fill out of the shown schema so a
+    test can assert the rendered default without re-implementing the flow.
+    """
+    for marker in result["data_schema"].schema:
+        if marker == key:
+            default = getattr(marker, "default", None)
+            return default() if callable(default) else default
+    return None
 
 
 async def test_user_step_success_creates_hub(hass):
@@ -172,6 +194,157 @@ async def test_device_options_step_aborts_when_no_devices(hass, hub_entry_builde
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "no_devices"
+
+
+# --------------------------------------------------------------------------- #
+# Options flow — per-device calibration (device step -> calibration step).     #
+# --------------------------------------------------------------------------- #
+async def test_calibration_round_trip_writes_into_device_record(
+    hass, hub_entry_builder
+):
+    """A water calibration drives device -> calibration step and is persisted.
+
+    Picking a real commodity on the device step advances to the calibration step;
+    submitting ``{unit, scale}`` writes the ``{commodity, unit, scale}`` triple
+    into ``entry.data[CONF_DEVICES][device_key]["calibration"]``.
+    """
+    device_key = "ERT-SCM-9001"
+    entry = hub_entry_builder(
+        devices={
+            device_key: {
+                CONF_MODEL: "ERT-SCM",
+                DEVICE_FIELDS: ["consumption_data"],
+            }
+        }
+    )
+    entry.add_to_hass(hass)
+
+    # Menu -> device step.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["step_id"] == "device"
+
+    # Choose water -> advance to the calibration step (no record written yet).
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"device": device_key, CALIBRATION_COMMODITY: COMMODITY_WATER},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "calibration"
+
+    # Submit a convertible volume unit + scale; the triple is persisted.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CALIBRATION_UNIT: UnitOfVolume.LITERS, CALIBRATION_SCALE: 0.1},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    calibration = entry.data[CONF_DEVICES][device_key][DEVICE_CALIBRATION]
+    assert calibration == {
+        CALIBRATION_COMMODITY: COMMODITY_WATER,
+        CALIBRATION_UNIT: UnitOfVolume.LITERS,
+        CALIBRATION_SCALE: 0.1,
+    }
+    # The timeout override is untouched (not part of this calibration).
+    assert DEVICE_TIMEOUT_OVERRIDE not in entry.data[CONF_DEVICES][device_key]
+
+
+async def test_device_step_none_commodity_finishes_without_calibration(
+    hass, hub_entry_builder
+):
+    """Commodity ``none`` writes the record (no calibration) and finishes."""
+    device_key = "ERT-SCM-9001"
+    entry = hub_entry_builder(
+        devices={
+            device_key: {CONF_MODEL: "ERT-SCM", DEVICE_FIELDS: ["consumption_data"]}
+        }
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"device": device_key, CALIBRATION_COMMODITY: COMMODITY_NONE},
+    )
+    # No calibration step; finishes immediately with no calibration sub-record.
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][device_key]
+
+
+# --------------------------------------------------------------------------- #
+# Options flow — commodity pre-fill from the device's last decoded event.      #
+# --------------------------------------------------------------------------- #
+def _seed_coordinator_last_event(hass, entry, device_key, fields):
+    """Stand a minimal coordinator with one device's last event into hass.data.
+
+    The device step reads ``coordinator.devices[device_key].fields`` to pre-fill
+    the commodity, so a SimpleNamespace coordinator with the right shape is enough
+    to exercise the pre-fill path without a full hub setup.
+    """
+    event = SimpleNamespace(fields=fields)
+    coordinator = SimpleNamespace(devices={device_key: event})
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+
+async def _open_device_step(hass, entry):
+    """Open the options device step and return the shown form result."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+
+
+async def test_commodity_prefill_from_meter_type_string(hass, hub_entry_builder):
+    """A last event with ``MeterType: "Gas"`` pre-fills the commodity to gas."""
+    device_key = "IDM-1234"
+    entry = hub_entry_builder(
+        devices={device_key: {CONF_MODEL: "IDM", DEVICE_FIELDS: ["consumption"]}}
+    )
+    entry.add_to_hass(hass)
+    _seed_coordinator_last_event(hass, entry, device_key, {"MeterType": "Gas"})
+
+    result = await _open_device_step(hass, entry)
+    assert result["step_id"] == "device"
+    assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_GAS
+
+
+async def test_commodity_prefill_from_ert_type_low_nibble(hass, hub_entry_builder):
+    """An ``ert_type`` whose low nibble denotes gas pre-fills the commodity to gas.
+
+    ``ert_type & 0x0f == 2`` is a gas commodity; 0x12 exercises that the high
+    nibble is ignored.
+    """
+    device_key = "ERT-SCM-9001"
+    entry = hub_entry_builder(
+        devices={
+            device_key: {CONF_MODEL: "ERT-SCM", DEVICE_FIELDS: ["consumption_data"]}
+        }
+    )
+    entry.add_to_hass(hass)
+    _seed_coordinator_last_event(hass, entry, device_key, {"ert_type": 0x12})
+
+    result = await _open_device_step(hass, entry)
+    assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_GAS
+
+
+async def test_commodity_prefill_defaults_to_none_without_hint(hass, hub_entry_builder):
+    """With no MeterType/ert_type hint, the commodity default stays ``none``."""
+    device_key = "ERT-SCM-9001"
+    entry = hub_entry_builder(
+        devices={
+            device_key: {CONF_MODEL: "ERT-SCM", DEVICE_FIELDS: ["consumption_data"]}
+        }
+    )
+    entry.add_to_hass(hass)
+    _seed_coordinator_last_event(hass, entry, device_key, {"consumption_data": 42})
+
+    result = await _open_device_step(hass, entry)
+    assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_NONE
 
 
 # --------------------------------------------------------------------------- #

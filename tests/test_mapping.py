@@ -229,3 +229,153 @@ def test_merge_overrides_ignores_malformed_entry(library):
     )
     assert lookup("bad_entry", registry=merged) is None
     assert lookup("good_entry", registry=merged) is not None
+
+
+# --------------------------------------------------------------------------- #
+# Component A — model-scoped lookup + specificity-first precedence.            #
+# --------------------------------------------------------------------------- #
+# An illustrative, non-real model string (the shipped library intentionally
+# carries no speculative real-meter consumption mapping, so tests synthesize one
+# via merge_overrides).
+ILLUSTRATIVE_MODEL = "Illustrative-Meter-Example"
+
+# A model-scoped consumption_data descriptor for the illustrative model: a real
+# device_class + a convertible base unit + total_increasing + a scale, i.e. the
+# Energy-dashboard-eligible shape Component A enables.
+_MODEL_CONSUMPTION = {
+    "platform": "sensor",
+    "device_class": "energy",
+    "unit_of_measurement": "kWh",
+    "state_class": "total_increasing",
+    "name": "Illustrative Consumption",
+    "object_suffix": "consumption",
+    "value_transform": {"scale": 0.01},
+}
+
+
+def test_model_scoped_lookup_resolves_then_falls_back_to_global(library):
+    """A model-scoped entry wins for its model; other models keep the global one.
+
+    Merging a synthetic ``models:`` block for an illustrative model overrides the
+    *global* unitless ``consumption_data`` descriptor only for that model; any
+    other model still resolves the shipped global descriptor, and a non-meter
+    field (``temperature_C``) is unaffected for the matching model.
+    """
+    registry, skip_keys = library
+    merged, _ = merge_overrides(
+        registry,
+        skip_keys,
+        {"models": {ILLUSTRATIVE_MODEL: {"consumption_data": _MODEL_CONSUMPTION}}},
+    )
+
+    # Matching model -> the model-scoped descriptor (Energy-dashboard-eligible).
+    scoped = lookup("consumption_data", ILLUSTRATIVE_MODEL, merged)
+    assert scoped is not None
+    assert scoped.device_class == "energy"
+    assert scoped.unit_of_measurement == "kWh"
+    assert scoped.state_class == "total_increasing"
+    assert scoped.value_transform == {"scale": 0.01}
+
+    # A different model -> the shipped global (unitless) descriptor.
+    other = lookup("consumption_data", "Some-Other-Model", merged)
+    assert other is not None
+    assert other.device_class is None
+    assert other.unit_of_measurement is None
+    assert other.value_transform == {"int": True}
+
+    # No model context -> the global descriptor too.
+    assert lookup("consumption_data", registry=merged).device_class is None
+
+    # A non-meter field is unaffected for the matching model (no regression): it
+    # still resolves the shipped global temperature descriptor.
+    temp = lookup("temperature_C", ILLUSTRATIVE_MODEL, merged)
+    assert temp is not None
+    assert temp.device_class == "temperature"
+    assert temp.unit_of_measurement == "°C"
+
+
+def test_precedence_specificity_first(library):
+    """Specificity-first: user-model > shipped-model > user-global > shipped-global.
+
+    The decisive case is **shipped-model > user-global**: a shipped model-scoped
+    entry must outrank a user-override *global* entry for a matching model.
+    """
+    registry, skip_keys = library
+    field = "consumption_data"
+
+    # Build a base registry that already carries a *shipped-equivalent*
+    # model-scoped entry for (ILLUSTRATIVE_MODEL, field).
+    shipped_model = dict(_MODEL_CONSUMPTION, name="Shipped Model")
+    base, base_skips = merge_overrides(
+        registry,
+        skip_keys,
+        {"models": {ILLUSTRATIVE_MODEL: {field: shipped_model}}},
+    )
+
+    # User override carries BOTH a user model-scoped entry and a user global entry
+    # for the same field.
+    user_model = dict(_MODEL_CONSUMPTION, name="User Model", unit_of_measurement="Wh")
+    user_global = {
+        "platform": "sensor",
+        "device_class": "gas",
+        "unit_of_measurement": "m³",
+        "state_class": "total_increasing",
+        "name": "User Global",
+        "object_suffix": "consumption",
+    }
+    with_user, _ = merge_overrides(
+        base,
+        base_skips,
+        {field: user_global, "models": {ILLUSTRATIVE_MODEL: {field: user_model}}},
+    )
+
+    # user-model > shipped-model.
+    assert lookup(field, ILLUSTRATIVE_MODEL, with_user).name == "User Model"
+
+    # Drop the user model entry: the *shipped* model entry still wins over the
+    # user *global* entry for the matching model (the decisive specificity-first
+    # case).
+    shipped_model_only, _ = merge_overrides(base, base_skips, {field: user_global})
+    decided = lookup(field, ILLUSTRATIVE_MODEL, shipped_model_only)
+    assert decided.name == "Shipped Model"
+    assert decided.device_class == "energy"
+
+    # A non-matching model falls through to the user global entry.
+    non_matching = lookup(field, "Some-Other-Model", shipped_model_only)
+    assert non_matching.name == "User Global"
+    assert non_matching.device_class == "gas"
+
+
+def test_existing_themed_file_loads_identically(library, tmp_path):
+    """Regression: an existing themed file loads identically via the loader.
+
+    Re-loading the shipped library from a copy of the existing themed
+    ``power_electrical.yaml`` (which carries no ``models:`` block) yields the same
+    flat descriptors as the packaged load, with an empty model-scoped table —
+    proving the additive ``models:`` parsing did not regress flat parsing.
+    """
+    from pathlib import Path
+    import shutil
+
+    registry, _ = library
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components"
+        / "rtl_433"
+        / "device_library"
+    )
+    shutil.copy(src / "power_electrical.yaml", tmp_path / "power_electrical.yaml")
+
+    reloaded, _ = load_library(tmp_path)
+    # The themed file carries no models: block.
+    assert reloaded.models == {}
+    # Every descriptor it defines matches the packaged registry exactly.
+    for field_key in (
+        "power_W",
+        "energy_kWh",
+        "consumption",
+        "consumption_data",
+        "ext_power",
+    ):
+        assert reloaded.flat[field_key] == registry.flat[field_key]

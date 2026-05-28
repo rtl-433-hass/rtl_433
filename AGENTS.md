@@ -44,6 +44,20 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   a menu with a *Hub settings* step (discovery toggle + default timeout, written
   to `entry.options`) and a *Device settings* step (per-device timeout override,
   written into `entry.data["devices"]`).
+- **Utility-meter calibration** (`calibration.py`, options `Device settings` →
+  `calibration` step) writes a `DEVICE_CALIBRATION` sub-record (`{commodity,
+  unit, scale}`) into `entry.data[CONF_DEVICES][device_key]` next to
+  `timeout_override`. It overlays the consumption descriptor (the
+  `CONSUMPTION_FIELD_KEYS` only) at entity build — precedence tier #1 above the
+  `models:`/global library lookup. Applied via **reload**: the device-step write
+  fires `_async_update_listener` (`__init__.py`), which `async_reload`s the hub
+  **only when the normalized calibration map differs** from the coordinator's
+  setup snapshot (`coordinator.calibration_snapshot` / `_calibration_map`), so
+  routine devices-map upserts never reload — mirroring the `manage_settings`
+  reload pattern. `device_class`/native unit/`state_class` are construction-time,
+  hence the rebuild; recalibration orphans prior long-term statistics (expected).
+  User-facing detail is in the [README](README.md#utility-meter-calibration) and
+  `docs/device-library.md` — keep this contributor-facing.
 - `Rtl433ConfigFlow` also implements `async_step_reconfigure` (`config_flow.py`)
   to edit a hub's connection params (host/port/path/secure) in place — "same
   server, new address". The `host:port` `unique_id` is recomputed (aborting only
@@ -346,6 +360,16 @@ temperature_C:
 stringified to the fired `event_type` and `device_class` is an
 `EventDeviceClass`; see the [Event platform](#event-platform-eventpy-value-as-type-auto-populated)
 section above. `_skip_keys.yaml` lists fields that must never become entities.
+
+An optional reserved top-level **`models:`** block (`model → {field_key →
+descriptor}`, same per-field schema; `mapping.py` `Registry.models`) carries
+**model-scoped** overrides — `lookup(field_key, model, registry)` resolves
+model-scoped → global → `None`. Precedence is **specificity-first**: per-device
+calibration > model-scoped (user > shipped) > global (user > shipped), so a
+*shipped* model entry beats a *user-override global* entry for a matching model.
+The user-override file `<config>/rtl_433_mappings.yaml` supports `models:` too.
+Full detail (incl. the illustrative non-real-model worked example) is in
+`docs/device-library.md`; do not duplicate it here.
 
 **Do not invent attributes here.** The full schema — every attribute, the
 `value_transform` keys and their application order, binary payloads, the

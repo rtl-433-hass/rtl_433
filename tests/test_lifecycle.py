@@ -37,6 +37,10 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.rtl_433.const import (
+    CALIBRATION_COMMODITY,
+    CALIBRATION_SCALE,
+    CALIBRATION_UNIT,
+    COMMODITY_WATER,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICE_KEY,
     CONF_DEVICES,
@@ -47,6 +51,7 @@ from custom_components.rtl_433.const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    DEVICE_CALIBRATION,
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
@@ -1359,3 +1364,101 @@ async def test_sensor_seeds_from_replay_but_event_does_not_fire(
     assert any(
         "suppressed" in r.message and r.levelno == logging.INFO for r in caplog.records
     )
+
+
+# --------------------------------------------------------------------------- #
+# Component B — per-device calibration: reload gating + sensor wiring.         #
+# --------------------------------------------------------------------------- #
+async def test_calibration_change_reloads_hub_unrelated_upsert_does_not(
+    hass, hub_entry_builder
+):
+    """A calibration change reloads the hub; an unrelated upsert does not.
+
+    Writing a calibration into the devices map flips the coordinator's snapshot,
+    so ``_async_update_listener`` reloads the hub. A routine devices-map upsert
+    (a new field) leaves the calibration sub-record untouched, so the snapshot is
+    unchanged and no reload fires.
+    """
+    from custom_components.rtl_433.entity import async_upsert_device
+
+    device_key = "ERT-SCM-9001"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {CONF_MODEL: "ERT-SCM", DEVICE_FIELDS: ["consumption_data"]}
+        },
+    )
+
+    calibration = {
+        CALIBRATION_COMMODITY: COMMODITY_WATER,
+        CALIBRATION_UNIT: "L",
+        CALIBRATION_SCALE: 0.1,
+    }
+
+    with patch.object(
+        hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
+    ) as reload_spy:
+        # Unrelated devices-map upsert (a newly observed field) must NOT reload.
+        await async_upsert_device(
+            hass, hub, device_key, model="ERT-SCM", fields=["battery_ok"]
+        )
+        await hass.async_block_till_done()
+        assert reload_spy.call_count == 0
+
+        # Writing a calibration into the record DOES reload (snapshot differs).
+        devices = {k: dict(v) for k, v in hub.data[CONF_DEVICES].items()}
+        devices[device_key][DEVICE_CALIBRATION] = calibration
+        hass.config_entries.async_update_entry(
+            hub, data={**hub.data, CONF_DEVICES: devices}
+        )
+        await hass.async_block_till_done()
+        assert reload_spy.call_count == 1
+        reload_spy.assert_called_with(hub.entry_id)
+
+
+async def test_calibrated_consumption_sensor_is_energy_eligible(
+    hass, hub_entry_builder
+):
+    """A water calibration rebuilds the consumption sensor as Energy-eligible.
+
+    Seeding a ``{water, L, 0.1}`` calibration on a ``consumption_data`` device and
+    setting the hub up makes the consumption ``Rtl433Sensor`` report
+    ``device_class == water``, the chosen native unit, ``state_class ==
+    total_increasing``, and a value of ``raw * 0.1``.
+    """
+    device_key = "ERT-SCM-9001"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "ERT-SCM",
+                DEVICE_FIELDS: ["consumption_data"],
+                DEVICE_CALIBRATION: {
+                    CALIBRATION_COMMODITY: COMMODITY_WATER,
+                    CALIBRATION_UNIT: "L",
+                    CALIBRATION_SCALE: 0.1,
+                },
+            }
+        },
+    )
+
+    ent_reg = er.async_get(hass)
+    prefix = f"{hub.entry_id}:{device_key}"
+    consumption = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:consumption")
+    assert consumption is not None
+
+    # Feed a raw counter; the calibration scale (0.1) is applied to the value.
+    _feed(
+        _coordinator(hass, hub),
+        {"model": "ERT-SCM", "id": 9001, "consumption_data": 1000},
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get(consumption)
+    assert state.attributes["device_class"] == COMMODITY_WATER
+    assert state.attributes["unit_of_measurement"] == "L"
+    assert state.attributes["state_class"] == "total_increasing"
+    # 1000 (raw) * 0.1 (scale) == 100.0.
+    assert float(state.state) == 100.0
