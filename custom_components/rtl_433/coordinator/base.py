@@ -207,6 +207,14 @@ class Rtl433Coordinator:
         self.new_device_callback: Callable[[str, str], None] | None = None
         self.effective_timeout_resolver: Callable[[str], int] | None = None
 
+        # Per-device calibration snapshot captured at setup (analogous to
+        # ``manage_settings``): ``{device_key: {commodity, unit, scale}}`` for
+        # every device with a calibration. ``_async_update_listener`` reloads the
+        # hub only when the live calibration map differs from this snapshot, so a
+        # routine devices-map upsert (which leaves calibrations untouched) never
+        # triggers a reload. Wired by the integration setup in ``__init__.py``.
+        self.calibration_snapshot: dict[str, dict[str, Any]] = {}
+
         # Per-device removal callbacks registered by the entity platforms. When a
         # device is removed (async_remove_config_entry_device) each is called with
         # the device_key so the platforms can drop their per-device dedup cache and

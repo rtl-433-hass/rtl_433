@@ -80,6 +80,37 @@ DEVICE_TIMEOUT_OVERRIDE: Final = "timeout_override"  # int seconds, or absent/No
 # observed for each event-platform field, persisted so the event entity's
 # ``event_types`` survives a restart.
 DEVICE_EVENT_TYPES: Final = "event_types"
+# Per-device utility-meter calibration sub-record. Holds the user-supplied
+# ``{commodity, unit, scale}`` triple that turns a unitless consumption counter
+# into an Energy-dashboard-eligible sensor (a real device_class + a convertible
+# base unit + ``total_increasing`` + a value scale). Absent (or commodity =
+# ``none``) means the consumption field keeps its library/global descriptor.
+DEVICE_CALIBRATION: Final = "calibration"
+# Sub-keys inside the calibration record.
+CALIBRATION_COMMODITY: Final = "commodity"  # one of CALIBRATION_COMMODITIES
+CALIBRATION_UNIT: Final = "unit"  # an HA-convertible unit for the commodity
+CALIBRATION_SCALE: Final = "scale"  # float multiplier on the raw counter
+
+# Commodity choices for the per-device calibration. ``none`` clears the
+# calibration; the other three map to a sensor device_class.
+COMMODITY_NONE: Final = "none"
+COMMODITY_ENERGY: Final = "energy"
+COMMODITY_GAS: Final = "gas"
+COMMODITY_WATER: Final = "water"
+CALIBRATION_COMMODITIES: Final[tuple[str, ...]] = (
+    COMMODITY_NONE,
+    COMMODITY_ENERGY,
+    COMMODITY_GAS,
+    COMMODITY_WATER,
+)
+
+# The known utility-meter consumption field keys a per-device calibration may be
+# applied to (SCM/ERT ``consumption_data``; SCMplus ``consumption``). The
+# calibration overlay (config_flow + entity) only touches these field keys, never
+# arbitrary fields.
+CONSUMPTION_FIELD_KEYS: Final[frozenset[str]] = frozenset(
+    {"consumption", "consumption_data"}
+)
 
 # --- hass.data keys ---------------------------------------------------------
 # Key under ``hass.data[DOMAIN]`` holding the once-loaded mapping library tuple

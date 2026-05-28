@@ -76,19 +76,43 @@
       },
       "device": {
         "title": "Device settings",
-        "description": "Pick a device and override its availability timeout. Leave the timeout blank to clear the override and use the hub default.",
+        "description": "Pick a device and override its availability timeout. Leave the timeout blank to clear the override and use the hub default. For a utility meter, choose a commodity to calibrate its consumption sensor for the Energy dashboard.",
         "data": {
           "device": "Device",
-          "timeout_override": "Availability timeout override (seconds)"
+          "timeout_override": "Availability timeout override (seconds)",
+          "commodity": "Meter commodity"
         },
         "data_description": {
-          "device": "The device whose availability timeout you want to override.",
-          "timeout_override": "Mark this device unavailable after this many seconds without an event. Leave blank to use the hub default."
+          "device": "The device whose settings you want to change.",
+          "timeout_override": "Mark this device unavailable after this many seconds without an event. Leave blank to use the hub default.",
+          "commodity": "What this meter measures. Pick Energy, Gas, or Water to calibrate the consumption sensor (next step) so it works in the Energy dashboard. Pick None to leave it unitless (and clear any existing calibration)."
+        }
+      },
+      "calibration": {
+        "title": "Calibrate consumption ({commodity})",
+        "description": "Set the base unit one raw consumption count represents and the scale applied to the counter. The sensor reports raw count x scale in this unit; Home Assistant converts to your preferred display unit. Changing this rebuilds the sensor and starts fresh long-term statistics.",
+        "data": {
+          "unit": "Base unit",
+          "scale": "Scale"
+        },
+        "data_description": {
+          "unit": "The unit one consumption count represents (before scale). Home Assistant converts between compatible units for display.",
+          "scale": "Multiplier applied to the raw counter (for example 0.1 if each count is a tenth of a unit). Use 1 if each count is exactly one base unit."
         }
       }
     },
     "abort": {
       "no_devices": "No devices have been discovered yet."
+    }
+  },
+  "selector": {
+    "commodity": {
+      "options": {
+        "none": "None (unitless)",
+        "energy": "Energy",
+        "gas": "Gas",
+        "water": "Water"
+      }
     }
   },
   "issues": {

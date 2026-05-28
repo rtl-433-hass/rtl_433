@@ -30,6 +30,7 @@ from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from . import repairs
+from .calibration import normalize_calibration
 from .const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICE_KEY,
@@ -45,6 +46,7 @@ from .const import (
     DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
+    DEVICE_CALIBRATION,
     DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
@@ -126,6 +128,26 @@ def _hub_manage_settings(entry: ConfigEntry) -> bool:
             entry.data.get(CONF_MANAGE_SETTINGS, DEFAULT_MANAGE_SETTINGS),
         )
     )
+
+
+def _calibration_map(entry: ConfigEntry) -> dict[str, dict]:
+    """Build the per-device calibration map from the hub's devices map.
+
+    Returns ``{device_key: {commodity, unit, scale}}`` for every device that
+    carries a *valid* calibration (via :func:`normalize_calibration`, which drops
+    a ``none``/unknown commodity or an out-of-range unit). Used both to capture
+    the coordinator's setup snapshot and to detect a change in the update
+    listener; comparing the normalized maps means only a real calibration change
+    (never a routine devices-map upsert) is treated as a change.
+    """
+    result: dict[str, dict] = {}
+    for device_key, record in entry.data.get(CONF_DEVICES, {}).items():
+        if not isinstance(record, dict):
+            continue
+        calibration = normalize_calibration(record.get(DEVICE_CALIBRATION))
+        if calibration is not None:
+            result[device_key] = calibration
+    return result
 
 
 async def _async_load_library(
@@ -214,6 +236,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     coordinator.new_device_callback = new_device_callback
     coordinator.effective_timeout_resolver = effective_timeout_resolver
+    # Snapshot the per-device calibration so the update listener can detect a
+    # real calibration change (and reload) while ignoring routine devices-map
+    # upserts — the same change-vs-snapshot pattern as ``manage_settings``.
+    coordinator.calibration_snapshot = _calibration_map(entry)
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
     await coordinator.async_start()
@@ -239,6 +265,15 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     ``coordinator.manage_settings``; comparing it against the new effective value
     detects the change without persisting extra bookkeeping.
 
+    A per-device calibration change is detected the same way: the options device
+    step writes the calibration into ``entry.data[CONF_DEVICES]`` (firing this
+    listener), and a consumption sensor's ``device_class`` / unit / ``state_class``
+    are construction-time, so the affected entity must be rebuilt by reloading the
+    hub. The new calibration map is compared against ``coordinator.calibration_
+    snapshot`` (captured at setup) so the *frequent* idempotent devices-map upserts
+    (``async_upsert_device`` / ``async_upsert_event_types``), which leave the
+    calibration sub-record untouched, never trigger a reload.
+
     Discovery-toggle and availability-timeout changes are applied live instead
     (the coordinator reads ``discovery_enabled`` / ``availability_timeout`` on
     every event and watchdog tick), so no reload is required for those and we
@@ -254,6 +289,12 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     if new_manage != coordinator.manage_settings:
         # The entity set changes (SDR controls appear / disappear) and the
         # coordinator's adoption/enforcement flips, so reload to rebuild.
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+
+    if _calibration_map(entry) != coordinator.calibration_snapshot:
+        # A consumption sensor's device_class / unit / state_class are
+        # construction-time, so rebuild the affected entity by reloading the hub.
         await hass.config_entries.async_reload(entry.entry_id)
         return
 
