@@ -49,6 +49,7 @@ from .const import (
     DEFAULT_MANAGE_SETTINGS,
     DEFAULT_MOTION_CLEAR_DELAY,
     DEVICE_CALIBRATION,
+    DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
@@ -73,6 +74,12 @@ LEGACY_CONF_OBSERVED_FIELDS = "observed_fields"
 # converges to a clean state after one run.
 PHANTOM_DEVICE_KEY = "unknown"
 
+# The ``object_suffix`` (and unique-id tail) of the pre-fix ``event.*_motion``
+# entity that has since moved to a ``binary_sensor.*_motion``. Used by the
+# migration sweep below to find the orphaned event entities and to drop the
+# matching ``DEVICE_EVENT_TYPES`` slot so the event platform never recreates it.
+_MOTION_OBJECT_SUFFIX = "motion"
+
 
 def _cleanup_phantom_unknown_device(
     hass: HomeAssistant, entry: ConfigEntry, device_registry: dr.DeviceRegistry
@@ -96,6 +103,69 @@ def _cleanup_phantom_unknown_device(
     )
     if phantom is not None:
         device_registry.async_remove_device(phantom.id)
+
+
+def _migrate_motion_event_to_binary_sensor(
+    hass: HomeAssistant, entry: ConfigEntry, entity_registry: er.EntityRegistry
+) -> None:
+    """Remove the orphaned ``event.*_motion`` entity and announce the move.
+
+    Pre-fix versions exposed motion as an ``event.*_motion`` entity; it is now a
+    ``binary_sensor.*_motion``. This sweep finds this hub's ``event``-domain
+    registry entries whose unique-id tail is ``:motion`` (unique-id shape
+    ``f"{hub_entry_id}:{device_key}:{object_suffix}"``), removes them, and drops
+    the ``motion`` slot from any persisted ``DEVICE_EVENT_TYPES`` so the event
+    platform never recreates them. Only when at least one orphaned entity was
+    removed is a single, integration-wide repairs issue raised announcing the
+    move (so automations referencing the old entity get updated).
+
+    Idempotent and safe on every startup: re-removing an already-removed entity
+    finds nothing, the devices-map write only persists when it changes, and the
+    issue id is stable so it is never duplicated across hubs or restarts.
+    """
+    removed_any = False
+    removed_device_keys: set[str] = set()
+    for ent in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
+        if ent.domain != "event" or not ent.unique_id.endswith(
+            f":{_MOTION_OBJECT_SUFFIX}"
+        ):
+            continue
+        # unique_id is ``{hub_entry_id}:{device_key}:motion``; the middle part is
+        # the device_key (device_keys may themselves contain ``:``).
+        parts = ent.unique_id.split(":")
+        if len(parts) >= 3:
+            removed_device_keys.add(":".join(parts[1:-1]))
+        entity_registry.async_remove(ent.entity_id)
+        removed_any = True
+
+    # Drop the ``motion`` event-type slot from the persisted devices map so the
+    # event platform does not recreate the entity on the next build.
+    devices = entry.data.get(CONF_DEVICES, {})
+    new_devices: dict = {}
+    changed = False
+    for device_key, record in devices.items():
+        if not isinstance(record, dict) or _MOTION_OBJECT_SUFFIX not in record.get(
+            DEVICE_EVENT_TYPES, {}
+        ):
+            new_devices[device_key] = record
+            continue
+        new_record = dict(record)
+        new_event_types = {
+            k: v
+            for k, v in record[DEVICE_EVENT_TYPES].items()
+            if k != _MOTION_OBJECT_SUFFIX
+        }
+        new_record[DEVICE_EVENT_TYPES] = new_event_types
+        new_devices[device_key] = new_record
+        changed = True
+
+    if changed:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_DEVICES: new_devices}
+        )
+
+    if removed_any:
+        repairs.async_raise_motion_moved(hass)
 
 
 def _hub_secure(entry: ConfigEntry) -> bool:
@@ -259,6 +329,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model="rtl_433 server",
     )
     _cleanup_phantom_unknown_device(hass, entry, device_registry)
+    _migrate_motion_event_to_binary_sensor(hass, entry, er.async_get(hass))
 
     coordinator = Rtl433Coordinator(
         hass,

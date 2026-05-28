@@ -263,7 +263,7 @@ graph TD
 - Task 003: `effective_clear_delay_resolver` + wiring + options→data persist (depends on: 001)
 - Task 005: Conditional clear-delay field in options-flow device step (depends on: 001)
 
-### Phase 3: Runtime behaviour + migration
+### ✅ Phase 3: Runtime behaviour + migration
 **Parallel Tasks:**
 - Task 004: Synthesized auto-off clear-delay timer in `Rtl433BinarySensor` (depends on: 001, 003)
 - Task 006: Migration registry sweep + repairs issue (depends on: 001, 002)

@@ -118,6 +118,10 @@
     }
   },
   "issues": {
+    "motion_moved_to_binary_sensor": {
+      "title": "Motion entities moved to binary sensors",
+      "description": "rtl_433 motion is now a binary_sensor (occupancy) with an auto-off clear delay. The old `event.*_motion` entity was removed. Update any automations or dashboards that referenced it to use the new `binary_sensor.*_motion` entity."
+    },
     "server_unreachable": {
       "title": "rtl_433 server unreachable: {title}",
       "fix_flow": {
