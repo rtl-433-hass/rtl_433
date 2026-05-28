@@ -82,7 +82,9 @@ def coordinator(hass, hub_entry_builder):
 
 def test_parses_frame_updates_state_and_dispatches(hass, coordinator):
     """A valid JSON text frame normalizes, records state, and dispatches."""
-    with patch(DISPATCH) as dispatch:
+    # Freeze ``now`` at the frame's ``time`` so the event is recent (live), not a
+    # stale gap event: the replay classifier ages each timed frame against now.
+    with freeze_time("2026-05-25 10:00:00"), patch(DISPATCH) as dispatch:
         coordinator._handle_text_frame(
             '{"time": "2026-05-25 10:00:00", "model": "Acurite-606TX", '
             '"id": 42, "temperature_C": 21.4, "humidity": 55}'

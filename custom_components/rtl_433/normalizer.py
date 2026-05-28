@@ -16,6 +16,7 @@ skip-keys rather than this module importing the loader.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Final
 
 # Identity keys, in the order they contribute to the device key. ``model`` is
@@ -41,12 +42,24 @@ class NormalizedEvent:
         identity: The present identity keys and their raw values.
         fields: Measurement field name -> value, with identity and skip-keys
             removed. This is what the entity platforms map to readings.
+        is_replay: Whether the coordinator classified this frame as a replayed or
+            stale gap event (vs a live transmission). Carried on the event object
+            so the dispatch needs no extra signature: replays seed sensor values
+            but ``Rtl433Event`` must not fire / persist for them. The coordinator
+            stamps this (via :func:`dataclasses.replace`) after ``normalize`` runs;
+            a frame produced by ``normalize`` alone is live (the default).
+        event_time: The parsed event timestamp (UTC) when one was usable, else
+            ``None``. Carried alongside ``is_replay`` so the event platform can log
+            the suppressed transmission's time/age at INFO; ``None`` when the raw
+            ``time`` was missing/blank/unparseable (such a frame is treated live).
     """
 
     device_key: str
     model: str
     identity: dict[str, Any] = field(default_factory=dict)
     fields: dict[str, Any] = field(default_factory=dict)
+    is_replay: bool = False
+    event_time: datetime | None = None
 
 
 def _safe_token(value: Any) -> str:

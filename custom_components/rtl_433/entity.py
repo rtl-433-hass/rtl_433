@@ -198,6 +198,10 @@ class Rtl433Entity(RestoreEntity):
         * the event is a watchdog re-dispatch with the field absent -> the value
           stays put but availability may have flipped.
         In both cases ``async_write_ha_state`` re-reads ``available``.
+
+        A replayed / stale frame (``event.is_replay``) still applies its value and
+        writes state here so sensors seed their latest reading from the reconnect
+        replay; only ``Rtl433Event`` honors the flag (to not re-fire automations).
         """
         if self._descriptor.field_key in event.fields:
             self._apply_value(event.fields[self._descriptor.field_key])
