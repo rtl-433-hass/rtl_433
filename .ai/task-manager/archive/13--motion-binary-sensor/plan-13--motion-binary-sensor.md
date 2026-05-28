@@ -279,3 +279,28 @@ After each phase, run `uvx ruff check .`, `uvx ruff format --check .`, and `uv r
 ### Execution Summary
 - Total Phases: 4
 - Total Tasks: 8
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-05-28
+
+### Results
+Converted the `motion` field from an `event` entity to an `occupancy` `binary_sensor` with a synthesized auto-off clear-delay, delivered across 8 tasks in 4 phases:
+- **Descriptor + constants**: optional `clear_delay` attribute on `FieldDescriptor` (auto-parsed, positive-int validated); `DEVICE_MOTION_CLEAR_DELAY` / `DEFAULT_MOTION_CLEAR_DELAY` (90).
+- **Library**: `motion` moved to `misc.yaml` as `platform: binary_sensor`, `device_class: occupancy`, `payload: {on: "1"}`, `clear_delay: 90`; removed from `events.yaml`.
+- **Runtime**: `Rtl433BinarySensor` turns on per detection, schedules a synthesized off via `async_call_later`, reschedules on retrigger, cancels on removal, and never restores a stale `on`.
+- **Per-device override**: conditional "Motion clear delay (seconds)" field in the options-flow device step (motion-bearing devices only), persisted under `DEVICE_MOTION_CLEAR_DELAY`, resolved by `effective_clear_delay_resolver` (override > 90 s default).
+- **Migration**: idempotent setup-time sweep removes the orphaned `event.*_motion` entity, drops `motion` from persisted `DEVICE_EVENT_TYPES`, and raises a one-time `motion_moved_to_binary_sensor` repairs issue (`is_fixable=False`, WARNING).
+- **Docs + tests**: `docs/device-library.md`, `AGENTS.md`, `README.md` updated; `tests/test_binary_sensor_motion.py` added and `tests/test_mapping.py` updated. Full suite: **125 passed**; ruff clean.
+
+### Noteworthy Events
+- **Branch base corrected before planning**: the per-device override infra and `calibration.py` live only on the unmerged stack, so the branch was re-based onto `feature/12` (Clarification #1); this is a stacked PR.
+- **Mechanism re-decided**: there is no per-device `number` entity to reuse, so the override uses the options-flow device step (the `DEVICE_TIMEOUT_OVERRIDE` precedent) rather than a new entity (Clarification #2).
+- **`device_class` resolved to `occupancy`** (Clarification #5), matching the Z2M PIR-with-timeout model; entity name/id stay "Motion"/`*_motion`.
+- **Parallel-execution hazard pre-empted**: `const.py` was made Task 1-owned and a single shared key (`DEVICE_MOTION_CLEAR_DELAY`) used for both options and record, avoiding a Phase-2 `const.py` race between Tasks 3 and 5.
+- **Pre-existing test fixed**: `tests/test_mapping.py` asserted motion-as-event; updated in the tests task (folded into Task 8 scope when discovered during Phase 2).
+- **Test timing**: `async_call_later` anchors to wall-clock, so timer tests advance to absolute offsets / use a ticking `freeze_time` — a test-harness detail, not a product bug.
+
+### Necessary follow-ups
+- Open the PR against `feature/12` (stacked); it can retarget `main` once plans 09–12 merge. The BC break (`event.*_motion` → `binary_sensor.*_motion`) is surfaced via the repairs issue and README note.
