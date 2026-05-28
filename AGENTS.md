@@ -119,6 +119,35 @@ coordinator watchdog, and the devices map:
   The entity does **not** seed/replay `coordinator.devices[key]` on construction
   (that would fire a stale event before the entity is added to hass).
 
+## Device triggers (`device_trigger.py`)
+
+`device_trigger.py` exposes the `event` entities (button / motion / doorbell) as
+UI-pickable **device triggers**. Contracts that must survive refactors:
+
+- **Discovered by file presence, not `PLATFORMS`.** HA's device-automation
+  machinery loads it purely because the module exists at
+  `custom_components/rtl_433/device_trigger.py`; it is **not** an entity platform
+  and must **not** be added to `const.py` `PLATFORMS`.
+- **Triggers only.** No conditions, no actions — `async_get_triggers` /
+  `async_attach_trigger` only.
+- **Per-event-entity granularity with an optional `event_type` subtype.** Each
+  event entity yields one base trigger ("<entity> triggered") plus one subtyped
+  trigger per known `event_type` ("<entity> triggered: <code>"). The subtype list
+  is sourced from the **persisted** `entry.data[CONF_DEVICES][key][DEVICE_EVENT_TYPES][field]`
+  (restart-surviving), falling back to the loaded entity's live `event_types`
+  capability attribute when nothing is persisted yet.
+- **Split firing mechanism.** The base trigger **delegates to the core `state`
+  trigger** (match_all): `Rtl433Event` writes a fresh timestamp state on every
+  genuine transmission, so a match_all state trigger fires exactly once per
+  transmission, and the core trigger emits the `device`-platform payload +
+  context for us. The subtyped trigger **cannot** reuse the core state trigger's
+  `attribute`/`to` filter, because that filter early-returns when
+  `old_value == new_value` (`triggers/state.py:158`), so two consecutive presses
+  of the same button would fire only once. Since a subtyped trigger must fire on
+  **every** matching transmission (repeats included), it uses a custom
+  `async_track_state_change_event` listener with **no** same-value dedupe,
+  replicating the core trigger's `device`-platform payload + context by hand.
+
 ## WebSocket frames & hub observability
 
 Durable contracts for the coordinator's frame routing and the hub diagnostic

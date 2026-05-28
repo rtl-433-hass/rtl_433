@@ -1,4 +1,10 @@
 {
+  "device_automation": {
+    "trigger_type": {
+      "triggered": "{entity_name} triggered",
+      "triggered_subtype": "{entity_name} triggered: {subtype}"
+    }
+  },
   "config": {
     "step": {
       "user": {
