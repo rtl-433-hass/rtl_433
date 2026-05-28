@@ -80,12 +80,14 @@
         "data": {
           "device": "Device",
           "timeout_override": "Availability timeout override (seconds)",
-          "commodity": "Meter commodity"
+          "commodity": "Meter commodity",
+          "motion_clear_delay": "Motion clear delay (seconds)"
         },
         "data_description": {
           "device": "The device whose settings you want to change.",
           "timeout_override": "Mark this device unavailable after this many seconds without an event. Leave blank to use the hub default.",
-          "commodity": "What this meter measures. Pick Energy, Gas, or Water to calibrate the consumption sensor (next step) so it works in the Energy dashboard. Pick None to leave it unitless (and clear any existing calibration)."
+          "commodity": "What this meter measures. Pick Energy, Gas, or Water to calibrate the consumption sensor (next step) so it works in the Energy dashboard. Pick None to leave it unitless (and clear any existing calibration).",
+          "motion_clear_delay": "For a motion sensor, auto-clear it to off this many seconds after the last motion. Leave blank to use the default."
         }
       },
       "calibration": {

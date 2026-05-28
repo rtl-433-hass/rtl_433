@@ -54,5 +54,7 @@ Your critical mantra: "write a few tests, mostly integration." Test YOUR logic (
 
 6. **Migration**: pre-seed an entity registry `event` entry with unique_id `f"{hub}:{device_key}:motion"` for the config entry, run setup, then assert: that entity_id is gone; `motion` absent from `DEVICE_EVENT_TYPES`; `ir.async_get(hass).issues` contains the `motion_moved_to_binary_sensor` key; and no `event.*_motion` entity exists.
 
-7. Keep it to one file, ~5-6 test functions. Run `uv run pytest tests/` and ruff.
+7. **Update the now-stale existing test** `tests/test_mapping.py`: motion is no longer an event. Remove `"motion": "motion"` from the event-mapping `expected` dict (≈line 64) and drop `"motion"` from the `("button", "motion", "secret_knock")` tuple (≈line 82). Add/extend a binary-side assertion that `lookup("motion")` resolves to `platform == "binary_sensor"`, `device_class == "occupancy"`, `clear_delay == 90`, `payload == {"on": "1"}` (matching Task 2). Keep `button`/`secret_knock` event assertions intact.
+
+8. Keep new tests to one file, ~5-6 test functions. Run `uv run pytest tests/` (the WHOLE suite must be green, including the updated test_mapping.py) and ruff.
 </details>

@@ -47,8 +47,10 @@ from .const import (
     DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
+    DEFAULT_MOTION_CLEAR_DELAY,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
+    DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
@@ -201,6 +203,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return int(override)
         return _hub_availability_timeout(entry)
 
+    def effective_clear_delay_resolver(device_key: str) -> int:
+        """Resolve a device's effective motion clear-delay (override > default).
+
+        Reads the per-device ``motion_clear_delay`` from the hub's devices map
+        (``entry.data[CONF_DEVICES][device_key]``); falls back to
+        ``DEFAULT_MOTION_CLEAR_DELAY`` when none is set.
+        """
+        override = (
+            entry.data.get(CONF_DEVICES, {})
+            .get(device_key, {})
+            .get(DEVICE_MOTION_CLEAR_DELAY)
+        )
+        if override is not None:
+            return int(override)
+        return DEFAULT_MOTION_CLEAR_DELAY
+
     def new_device_callback(device_key: str, model: str) -> None:
         """Dispatch the hub-level new-device signal for a newly observed device.
 
@@ -256,6 +274,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     coordinator.new_device_callback = new_device_callback
     coordinator.effective_timeout_resolver = effective_timeout_resolver
+    coordinator.effective_clear_delay_resolver = effective_clear_delay_resolver
     # Snapshot the per-device calibration so the update listener can detect a
     # real calibration change (and reload) while ignoring routine devices-map
     # upserts — the same change-vs-snapshot pattern as ``manage_settings``.
@@ -456,6 +475,9 @@ async def _migrate_hub_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> Non
         timeout_override = child.options.get(CONF_AVAILABILITY_TIMEOUT)
         if timeout_override is not None:
             record[DEVICE_TIMEOUT_OVERRIDE] = int(timeout_override)
+        clear_delay = child.options.get(DEVICE_MOTION_CLEAR_DELAY)
+        if clear_delay is not None:
+            record[DEVICE_MOTION_CLEAR_DELAY] = int(clear_delay)
         devices[device_key] = record
 
         # Re-home registry objects BEFORE the child entry is removed.

@@ -253,11 +253,11 @@ graph TD
     006 --> 008
 ```
 
-### Phase 1: Foundation
+### ✅ Phase 1: Foundation
 **Parallel Tasks:**
 - Task 001: `clear_delay` descriptor attribute + motion constants
 
-### Phase 2: Library + per-device plumbing
+### ✅ Phase 2: Library + per-device plumbing
 **Parallel Tasks:**
 - Task 002: Reclassify `motion` as an occupancy binary_sensor (depends on: 001)
 - Task 003: `effective_clear_delay_resolver` + wiring + options→data persist (depends on: 001)
