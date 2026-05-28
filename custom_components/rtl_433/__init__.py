@@ -23,6 +23,7 @@ nested devices and entities automatically.
 
 from __future__ import annotations
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -206,10 +207,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         The coordinator only invokes this when discovery is enabled and the
         device is genuinely new (its ``is_new`` check dedupes), so the platform
         listeners can add the nested device + its entities directly.
+
+        In addition to wiring up the device, a genuinely-new device (one absent
+        from the persisted ``entry.data[CONF_DEVICES]`` map) raises an in-app
+        persistent notification. ``entry.data[CONF_DEVICES]`` is the restart-safe
+        "ever-adopted" record, so a device already in it is a known device
+        re-observed after a restart/reload (``coordinator.devices`` starts empty)
+        — NOT genuinely new — and is not re-notified. This boolean is captured
+        *before* the dispatch, which schedules the deferred ``async_upsert_device``
+        that adds the key to the map.
         """
+        is_new_device = device_key not in entry.data.get(CONF_DEVICES, {})
         async_dispatcher_send(
             hass, signal_new_device(entry.entry_id), device_key, model
         )
+        if is_new_device:
+            name = model or device_key
+            persistent_notification.async_create(
+                hass,
+                f"A new device '{name}' (key {device_key}) was added under hub "
+                f"'{entry.title}'.",
+                title="rtl_433: new device discovered",
+                notification_id=(f"{DOMAIN}_new_device_{entry.entry_id}_{device_key}"),
+            )
 
     # Register the hub device so nested devices can link to it via ``via_device``.
     device_registry = dr.async_get(hass)

@@ -27,7 +27,11 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   per-hub `entry.data["devices"]` map (the single source of truth: model,
   observed mapped fields, optional per-device timeout override) and added at
   runtime via the new-device dispatcher signal — gated by the hub's discovery
-  toggle (the Quality-Scale `dynamic-devices` rule).
+  toggle (the Quality-Scale `dynamic-devices` rule). `new_device_callback`
+  (`__init__.py`) also raises a `persistent_notification` with a stable
+  per-device `notification_id`, gated on `entry.data[CONF_DEVICES]` (not the
+  coordinator's per-session `is_new`) so restarts/reloads don't re-notify;
+  in-app only.
 - `async_remove_config_entry_device` (`__init__.py`) backs the per-device
   **Delete** affordance (the `stale-devices` rule): it returns `False` for the
   hub device (so the hub can't be removed out from under its entry) and `True`
