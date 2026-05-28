@@ -18,10 +18,27 @@
           "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy).",
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched."
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure rtl_433 hub",
+        "description": "Update this hub's connection target. Nested devices and their history are preserved.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "path": "WebSocket path",
+          "secure": "Secure (use wss://)"
+        },
+        "data_description": {
+          "host": "Hostname or IP address of the rtl_433 server.",
+          "port": "TCP port of the rtl_433 HTTP server (default 8433).",
+          "path": "WebSocket endpoint path on the server (default /ws).",
+          "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy)."
+        }
       }
     },
     "abort": {
-      "already_configured": "This rtl_433 server is already configured."
+      "already_configured": "This rtl_433 server is already configured.",
+      "reconfigure_successful": "Connection settings updated."
     },
     "error": {
       "cannot_connect": "Failed to connect. Check the host, port, and path, and that the rtl_433 server is reachable."

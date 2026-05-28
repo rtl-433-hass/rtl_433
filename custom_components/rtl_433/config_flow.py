@@ -130,6 +130,81 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # ------------------------------------------------------------------ #
+    # Hub reconfigure flow                                               #
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _reconfigure_schema(entry: ConfigEntry) -> vol.Schema:
+        """Build the reconfigure form schema pre-filled from ``entry.data``.
+
+        Mirrors the connection subset of :data:`STEP_USER_SCHEMA` but omits
+        ``manage_settings`` (that toggle is owned by the options flow).
+        """
+        data = entry.data
+        return vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
+                vol.Required(CONF_PORT, default=data.get(CONF_PORT, DEFAULT_PORT)): int,
+                vol.Required(CONF_PATH, default=data.get(CONF_PATH, DEFAULT_PATH)): str,
+                vol.Optional(CONF_SECURE, default=data.get(CONF_SECURE, False)): bool,
+            }
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit an existing hub's connection target in place.
+
+        Validates the new host/port/path/secure, recomputes the host:port
+        unique_id (guarding against collision with a *different* configured
+        hub), then merges the new connection params into the entry via
+        ``data_updates=`` and reloads it in place — preserving the entry_id,
+        ``entry.data["devices"]``, and ``manage_settings``.
+        """
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host: str = user_input[CONF_HOST]
+            port: int = user_input[CONF_PORT]
+            path: str = user_input[CONF_PATH]
+            secure: bool = user_input[CONF_SECURE]
+
+            try:
+                await Rtl433Coordinator.validate_connection(
+                    self.hass, host, port, path, secure=secure
+                )
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            else:
+                new_unique_id = _hub_unique_id(host, port)
+                await self.async_set_unique_id(new_unique_id)
+                # Abort only if a *different* entry already owns this unique_id;
+                # the entry being reconfigured must not abort against itself.
+                for other in self._async_current_entries():
+                    if (
+                        other.unique_id == new_unique_id
+                        and other.entry_id != entry.entry_id
+                    ):
+                        return self.async_abort(reason="already_configured")
+                return self.async_update_reload_and_abort(
+                    entry,
+                    unique_id=new_unique_id,
+                    title=f"rtl_433 ({host})",
+                    data_updates={
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        CONF_PATH: path,
+                        CONF_SECURE: secure,
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=self._reconfigure_schema(entry),
+            errors=errors,
+        )
+
+    # ------------------------------------------------------------------ #
     # Options flow                                                       #
     # ------------------------------------------------------------------ #
     @staticmethod
