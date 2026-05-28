@@ -8,11 +8,18 @@ list, and (optionally) layers a per-installation user-override file on top.
 The public surface consumed by later tasks is:
 
 * :func:`load_library` -> ``(registry, skip_keys)`` -- parse the shipped library.
-* :func:`lookup` -- resolve one field name to a descriptor (or ``None``).
+* :func:`lookup` -- resolve one field name (and ``model``) to a descriptor (or
+  ``None``).
 * :func:`should_skip` -- test a field against the skip-key set.
 * :func:`apply_transform` -- turn a raw rtl_433 value into the HA-facing state.
 * :func:`load_user_overrides` -- merge ``<config>/rtl_433_mappings.yaml``.
 * :func:`merge_overrides` -- pure merge helper (used by the loader + tests).
+
+The ``registry`` returned by :func:`load_library` is a :class:`Registry`: a flat
+``{field_key: FieldDescriptor}`` table (the global default) plus an optional
+model-scoped ``{model: {field_key: FieldDescriptor}}`` table populated from each
+file's reserved top-level ``models:`` block. :func:`lookup` resolves the
+model-scoped entry for ``(model, field_key)`` first, then the global flat entry.
 
 File I/O is synchronous. Async callers (the integration setup) must
 run :func:`load_library` and :func:`load_user_overrides` off the event loop via
@@ -39,6 +46,11 @@ USER_OVERRIDE_FILENAME = "rtl_433_mappings.yaml"
 # Top-level key inside ``_skip_keys.yaml`` (and optionally an override file)
 # holding the flat list of fields that must never produce an entity.
 SKIP_KEYS_FIELD = "skip_keys"
+
+# Reserved top-level key holding the model-scoped descriptor table
+# (``model -> {field_key -> descriptor}``). Intercepted by the loader / merge so
+# it is never mis-parsed as a field named ``models``.
+MODELS_FIELD = "models"
 
 # Directory holding the shipped library, resolved relative to this module so the
 # loader works regardless of the installed location.
@@ -74,6 +86,23 @@ class FieldDescriptor:
 _DESCRIPTOR_ATTRS = frozenset(
     f.name for f in fields(FieldDescriptor) if f.name != "field_key"
 )
+
+
+@dataclass(frozen=True)
+class Registry:
+    """The loaded device library: a flat table plus a model-scoped table.
+
+    ``flat`` is the global ``{field_key: FieldDescriptor}`` mapping (the
+    historical registry shape, the global default for every device). ``models``
+    is the optional model-scoped overlay ``{model: {field_key: FieldDescriptor}}``
+    populated from each file's reserved top-level ``models:`` block.
+
+    :func:`lookup` resolves the model-scoped entry for ``(model, field_key)``
+    first, falling back to the global ``flat`` entry.
+    """
+
+    flat: dict[str, FieldDescriptor]
+    models: dict[str, dict[str, FieldDescriptor]]
 
 
 def _descriptor_from_entry(field_key: str, entry: dict[str, Any]) -> FieldDescriptor:
@@ -125,24 +154,73 @@ def _normalize_payload(payload: Any) -> dict[str, Any] | None:
     return normalized
 
 
-def _load_descriptor_file(path: Path) -> dict[str, FieldDescriptor]:
-    """Parse one themed library file into ``{field_key: FieldDescriptor}``.
+def _parse_models_block(raw: Any, source: str) -> dict[str, dict[str, FieldDescriptor]]:
+    """Parse a reserved ``models:`` block into ``{model: {field_key: descriptor}}``.
+
+    ``raw`` is the value of the top-level ``models:`` key. A non-mapping block,
+    a non-mapping per-model entry, or an individual malformed descriptor is
+    logged and skipped (matching the per-entry defensiveness elsewhere) rather
+    than aborting the whole load. ``source`` names the originating file/override
+    for log context.
+    """
+    models: dict[str, dict[str, FieldDescriptor]] = {}
+    if not isinstance(raw, dict):
+        LOGGER.warning(
+            "Ignoring %s 'models:' block: not a mapping (%s)",
+            source,
+            type(raw).__name__,
+        )
+        return models
+
+    for model, entries in raw.items():
+        if not isinstance(entries, dict):
+            LOGGER.warning(
+                "Ignoring %s model %r: not a mapping (%s)",
+                source,
+                model,
+                type(entries).__name__,
+            )
+            continue
+        descriptors: dict[str, FieldDescriptor] = {}
+        for field_key, entry in entries.items():
+            try:
+                descriptors[field_key] = _descriptor_from_entry(field_key, entry)
+            except (TypeError, ValueError):
+                LOGGER.exception(
+                    "Ignoring malformed %s model %r field %r", source, model, field_key
+                )
+        if descriptors:
+            models[str(model)] = descriptors
+    return models
+
+
+def _load_descriptor_file(
+    path: Path,
+) -> tuple[dict[str, FieldDescriptor], dict[str, dict[str, FieldDescriptor]]]:
+    """Parse one themed library file into ``(flat, models)`` descriptor tables.
 
     Raises on a malformed file; the caller decides whether that is fatal. Each
-    top-level key is an rtl_433 field name mapped to its entry.
+    top-level key is an rtl_433 field name mapped to its entry, except the
+    reserved ``models:`` key, which is intercepted and parsed into the
+    model-scoped ``{model: {field_key: descriptor}}`` table instead of being
+    treated as a field named ``models``.
     """
     with path.open("r", encoding="utf-8") as handle:
         data = yaml.safe_load(handle)
 
     if data is None:
-        return {}
+        return {}, {}
     if not isinstance(data, dict):
         raise TypeError(f"{path.name}: top-level YAML is not a mapping")
 
     descriptors: dict[str, FieldDescriptor] = {}
+    models: dict[str, dict[str, FieldDescriptor]] = {}
     for field_key, entry in data.items():
+        if field_key == MODELS_FIELD:
+            models = _parse_models_block(entry, path.name)
+            continue
         descriptors[field_key] = _descriptor_from_entry(field_key, entry)
-    return descriptors
+    return descriptors, models
 
 
 def _load_skip_keys(path: Path) -> set[str]:
@@ -179,7 +257,7 @@ def _extract_skip_keys(data: Any) -> set[str]:
 
 def load_library(
     library_dir: Path | None = None,
-) -> tuple[dict[str, FieldDescriptor], set[str]]:
+) -> tuple[Registry, set[str]]:
     """Load the shipped device library and skip-key list.
 
     Globs ``<library_dir>/*.yaml`` (default: the packaged ``device_library``
@@ -191,51 +269,58 @@ def load_library(
     whole load, so one bad file never prevents the rest of the library from
     working.
 
-    Returns ``(registry, skip_keys)`` where ``registry`` is
-    ``{field_key: FieldDescriptor}`` and ``skip_keys`` is a ``set[str]``.
+    Returns ``(registry, skip_keys)`` where ``registry`` is a :class:`Registry`
+    (flat ``{field_key: FieldDescriptor}`` table plus the model-scoped overlay)
+    and ``skip_keys`` is a ``set[str]``.
 
     This performs blocking file I/O; async callers must invoke it via
     ``hass.async_add_executor_job``.
     """
     base = library_dir if library_dir is not None else _LIBRARY_DIR
 
-    registry: dict[str, FieldDescriptor] = {}
+    flat: dict[str, FieldDescriptor] = {}
+    models: dict[str, dict[str, FieldDescriptor]] = {}
     if not base.is_dir():
         LOGGER.error("Device-library directory not found: %s", base)
-        return registry, set()
+        return Registry(flat=flat, models=models), set()
 
     for path in sorted(base.glob("*.yaml")):
         if path.name.startswith("_"):
             # Underscore-prefixed files are not mapping tables.
             continue
         try:
-            descriptors = _load_descriptor_file(path)
+            descriptors, file_models = _load_descriptor_file(path)
         except (OSError, yaml.YAMLError, TypeError, ValueError):
             LOGGER.exception("Skipping malformed device-library file %s", path)
             continue
         # Later files override earlier ones on key collision; warn so it is
         # visible during development.
-        for key in descriptors.keys() & registry.keys():
+        for key in descriptors.keys() & flat.keys():
             LOGGER.warning(
                 "Field %r in %s overrides an earlier definition", key, path.name
             )
-        registry.update(descriptors)
+        flat.update(descriptors)
+        for model, entries in file_models.items():
+            models.setdefault(model, {}).update(entries)
 
     skip_keys = _load_skip_keys(base / "_skip_keys.yaml")
     LOGGER.debug(
-        "Loaded %d descriptor(s) and %d skip key(s)", len(registry), len(skip_keys)
+        "Loaded %d descriptor(s), %d model(s) and %d skip key(s)",
+        len(flat),
+        len(models),
+        len(skip_keys),
     )
-    return registry, skip_keys
+    return Registry(flat=flat, models=models), skip_keys
 
 
 # Lazily-populated default library, used by :func:`lookup` / :func:`should_skip`
 # when no explicit registry is passed. Callers that need overrides applied
 # should pass their own merged registry/skip set instead.
-_DEFAULT_REGISTRY: dict[str, FieldDescriptor] | None = None
+_DEFAULT_REGISTRY: Registry | None = None
 _DEFAULT_SKIP_KEYS: set[str] | None = None
 
 
-def _default_library() -> tuple[dict[str, FieldDescriptor], set[str]]:
+def _default_library() -> tuple[Registry, set[str]]:
     """Return the cached shipped library, loading it on first use.
 
     Blocking on first call; async callers should instead call
@@ -249,18 +334,22 @@ def _default_library() -> tuple[dict[str, FieldDescriptor], set[str]]:
 
 
 def merge_overrides(
-    registry: dict[str, FieldDescriptor],
+    registry: Registry,
     skip_keys: set[str],
     override_data: dict[str, Any],
-) -> tuple[dict[str, FieldDescriptor], set[str]]:
+) -> tuple[Registry, set[str]]:
     """Layer a parsed override mapping on top of a base registry/skip set.
 
     Pure (no I/O): returns new ``(registry, skip_keys)`` objects, leaving the
-    inputs untouched. Override entries fully replace existing descriptors (no
-    deep merge); a ``skip_keys`` list in the override is unioned with the base.
-    A malformed individual override entry is logged and skipped.
+    inputs untouched. Override flat entries fully replace existing descriptors
+    (no deep merge); a reserved ``models:`` block is merged so an override
+    model-scoped entry replaces the shipped one for the same ``(model,
+    field_key)`` (other shipped model fields are preserved); a ``skip_keys`` list
+    in the override is unioned with the base. A malformed individual override
+    entry is logged and skipped.
     """
-    merged = dict(registry)
+    merged_flat = dict(registry.flat)
+    merged_models = {model: dict(entries) for model, entries in registry.models.items()}
     merged_skips = set(skip_keys)
 
     if not isinstance(override_data, dict):
@@ -268,27 +357,43 @@ def merge_overrides(
             "Override data is not a mapping (%s); ignoring",
             type(override_data).__name__,
         )
-        return merged, merged_skips
+        return Registry(flat=merged_flat, models=merged_models), merged_skips
 
     for field_key, entry in override_data.items():
         if field_key == SKIP_KEYS_FIELD:
             merged_skips |= _extract_skip_keys({SKIP_KEYS_FIELD: entry})
             continue
+        if field_key == MODELS_FIELD:
+            for model, entries in _parse_models_block(entry, "override").items():
+                merged_models.setdefault(model, {}).update(entries)
+            continue
         try:
-            merged[field_key] = _descriptor_from_entry(field_key, entry)
+            merged_flat[field_key] = _descriptor_from_entry(field_key, entry)
         except (TypeError, ValueError):
             LOGGER.exception(
                 "Ignoring malformed override entry for field %r", field_key
             )
 
-    return merged, merged_skips
+    return Registry(flat=merged_flat, models=merged_models), merged_skips
+
+
+def _copy_registry(registry: Registry) -> Registry:
+    """Return a shallow-copied :class:`Registry` (new containers, same values).
+
+    Used by :func:`load_user_overrides`' no-op paths so it always hands back a
+    fresh object, never the caller's instance, matching the pure-merge contract.
+    """
+    return Registry(
+        flat=dict(registry.flat),
+        models={model: dict(entries) for model, entries in registry.models.items()},
+    )
 
 
 def load_user_overrides(
     config_path: str | Path,
-    registry: dict[str, FieldDescriptor],
+    registry: Registry,
     skip_keys: set[str],
-) -> tuple[dict[str, FieldDescriptor], set[str]]:
+) -> tuple[Registry, set[str]]:
     """Merge ``<config_path>/rtl_433_mappings.yaml`` over the shipped library.
 
     ``config_path`` is the Home Assistant configuration directory (callers pass
@@ -303,7 +408,7 @@ def load_user_overrides(
     path = Path(config_path) / USER_OVERRIDE_FILENAME
     if not path.is_file():
         LOGGER.debug("No user override file at %s", path)
-        return dict(registry), set(skip_keys)
+        return _copy_registry(registry), set(skip_keys)
 
     try:
         with path.open("r", encoding="utf-8") as handle:
@@ -312,11 +417,11 @@ def load_user_overrides(
         LOGGER.warning(
             "Failed to read/parse user override %s; ignoring it", path, exc_info=True
         )
-        return dict(registry), set(skip_keys)
+        return _copy_registry(registry), set(skip_keys)
 
     if data is None:
         LOGGER.debug("User override file %s is empty; nothing to merge", path)
-        return dict(registry), set(skip_keys)
+        return _copy_registry(registry), set(skip_keys)
 
     try:
         merged, merged_skips = merge_overrides(registry, skip_keys, data)
@@ -324,7 +429,7 @@ def load_user_overrides(
         LOGGER.warning(
             "Failed to merge user override %s; ignoring it", path, exc_info=True
         )
-        return dict(registry), set(skip_keys)
+        return _copy_registry(registry), set(skip_keys)
 
     LOGGER.info("Applied user override mappings from %s", path)
     return merged, merged_skips
@@ -345,9 +450,15 @@ def should_skip(field_key: str, skip_keys: set[str] | None = None) -> bool:
 
 def lookup(
     field_key: str,
-    registry: dict[str, FieldDescriptor] | None = None,
+    model: str | None = None,
+    registry: Registry | None = None,
 ) -> FieldDescriptor | None:
-    """Return the descriptor for ``field_key`` or ``None`` if unmapped.
+    """Return the descriptor for ``field_key`` on ``model``, or ``None``.
+
+    Resolution is specificity-first: the model-scoped entry for
+    ``(model, field_key)`` wins if present, else the global flat entry for
+    ``field_key``, else ``None``. ``model`` may be ``None`` (or unknown) to
+    resolve only the global flat entry.
 
     ``registry`` defaults to the cached shipped library (without user
     overrides); callers that have applied overrides should pass their merged
@@ -355,7 +466,11 @@ def lookup(
     """
     if registry is None:
         registry, _ = _default_library()
-    return registry.get(field_key)
+    if model is not None:
+        scoped = registry.models.get(model)
+        if scoped is not None and field_key in scoped:
+            return scoped[field_key]
+    return registry.flat.get(field_key)
 
 
 # ---------------------------------------------------------------------------

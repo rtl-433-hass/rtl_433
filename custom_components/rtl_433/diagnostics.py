@@ -21,7 +21,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_HOST, CONF_PATH, CONF_PORT, DATA_LIBRARY, DOMAIN
 from .coordinator import Rtl433Coordinator
-from .mapping import FieldDescriptor, lookup
+from .mapping import Registry, lookup
 
 # Keys redacted from the exported connection params. The host can reveal a
 # private network address / hostname, so it is redacted; port/path are benign.
@@ -40,7 +40,7 @@ def _resolve_coordinator(
 
 def _unmatched_field_keys(
     coordinator: Rtl433Coordinator,
-    registry: dict[str, FieldDescriptor] | None,
+    registry: Registry | None,
     skip_keys: set[str],
 ) -> list[str]:
     """Compute observed fields that have neither a descriptor nor a skip-entry.
@@ -48,11 +48,14 @@ def _unmatched_field_keys(
     A field is "matched" if :func:`mapping.lookup` resolves it against the
     merged registry; a field is intentionally dropped if it is in ``skip_keys``.
     Everything else the hub has seen is a candidate for new library coverage.
+    The check is model-agnostic (``model=None``): ``seen_fields`` is a flat set
+    of field keys across all devices, so a field counts as matched if any
+    global descriptor exists for it.
     """
     unmatched = {
         field_key
         for field_key in coordinator.seen_fields
-        if field_key not in skip_keys and lookup(field_key, registry) is None
+        if field_key not in skip_keys and lookup(field_key, None, registry) is None
     }
     return sorted(unmatched)
 
