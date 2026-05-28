@@ -79,6 +79,7 @@ class FieldDescriptor:
     entity_category: str | None = None
     enabled_by_default: bool = True
     icon: str | None = None
+    clear_delay: int | None = None
 
 
 # Attribute names the descriptor accepts from a YAML entry (everything except
@@ -127,6 +128,14 @@ def _descriptor_from_entry(field_key: str, entry: dict[str, Any]) -> FieldDescri
 
     if "payload" in known:
         known["payload"] = _normalize_payload(known["payload"])
+
+    if "clear_delay" in known:
+        raw = known["clear_delay"]
+        if not isinstance(raw, int) or isinstance(raw, bool) or raw <= 0:
+            LOGGER.debug(
+                "Ignoring invalid 'clear_delay' %r on field %r", raw, field_key
+            )
+            known.pop("clear_delay")
 
     return FieldDescriptor(field_key=field_key, **known)
 
