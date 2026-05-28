@@ -33,9 +33,11 @@ current via the idempotent :func:`async_upsert_device` helper.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+import dataclasses
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.components.sensor import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -44,10 +46,16 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
+from .calibration import COMMODITY_DEVICE_CLASS, normalize_calibration
 from .const import (
+    CALIBRATION_COMMODITY,
+    CALIBRATION_SCALE,
+    CALIBRATION_UNIT,
     CONF_DEVICES,
     CONF_MODEL,
+    CONSUMPTION_FIELD_KEYS,
     DATA_LIBRARY,
+    DEVICE_CALIBRATION,
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DOMAIN,
@@ -75,6 +83,31 @@ def _resolve_entity_category(value: str | None) -> EntityCategory | None:
         return EntityCategory(value)
     except ValueError:
         return None
+
+
+def _apply_calibration(
+    descriptor: FieldDescriptor, calibration: dict[str, Any]
+) -> FieldDescriptor:
+    """Overlay a per-device calibration onto a consumption field descriptor.
+
+    Precedence #1: the calibration's commodity device_class, convertible base
+    unit, ``state_class: total_increasing`` and value scale replace the library
+    descriptor's, making a unitless counter Energy-dashboard-eligible. The base
+    ``consumption``/``consumption_data`` descriptors carry
+    ``value_transform: {int: true}``; merging a ``scale`` makes the transform
+    float-valued, which is correct for an energy/volume reading. The caller has
+    already validated the calibration via :func:`normalize_calibration`.
+    """
+    commodity = calibration[CALIBRATION_COMMODITY]
+    transform = dict(descriptor.value_transform or {})
+    transform["scale"] = calibration[CALIBRATION_SCALE]
+    return dataclasses.replace(
+        descriptor,
+        device_class=COMMODITY_DEVICE_CLASS[commodity].value,
+        unit_of_measurement=calibration[CALIBRATION_UNIT],
+        state_class=SensorStateClass.TOTAL_INCREASING.value,
+        value_transform=transform,
+    )
 
 
 class Rtl433Entity(RestoreEntity):
@@ -424,6 +457,16 @@ async def async_setup_hub_platform(
     # created, so it is made exactly once per device across both creation paths.
     extra_created: set[str] = set()
 
+    def _calibration_for(device_key: str) -> dict[str, Any] | None:
+        """Return the validated per-device calibration record, or ``None``.
+
+        Read from the hub's per-device record on every build so a reload picks up
+        a freshly-written calibration; ``None`` (no/none calibration) leaves the
+        consumption field on its library descriptor.
+        """
+        record = entry.data.get(CONF_DEVICES, {}).get(device_key, {})
+        return normalize_calibration(record.get(DEVICE_CALIBRATION))
+
     def _descriptor_for(field_key: str, model: str) -> FieldDescriptor | None:
         """Return a descriptor for this platform, or None to skip the field.
 
@@ -440,11 +483,16 @@ async def async_setup_hub_platform(
     ) -> list[Rtl433Entity]:
         """Build (and dedupe by unique_id) entities for the given field keys."""
         seen = created.setdefault(device_key, set())
+        calibration = _calibration_for(device_key)
         new_entities: list[Rtl433Entity] = []
         for field_key in field_keys:
             descriptor = _descriptor_for(field_key, model)
             if descriptor is None:
                 continue
+            # Precedence #1: overlay a per-device calibration onto the device's
+            # known consumption field(s), overriding the library descriptor.
+            if calibration is not None and field_key in CONSUMPTION_FIELD_KEYS:
+                descriptor = _apply_calibration(descriptor, calibration)
             unique_id = f"{entry.entry_id}:{device_key}:{descriptor.object_suffix}"
             if unique_id in seen:
                 continue

@@ -35,13 +35,27 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
 )
 
+from .calibration import (
+    COMMODITY_UNITS,
+    commodity_from_fields,
+    default_unit,
+    normalize_calibration,
+)
 from .const import (
+    CALIBRATION_COMMODITIES,
+    CALIBRATION_COMMODITY,
+    CALIBRATION_SCALE,
+    CALIBRATION_UNIT,
+    COMMODITY_NONE,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
@@ -54,6 +68,7 @@ from .const import (
     DEFAULT_MANAGE_SETTINGS,
     DEFAULT_PATH,
     DEFAULT_PORT,
+    DEVICE_CALIBRATION,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
@@ -219,8 +234,14 @@ class Rtl433OptionsFlow(OptionsFlow):
 
     The hub step persists the discovery toggle and the default availability
     timeout to ``entry.options``. The device step writes a per-device
-    availability-timeout override into the hub's ``entry.data["devices"]`` map.
+    availability-timeout override and an optional utility-meter calibration
+    into the hub's ``entry.data["devices"]`` map.
     """
+
+    # State carried from the device step into the (optional) calibration step.
+    _calibration_device: str = ""
+    _calibration_override: int | None = None
+    _calibration_commodity: str = COMMODITY_NONE
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -263,14 +284,64 @@ class Rtl433OptionsFlow(OptionsFlow):
         )
         return self.async_show_form(step_id="hub", data_schema=schema)
 
+    def _device_commodity_default(self, device_key: str) -> str:
+        """Best-effort commodity pre-fill from the device's last decoded event.
+
+        Reads the running coordinator's most recent ``NormalizedEvent`` for the
+        device and derives a commodity hint from its ``MeterType`` / ``ert_type``
+        fields. Everything is guarded: a missing coordinator/event/field falls
+        back to ``none`` and never raises into the form render.
+        """
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        event = getattr(coordinator, "devices", {}).get(device_key)
+        fields = getattr(event, "fields", None)
+        return commodity_from_fields(fields)
+
+    def _write_device_record(
+        self,
+        device_key: str,
+        *,
+        override: int | None,
+        calibration: dict[str, Any] | None,
+    ) -> ConfigFlowResult:
+        """Persist a device's timeout override + calibration; finish the flow.
+
+        Writes into the hub's ``entry.data["devices"]`` map (the single source of
+        truth read by the coordinator and the entity build), not into
+        ``entry.options``. ``calibration is None`` clears any prior calibration.
+        The resulting ``async_update_entry`` fires ``_async_update_listener``,
+        which reloads the hub iff the calibration map actually changed.
+        """
+        data = dict(self.config_entry.data)
+        new_devices = dict(data.get(CONF_DEVICES, {}))
+        record = dict(new_devices.get(device_key, {}))
+        if override is None:
+            # Blank submission clears the override (fall back to hub default).
+            record.pop(DEVICE_TIMEOUT_OVERRIDE, None)
+        else:
+            record[DEVICE_TIMEOUT_OVERRIDE] = override
+        if calibration is None:
+            record.pop(DEVICE_CALIBRATION, None)
+        else:
+            record[DEVICE_CALIBRATION] = calibration
+        new_devices[device_key] = record
+        data[CONF_DEVICES] = new_devices
+
+        self.hass.config_entries.async_update_entry(self.config_entry, data=data)
+        # Finish the flow without altering entry.options.
+        return self.async_create_entry(title="", data=self.config_entry.options)
+
     async def async_step_device(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Pick a known device and set/clear its availability-timeout override.
+        """Pick a known device; set its timeout override and meter commodity.
 
-        The override is written into the hub's ``entry.data["devices"]`` map (the
-        single source of truth read by the coordinator), not into
-        ``entry.options``.
+        Collects the per-device availability-timeout override and the consumption
+        commodity (none / energy / gas / water). Choosing ``none`` writes the
+        record (clearing any calibration) and finishes; choosing a real commodity
+        advances to :meth:`async_step_calibration` to pick a commodity-constrained
+        base unit + scale. The commodity default is pre-filled from the device's
+        decoded ``MeterType`` / ``ert_type`` when present.
         """
         devices: dict[str, Any] = dict(self.config_entry.data.get(CONF_DEVICES, {}))
         if not devices:
@@ -279,21 +350,18 @@ class Rtl433OptionsFlow(OptionsFlow):
         if user_input is not None:
             device_key: str = user_input[CONF_DEVICE]
             override = user_input.get(DEVICE_TIMEOUT_OVERRIDE)
+            commodity = user_input.get(CALIBRATION_COMMODITY, COMMODITY_NONE)
 
-            data = dict(self.config_entry.data)
-            new_devices = dict(data.get(CONF_DEVICES, {}))
-            record = dict(new_devices.get(device_key, {}))
-            if override is None:
-                # Blank submission clears the override (fall back to hub default).
-                record.pop(DEVICE_TIMEOUT_OVERRIDE, None)
-            else:
-                record[DEVICE_TIMEOUT_OVERRIDE] = override
-            new_devices[device_key] = record
-            data[CONF_DEVICES] = new_devices
+            if commodity == COMMODITY_NONE:
+                return self._write_device_record(
+                    device_key, override=override, calibration=None
+                )
 
-            self.hass.config_entries.async_update_entry(self.config_entry, data=data)
-            # Finish the flow without altering entry.options.
-            return self.async_create_entry(title="", data=self.config_entry.options)
+            # Carry the device + timeout + commodity into the calibration step.
+            self._calibration_device = device_key
+            self._calibration_override = override
+            self._calibration_commodity = commodity
+            return await self.async_step_calibration()
 
         options = [
             SelectOptionDict(
@@ -302,6 +370,17 @@ class Rtl433OptionsFlow(OptionsFlow):
             )
             for device_key, record in sorted(devices.items())
         ]
+        commodity_options = [
+            SelectOptionDict(value=value, label=value)
+            for value in CALIBRATION_COMMODITIES
+        ]
+        # Best-effort commodity pre-fill: the device picker and commodity share
+        # one form, so the default can only reflect a specific device when there
+        # is exactly one (the focused-calibration case). With several devices the
+        # default stays ``none`` and the user picks the commodity explicitly.
+        commodity_default = COMMODITY_NONE
+        if len(devices) == 1:
+            commodity_default = self._device_commodity_default(next(iter(devices)))
         schema = vol.Schema(
             {
                 vol.Required(CONF_DEVICE): SelectSelector(
@@ -311,6 +390,84 @@ class Rtl433OptionsFlow(OptionsFlow):
                     )
                 ),
                 vol.Optional(DEVICE_TIMEOUT_OVERRIDE): vol.All(int, vol.Range(min=1)),
+                vol.Optional(
+                    CALIBRATION_COMMODITY, default=commodity_default
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=commodity_options,
+                        mode=SelectSelectorMode.DROPDOWN,
+                        translation_key="commodity",
+                    )
+                ),
             }
         )
         return self.async_show_form(step_id="device", data_schema=schema)
+
+    async def async_step_calibration(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick the commodity-constrained base unit + scale for a consumption meter.
+
+        Reached from :meth:`async_step_device` only when a real commodity was
+        chosen. The unit selector is constrained to the units Home Assistant
+        recognizes as convertible for the commodity's device_class, so the
+        resulting consumption sensor is Energy-dashboard-eligible. The
+        ``{commodity, unit, scale}`` triple is written into the device record and
+        applies to the device's known consumption field(s) only.
+        """
+        device_key = self._calibration_device
+        commodity = self._calibration_commodity
+
+        if user_input is not None:
+            calibration = normalize_calibration(
+                {
+                    CALIBRATION_COMMODITY: commodity,
+                    CALIBRATION_UNIT: user_input[CALIBRATION_UNIT],
+                    CALIBRATION_SCALE: user_input[CALIBRATION_SCALE],
+                }
+            )
+            return self._write_device_record(
+                device_key,
+                override=self._calibration_override,
+                calibration=calibration,
+            )
+
+        # Pre-fill from an existing calibration when re-editing the same device.
+        existing = normalize_calibration(
+            self.config_entry.data.get(CONF_DEVICES, {})
+            .get(device_key, {})
+            .get(DEVICE_CALIBRATION)
+        )
+        unit_default = (
+            existing[CALIBRATION_UNIT]
+            if existing is not None and existing[CALIBRATION_COMMODITY] == commodity
+            else default_unit(commodity)
+        )
+        scale_default = existing[CALIBRATION_SCALE] if existing is not None else 1.0
+
+        unit_options = [
+            SelectOptionDict(value=unit, label=unit)
+            for unit in COMMODITY_UNITS[commodity]
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required(CALIBRATION_UNIT, default=unit_default): SelectSelector(
+                    SelectSelectorConfig(
+                        options=unit_options,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(CALIBRATION_SCALE, default=scale_default): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0,
+                        step="any",
+                        mode=NumberSelectorMode.BOX,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="calibration",
+            data_schema=schema,
+            description_placeholders={"commodity": commodity},
+        )
