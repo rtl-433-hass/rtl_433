@@ -1462,3 +1462,169 @@ async def test_calibrated_consumption_sensor_is_energy_eligible(
     assert state.attributes["state_class"] == "total_increasing"
     # 1000 (raw) * 0.1 (scale) == 100.0.
     assert float(state.state) == 100.0
+
+
+# --------------------------------------------------------------------------- #
+# New-device persistent notification: restart-safe gating + de-duplication.    #
+# --------------------------------------------------------------------------- #
+# ``new_device_callback`` (custom_components/rtl_433/__init__.py) does
+# ``from homeassistant.components import persistent_notification`` then calls
+# ``persistent_notification.async_create(...)``, so the bound name to patch is on
+# the integration module, NOT the homeassistant.components package. ``async_create``
+# is a ``@callback`` (sync) helper, so ``patch``'s default (a sync ``MagicMock``,
+# NOT an ``AsyncMock``) is the right stand-in.
+_NOTIFY_TARGET = "custom_components.rtl_433.persistent_notification.async_create"
+
+
+def _notify_id(entry_id: str, device_key: str) -> str:
+    """The stable per-device notification id the callback must use."""
+    return f"{DOMAIN}_new_device_{entry_id}_{device_key}"
+
+
+async def test_new_device_notifies_once_with_stable_id_and_message(
+    hass, hub_entry_builder, events
+):
+    """A genuinely-new device (discovery on) raises exactly one notification.
+
+    The device is absent from the persisted ``entry.data[CONF_DEVICES]`` map, so
+    the first sighting is genuinely new: ``async_create`` is called once with the
+    stable ``{DOMAIN}_new_device_{entry_id}_{device_key}`` id and a message naming
+    the model, the device key, and the hub. A second sighting in the same session
+    (now persisted) does NOT notify again.
+    """
+    power_event = events("power_sensor.json")[0]
+    device_key = "EnergyMeter-2000-1234"
+
+    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    coordinator = _coordinator(hass, hub)
+
+    with patch(_NOTIFY_TARGET) as notify:
+        _feed(coordinator, power_event)
+        await hass.async_block_till_done()
+
+        notify.assert_called_once()
+        # The notification id is the stable per-device id.
+        assert notify.call_args.kwargs["notification_id"] == _notify_id(
+            hub.entry_id, device_key
+        )
+        # The message names the model, the device key, and the hub title.
+        message = notify.call_args.args[1]
+        assert "EnergyMeter-2000" in message
+        assert device_key in message
+        assert hub.title in message
+
+        # Second sighting of the now-adopted device: no second notification.
+        _feed(coordinator, power_event)
+        await hass.async_block_till_done()
+        notify.assert_called_once()
+
+
+async def test_no_notification_for_known_device_on_restart_reload(
+    hass, hub_entry_builder
+):
+    """The regression guard: a device already in the persisted map never notifies.
+
+    Seed the hub with the device already present in ``entry.data[CONF_DEVICES]``
+    (the restart-safe "ever-adopted" record), set the hub up (``coordinator.devices``
+    starts empty), then feed that device's frame. The callback fires because the
+    device is new to the in-memory ``coordinator.devices`` — but the persisted-map
+    gate suppresses the notification. The reload variant re-confirms it: after
+    ``async_reload`` empties ``coordinator.devices`` again, a fresh frame for the
+    known device still raises nothing.
+    """
+    device_key = "EnergyMeter-2000-1234"
+    frame = {"model": "EnergyMeter-2000", "id": 1234, "power_W": 1450.5}
+
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        discovery_enabled=True,
+        devices={
+            device_key: {
+                CONF_MODEL: "EnergyMeter-2000",
+                DEVICE_FIELDS: ["power_W"],
+            }
+        },
+    )
+    coordinator = _coordinator(hass, hub)
+    # The in-memory set starts empty, so this device looks ``is_new`` to it.
+    assert device_key not in coordinator.devices
+
+    with patch(_NOTIFY_TARGET) as notify:
+        _feed(coordinator, frame)
+        await hass.async_block_till_done()
+        # Known device (in the persisted map) -> the callback fired but did NOT
+        # raise a notification.
+        assert device_key in coordinator.devices
+        notify.assert_not_called()
+
+    # Reload variant: the reload rebuilds the coordinator with an empty
+    # ``devices`` again, so the known device once more looks new in memory — and
+    # must still raise nothing.
+    with patch(_NOTIFY_TARGET) as notify:
+        assert await hass.config_entries.async_reload(hub.entry_id)
+        await hass.async_block_till_done()
+        coordinator = _coordinator(hass, hub)
+        assert device_key not in coordinator.devices
+
+        _feed(coordinator, frame)
+        await hass.async_block_till_done()
+        notify.assert_not_called()
+
+
+async def test_no_notification_when_discovery_off(hass, hub_entry_builder, events):
+    """With discovery off the callback never fires, so no notification is raised."""
+    power_event = events("power_sensor.json")[0]
+
+    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=False)
+    coordinator = _coordinator(hass, hub)
+
+    with patch(_NOTIFY_TARGET) as notify:
+        _feed(coordinator, power_event)
+        await hass.async_block_till_done()
+        notify.assert_not_called()
+
+
+async def test_delete_then_re_transmit_re_notifies_same_id(
+    hass, hub_entry_builder, events
+):
+    """A deleted device that re-transmits re-notifies with the same stable id.
+
+    Adopting the device notifies once. ``async_remove_config_entry_device`` drops
+    it from the persisted map (and evicts the coordinator runtime state via
+    ``forget_device``), making it genuinely new again, so a later transmission
+    raises the notification a second time — with the SAME stable id, so the panel
+    entry is replaced rather than stacked.
+    """
+    from custom_components.rtl_433 import async_remove_config_entry_device
+
+    power_event = events("power_sensor.json")[0]
+    device_key = "EnergyMeter-2000-1234"
+
+    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    coordinator = _coordinator(hass, hub)
+    dev_reg = dr.async_get(hass)
+    prefix = f"{hub.entry_id}:{device_key}"
+    expected_id = _notify_id(hub.entry_id, device_key)
+
+    with patch(_NOTIFY_TARGET) as notify:
+        # First adoption notifies once.
+        _feed(coordinator, power_event)
+        await hass.async_block_till_done()
+        notify.assert_called_once()
+        assert notify.call_args.kwargs["notification_id"] == expected_id
+
+        # Remove the nested device: drops it from the map + evicts runtime state.
+        device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+        assert device_entry is not None
+        assert await async_remove_config_entry_device(hass, hub, device_entry) is True
+        dev_reg.async_remove_device(device_entry.id)
+        await hass.async_block_till_done()
+        assert device_key not in hub.data.get(CONF_DEVICES, {})
+
+        # Re-transmitting is genuinely new again -> a SECOND notification with the
+        # SAME stable id (replaces, does not stack).
+        _feed(coordinator, power_event)
+        await hass.async_block_till_done()
+        assert notify.call_count == 2
+        assert notify.call_args.kwargs["notification_id"] == expected_id

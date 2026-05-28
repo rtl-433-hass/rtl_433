@@ -125,7 +125,10 @@ no card to accept or dismiss:
 
 - When the hub decodes a device it does not yet know, it **adds it
   automatically** as a Home Assistant device under the hub, along with its
-  sensor / binary_sensor entities.
+  sensor / binary_sensor entities, and raises an **in-app persistent
+  notification** (stable per-device id, so a deleted device that later
+  re-appears replaces its notification rather than duplicating it). Restarting
+  Home Assistant does **not** re-notify for already-known devices.
 - To get rid of an unwanted device, open it under **Settings → Devices &
   Services → rtl_433 → the device → Delete**. There is no persistent ignore
   list: with discovery **on**, a deleted device **re-appears** the next time it
