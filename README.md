@@ -255,15 +255,18 @@ What "managed" means:
   Assistant re-applies its stored values on the next reconnect and will override
   a direct edit you made to the rtl_433 config.
 
-**Re-syncing from the rtl_433 config (the only way).** There is deliberately no
-"re-adopt" button or service. If you have changed the rtl_433 config directly
-and want Home Assistant to pick up those values, do this dance:
+**Re-syncing from the rtl_433 config.** If you have changed the rtl_433 config
+directly (or via another tool) and want Home Assistant to pick up those values,
+press the **Re-sync SDR settings from server** button on the hub device. It
+re-fetches the server's current SDR settings and re-adopts them into Home
+Assistant's managed desired state, replacing the value Home Assistant was
+enforcing. The button is shown whenever management is on.
 
-1. Turn **Manage rtl_433 settings from Home Assistant** **off** (this clears
-   Home Assistant's stored desired state).
-2. **Restart rtl_433** so it loads its config.
-3. Turn the toggle back **on** — on the next connect Home Assistant re-adopts
-   the server's now-current settings from scratch.
+The button only re-adopts when the server's **`/cmd` endpoint is reachable**: it
+re-fetches the server's settings first, and if that fetch fails (or returns
+nothing) the press is a safe **no-op** — your existing managed settings are left
+intact, so there is no data loss. In a **hopping setup** the center frequency
+stays unmanaged, exactly as during normal management.
 
 **Requirements and caveats:**
 

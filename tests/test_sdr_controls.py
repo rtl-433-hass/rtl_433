@@ -31,6 +31,7 @@ from unittest.mock import patch
 
 import pytest
 
+from custom_components.rtl_433.button import Rtl433ResyncButton
 from custom_components.rtl_433.const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DISCOVERY_ENABLED,
@@ -48,8 +49,8 @@ from custom_components.rtl_433.sdr_settings import (
     KEY_PPM_ERROR,
     KEY_SAMPLE_RATE,
 )
-from homeassistant.const import STATE_UNAVAILABLE
-from homeassistant.helpers import entity_registry as er
+from homeassistant.const import STATE_UNAVAILABLE, Platform
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 
@@ -105,6 +106,34 @@ def _mock_setters(aioclient_mock) -> None:
     aioclient_mock.get(_CMD_URL, params={"cmd": "get_meta"}, json={"result": {}})
     aioclient_mock.get(_CMD_URL, params={"cmd": "get_gain"}, json={"result": "32.8"})
     aioclient_mock.get(_CMD_URL, params={"cmd": "get_ppm_error"}, json={"result": 2})
+
+
+def _mock_meta_getters(aioclient_mock, meta: dict) -> None:
+    """Register the read getters so ``_refresh_meta`` reconstructs ``meta``.
+
+    ``_refresh_meta`` assembles ``self.meta`` from three getters: ``get_meta``
+    (the meta object minus gain/ppm), ``get_gain`` (the gain string), and
+    ``get_ppm_error`` (the ppm int). Mirror those exact sources so a
+    ``async_resync_sdr`` press adopts the same end-state the direct
+    ``coordinator.meta = meta`` adoption tests assert.
+    """
+    aioclient_mock.get(_CMD_URL, params={"cmd": "get_meta"}, json={"result": meta})
+    aioclient_mock.get(
+        _CMD_URL, params={"cmd": "get_gain"}, json={"result": meta["gain"]}
+    )
+    aioclient_mock.get(
+        _CMD_URL, params={"cmd": "get_ppm_error"}, json={"result": meta["ppm_error"]}
+    )
+    # The resync ends in _enforce_all, which issues the managed setters.
+    for cmd in (
+        "center_frequency",
+        "sample_rate",
+        "ppm_error",
+        "convert",
+        "hop_interval",
+        "gain",
+    ):
+        aioclient_mock.get(_CMD_URL, params={"cmd": cmd}, json={"result": "Ok"})
 
 
 @pytest.fixture
@@ -619,3 +648,147 @@ async def test_cmd_issuance_serialized_through_lock(hass, hub_entry_builder):
         ["enter:b", "exit:b", "enter:a", "exit:a"],
     )
     assert coordinator._cmd_lock.locked() is False
+
+
+# --------------------------------------------------------------------------- #
+# 8. Re-sync button + async_resync_sdr() coroutine (Plan 9).                   #
+# --------------------------------------------------------------------------- #
+def test_resync_reseeds_from_server_refresh_first(
+    hass, coordinator, aioclient_mock, hass_storage
+):
+    """A press re-fetches meta first, then clears + re-adopts from the server.
+
+    Refresh-first: a stale desired state (persisted to the Store) is replaced by
+    the server's current ``_META_SINGLE`` values, the gain pair is re-adopted,
+    and the Store payload now holds the re-adopted values.
+    """
+    # Seed + persist a stale desired state (a different center frequency).
+    coordinator._desired = {"center_frequency": 111111111, KEY_GAIN_AUTO: True}
+    coordinator._managed = {"center_frequency", KEY_GAIN_AUTO}
+    _run(hass, coordinator._persist_desired())
+    assert sdr_store_key(coordinator.entry.entry_id) in hass_storage
+
+    _mock_meta_getters(aioclient_mock, dict(_META_SINGLE))
+    coordinator.connected = True
+
+    with patch(DISPATCH):
+        _run(hass, coordinator.async_resync_sdr())
+
+    # Re-adopted the server's value, not the stale one.
+    assert coordinator.get_desired("center_frequency") == 433920000
+    assert coordinator.is_managed("center_frequency")
+    # Gain "32.8" -> auto False (correctly managed for this meta).
+    assert coordinator.get_desired(KEY_GAIN_AUTO) is False
+    assert coordinator.is_managed(KEY_GAIN_AUTO)
+    assert coordinator.get_desired(KEY_GAIN_DB) == 32.8
+
+    # The Store payload was re-written with the re-adopted values.
+    stored = hass_storage[sdr_store_key(coordinator.entry.entry_id)]["data"]
+    assert stored["values"]["center_frequency"] == 433920000
+    assert stored["values"][KEY_GAIN_AUTO] is False
+    assert "center_frequency" in stored["managed"]
+
+
+def test_resync_hop_mode_leaves_center_frequency_unmanaged(
+    hass, coordinator, aioclient_mock
+):
+    """A press in hop mode (>1 frequency) never pins ``center_frequency``."""
+    _mock_meta_getters(aioclient_mock, dict(_META_HOPPING))
+    coordinator.connected = True
+
+    with patch(DISPATCH):
+        _run(hass, coordinator.async_resync_sdr())
+
+    assert coordinator.get_desired("center_frequency") is None
+    assert not coordinator.is_managed("center_frequency")
+    # The other fields are still adopted.
+    assert coordinator.is_managed(KEY_SAMPLE_RATE)
+    assert coordinator.is_managed(KEY_HOP_INTERVAL)
+    assert coordinator.is_managed(KEY_GAIN_AUTO)
+
+
+def test_resync_cmd_down_is_noop_no_data_loss(
+    hass, coordinator, aioclient_mock, hass_storage
+):
+    """A press while ``/cmd`` is down is a no-op: prior state + Store survive.
+
+    The empty-meta guard returns BEFORE ``clear_desired_state`` so the seeded
+    stale state is untouched and no setter ``/cmd`` is issued.
+    """
+    # Seed + persist a stale desired state and leave meta empty.
+    coordinator._desired = {"center_frequency": 111111111, KEY_GAIN_AUTO: True}
+    coordinator._managed = {"center_frequency", KEY_GAIN_AUTO}
+    _run(hass, coordinator._persist_desired())
+    store_key = sdr_store_key(coordinator.entry.entry_id)
+    before = dict(hass_storage[store_key]["data"])
+    assert coordinator.meta == {}
+
+    # Every getter fails -> _refresh_meta populates nothing.
+    aioclient_mock.get(_CMD_URL, status=500)
+    coordinator.connected = True
+
+    with patch(DISPATCH):
+        # Must not raise even though the server is unreachable.
+        _run(hass, coordinator.async_resync_sdr())
+
+    # meta stayed empty -> the guard returned before clearing.
+    assert coordinator.meta == {}
+    # Desired state + managed flags are UNCHANGED (no data loss).
+    assert coordinator.get_desired("center_frequency") == 111111111
+    assert coordinator.is_managed("center_frequency")
+    assert coordinator.get_desired(KEY_GAIN_AUTO) is True
+    # The Store payload is UNCHANGED.
+    assert hass_storage[store_key]["data"] == before
+    # No setter /cmd was issued (only the failed getters were attempted).
+    assert _setter_queries(aioclient_mock) == []
+
+
+async def test_resync_button_present_only_when_managed(hass, hub_entry_builder):
+    """A managed hub gets exactly one ``:hub:resync_sdr`` button; unmanaged none."""
+    managed = await _setup_hub(hass, hub_entry_builder)  # managed by default
+    ent_reg = er.async_get(hass)
+    managed_uid = f"{managed.entry_id}:hub:resync_sdr"
+    eid = ent_reg.async_get_entity_id("button", DOMAIN, managed_uid)
+    assert eid is not None
+    # Exactly one button entity with that unique_id, on the hub device.
+    matches = [
+        e
+        for e in ent_reg.entities.values()
+        if e.platform == DOMAIN and e.unique_id == managed_uid
+    ]
+    assert len(matches) == 1
+    hub_device = dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, managed.entry_id)}
+    )
+    assert hub_device is not None
+    assert ent_reg.async_get(eid).device_id == hub_device.id
+
+    unmanaged = await _setup_hub(
+        hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
+    )
+    assert (
+        ent_reg.async_get_entity_id(
+            "button", DOMAIN, f"{unmanaged.entry_id}:hub:resync_sdr"
+        )
+        is None
+    )
+
+
+def test_resync_button_always_available(hass, coordinator):
+    """The button defines no ``available`` override and is always available."""
+    button = Rtl433ResyncButton(coordinator, coordinator.entry.entry_id)
+    # No per-class availability gate -> inherits the default True.
+    assert "available" not in vars(Rtl433ResyncButton)
+    assert button.unique_id == f"{coordinator.entry.entry_id}:hub:resync_sdr"
+
+    coordinator.meta = dict(_META_SINGLE)
+    assert button.available is True
+    coordinator.meta = {}
+    assert button.available is True
+
+
+def test_button_platform_registered_in_const():
+    """``Platform.BUTTON`` is forwarded for the hub entry."""
+    from custom_components.rtl_433 import const
+
+    assert Platform.BUTTON in const.PLATFORMS

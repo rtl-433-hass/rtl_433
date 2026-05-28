@@ -278,12 +278,21 @@ contributor-facing.
   against the running `coordinator.manage_settings` and **reloads the entry only
   when the toggle changed** (the entity set + adopt/enforce behaviour flips);
   discovery-toggle and timeout changes are applied live with no reload.
-- **HA is the authority; no re-adopt action — by design.** Once managed, HA
+- **HA is the authority; one-click re-adopt button.** Once managed, HA
   re-applies its stored values on reconnect and **overrides later direct edits**
-  to the rtl_433 config. There is deliberately **no re-adopt button/service**.
-  The **only** re-sync path is the toggle dance: **off → restart rtl_433 → on**
-  (the now-empty Store re-adopts the live config value on the next connect).
-  Document any change to this in the README in lockstep.
+  to the rtl_433 config. To pull the server's current settings back in there is
+  a **re-adopt button** (`button.py`, `Rtl433ResyncButton` → coordinator
+  `async_resync_sdr()`), replacing the old off → restart rtl_433 → on toggle
+  dance. `async_resync_sdr` **composes existing methods**: refresh meta
+  (`_refresh_meta`) → **guard on empty meta** (return early without clearing, so
+  an unreachable `/cmd` is a safe no-op — no data-loss window) → `clear_desired_state`
+  → `_adopt_from_server` (keeps the hop-mode center-frequency guard) → `_enforce_all`.
+  It takes **no outer `_cmd_lock`** (`_refresh_meta` is lock-free and each
+  `_enforce_all` send self-serializes through the non-reentrant `_cmd_lock`; an
+  outer lock would deadlock at the first send), and **does not reload the config
+  entry**. Gating: the button is created only when `manage_settings` is on and is
+  **always available** (no `available` override). Document any change to this in
+  the README in lockstep.
 - **Out of scope but anticipated** (the `capability` gate exists for these):
   decoder enable/disable, device selection, and multi-frequency **hop lists** —
   some unimplemented upstream. Multi-stage gain strings are likewise out of
