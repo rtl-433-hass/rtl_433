@@ -11,6 +11,7 @@ map/coordinator eviction for a nested device).
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -20,6 +21,7 @@ from custom_components.rtl_433.const import (
     CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
     CONF_HOST,
+    CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
@@ -215,3 +217,171 @@ async def test_remove_nested_device_evicts_map_and_coordinator(hass, hub_entry_b
     # ...and the coordinator was told to forget it, and the platform removers ran.
     assert forgotten == [device_key]
     assert removed == [device_key]
+
+
+# --------------------------------------------------------------------------- #
+# Reconfigure flow.                                                            #
+# --------------------------------------------------------------------------- #
+async def test_reconfigure_updates_data_and_preserves_devices(hass, hub_entry_builder):
+    """A changed-and-reachable target updates entry.data in place.
+
+    The same flow exercise proves the headline guarantees: aborts with
+    ``reconfigure_successful``, host/port/path/secure are rewritten,
+    ``manage_settings`` and the seeded ``data["devices"]`` map survive untouched,
+    ``entry_id`` is stable, and the unique_id is reconciled to the new host:port.
+    """
+    device_key = "Acurite-606TX-42"
+    seeded_devices = {
+        device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
+    }
+    entry = hub_entry_builder(
+        host="old.local",
+        port=8433,
+        path="/ws",
+        devices=seeded_devices,
+    )
+    entry.add_to_hass(hass)
+    # manage_settings is owned by the options flow; stamp it on so we can assert
+    # the reconfigure data_updates merge leaves it (and the devices map) intact.
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_MANAGE_SETTINGS: True}
+    )
+
+    original_entry_id = entry.entry_id
+    devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    # Suppress the framework-scheduled reload so it does not try a real socket
+    # setup; we only need to confirm the update + abort behaviour here.
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/socket",
+                "secure": True,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+
+    # Connection params updated in place.
+    assert entry.data[CONF_HOST] == "new.local"
+    assert entry.data[CONF_PORT] == 9000
+    assert entry.data[CONF_PATH] == "/socket"
+    assert entry.data["secure"] is True
+
+    # Same entry, preserved nested state and manage_settings (data_updates merge).
+    assert entry.entry_id == original_entry_id
+    assert entry.data[CONF_DEVICES] == devices_snapshot
+    assert entry.data[CONF_MANAGE_SETTINGS] is True
+
+    # unique_id reconciled to the new host:port.
+    assert entry.unique_id == "hub:new.local:9000"
+
+
+async def test_reconfigure_cannot_connect_keeps_form_and_data(hass, hub_entry_builder):
+    """An unreachable target re-shows the form and leaves entry.data unchanged."""
+    from custom_components.rtl_433.coordinator import CannotConnect
+
+    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry.add_to_hass(hass)
+    data_snapshot = deepcopy(dict(entry.data))
+    unique_id_snapshot = entry.unique_id
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    with patch(VALIDATE, side_effect=CannotConnect("nope")):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "unreachable",
+                CONF_PORT: 9999,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": "cannot_connect"}
+
+    # Nothing persisted.
+    assert dict(entry.data) == data_snapshot
+    assert entry.unique_id == unique_id_snapshot
+
+
+async def test_reconfigure_collision_aborts_and_mutates_neither(
+    hass, hub_entry_builder
+):
+    """Reconfiguring one hub onto another's host:port aborts as already_configured."""
+    entry_a = hub_entry_builder(host="a.local", port=8433, path="/ws")
+    entry_b = hub_entry_builder(host="b.local", port=9000, path="/ws")
+    entry_a.add_to_hass(hass)
+    entry_b.add_to_hass(hass)
+
+    a_data_snapshot = deepcopy(dict(entry_a.data))
+    a_unique_id_snapshot = entry_a.unique_id
+    b_data_snapshot = deepcopy(dict(entry_b.data))
+    b_unique_id_snapshot = entry_b.unique_id
+
+    result = await entry_a.start_reconfigure_flow(hass)
+    assert result["step_id"] == "reconfigure"
+
+    # Validation passes, but the new host:port collides with entry_b.
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "b.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+    # Neither entry's data changed.
+    assert dict(entry_a.data) == a_data_snapshot
+    assert entry_a.unique_id == a_unique_id_snapshot
+    assert dict(entry_b.data) == b_data_snapshot
+    assert entry_b.unique_id == b_unique_id_snapshot
+
+
+async def test_reconfigure_reloads_entry_exactly_once(hass, hub_entry_builder):
+    """A successful reconfigure schedules exactly one reload (no double teardown)."""
+    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry.add_to_hass(hass)
+
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_schedule_reload") as reload_spy,
+    ):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    reload_spy.assert_called_once_with(entry.entry_id)

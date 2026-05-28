@@ -100,6 +100,13 @@ be added twice.
 The **Manage rtl_433 settings from Home Assistant** toggle can be changed later
 from the hub options (see [Editing options](#editing-options)).
 
+To point an existing hub at the same server's new address, open **Settings →
+Devices & Services → rtl_433 → the hub → Reconfigure** and update the
+host/port/path/secure connection target in place; nested devices and their
+history are preserved. Use **Reconfigure** for the connection target, and
+**Configure** (options) for the discovery toggle, availability timeouts, and the
+**Manage rtl_433 settings from Home Assistant** toggle.
+
 ### `ws://`, `wss://`, and authentication
 
 - By default the connection is plain **`ws://host:port/path`**.
@@ -177,6 +184,11 @@ options flow presents a menu:
 Changing the **Manage rtl_433 settings from Home Assistant** toggle reloads the
 hub (the SDR controls appear or disappear); changing the discovery toggle or a
 timeout applies live.
+
+To instead change the hub's connection target (host/port/path/secure) — the
+same server at a new address — use **Reconfigure** rather than **Configure**;
+nested devices and their history are preserved (see
+[Configuration](#configuration)).
 
 ## Hub entities
 
