@@ -2,7 +2,7 @@
 id: 8
 group: "docs-and-tests"
 dependencies: [2, 3, 4, 5, 6]
-status: "pending"
+status: "completed"
 created: "2026-05-28"
 skills:
   - python

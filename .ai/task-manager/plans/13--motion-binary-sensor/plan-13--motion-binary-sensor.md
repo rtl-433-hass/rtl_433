@@ -268,7 +268,7 @@ graph TD
 - Task 004: Synthesized auto-off clear-delay timer in `Rtl433BinarySensor` (depends on: 001, 003)
 - Task 006: Migration registry sweep + repairs issue (depends on: 001, 002)
 
-### Phase 4: Docs + tests
+### ✅ Phase 4: Docs + tests
 **Parallel Tasks:**
 - Task 007: Documentation — device-library schema, AGENTS.md, README note (depends on: 001, 002, 003, 004, 005, 006)
 - Task 008: Tests — timer, override, migration (depends on: 002, 003, 004, 005, 006)

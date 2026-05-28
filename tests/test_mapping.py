@@ -52,16 +52,17 @@ def test_lookup_resolves_representative_descriptors(library):
 
 
 def test_event_fields_resolve_to_event_platform(library):
-    """The three shipped event fields resolve to ``event`` descriptors.
+    """The shipped event fields resolve to ``event`` descriptors.
 
     Each carries the expected ``EventDeviceClass`` value (a plain string on the
-    descriptor) and keeps its declared object_suffix.
+    descriptor) and keeps its declared object_suffix. ``motion`` is intentionally
+    NOT here: it is now a ``binary_sensor`` (see
+    ``test_motion_resolves_to_binary_sensor``).
     """
     registry, _ = library
 
     expected = {
         "button": "button",
-        "motion": "motion",
         "secret_knock": "doorbell",
     }
     for field_key, device_class in expected.items():
@@ -77,10 +78,33 @@ def test_event_fields_resolve_to_event_platform(library):
 
 
 def test_event_fields_not_in_skip_set(library):
-    """None of the three event field keys is excluded by the skip-key set."""
+    """None of the event field keys is excluded by the skip-key set."""
     _, skip_keys = library
-    for field_key in ("button", "motion", "secret_knock"):
+    for field_key in ("button", "secret_knock"):
         assert should_skip(field_key, skip_keys) is False, field_key
+
+
+def test_motion_resolves_to_binary_sensor(library):
+    """``motion`` is a detect-only occupancy binary_sensor with a clear delay.
+
+    It moved off the ``event`` platform: it resolves to a ``binary_sensor``
+    descriptor with ``device_class == "occupancy"``, only an ``on`` token
+    (raw "1"), and a 90s ``clear_delay`` driving the synthesized auto-off.
+    """
+    registry, skip_keys = library
+
+    motion = lookup("motion", registry=registry)
+    assert motion is not None
+    assert motion.platform == "binary_sensor"
+    assert motion.device_class == "occupancy"
+    assert motion.clear_delay == 90
+    assert motion.payload == {"on": "1"}
+    # Detect-only: raw "1" is on; anything else is unknown (not off).
+    assert apply_transform(motion, "1") is True
+    assert apply_transform(motion, 1) is True
+    assert apply_transform(motion, 0) is None
+    # Not skipped.
+    assert should_skip("motion", skip_keys) is False
 
 
 def test_existing_fields_keep_original_platform(library):
