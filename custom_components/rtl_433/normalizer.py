@@ -51,7 +51,7 @@ class NormalizedEvent:
         event_time: The parsed event timestamp (UTC) when one was usable, else
             ``None``. Carried alongside ``is_replay`` so the event platform can log
             the suppressed transmission's time/age at INFO; ``None`` when the raw
-            ``time`` was missing/blank/unparseable (such a frame is treated live).
+            ``time`` was missing/blank/unparsable (such a frame is treated live).
     """
 
     device_key: str

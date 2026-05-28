@@ -467,8 +467,8 @@ def test_parse_event_time_handles_format_variance():
     assert parse(12345) is None  # non-string
 
 
-def test_classifies_local_iso_and_unparseable_times(hass, coordinator):
-    """A local, an ISO/``Z``, and an unparseable frame each classify as expected.
+def test_classifies_local_iso_and_unparsable_times(hass, coordinator):
+    """A local, an ISO/``Z``, and an unparsable frame each classify as expected.
 
     Drives the classifier through ``_handle_text_frame`` with ``now`` frozen so
     age is deterministic: a recent local-naive time and a recent ISO/``Z`` time
@@ -488,9 +488,9 @@ def test_classifies_local_iso_and_unparseable_times(hass, coordinator):
     iso_now = dt_util.parse_datetime("2026-05-25T20:00:10+00:00")
     with freeze_time(iso_now), patch(DISPATCH) as d2:
         coordinator._handle_text_frame(_doorbell_frame("2026-05-25T20:00:05Z"))
-        # Blank ``time`` -> unparseable -> treated as live, never raises.
+        # Blank ``time`` -> unparsable -> treated as live, never raises.
         coordinator._handle_text_frame(_doorbell_frame(""))
-        # Garbage ``time`` -> unparseable -> live, never raises.
+        # Garbage ``time`` -> unparsable -> live, never raises.
         coordinator._handle_text_frame(_doorbell_frame("garbage"))
     assert _dispatched_replay_flags(d2) == [False, False, False]
 
