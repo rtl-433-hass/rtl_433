@@ -730,7 +730,7 @@ class Rtl433Coordinator:
         in HA's configured time zone (the NTP-sync assumption documented on
         :data:`REPLAY_STALE_THRESHOLD`), offset-aware values are converted as-is.
 
-        A missing, blank, or unparseable value yields ``None`` ("no usable
+        A missing, blank, or unparsable value yields ``None`` ("no usable
         timestamp" — the frame is then treated as live). Never raises into the
         frame loop.
         """
