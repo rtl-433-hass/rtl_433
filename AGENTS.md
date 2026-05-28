@@ -44,6 +44,12 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   a menu with a *Hub settings* step (discovery toggle + default timeout, written
   to `entry.options`) and a *Device settings* step (per-device timeout override,
   written into `entry.data["devices"]`).
+- `Rtl433ConfigFlow` also implements `async_step_reconfigure` (`config_flow.py`)
+  to edit a hub's connection params (host/port/path/secure) in place — "same
+  server, new address". The `host:port` `unique_id` is recomputed (aborting only
+  on collision with a *different* entry), and the nested-device map is preserved
+  because the new params are merged via `data_updates=` (which leaves
+  `entry.data["devices"]` and `manage_settings` untouched).
 
 ## Per-device "Last seen" sensor (synthetic, non-field-driven)
 
