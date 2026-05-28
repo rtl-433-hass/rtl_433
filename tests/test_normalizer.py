@@ -71,3 +71,28 @@ def test_normalize_model_only_event():
     assert normalized.device_key == "unknown-ch3"
     assert normalized.model == ""
     assert normalized.fields == {"temperature_C": 19.0}
+
+
+def test_normalize_drops_time_from_fields():
+    """``time`` never becomes a measurement field on a NormalizedEvent.
+
+    The coordinator reads raw ``time`` for the replay classification and relies on
+    it never reaching entities as an (unmatched) measurement field. The default
+    skip set lists ``time`` and the coordinator adds it to whatever runtime set is
+    injected, so a frame carrying ``time`` must leave it out of ``fields`` whether
+    or not the caller's skip set happened to list it.
+    """
+    event = {
+        "time": "2026-05-25 10:00:00",
+        "model": "Honeywell-Doorbell",
+        "id": 7,
+        "secret_knock": 1,
+    }
+    # The default skip set (used when the caller injects nothing) lists ``time``.
+    assert "time" not in normalize(event).fields
+    # And a runtime skip set that does NOT list ``time`` (as ``_skip_keys.yaml``
+    # omits it) still must not leak it once the coordinator adds it.
+    skip = {"model", "id", "channel", "subtype", "time"}
+    normalized = normalize(event, skip)
+    assert "time" not in normalized.fields
+    assert normalized.fields == {"secret_knock": 1}

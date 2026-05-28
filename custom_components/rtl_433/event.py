@@ -22,8 +22,9 @@ from homeassistant.components.event import EventEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 
-from .const import CONF_DEVICES, DEVICE_EVENT_TYPES
+from .const import CONF_DEVICES, DEVICE_EVENT_TYPES, LOGGER
 from .entity import Rtl433Entity, async_setup_hub_platform, async_upsert_event_types
 
 if TYPE_CHECKING:
@@ -40,10 +41,10 @@ class Rtl433Event(Rtl433Entity, EventEntity):
 
     Fires once per genuine transmission with ``str(value)`` as the event type.
     Diverges from the base entity in four places: it overrides
-    ``_handle_dispatch`` (dedupe by object identity, then fire), ``available``
-    (always True), ``_async_restore_state`` (no-op; HA's ``EventEntity`` restores
-    the last displayed event), and seeds ``_attr_event_types`` /
-    ``_attr_device_class`` in ``__init__``.
+    ``_handle_dispatch`` (suppress replays, dedupe by object identity, then fire),
+    ``available`` (always True), ``_async_restore_state`` (no-op; HA's
+    ``EventEntity`` restores the last displayed event), and seeds
+    ``_attr_event_types`` / ``_attr_device_class`` in ``__init__``.
     """
 
     def __init__(
@@ -83,13 +84,42 @@ class Rtl433Event(Rtl433Entity, EventEntity):
         fresh ``normalize()`` object. So dedupe by object identity (``is``), not
         value-equality: a genuine repeat of the same value is a distinct object
         that must fire (a doorbell pressed twice in 30 s fires twice).
+
+        A replayed / stale frame (``event.is_replay``) is the reconnect-replay
+        case the plan targets: it must NOT fire, append to ``event_types``, or
+        persist — but it still writes state (which only re-reads ``available``,
+        always ``True`` for events). A suppressed transmission that *would* have
+        fired is logged once at INFO so the user sees the real-but-stale event.
         """
+        field_key = self._descriptor.field_key
+        if event.is_replay:
+            if field_key in event.fields:
+                value = event.fields[field_key]
+                event_time = event.event_time
+                age = (
+                    f"{(dt_util.utcnow() - event_time).total_seconds():.0f}s"
+                    if event_time is not None
+                    else "unknown"
+                )
+                LOGGER.info(
+                    "rtl_433 suppressed replayed/stale %s '%s' for %s "
+                    "(model %s, event time %s, age %s)",
+                    field_key,
+                    str(value),
+                    self._device_key,
+                    self._coordinator.devices[self._device_key].model
+                    if self._device_key in self._coordinator.devices
+                    else "",
+                    event_time.isoformat() if event_time is not None else "unknown",
+                    age,
+                )
+            self.async_write_ha_state()
+            return
         # Watchdog re-dispatch of the cached last event -> same object -> don't
         # re-fire; just re-read availability.
         if event is self._last_fired_event:
             self.async_write_ha_state()
             return
-        field_key = self._descriptor.field_key
         if field_key in event.fields:
             self._last_fired_event = event
             event_type = str(event.fields[field_key])

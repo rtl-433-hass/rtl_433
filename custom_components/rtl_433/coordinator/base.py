@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 import contextlib
+import dataclasses
 from datetime import datetime, timedelta
 import json
 from typing import Any
@@ -67,6 +68,17 @@ _BACKOFF_MAX = 60.0
 
 # How often the availability watchdog evaluates last-seen vs effective timeout.
 _WATCHDOG_INTERVAL = timedelta(seconds=30)
+
+# Age boundary that separates a genuinely-fresh "live" event from a stale "gap"
+# event in the reconnect replay. On every (re)connect the server replays up to
+# its last 100 events; a frame whose ``time`` is newer than the high-water mark
+# but older than this threshold occurred while Home Assistant was disconnected
+# (a gap event) and must NOT re-fire automations or refresh liveness. Sized
+# generously enough to absorb modest rtl_433-vs-HA clock skew + transmission
+# latency (so a real live event is never misjudged stale — "never drop a real
+# one") while staying shorter than a typical HA-restart outage (so restart gap
+# events are suppressed). Assumes the server and HA clocks are roughly NTP-synced.
+REPLAY_STALE_THRESHOLD = timedelta(seconds=30)
 
 # Timeout (seconds) for the short-lived connection attempt used by the config
 # flow's reachability check.
@@ -185,6 +197,11 @@ class Rtl433Coordinator:
         self.skip_keys: set[str] = (
             set(skip_keys) if skip_keys is not None else set(DEFAULT_SKIP_KEYS)
         )
+        # The coordinator reads raw ``time`` for the replay classification, so it
+        # must never reach entities as an (unmatched) measurement field. The
+        # library skip-keys (``_skip_keys.yaml``) do not list ``time``, so add it
+        # here so ``normalize`` always drops it regardless of the injected set.
+        self.skip_keys.add("time")
 
         # --- Injectable hooks (wired by the integration setup) ----------------
         self.new_device_callback: Callable[[str, str], None] | None = None
@@ -204,6 +221,14 @@ class Rtl433Coordinator:
         self.seen_fields: set[str] = set()
         self.device_fields: dict[str, set[str]] = {}
         self.connected = False
+
+        # High-water mark of the maximum event ``time`` (UTC) ever parsed, used
+        # to classify each frame against the reconnect replay (see
+        # ``_process_event``). Initially unset: a frame at or below it is an
+        # already-seen replay; the cold-start case (mark unset) falls to the age
+        # test in ``_process_event``. Spans reconnects so a brief blip's re-sent
+        # buffer tail is recognised as already-seen and never re-fires.
+        self._event_high_water: datetime | None = None
 
         # --- Hub-scoped runtime state (rendered by the hub entities) ---------
         # Latest meta/SDR configuration (assembled from the HTTP getters in Task 2)
@@ -694,26 +719,108 @@ class Rtl433Coordinator:
     # ------------------------------------------------------------------ #
     # Event handling                                                     #
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _parse_event_time(raw: Any) -> datetime | None:
+        """Parse an rtl_433 ``time`` value to a comparable UTC instant, or ``None``.
+
+        rtl_433 stamps ``time`` either as a local ``"YYYY-MM-DD HH:MM:SS"`` string
+        (optionally with fractional seconds) or as ISO-8601 with an offset / ``Z``,
+        depending on server config. This reduces both to a single UTC basis so the
+        replay classification can compare them: local-naive values are interpreted
+        in HA's configured time zone (the NTP-sync assumption documented on
+        :data:`REPLAY_STALE_THRESHOLD`), offset-aware values are converted as-is.
+
+        A missing, blank, or unparseable value yields ``None`` ("no usable
+        timestamp" — the frame is then treated as live). Never raises into the
+        frame loop.
+        """
+        if not isinstance(raw, str):
+            return None
+        text = raw.strip()
+        if not text:
+            return None
+        try:
+            parsed = dt_util.parse_datetime(text)
+            if parsed is None:
+                # ``parse_datetime`` rejects the space-separated local form
+                # without an offset; parse it explicitly as a naive datetime.
+                for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+                    try:
+                        parsed = datetime.strptime(text, fmt)  # noqa: DTZ007 - local
+                        break
+                    except ValueError:
+                        continue
+            if parsed is None:
+                return None
+            # ``as_utc`` treats a naive datetime as DEFAULT_TIME_ZONE and leaves an
+            # aware one alone, so both forms reduce to a single comparable basis.
+            return dt_util.as_utc(parsed)
+        except (ValueError, TypeError, OverflowError):
+            return None
+
     def _process_event(self, event: dict[str, Any]) -> None:
-        """Normalize an event, update state, and dispatch to entities."""
+        """Normalize an event, classify it (live vs replay), and dispatch.
+
+        Replays and stale gap events seed sensor values but must NOT re-fire
+        ``event`` entities or refresh ``last_seen`` / ``available`` (see the
+        plan's two-signal classification): the high-water mark catches an
+        already-seen frame and the event age catches an unseen-but-old gap event.
+        """
         normalized = normalize(event, self.skip_keys)
         key = normalized.device_key
 
         is_new = key not in self.devices
 
         now = dt_util.utcnow()
+
+        # Read the raw ``time`` independently of ``normalize`` (which drops it)
+        # and classify the frame into live / already-seen replay / stale gap.
+        event_time = self._parse_event_time(event.get("time"))
+        if event_time is None:
+            # No usable timestamp -> treat as live ("never drop a real one").
+            is_replay = False
+        elif (
+            self._event_high_water is not None and event_time <= self._event_high_water
+        ):
+            # At or below the high-water mark -> an already-seen replay (catches
+            # the re-sent buffer tail on a brief blip; never re-fires).
+            is_replay = True
+        elif now - event_time > REPLAY_STALE_THRESHOLD:
+            # Newer than the mark (HA never saw it) but old -> a stale gap event
+            # that occurred while disconnected. Advance the mark so it is not
+            # reconsidered, but do not treat it as live.
+            is_replay = True
+            self._event_high_water = event_time
+        else:
+            # Newer than the mark and recent -> a genuine live transmission.
+            is_replay = False
+            self._event_high_water = event_time
+
+        # Carry the classification on the event object (the dispatch carrier), so
+        # every ``_handle_dispatch`` sees a consistent flag with no signature
+        # churn and the event platform can log a suppressed transmission's age.
+        normalized = dataclasses.replace(
+            normalized, is_replay=is_replay, event_time=event_time
+        )
         self.devices[key] = normalized
-        self.last_seen[key] = now
 
         # Track observed field keys for diagnostics (surfaced as unmatched keys).
+        # Done for every outcome so a replay-discovered device's sensors can seed.
         field_keys = set(normalized.fields)
         self.seen_fields |= field_keys
         self.device_fields.setdefault(key, set()).update(field_keys)
 
-        # A device with a fresh event is available again.
+        # Only a live frame refreshes liveness; replays / stale gap events leave
+        # ``last_seen`` / ``available`` alone so a genuinely-offline device is not
+        # resurrected by the reconnect replay.
         was_available = self.available.get(key)
-        self.available[key] = True
+        if not is_replay:
+            self.last_seen[key] = now
+            self.available[key] = True
 
+        # The new-device callback still fires for a replay-discovered device so
+        # its entities exist and can seed; its availability stays governed by
+        # liveness (it reads unavailable until a live frame arrives).
         if is_new and self.discovery_enabled and self.new_device_callback is not None:
             try:
                 self.new_device_callback(key, normalized.model)
@@ -722,11 +829,29 @@ class Rtl433Coordinator:
 
         self._dispatch(key, normalized)
 
-        if was_available is False:
+        if not is_replay and was_available is False:
             LOGGER.debug("rtl_433 device %s back online", key)
 
-    def _dispatch(self, device_key: str, normalized: NormalizedEvent) -> None:
-        """Fan a normalized event out to the device's entities."""
+    def _dispatch(
+        self,
+        device_key: str,
+        normalized: NormalizedEvent,
+        *,
+        is_replay: bool | None = None,
+    ) -> None:
+        """Fan a normalized event out to the device's entities.
+
+        The replay flag travels on the ``NormalizedEvent`` itself, so the normal
+        ``_process_event`` path passes ``is_replay=None`` (the default) to honor
+        whatever flag the classification stamped on the object. An explicit
+        ``is_replay`` overrides it: the watchdog re-dispatch of a *cached* event
+        passes ``is_replay=False`` so its unavailable re-paint is never suppressed
+        as a replay even when the cached object happened to be a replay frame.
+        Identity is preserved when no rebuild is needed, so the event entity's
+        object-identity dedupe of the watchdog re-paint still holds.
+        """
+        if is_replay is not None and normalized.is_replay != is_replay:
+            normalized = dataclasses.replace(normalized, is_replay=is_replay)
         async_dispatcher_send(
             self.hass,
             signal_device_update(self.entry.entry_id, device_key),
@@ -763,7 +888,9 @@ class Rtl433Coordinator:
                 )
                 normalized = self.devices.get(device_key)
                 if normalized is not None:
-                    self._dispatch(device_key, normalized)
+                    # A watchdog re-paint of the cached event is not a replay; it
+                    # must not be suppressed or the unavailable-repaint breaks.
+                    self._dispatch(device_key, normalized, is_replay=False)
 
     # ------------------------------------------------------------------ #
     # Config-flow connectivity check                                     #
