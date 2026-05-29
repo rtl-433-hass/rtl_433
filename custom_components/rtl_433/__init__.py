@@ -193,7 +193,7 @@ def _read_legacy_overrides(path: str) -> dict:
             parsed = yaml.safe_load(handle)
     except FileNotFoundError:
         return {}
-    except OSError, yaml.YAMLError:
+    except (OSError, yaml.YAMLError):
         LOGGER.warning(
             "Could not read legacy mappings file %s; migrating to empty mappings",
             path,

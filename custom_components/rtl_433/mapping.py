@@ -204,7 +204,7 @@ def _parse_models_block(raw: Any, source: str) -> dict[str, dict[str, FieldDescr
         for field_key, entry in entries.items():
             try:
                 descriptors[field_key] = _descriptor_from_entry(field_key, entry)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 LOGGER.exception(
                     "Ignoring malformed %s model %r field %r", source, model, field_key
                 )
@@ -257,7 +257,7 @@ def _load_skip_keys(path: Path) -> set[str]:
     try:
         with path.open("r", encoding="utf-8") as handle:
             data = yaml.safe_load(handle)
-    except OSError, yaml.YAMLError:
+    except (OSError, yaml.YAMLError):
         LOGGER.exception("Failed to parse skip-keys file %s; ignoring it", path)
         return set()
 
@@ -309,7 +309,7 @@ def load_library(
             continue
         try:
             descriptors, file_models = _load_descriptor_file(path)
-        except OSError, yaml.YAMLError, TypeError, ValueError:
+        except (OSError, yaml.YAMLError, TypeError, ValueError):
             LOGGER.exception("Skipping malformed device-library file %s", path)
             continue
         # Later files override earlier ones on key collision; warn so it is
@@ -388,7 +388,7 @@ def merge_overrides(
             continue
         try:
             merged_flat[field_key] = _descriptor_from_entry(field_key, entry)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             LOGGER.exception(
                 "Ignoring malformed override entry for field %r", field_key
             )
@@ -552,7 +552,7 @@ def _coerce_number(raw_value: Any, *, as_int: bool) -> float | int | None:
     """Coerce ``raw_value`` to ``int``/``float``; return ``None`` on failure."""
     try:
         number = float(raw_value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     return int(number) if as_int else number
 
@@ -585,19 +585,19 @@ def _apply_sensor_transform(transform: dict[str, Any], raw_value: Any) -> Any:
     if "scale" in transform:
         try:
             number = number * float(transform["scale"])
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             LOGGER.debug("Invalid 'scale' %r; skipping", transform.get("scale"))
 
     if "offset" in transform:
         try:
             number = number + float(transform["offset"])
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             LOGGER.debug("Invalid 'offset' %r; skipping", transform.get("offset"))
 
     if has_round:
         try:
             digits = int(transform["round"])
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             LOGGER.debug("Invalid 'round' %r; skipping", transform.get("round"))
         else:
             number = round(float(number), digits)

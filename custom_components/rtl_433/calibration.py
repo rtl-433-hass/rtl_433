@@ -95,7 +95,7 @@ def normalize_calibration(raw: Any) -> dict[str, Any] | None:
         return None
     try:
         scale = float(raw.get(CALIBRATION_SCALE, 1.0))
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         scale = 1.0
     return {
         CALIBRATION_COMMODITY: commodity,
@@ -128,7 +128,7 @@ def commodity_from_fields(fields: dict[str, Any] | None) -> str:
     ert_type = fields.get("ert_type")
     try:
         nibble = int(ert_type) & 0x0F
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return COMMODITY_NONE
     return {
         2: COMMODITY_GAS,

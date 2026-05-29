@@ -193,7 +193,7 @@ def _read_gain_db(meta: dict[str, Any]) -> float | None:
         return None
     try:
         return float(gain)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 
@@ -217,7 +217,7 @@ def _read_conversion_mode(meta: dict[str, Any]) -> int | None:
         return None
     try:
         return int(raw)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
 
 
