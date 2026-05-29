@@ -34,13 +34,11 @@ from custom_components.rtl_433.mapping import (
     _apply_binary_payload,
     _apply_sensor_transform,
     _coerce_number,
-    _copy_registry,
     _extract_skip_keys,
     _normalize_payload,
     _parse_models_block,
     apply_transform,
     load_library,
-    load_user_overrides,
     lookup,
     merge_overrides,
     should_skip,
@@ -896,43 +894,6 @@ class TestLookup:
 
 
 # ===========================================================================
-# _copy_registry
-# ===========================================================================
-
-
-class TestCopyRegistry:
-    """Kills the models={model: dict(None)} mutant."""
-
-    def test_copy_produces_equal_registry(self):
-        flat_desc = _make_descriptor(field_key="x")
-        reg = _make_registry(
-            flat={"x": flat_desc},
-            models={"M": {"x": flat_desc}},
-        )
-        copied = _copy_registry(reg)
-        assert copied.flat == reg.flat
-        assert copied.models == reg.models
-
-    def test_copy_is_new_object(self):
-        """Copied registry's containers must be new objects."""
-        flat_desc = _make_descriptor(field_key="x")
-        reg = _make_registry(flat={"x": flat_desc}, models={"M": {"x": flat_desc}})
-        copied = _copy_registry(reg)
-        assert copied.flat is not reg.flat
-        assert copied.models is not reg.models
-
-    def test_copy_models_entries_are_new_dicts(self):
-        flat_desc = _make_descriptor(field_key="x")
-        reg = _make_registry(
-            flat={"x": flat_desc},
-            models={"M": {"x": flat_desc}},
-        )
-        copied = _copy_registry(reg)
-        assert copied.models["M"] is not reg.models["M"]
-        assert copied.models["M"] == reg.models["M"]
-
-
-# ===========================================================================
 # merge_overrides
 # ===========================================================================
 
@@ -1154,50 +1115,6 @@ class TestLoadLibrary:
         registry, _ = load_library(tmp_path)
         assert "field_a" in registry.models.get("DevA", {})
         assert "field_b" in registry.models.get("DevA", {})
-
-
-# ===========================================================================
-# load_user_overrides — I/O paths
-# ===========================================================================
-
-
-class TestLoadUserOverrides:
-    """Kills mutants in the load_user_overrides I/O wrapper."""
-
-    def test_absent_file_returns_copy_of_base(self, tmp_path, lib):
-        registry, skip_keys = lib
-        merged, merged_skips = load_user_overrides(tmp_path, registry, skip_keys)
-        # Outputs equal the inputs (copy, not same object).
-        assert merged.flat == registry.flat
-        assert merged_skips == skip_keys
-
-    def test_empty_file_returns_copy(self, tmp_path, lib):
-        registry, skip_keys = lib
-        (tmp_path / "rtl_433_mappings.yaml").write_text("", encoding="utf-8")
-        merged, merged_skips = load_user_overrides(tmp_path, registry, skip_keys)
-        assert merged.flat == registry.flat
-
-    def test_valid_override_applied(self, tmp_path, lib):
-        registry, skip_keys = lib
-        (tmp_path / "rtl_433_mappings.yaml").write_text(
-            "my_custom_field:\n"
-            "  platform: sensor\n"
-            "  name: Custom\n"
-            "  object_suffix: C\n",
-            encoding="utf-8",
-        )
-        merged, _ = load_user_overrides(tmp_path, registry, skip_keys)
-        assert lookup("my_custom_field", registry=merged) is not None
-
-    def test_corrupt_yaml_returns_copy_not_raise(self, tmp_path, lib):
-        """Invalid YAML must be swallowed; caller never sees an exception."""
-        registry, skip_keys = lib
-        (tmp_path / "rtl_433_mappings.yaml").write_text(
-            ": bad yaml: [unclosed\n",
-            encoding="utf-8",
-        )
-        merged, merged_skips = load_user_overrides(tmp_path, registry, skip_keys)
-        assert merged.flat == registry.flat
 
 
 # ===========================================================================
@@ -1936,42 +1853,6 @@ class TestDescriptorFromEntryViaModule:
 
 
 # ---------------------------------------------------------------------------
-# _copy_registry via mp. — mutmut_6: dict(None) instead of dict(entries)
-# ---------------------------------------------------------------------------
-
-
-class TestCopyRegistryViaModule:
-    """_copy_registry called through the module object."""
-
-    def test_copy_with_model_entries_via_module(self):
-        """dict(entries) must be used; dict(None) would crash."""
-        fd = mp.FieldDescriptor(
-            field_key="x",
-            platform="sensor",
-            name="X",
-            object_suffix="X",
-        )
-        reg = mp.Registry(flat={"x": fd}, models={"ModelA": {"x": fd}})
-        # mutmut_6: dict(None) raises TypeError when models has entries
-        copied = mp._copy_registry(reg)
-        assert copied.models == {"ModelA": {"x": fd}}
-        assert copied.flat == {"x": fd}
-
-    def test_copy_model_entries_match_original(self):
-        """Copied model entries equal the original entries."""
-        fd = mp.FieldDescriptor(
-            field_key="temp",
-            platform="sensor",
-            name="Temperature",
-            object_suffix="T",
-        )
-        reg = mp.Registry(flat={}, models={"DevA": {"temp": fd}, "DevB": {"temp": fd}})
-        copied = mp._copy_registry(reg)
-        assert copied.models["DevA"]["temp"] is fd
-        assert copied.models["DevB"]["temp"] is fd
-
-
-# ---------------------------------------------------------------------------
 # _default_library via mp. — caching condition mutations (mutmut_1..4)
 # ---------------------------------------------------------------------------
 
@@ -2322,3 +2203,433 @@ class TestCoerceNumberViaModule:
     def test_non_numeric_returns_none_via_module(self):
         assert mp._coerce_number("abc", as_int=False) is None
         assert mp._coerce_number(None, as_int=False) is None
+
+
+# ---------------------------------------------------------------------------
+# _validate_entry via mp. — required-attr / platform validation
+# (kills _validate_entry mutmut_18, 21, 22 and related survivors)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateEntryViaModule:
+    """_validate_entry called through the module object.
+
+    Signature is _validate_entry(field_key, entry) and it returns a list of
+    self-contained problem strings prefixed with ``<field_key>: ``.
+    """
+
+    def test_non_dict_entry_returns_single_problem(self):
+        """Non-mapping entry yields exactly one '<field_key>: must be a mapping'."""
+        problems = mp._validate_entry("my_field", "not-a-dict")
+        assert problems == ["my_field: must be a mapping"]
+
+    def test_non_dict_entry_short_circuits(self):
+        """A non-dict entry must not also emit missing-required problems."""
+        problems = mp._validate_entry("f", 42)
+        assert problems == ["f: must be a mapping"]
+        assert len(problems) == 1
+
+    def test_valid_entry_returns_empty_list(self):
+        """All required attrs present and platform supported -> no problems."""
+        problems = mp._validate_entry(
+            "humidity",
+            {"platform": "sensor", "name": "Humidity", "object_suffix": "H"},
+        )
+        assert problems == []
+
+    def test_missing_each_required_attr_reported(self):
+        """Each of platform/name/object_suffix missing yields its own problem."""
+        problems = mp._validate_entry("f", {})
+        assert problems == [
+            "f: missing required 'platform'",
+            "f: missing required 'name'",
+            "f: missing required 'object_suffix'",
+        ]
+
+    def test_missing_required_message_uses_field_key_and_attr(self):
+        """mutmut_21 replaces the message with None; pin exact string content."""
+        problems = mp._validate_entry("door", {"name": "Door", "object_suffix": "D"})
+        assert problems == ["door: missing required 'platform'"]
+
+    def test_blank_string_required_attr_is_missing(self):
+        """A whitespace-only required attr counts as missing.
+
+        mutmut_18 changes ``value is None or (...)`` to ``and``; with a blank
+        object_suffix the original reports it missing while the ``and`` mutant
+        (a non-None blank value -> ``blank and ...`` short-circuits) would not.
+        ``object_suffix`` has no platform check, so the only problem is missing.
+        """
+        problems = mp._validate_entry(
+            "f", {"platform": "sensor", "name": "N", "object_suffix": "   "}
+        )
+        assert problems == ["f: missing required 'object_suffix'"]
+
+    def test_none_required_attr_is_missing(self):
+        """An explicit None required attr is reported missing (mutmut_18 'and')."""
+        problems = mp._validate_entry(
+            "f", {"platform": None, "name": "N", "object_suffix": "O"}
+        )
+        assert problems == ["f: missing required 'platform'"]
+
+    def test_unsupported_platform_reported(self):
+        """A present-but-unsupported platform yields an 'unknown platform' problem."""
+        problems = mp._validate_entry(
+            "f", {"platform": "switch", "name": "N", "object_suffix": "O"}
+        )
+        assert any("unknown platform 'switch'" in p for p in problems)
+
+    def test_supported_platforms_accepted(self):
+        """sensor / binary_sensor / event are all accepted without a platform error."""
+        for plat in ("sensor", "binary_sensor", "event"):
+            problems = mp._validate_entry(
+                "f", {"platform": plat, "name": "N", "object_suffix": "O"}
+            )
+            assert problems == []
+
+
+# ---------------------------------------------------------------------------
+# validate_user_mappings via mp. — top-level validation dispatch
+# (kills validate_user_mappings mutmut_3,4,5,7,8,9,12,14-27)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateUserMappingsViaModule:
+    """validate_user_mappings called through the module object.
+
+    Pure validator returning a *list* of problem strings ([] means valid).
+    """
+
+    def test_none_is_valid_empty_list(self):
+        """None (empty mapping) is valid -> empty list."""
+        assert mp.validate_user_mappings(None) == []
+
+    def test_non_dict_returns_single_problem(self):
+        """A non-mapping top level yields exactly one fixed message."""
+        assert mp.validate_user_mappings("not-a-dict") == [
+            "top-level mapping must be a YAML object"
+        ]
+        assert mp.validate_user_mappings([1, 2, 3]) == [
+            "top-level mapping must be a YAML object"
+        ]
+
+    def test_empty_dict_is_valid(self):
+        """An empty mapping has no entries and is valid."""
+        assert mp.validate_user_mappings({}) == []
+
+    def test_valid_flat_entry_no_problems(self):
+        data = {
+            "humidity": {
+                "platform": "sensor",
+                "name": "Humidity",
+                "object_suffix": "H",
+            }
+        }
+        assert mp.validate_user_mappings(data) == []
+
+    def test_flat_entry_problems_prefixed_with_field_key(self):
+        """A bad flat entry reports problems prefixed with its key (str(key))."""
+        problems = mp.validate_user_mappings({"bad": {}})
+        assert problems == [
+            "bad: missing required 'platform'",
+            "bad: missing required 'name'",
+            "bad: missing required 'object_suffix'",
+        ]
+
+    def test_non_string_flat_key_is_stringified(self):
+        """An integer key is coerced via str(key) in the problem prefix."""
+        problems = mp.validate_user_mappings({5: {}})
+        assert "5: missing required 'platform'" in problems
+
+    def test_skip_keys_must_be_list(self):
+        """skip_keys with a non-list value yields a specific problem."""
+        assert mp.validate_user_mappings({"skip_keys": "nope"}) == [
+            "skip_keys: must be a list"
+        ]
+
+    def test_skip_keys_list_is_valid(self):
+        """A skip_keys list is accepted with no problems."""
+        assert mp.validate_user_mappings({"skip_keys": ["model", "id"]}) == []
+
+    def test_models_must_be_mapping(self):
+        """models with a non-mapping value yields a specific problem."""
+        assert mp.validate_user_mappings({"models": [1, 2]}) == [
+            "models: must be a mapping"
+        ]
+
+    def test_models_per_model_must_be_mapping(self):
+        """A non-mapping per-model entry yields models.<model>: must be a mapping."""
+        problems = mp.validate_user_mappings({"models": {"Acme": "nope"}})
+        assert problems == ["models.Acme: must be a mapping"]
+
+    def test_models_entry_validated_with_dotted_path(self):
+        """A bad descriptor inside models is validated with a dotted field path."""
+        problems = mp.validate_user_mappings({"models": {"Acme": {"temp": {}}}})
+        assert problems == [
+            "models.Acme.temp: missing required 'platform'",
+            "models.Acme.temp: missing required 'name'",
+            "models.Acme.temp: missing required 'object_suffix'",
+        ]
+
+    def test_models_valid_entry_no_problems(self):
+        data = {
+            "models": {
+                "Acme": {
+                    "temp": {
+                        "platform": "sensor",
+                        "name": "Temp",
+                        "object_suffix": "T",
+                    }
+                }
+            }
+        }
+        assert mp.validate_user_mappings(data) == []
+
+    def test_problems_aggregated_across_entries(self):
+        """Problems from multiple entries are collected together."""
+        data = {
+            "a": {},
+            "skip_keys": "bad",
+        }
+        problems = mp.validate_user_mappings(data)
+        assert "a: missing required 'platform'" in problems
+        assert "skip_keys: must be a list" in problems
+
+
+# ---------------------------------------------------------------------------
+# _parse_models_block via mp. — module-routed (kills mutmut_4,5,9,10,12,15,16,
+#  17,22,23,25,34,35,36,41,42)
+# ---------------------------------------------------------------------------
+
+
+class TestParseModelsBlockViaModule:
+    """_parse_models_block(raw, source) called through the module object."""
+
+    def test_non_dict_raw_returns_empty_dict(self):
+        """mutmut_4 inverts the guard; mutmut_5/41/42 break the return value."""
+        assert mp._parse_models_block("not-a-dict", "src.yaml") == {}
+        assert mp._parse_models_block(None, "src.yaml") == {}
+        assert mp._parse_models_block(123, "src.yaml") == {}
+
+    def test_empty_dict_returns_empty_dict(self):
+        assert mp._parse_models_block({}, "src.yaml") == {}
+
+    def test_valid_block_parsed(self):
+        raw = {
+            "Acme-Thermo": {
+                "temperature_C": {
+                    "platform": "sensor",
+                    "name": "Temperature",
+                    "object_suffix": "T",
+                }
+            }
+        }
+        result = mp._parse_models_block(raw, "src.yaml")
+        assert set(result) == {"Acme-Thermo"}
+        desc = result["Acme-Thermo"]["temperature_C"]
+        assert desc.platform == "sensor"
+        assert desc.field_key == "temperature_C"
+
+    def test_non_mapping_model_entry_skipped(self):
+        """mutmut_15 inverts the per-model guard; the bad model must be dropped."""
+        raw = {
+            "BadModel": "not-a-dict",
+            "GoodModel": {
+                "temp": {"platform": "sensor", "name": "T", "object_suffix": "T"}
+            },
+        }
+        result = mp._parse_models_block(raw, "src.yaml")
+        assert "BadModel" not in result
+        assert "GoodModel" in result
+
+    def test_model_with_only_bad_descriptors_omitted(self):
+        """mutmut_34 inverts ``if descriptors``; a model with no valid descriptor
+        must not appear in the result."""
+        raw = {"M": {"bad": "not-a-dict"}}
+        result = mp._parse_models_block(raw, "src.yaml")
+        assert result == {}
+
+    def test_model_key_stringified(self):
+        """mutmut_35/36 break the str(model) key; numeric keys become strings."""
+        raw = {7: {"f": {"platform": "sensor", "name": "N", "object_suffix": "O"}}}
+        result = mp._parse_models_block(raw, "src.yaml")
+        assert "7" in result
+        assert 7 not in result
+
+    def test_malformed_descriptor_skipped_others_kept(self):
+        """mutmut_25 drops the try; one bad descriptor must not lose the good one."""
+        raw = {
+            "M": {
+                "bad": "not-a-dict",
+                "good": {"platform": "sensor", "name": "G", "object_suffix": "G"},
+            }
+        }
+        result = mp._parse_models_block(raw, "src.yaml")
+        assert "good" in result["M"]
+        assert "bad" not in result["M"]
+
+    def test_multiple_models_all_parsed(self):
+        """mutmut_22 turns the per-model continue into break, dropping later models."""
+        raw = {
+            "BadFirst": "not-a-dict",
+            "GoodSecond": {
+                "temp": {"platform": "sensor", "name": "T", "object_suffix": "T"}
+            },
+        }
+        result = mp._parse_models_block(raw, "src.yaml")
+        # If continue->break, the loop aborts at BadFirst and GoodSecond is lost.
+        assert "GoodSecond" in result
+
+
+# ---------------------------------------------------------------------------
+# normalize_overrides via mp. — payload canonicalisation / structure preserving
+# (kills normalize_overrides mutmut_6,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22)
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeOverridesViaModule:
+    """normalize_overrides(data) called through the module object.
+
+    Returns a deep-copied dict with every flat / models.<m>.<f> ``payload``
+    rewritten to canonical string ``on``/``off`` keys. Non-mapping input -> {}.
+    """
+
+    def test_non_dict_returns_empty_dict(self):
+        """mutmut_6 inverts the guard; non-mapping input must yield {}."""
+        assert mp.normalize_overrides("nope") == {}
+        assert mp.normalize_overrides(None) == {}
+        assert mp.normalize_overrides([1, 2]) == {}
+
+    def test_does_not_mutate_input(self):
+        """mutmut_8 deepcopies None; the original input must stay untouched."""
+        data = {
+            "door": {
+                "platform": "binary_sensor",
+                "name": "Door",
+                "object_suffix": "D",
+                "payload": {True: "1", False: "0"},
+            }
+        }
+        result = mp.normalize_overrides(data)
+        # Input still has the raw bool keys.
+        assert data["door"]["payload"] == {True: "1", False: "0"}
+        # Output is canonicalised.
+        assert result["door"]["payload"] == {"on": "1", "off": "0"}
+
+    def test_flat_payload_canonicalised(self):
+        """A flat entry's bool-keyed payload becomes string on/off keys."""
+        data = {
+            "door": {
+                "platform": "binary_sensor",
+                "name": "Door",
+                "object_suffix": "D",
+                "payload": {True: "open", False: "closed"},
+            }
+        }
+        result = mp.normalize_overrides(data)
+        assert result["door"]["payload"] == {"on": "open", "off": "closed"}
+
+    def test_flat_entry_without_payload_preserved(self):
+        """mutmut_21 (and->or) would index ['payload'] on entries lacking it.
+
+        An entry with no payload must survive unchanged (no KeyError).
+        """
+        data = {"temp": {"platform": "sensor", "name": "T", "object_suffix": "T"}}
+        result = mp.normalize_overrides(data)
+        assert result == {
+            "temp": {"platform": "sensor", "name": "T", "object_suffix": "T"}
+        }
+
+    def test_non_dict_flat_value_left_alone(self):
+        """A non-dict flat value must not trigger payload handling (mutmut_21)."""
+        data = {"weird": "just-a-string"}
+        result = mp.normalize_overrides(data)
+        assert result == {"weird": "just-a-string"}
+
+    def test_skip_keys_preserved_unchanged(self):
+        """mutmut_10 flips ==; the skip_keys list must be preserved verbatim."""
+        data = {"skip_keys": ["model", "id"]}
+        result = mp.normalize_overrides(data)
+        assert result == {"skip_keys": ["model", "id"]}
+
+    def test_models_payload_canonicalised(self):
+        """mutmut_12 flips the models branch; nested payloads must canonicalise."""
+        data = {
+            "models": {
+                "Acme": {
+                    "wet": {
+                        "platform": "binary_sensor",
+                        "name": "Wet",
+                        "object_suffix": "W",
+                        "payload": {True: "1", False: "0"},
+                    }
+                }
+            }
+        }
+        result = mp.normalize_overrides(data)
+        assert result["models"]["Acme"]["wet"]["payload"] == {"on": "1", "off": "0"}
+
+    def test_models_non_dict_value_preserved(self):
+        """mutmut_13 inverts the models-value dict check; a non-dict models value
+        must be passed through unchanged rather than iterated."""
+        data = {"models": "not-a-dict"}
+        result = mp.normalize_overrides(data)
+        assert result == {"models": "not-a-dict"}
+
+    def test_models_non_dict_entries_skipped(self):
+        """mutmut_16 inverts the per-model dict check; a non-dict per-model value
+        must be left alone without crashing."""
+        data = {"models": {"Acme": "not-a-dict"}}
+        result = mp.normalize_overrides(data)
+        assert result == {"models": {"Acme": "not-a-dict"}}
+
+    def test_models_entry_without_payload_preserved(self):
+        """mutmut_19 (and->or) would index ['payload'] on a payload-less entry."""
+        data = {
+            "models": {
+                "Acme": {
+                    "temp": {
+                        "platform": "sensor",
+                        "name": "T",
+                        "object_suffix": "T",
+                    }
+                }
+            }
+        }
+        result = mp.normalize_overrides(data)
+        assert result["models"]["Acme"]["temp"] == {
+            "platform": "sensor",
+            "name": "T",
+            "object_suffix": "T",
+        }
+
+    def test_models_non_dict_entry_value_left_alone(self):
+        """A non-dict entry value inside a model is passed through (mutmut_19)."""
+        data = {"models": {"Acme": {"weird": "string-entry"}}}
+        result = mp.normalize_overrides(data)
+        assert result["models"]["Acme"]["weird"] == "string-entry"
+
+    def test_multiple_sections_combined(self):
+        """Flat payload, models payload and skip_keys all handled in one pass."""
+        data = {
+            "door": {
+                "platform": "binary_sensor",
+                "name": "Door",
+                "object_suffix": "D",
+                "payload": {True: "1", False: "0"},
+            },
+            "skip_keys": ["id"],
+            "models": {
+                "Acme": {
+                    "wet": {
+                        "platform": "binary_sensor",
+                        "name": "Wet",
+                        "object_suffix": "W",
+                        "payload": {"on": "Y", "off": "N"},
+                    }
+                }
+            },
+        }
+        result = mp.normalize_overrides(data)
+        assert result["door"]["payload"] == {"on": "1", "off": "0"}
+        assert result["skip_keys"] == ["id"]
+        assert result["models"]["Acme"]["wet"]["payload"] == {"on": "Y", "off": "N"}
