@@ -18,14 +18,15 @@ captures documentation screenshots with Playwright.
 A single `rtl_433` process replays a real Acurite capture continuously; the
 integration connects over a WebSocket, discovers the device, creates entities
 with correct device classes/units, and flips them to `unavailable` when the
-stream stops. Playwright captures four screenshots (see `../../screenshots/`):
+stream stops. Playwright captures these screenshots (see `../../screenshots/`):
 
 | File | Shows |
 | --- | --- |
 | `01-discovery-card.png` | The discovered-device card at the top of Settings → Devices & Services |
 | `02-device-page.png` | The accepted device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
-| `03-options-flow.png` | The hub options flow (discovery toggle + availability timeout) |
+| `03-options-flow.png` | The hub options flow menu (Hub settings / Device settings / Device mappings) |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
+| `05-mapping-overrides.png` | The **Device mappings** step: the YAML editor pre-filled with an example per-hub override |
 
 ## Prerequisites
 

@@ -385,11 +385,21 @@ temperature, humidity, and battery sensors, plus RSSI / SNR / noise diagnostics.
 
 ### Hub options flow
 
-The hub options flow (**Configure** on the hub) exposes the discovery toggle and
-the default availability timeout under **Hub settings**, and per-device timeout
-overrides under **Device settings**.
+The hub options flow (**Configure** on the hub) opens a menu: the discovery
+toggle and default availability timeout live under **Hub settings**, per-device
+timeout overrides and calibration under **Device settings**, and the per-hub
+mapping overrides under **Device mappings**.
 
-![Hub options flow with the discovery toggle and availability-timeout field](docs/images/03-options-flow.png)
+![Hub options flow menu showing Hub settings, Device settings, and Device mappings](docs/images/03-options-flow.png)
+
+### Device mappings
+
+The **Device mappings** step opens Home Assistant's built-in YAML editor
+pre-filled with that hub's current overrides. Edit the per-hub mappings as
+YAML — the schema matches the shipped library — and the hub reloads
+automatically on save. See [User overrides](docs/device-library.md#user-overrides).
+
+![Device mappings step showing the YAML editor pre-filled with an example override that adds a custom field and re-classifies battery_ok as a low-battery problem sensor](docs/images/05-mapping-overrides.png)
 
 ### Unavailable state
 
