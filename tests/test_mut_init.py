@@ -845,7 +845,11 @@ async def test_new_device_callback_notifies_for_new_device(
     hass, hub_entry_builder, events
 ):
     """A genuinely new device triggers a persistent notification."""
-    power_event = events("power_sensor.json")[0]
+    # Drop ``time`` so the frame classifies as a live transmission, not a
+    # reconnect replay (a replay never raises the new-device notification).
+    power_event = {
+        k: v for k, v in events("power_sensor.json")[0].items() if k != "time"
+    }
     hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
     coordinator = _coordinator(hass, hub)
 
