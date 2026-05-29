@@ -163,16 +163,21 @@ a silence-based availability model: if no event for a device arrives within its
   "no signal for N minutes" staleness alerts and dashboards against it. It
   restores its previous value across restarts.
 - **Event entities** — momentary, fire-and-forget RF (remote buttons,
-  doorbells, motion, key fobs) becomes a native HA **event** entity rather than
+  doorbells, key fobs) becomes a native HA **event** entity rather than
   a sensor with a faked "off". Each transmission fires one event whose type is
   the transmitted value; like the Last seen sensor, event entities **stay
   available** between presses instead of going `unavailable`. The shipped
   mappings are in
   [`device_library/events.yaml`](docs/device-library.md#event-entities).
+- **Motion / occupancy** — detect-only PIR sensors (which send a trip but never
+  an "off") become an occupancy `binary_sensor` that auto-clears to off a set
+  time after the last detection (default 90 s, tunable per device in the device
+  options). See
+  [Motion / occupancy](docs/device-library.md#motion--occupancy).
 - **No late event replays** — on reconnect or a Home Assistant restart, rtl_433
   replays its recent event history. Momentary RF events that occurred **while HA
-  was disconnected** are intentionally **not re-fired**, so a doorbell or motion
-  event from an hour ago can't trigger your automations late (they are logged at
+  was disconnected** are intentionally **not re-fired**, so a doorbell press
+  from an hour ago can't trigger your automations late (they are logged at
   INFO instead). Their latest readings still seed the corresponding sensors. No
   configuration; nothing to set up.
 
@@ -408,6 +413,13 @@ removes just that one.
 uninstall. On first start the integration re-homes your existing devices and
 entities onto the hub entry, preserving their entity IDs and history, so
 dashboards and automations keep working.
+
+**Breaking change — motion is now a binary_sensor.** Motion is now an occupancy
+`binary_sensor` (with a synthesized auto-off) instead of an event entity, so its
+entity_id changes from `event.*_motion` to `binary_sensor.*_motion`. Update any
+automations, dashboards, or scripts that referenced the old `event.*_motion`
+entity. On upgrade the integration removes the orphaned old entity and raises a
+one-time repairs issue flagging the move.
 
 ## Development and links
 

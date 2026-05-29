@@ -47,8 +47,11 @@ from .const import (
     DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
+    DEFAULT_MOTION_CLEAR_DELAY,
     DEVICE_CALIBRATION,
+    DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
+    DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
@@ -70,6 +73,12 @@ LEGACY_CONF_OBSERVED_FIELDS = "observed_fields"
 # classified. The frame-routing fix prevents recreation, so the cleanup below
 # converges to a clean state after one run.
 PHANTOM_DEVICE_KEY = "unknown"
+
+# The ``object_suffix`` (and unique-id tail) of the pre-fix ``event.*_motion``
+# entity that has since moved to a ``binary_sensor.*_motion``. Used by the
+# migration sweep below to find the orphaned event entities and to drop the
+# matching ``DEVICE_EVENT_TYPES`` slot so the event platform never recreates it.
+_MOTION_OBJECT_SUFFIX = "motion"
 
 
 def _cleanup_phantom_unknown_device(
@@ -94,6 +103,69 @@ def _cleanup_phantom_unknown_device(
     )
     if phantom is not None:
         device_registry.async_remove_device(phantom.id)
+
+
+def _migrate_motion_event_to_binary_sensor(
+    hass: HomeAssistant, entry: ConfigEntry, entity_registry: er.EntityRegistry
+) -> None:
+    """Remove the orphaned ``event.*_motion`` entity and announce the move.
+
+    Pre-fix versions exposed motion as an ``event.*_motion`` entity; it is now a
+    ``binary_sensor.*_motion``. This sweep finds this hub's ``event``-domain
+    registry entries whose unique-id tail is ``:motion`` (unique-id shape
+    ``f"{hub_entry_id}:{device_key}:{object_suffix}"``), removes them, and drops
+    the ``motion`` slot from any persisted ``DEVICE_EVENT_TYPES`` so the event
+    platform never recreates them. Only when at least one orphaned entity was
+    removed is a single, integration-wide repairs issue raised announcing the
+    move (so automations referencing the old entity get updated).
+
+    Idempotent and safe on every startup: re-removing an already-removed entity
+    finds nothing, the devices-map write only persists when it changes, and the
+    issue id is stable so it is never duplicated across hubs or restarts.
+    """
+    removed_any = False
+    removed_device_keys: set[str] = set()
+    for ent in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
+        if ent.domain != "event" or not ent.unique_id.endswith(
+            f":{_MOTION_OBJECT_SUFFIX}"
+        ):
+            continue
+        # unique_id is ``{hub_entry_id}:{device_key}:motion``; the middle part is
+        # the device_key (device_keys may themselves contain ``:``).
+        parts = ent.unique_id.split(":")
+        if len(parts) >= 3:
+            removed_device_keys.add(":".join(parts[1:-1]))
+        entity_registry.async_remove(ent.entity_id)
+        removed_any = True
+
+    # Drop the ``motion`` event-type slot from the persisted devices map so the
+    # event platform does not recreate the entity on the next build.
+    devices = entry.data.get(CONF_DEVICES, {})
+    new_devices: dict = {}
+    changed = False
+    for device_key, record in devices.items():
+        if not isinstance(record, dict) or _MOTION_OBJECT_SUFFIX not in record.get(
+            DEVICE_EVENT_TYPES, {}
+        ):
+            new_devices[device_key] = record
+            continue
+        new_record = dict(record)
+        new_event_types = {
+            k: v
+            for k, v in record[DEVICE_EVENT_TYPES].items()
+            if k != _MOTION_OBJECT_SUFFIX
+        }
+        new_record[DEVICE_EVENT_TYPES] = new_event_types
+        new_devices[device_key] = new_record
+        changed = True
+
+    if changed:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_DEVICES: new_devices}
+        )
+
+    if removed_any:
+        repairs.async_raise_motion_moved(hass)
 
 
 def _hub_secure(entry: ConfigEntry) -> bool:
@@ -201,6 +273,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return int(override)
         return _hub_availability_timeout(entry)
 
+    def effective_clear_delay_resolver(device_key: str) -> int:
+        """Resolve a device's effective motion clear-delay (override > default).
+
+        Reads the per-device ``motion_clear_delay`` from the hub's devices map
+        (``entry.data[CONF_DEVICES][device_key]``); falls back to
+        ``DEFAULT_MOTION_CLEAR_DELAY`` when none is set.
+        """
+        override = (
+            entry.data.get(CONF_DEVICES, {})
+            .get(device_key, {})
+            .get(DEVICE_MOTION_CLEAR_DELAY)
+        )
+        if override is not None:
+            return int(override)
+        return DEFAULT_MOTION_CLEAR_DELAY
+
     def new_device_callback(device_key: str, model: str) -> None:
         """Dispatch the hub-level new-device signal for a newly observed device.
 
@@ -241,6 +329,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         model="rtl_433 server",
     )
     _cleanup_phantom_unknown_device(hass, entry, device_registry)
+    _migrate_motion_event_to_binary_sensor(hass, entry, er.async_get(hass))
 
     coordinator = Rtl433Coordinator(
         hass,
@@ -256,6 +345,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     coordinator.new_device_callback = new_device_callback
     coordinator.effective_timeout_resolver = effective_timeout_resolver
+    coordinator.effective_clear_delay_resolver = effective_clear_delay_resolver
     # Snapshot the per-device calibration so the update listener can detect a
     # real calibration change (and reload) while ignoring routine devices-map
     # upserts — the same change-vs-snapshot pattern as ``manage_settings``.
@@ -456,6 +546,9 @@ async def _migrate_hub_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> Non
         timeout_override = child.options.get(CONF_AVAILABILITY_TIMEOUT)
         if timeout_override is not None:
             record[DEVICE_TIMEOUT_OVERRIDE] = int(timeout_override)
+        clear_delay = child.options.get(DEVICE_MOTION_CLEAR_DELAY)
+        if clear_delay is not None:
+            record[DEVICE_MOTION_CLEAR_DELAY] = int(clear_delay)
         devices[device_key] = record
 
         # Re-home registry objects BEFORE the child entry is removed.

@@ -98,3 +98,19 @@ strike_count:
   name: Lightning Strike Count
   value_transform: { int: true }
   object_suffix: strcnt
+
+# Occupancy / motion. PIR / occupancy decoders (Interlogix, Risco Agility,
+# Kerui, ...) emit `motion` only ON DETECTION (raw value 1) and never send an
+# off, so this is a detect-only binary_sensor: only an `on` token is declared
+# and the off state is synthesized by the timer (see Rtl433BinarySensor +
+# clear_delay). A non-matching value yields unknown; clear_delay drives the off.
+# Raw value 1 confirmed against upstream rtl_433 PIR decoders (e.g.
+# Interlogix / Risco Agility / Kerui add `"motion"` = 1 on trigger), matching
+# the `1 == on` convention of the upstream rtl_433_mqtt_hass.py mappings.
+motion:
+  platform: binary_sensor
+  device_class: occupancy
+  name: Motion
+  payload: { on: "1" }
+  clear_delay: 90
+  object_suffix: motion

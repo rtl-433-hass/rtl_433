@@ -80,12 +80,14 @@
         "data": {
           "device": "Device",
           "timeout_override": "Availability timeout override (seconds)",
-          "commodity": "Meter commodity"
+          "commodity": "Meter commodity",
+          "motion_clear_delay": "Motion clear delay (seconds)"
         },
         "data_description": {
           "device": "The device whose settings you want to change.",
           "timeout_override": "Mark this device unavailable after this many seconds without an event. Leave blank to use the hub default.",
-          "commodity": "What this meter measures. Pick Energy, Gas, or Water to calibrate the consumption sensor (next step) so it works in the Energy dashboard. Pick None to leave it unitless (and clear any existing calibration)."
+          "commodity": "What this meter measures. Pick Energy, Gas, or Water to calibrate the consumption sensor (next step) so it works in the Energy dashboard. Pick None to leave it unitless (and clear any existing calibration).",
+          "motion_clear_delay": "For a motion sensor, auto-clear it to off this many seconds after the last motion. Leave blank to use the default."
         }
       },
       "calibration": {
@@ -116,6 +118,10 @@
     }
   },
   "issues": {
+    "motion_moved_to_binary_sensor": {
+      "title": "Motion entities moved to binary sensors",
+      "description": "rtl_433 motion is now a binary_sensor (occupancy) with an auto-off clear delay. The old `event.*_motion` entity was removed. Update any automations or dashboards that referenced it to use the new `binary_sensor.*_motion` entity."
+    },
     "server_unreachable": {
       "title": "rtl_433 server unreachable: {title}",
       "fix_flow": {

@@ -64,15 +64,20 @@ from .const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
+    DEFAULT_MOTION_CLEAR_DELAY,
     DEFAULT_PATH,
     DEFAULT_PORT,
     DEVICE_CALIBRATION,
+    DEVICE_FIELDS,
+    DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
 from .coordinator import CannotConnect, Rtl433Coordinator
+from .mapping import Registry, lookup
 
 # Whether to dial the server over ``wss://`` instead of ``ws://``.
 CONF_SECURE = "secure"
@@ -242,6 +247,10 @@ class Rtl433OptionsFlow(OptionsFlow):
     _calibration_device: str = ""
     _calibration_override: int | None = None
     _calibration_commodity: str = COMMODITY_NONE
+    # Per-device motion clear-delay override submitted on the device step, carried
+    # through the (optional) calibration step into the finish path. ``None`` means
+    # "no value submitted" -> clear any prior override.
+    _motion_clear_delay: int | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -297,20 +306,55 @@ class Rtl433OptionsFlow(OptionsFlow):
         fields = getattr(event, "fields", None)
         return commodity_from_fields(fields)
 
+    def _registry(self) -> Registry | None:
+        """Return the merged device-library registry the hub cached at setup.
+
+        The hub loads the shipped library + user overrides once in an executor and
+        caches ``(registry, skip_keys)`` on ``hass.data[DOMAIN][DATA_LIBRARY]``;
+        reuse it so descriptor lookups never re-read the YAML on the event loop.
+        Returns ``None`` if the hub has not finished loading (the conditional
+        clear-delay field then simply does not appear).
+        """
+        return self.hass.data.get(DOMAIN, {}).get(DATA_LIBRARY, (None, None))[0]
+
+    def _is_motion_bearing(self, device_key: str) -> bool:
+        """Return ``True`` if the device has a field carrying a ``clear_delay``.
+
+        A device is "motion-bearing" iff any of its observed fields resolves
+        (model-scoped) to a descriptor with a truthy ``clear_delay`` -- i.e. a
+        motion/event binary_sensor that auto-clears. Only such devices expose the
+        per-device clear-delay knob.
+        """
+        record = self.config_entry.data.get(CONF_DEVICES, {}).get(device_key, {})
+        model = record.get(CONF_MODEL)
+        registry = self._registry()
+        return any(
+            (descriptor := lookup(field_key, model, registry)) is not None
+            and descriptor.clear_delay
+            for field_key in record.get(DEVICE_FIELDS, [])
+        )
+
     def _write_device_record(
         self,
         device_key: str,
         *,
         override: int | None,
         calibration: dict[str, Any] | None,
+        motion_clear_delay: int | None,
     ) -> ConfigFlowResult:
         """Persist a device's timeout override + calibration; finish the flow.
 
-        Writes into the hub's ``entry.data["devices"]`` map (the single source of
-        truth read by the coordinator and the entity build), not into
-        ``entry.options``. ``calibration is None`` clears any prior calibration.
-        The resulting ``async_update_entry`` fires ``_async_update_listener``,
-        which reloads the hub iff the calibration map actually changed.
+        Writes the timeout override + calibration into the hub's
+        ``entry.data["devices"]`` map (the single source of truth read by the
+        coordinator and the entity build). ``calibration is None`` clears any
+        prior calibration. The resulting ``async_update_entry`` fires
+        ``_async_update_listener``, which reloads the hub iff the calibration map
+        actually changed.
+
+        The per-device motion clear-delay is persisted into ``entry.options``
+        instead (keyed by ``DEVICE_MOTION_CLEAR_DELAY``); setup copies that into
+        the device record. ``motion_clear_delay is None`` clears any prior
+        override (the field falls back to the descriptor default).
         """
         data = dict(self.config_entry.data)
         new_devices = dict(data.get(CONF_DEVICES, {}))
@@ -328,8 +372,24 @@ class Rtl433OptionsFlow(OptionsFlow):
         data[CONF_DEVICES] = new_devices
 
         self.hass.config_entries.async_update_entry(self.config_entry, data=data)
-        # Finish the flow without altering entry.options.
-        return self.async_create_entry(title="", data=self.config_entry.options)
+
+        # The motion clear-delay lives in entry.options (setup copies it into the
+        # device record). Merge it into the per-device options sub-map; a blank
+        # submission clears the override.
+        options = dict(self.config_entry.options)
+        opt_devices = dict(options.get(CONF_DEVICES, {}))
+        opt_record = dict(opt_devices.get(device_key, {}))
+        if motion_clear_delay is None:
+            opt_record.pop(DEVICE_MOTION_CLEAR_DELAY, None)
+        else:
+            opt_record[DEVICE_MOTION_CLEAR_DELAY] = motion_clear_delay
+        if opt_record:
+            opt_devices[device_key] = opt_record
+        else:
+            opt_devices.pop(device_key, None)
+        options[CONF_DEVICES] = opt_devices
+
+        return self.async_create_entry(title="", data=options)
 
     async def async_step_device(
         self, user_input: dict[str, Any] | None = None
@@ -351,16 +411,22 @@ class Rtl433OptionsFlow(OptionsFlow):
             device_key: str = user_input[CONF_DEVICE]
             override = user_input.get(DEVICE_TIMEOUT_OVERRIDE)
             commodity = user_input.get(CALIBRATION_COMMODITY, COMMODITY_NONE)
+            # Optional + no key in the schema for non-motion devices -> ``None``.
+            clear_delay = user_input.get(DEVICE_MOTION_CLEAR_DELAY)
 
             if commodity == COMMODITY_NONE:
                 return self._write_device_record(
-                    device_key, override=override, calibration=None
+                    device_key,
+                    override=override,
+                    calibration=None,
+                    motion_clear_delay=clear_delay,
                 )
 
             # Carry the device + timeout + commodity into the calibration step.
             self._calibration_device = device_key
             self._calibration_override = override
             self._calibration_commodity = commodity
+            self._motion_clear_delay = clear_delay
             return await self.async_step_calibration()
 
         options = [
@@ -381,27 +447,44 @@ class Rtl433OptionsFlow(OptionsFlow):
         commodity_default = COMMODITY_NONE
         if len(devices) == 1:
             commodity_default = self._device_commodity_default(next(iter(devices)))
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_DEVICE): SelectSelector(
-                    SelectSelectorConfig(
-                        options=options,
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-                vol.Optional(DEVICE_TIMEOUT_OVERRIDE): vol.All(int, vol.Range(min=1)),
-                vol.Optional(
-                    CALIBRATION_COMMODITY, default=commodity_default
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=commodity_options,
-                        mode=SelectSelectorMode.DROPDOWN,
-                        translation_key="commodity",
-                    )
-                ),
-            }
+        schema_dict: dict[Any, Any] = {
+            vol.Required(CONF_DEVICE): SelectSelector(
+                SelectSelectorConfig(
+                    options=options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(DEVICE_TIMEOUT_OVERRIDE): vol.All(int, vol.Range(min=1)),
+            vol.Optional(
+                CALIBRATION_COMMODITY, default=commodity_default
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=commodity_options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                    translation_key="commodity",
+                )
+            ),
+        }
+        # The clear-delay knob is only meaningful for motion-bearing devices
+        # (those with a field whose descriptor carries a ``clear_delay``). The
+        # device picker and this field share one form, so -- like the commodity
+        # pre-fill -- the field is conditionally included iff any device on the
+        # hub is motion-bearing, and pre-filled from the persisted override only
+        # when there is exactly one device (the focused-config case).
+        if any(self._is_motion_bearing(key) for key in devices):
+            clear_default = DEFAULT_MOTION_CLEAR_DELAY
+            if len(devices) == 1:
+                clear_default = (
+                    self.config_entry.data.get(CONF_DEVICES, {})
+                    .get(next(iter(devices)), {})
+                    .get(DEVICE_MOTION_CLEAR_DELAY, DEFAULT_MOTION_CLEAR_DELAY)
+                )
+            schema_dict[
+                vol.Optional(DEVICE_MOTION_CLEAR_DELAY, default=clear_default)
+            ] = vol.All(int, vol.Range(min=1))
+        return self.async_show_form(
+            step_id="device", data_schema=vol.Schema(schema_dict)
         )
-        return self.async_show_form(step_id="device", data_schema=schema)
 
     async def async_step_calibration(
         self, user_input: dict[str, Any] | None = None
@@ -430,6 +513,7 @@ class Rtl433OptionsFlow(OptionsFlow):
                 device_key,
                 override=self._calibration_override,
                 calibration=calibration,
+                motion_clear_delay=self._motion_clear_delay,
             )
 
         # Pre-fill from an existing calibration when re-editing the same device.

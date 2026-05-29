@@ -76,6 +76,7 @@ CONF_DEVICES: Final = "devices"
 # reuses ``CONF_MODEL`` ("model"); the others are defined here.
 DEVICE_FIELDS: Final = "fields"  # sorted list of observed mapped field keys
 DEVICE_TIMEOUT_OVERRIDE: Final = "timeout_override"  # int seconds, or absent/None
+DEVICE_MOTION_CLEAR_DELAY: Final = "motion_clear_delay"  # int seconds, or absent/None
 # Maps ``{field_key: sorted list[str]}`` per device record: the event types
 # observed for each event-platform field, persisted so the event entity's
 # ``event_types`` survives a restart.
@@ -129,6 +130,9 @@ DEFAULT_PATH: Final = "/ws"
 # reporters while still detecting genuinely offline devices. Configurable per
 # hub and overridable per device, so this is not a magic constant elsewhere.
 DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
+# Default seconds after which a motion/event binary_sensor auto-clears to "off"
+# when no explicit clear signal arrives. Overridable per device.
+DEFAULT_MOTION_CLEAR_DELAY: Final = 90
 # Default for the per-hub manage-settings toggle. New hubs adopt and manage the
 # SDR settings by default; users can opt out per hub via the options flow.
 DEFAULT_MANAGE_SETTINGS: Final = True

@@ -15,15 +15,6 @@ button:
   name: Button
   object_suffix: button
 
-# PIR / occupancy motion trigger emitted by motion decoders (e.g. Interlogix,
-# Risco Agility, Kerui). Typically a single momentary value -- the
-# single-value case.
-motion:
-  platform: event
-  device_class: motion
-  name: Motion
-  object_suffix: motion
-
 # Doorbell press emitted by the Honeywell ActivLink wireless doorbell decoder
 # (`secret_knock` = 1 when the doorbell is pressed 3x rapidly). A real
 # momentary doorbell-press field, mapped here as the doorbell case.

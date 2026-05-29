@@ -137,9 +137,46 @@ coordinator watchdog, and the devices map:
   The entity does **not** seed/replay `coordinator.devices[key]` on construction
   (that would fire a stale event before the entity is added to hass).
 
+## Motion / occupancy binary_sensor (`clear_delay`, synthesized off)
+
+Detect-only PIR/occupancy hardware (`motion`) emits an `on` and **never an
+off**, so `motion` is a `binary_sensor` (device class `occupancy`, `payload: {
+on: "1" }`, in `device_library/misc.yaml`) that **synthesizes** the off via a
+timer. Contracts that must survive refactors:
+
+- **`clear_delay` descriptor attribute** (`FieldDescriptor.clear_delay: int |
+  None`, `mapping.py`). `binary_sensor`-only seconds value; a non-int is logged
+  and dropped at load. Its presence is what marks a descriptor as detect-only.
+- **`Rtl433BinarySensor` timer** (`binary_sensor.py`). On each `on`, `_schedule_clear`
+  **cancels and reschedules** a single `async_call_later` one-shot, so the off
+  window **restarts on every retrigger**; `_clear` writes `is_on = False`.
+  `async_will_remove_from_hass` **cancels** the pending timer (never write after
+  removal). `_async_restore_state` **does not restore a stale `on`** for a
+  `clear_delay` descriptor (no live timer would clear it) — it returns early, so
+  the sensor comes back off/unknown until the next detection. Scheduling is
+  guarded until `hass` is set; the initial arm happens in `async_added_to_hass`.
+- **Per-device override.** `DEVICE_MOTION_CLEAR_DELAY` (`"motion_clear_delay"`,
+  `const.py`) holds an optional per-device int in the device record;
+  `DEFAULT_MOTION_CLEAR_DELAY = 90`. The options-flow device step shows a *Motion
+  clear delay (seconds)* field **only for motion-bearing devices** (descriptor
+  with a truthy `clear_delay`) and persists it. At runtime
+  `effective_clear_delay_resolver(device_key)` (set on the coordinator in
+  `__init__.py`) returns the per-device value, else the 90 s default;
+  `Rtl433BinarySensor._effective_clear_delay` consumes it (falling back to the
+  descriptor default if the resolver errors/returns `None`).
+- **event → binary migration** (`_migrate_motion_event_to_binary_sensor`,
+  `__init__.py`). Earlier versions exposed motion as `event.*_motion`; the
+  entity_id is now `binary_sensor.*_motion` (**a BC break**). At setup the sweep
+  removes the orphaned `event`-domain registry entries whose unique-id tail is
+  `:motion`, drops the `motion` slot from any persisted `DEVICE_EVENT_TYPES` (so
+  the event platform never recreates it), and — only if it removed at least one —
+  raises a single integration-wide repairs issue `motion_moved_to_binary_sensor`
+  (`is_fixable=False`, WARNING; stable id, so never duplicated across hubs or
+  restarts). Idempotent and safe on every startup.
+
 ## Device triggers (`device_trigger.py`)
 
-`device_trigger.py` exposes the `event` entities (button / motion / doorbell) as
+`device_trigger.py` exposes the `event` entities (button / doorbell) as
 UI-pickable **device triggers**. Contracts that must survive refactors:
 
 - **Discovered by file presence, not `PLATFORMS`.** HA's device-automation

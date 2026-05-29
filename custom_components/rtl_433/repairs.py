@@ -39,10 +39,32 @@ _UNREACHABLE_GRACE = timedelta(seconds=90)
 # translation_key / issue_id prefix for the unreachable-server issue.
 ISSUE_UNREACHABLE = "server_unreachable"
 
+# translation_key for the one-shot "motion moved to binary_sensor" advisory.
+# A single, integration-wide issue id (the move affects every motion device the
+# same way), so it is never duplicated across hubs or restarts.
+ISSUE_MOTION_MOVED = "motion_moved_to_binary_sensor"
+
 
 def _unreachable_issue_id(entry: ConfigEntry) -> str:
     """Return the per-hub issue id for the unreachable-server repair."""
     return f"{ISSUE_UNREACHABLE}_{entry.entry_id}"
+
+
+@callback
+def async_raise_motion_moved(hass: HomeAssistant) -> None:
+    """Raise the (non-fixable, warning) "motion moved to binary_sensor" advisory.
+
+    The issue id is the stable ``ISSUE_MOTION_MOVED`` so re-raising it (on a
+    later startup, or for a second hub) is a no-op rather than a duplicate card.
+    """
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_MOTION_MOVED,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_MOTION_MOVED,
+    )
 
 
 @callback
@@ -131,5 +153,6 @@ __all__: list[str] = [
     "async_clear_hub_unreachable",
     "async_create_fix_flow",
     "async_raise_hub_unreachable",
+    "async_raise_motion_moved",
     "async_track_hub_reachability",
 ]

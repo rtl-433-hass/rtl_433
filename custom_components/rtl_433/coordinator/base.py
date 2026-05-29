@@ -19,6 +19,9 @@ needs as injectable attributes:
 - ``effective_timeout_resolver`` — called with ``device_key`` to resolve the
   per-device availability timeout (override → hub default). The integration setup wires this;
   the fallback is the hub default.
+- ``effective_clear_delay_resolver`` — called with ``device_key`` to resolve the
+  per-device motion clear-delay (override → default). The integration setup wires
+  this; the binary_sensor reads it. The fallback is the motion default.
 """
 
 from __future__ import annotations
@@ -144,6 +147,7 @@ class Rtl433Coordinator:
             receiver's settings are left untouched.
         ``new_device_callback``: ``Callable[[str, str], None] | None``.
         ``effective_timeout_resolver``: ``Callable[[str], int] | None``.
+        ``effective_clear_delay_resolver``: ``Callable[[str], int] | None``.
 
     Runtime state (read by ``diagnostics.py``):
         ``devices``: ``dict[str, NormalizedEvent]`` last event per device key.
@@ -206,6 +210,7 @@ class Rtl433Coordinator:
         # --- Injectable hooks (wired by the integration setup) ----------------
         self.new_device_callback: Callable[[str, str], None] | None = None
         self.effective_timeout_resolver: Callable[[str], int] | None = None
+        self.effective_clear_delay_resolver: Callable[[str], int] | None = None
 
         # Per-device calibration snapshot captured at setup (analogous to
         # ``manage_settings``): ``{device_key: {commodity, unit, scale}}`` for

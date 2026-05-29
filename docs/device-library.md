@@ -21,7 +21,7 @@ custom_components/rtl_433/device_library/
 ├── _skip_keys.yaml         # fields that never become entities
 ├── air_quality.yaml        # pm2.5 / pm10 / co2
 ├── binary_states.yaml      # contacts, tamper, alarm, door state
-├── events.yaml             # momentary RF: button, motion, doorbell
+├── events.yaml             # momentary RF: button, doorbell
 ├── humidity_moisture.yaml  # humidity, moisture, leak, depth
 ├── light_uv.yaml           # illuminance, UV
 ├── misc.yaml               # battery %, timestamp, signal, lightning
@@ -65,13 +65,14 @@ temperature_C:
 | Attribute             | Required | Type            | Meaning |
 |-----------------------|----------|-----------------|---------|
 | `platform`            | yes      | `sensor` \| `binary_sensor` \| `event` | Which Home Assistant platform creates the entity. See [Event entities](#event-entities) for `event`. |
-| `device_class`        | yes (nullable) | string \| `null` | Home Assistant device class (e.g. `temperature`, `humidity`, `safety`). Use `null` when the field has no appropriate device class. For `event` entries it is an [`EventDeviceClass`](https://www.home-assistant.io/integrations/event/#device-class) (`button`, `motion`, `doorbell`). |
+| `device_class`        | yes (nullable) | string \| `null` | Home Assistant device class (e.g. `temperature`, `humidity`, `safety`). Use `null` when the field has no appropriate device class. For `event` entries it is an [`EventDeviceClass`](https://www.home-assistant.io/integrations/event/#device-class) (`button`, `doorbell`). |
 | `unit_of_measurement` | yes (nullable) | string \| `null` | Unit shown by the entity. `null` for unitless or binary fields. |
 | `state_class`         | yes (nullable) | `measurement` \| `total` \| `total_increasing` \| `null` | Long-term-statistics class. `null` for binary fields and non-numeric sensors. |
 | `name`                | yes      | string          | Human-readable entity name (suffixed to the device name by HA). |
 | `object_suffix`       | yes      | string          | Short, stable token appended to the device key to form the entity's unique id. **Must be stable** — changing it orphans existing entities. |
 | `value_transform`     | no       | mapping         | Declarative numeric transform applied before the value is stored. See [Value transforms](#value-transforms). Omit for binary fields. |
 | `payload`             | no       | `{ on: <raw>, off: <raw> }` | For `binary_sensor` only: maps the raw rtl_433 value to the HA on/off state. See [Binary payloads](#binary-payloads). |
+| `clear_delay`         | no       | int (seconds)   | For `binary_sensor` only: seconds after a detection to **synthesize** an off, for detect-only hardware that sends no off (e.g. motion/PIR). Reschedules on each detection; per-device override via the options flow. See [Motion / occupancy](#motion--occupancy). |
 | `force_update`        | no       | bool            | Mirrors upstream `force_update`; write state even when the value is unchanged. Defaults to false. |
 | `entity_category`     | no       | `diagnostic` \| `config` \| `null` | Categorizes the entity in the HA UI. Diagnostic fields (battery, signal, tamper) use `diagnostic`. |
 | `enabled_by_default`  | no       | bool            | Set `false` to register the entity disabled (the user can enable it). Defaults to true. |
@@ -134,10 +135,42 @@ emits them.
 > `value_transform: { scale: 99, offset: 1, round: 0 }`. If you prefer a
 > low-battery binary problem sensor, that is a candidate for a user override.
 
+### Motion / occupancy
+
+PIR / occupancy decoders (Interlogix, Risco Agility, Kerui, …) emit `motion`
+**only on detection** (raw value `1`) and **never send an off** — the hardware is
+detect-only. So `motion` is a `binary_sensor` (device class `occupancy`) whose
+`payload` declares only an `on` token; the off state is **synthesized** by a
+timer rather than received:
+
+```yaml
+motion:
+  platform: binary_sensor
+  device_class: occupancy
+  name: Motion
+  payload: { on: "1" }   # detect-only: no off token
+  clear_delay: 90        # synthesize off 90 s after the last detection
+  object_suffix: motion
+```
+
+The `clear_delay` attribute (seconds) drives the synthesized off: the sensor
+turns `on` on each detection and is auto-cleared to off after the delay elapses
+with no re-detection. Every fresh detection **reschedules** the timer, so the
+off window restarts on each retrigger. The shipped default is **90 s**.
+
+A stale `on` is never restored across a restart (there would be no live timer to
+clear it): the sensor comes back off/unknown until the next detection.
+
+**Per-device override.** The delay can be tuned per device in the options flow —
+**Settings → Devices & Services → rtl_433 → Configure → (device step)** exposes a
+*Motion clear delay (seconds)* field, shown only for motion-bearing devices.
+Leave it blank to use the 90 s default. The override is resolved at runtime
+(per-device value, else the descriptor default).
+
 ### Event entities
 
 `platform: event` is for **momentary, fire-and-forget** RF fields — a remote
-button, a doorbell press, a motion trip — that have no steady "on" / "off"
+button, a doorbell press — that have no steady "on" / "off"
 state to track. Each genuine transmission fires **one** Home Assistant
 [event](https://www.home-assistant.io/integrations/event/), and the entity
 stays available between presses (no faked "off"). Event entries live in their
@@ -160,21 +193,26 @@ How event entries differ from `sensor` / `binary_sensor`:
   is recorded as a valid type the first time it is seen and **persisted per
   device**, so after a restart the entity rebuilds knowing the types it has
   seen before. You never list them in the YAML.
-- A field that only ever emits **one distinct value** (motion, doorbell) is a
+- A field that only ever emits **one distinct value** (a doorbell press) is a
   **momentary single-type trigger** — it fires that one type on every
   transmission. A field whose value varies (a remote that reports which button
   was pressed) auto-populates several types.
 - **The fired event carries no extra attributes** — the type is the only
   payload.
-- `device_class` is an `EventDeviceClass` (`button`, `motion`, `doorbell`).
+- `device_class` is an `EventDeviceClass` (`button`, `doorbell`).
 
-The shipped `events.yaml` has three examples:
+The shipped `events.yaml` has two examples:
 
 | Field | `device_class` | Notes |
 |-------|----------------|-------|
 | `button` | `button` | Remote / key-fob button code; the value is the pressed code, so distinct presses auto-populate several types. |
-| `motion` | `motion` | PIR / occupancy trip; typically a single momentary value. |
 | `secret_knock` | `doorbell` | Honeywell ActivLink doorbell press; a single momentary value. |
+
+> **`motion` is not an event entity.** PIR / occupancy decoders emit `motion`
+> on detection but never send an off, so it is modelled as a detect-only
+> `binary_sensor` (device class `occupancy`) with a synthesized off — see
+> [Motion / occupancy](#motion--occupancy). (Earlier versions exposed it as an
+> `event`; the entity_id changed `event.*_motion` → `binary_sensor.*_motion`.)
 
 ## Model-scoped mappings (`models:`)
 
