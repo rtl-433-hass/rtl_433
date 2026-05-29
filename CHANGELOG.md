@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.7.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.6.0...v0.7.0) (2026-05-29)
+
+
+### Features
+
+* **rtl_433:** add hub reconfigure flow to edit connection params in place ([992ca75](https://github.com/rtl-433-hass/rtl_433/commit/992ca75f2f8a5e27c56e92af0ccfa77b68c4a5ff))
+* **rtl_433:** add model-scoped device-library lookup ([f7c6685](https://github.com/rtl-433-hass/rtl_433/commit/f7c66853efee3d801aa5123953792712d53dc13c))
+* **rtl_433:** add per-device meter calibration (commodity/unit/scale) ([83fcf00](https://github.com/rtl-433-hass/rtl_433/commit/83fcf001df5e8ccf06af716201e0cf1eb10dea5e))
+* **rtl_433:** device triggers for event entities ([#26](https://github.com/rtl-433-hass/rtl_433/issues/26)) ([348698e](https://github.com/rtl-433-hass/rtl_433/commit/348698e2e7a6bbb2d7224ada1ae46b368d272150))
+* **rtl_433:** motion as an occupancy binary_sensor with a clear-delay ([#31](https://github.com/rtl-433-hass/rtl_433/issues/31)) ([85897d1](https://github.com/rtl-433-hass/rtl_433/commit/85897d1a3067b5ba2517eef99dab6f387744580b))
+* **rtl_433:** persistent notification on new device discovery ([#28](https://github.com/rtl-433-hass/rtl_433/issues/28)) ([6809877](https://github.com/rtl-433-hass/rtl_433/commit/680987770c77c39988dfff6c51ea17c969a7ae50))
+* **rtl_433:** suppress replayed history on websocket reconnect ([#24](https://github.com/rtl-433-hass/rtl_433/issues/24)) ([4ba139d](https://github.com/rtl-433-hass/rtl_433/commit/4ba139d306bd9a3415399ac37dd7b4cd39684376))
+
 ## [0.6.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.5.0...v0.6.0) (2026-05-27)
 
 
