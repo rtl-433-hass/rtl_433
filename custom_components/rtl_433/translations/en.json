@@ -93,7 +93,7 @@
       },
       "mappings": {
         "title": "Device mappings",
-        "description": "Add or correct device-library mappings as YAML. Problems are reported when you save. {problems}",
+        "description": "Add or correct this hub's device-library mappings as YAML, using the same schema as the shipped library. See [how to write mappings](https://github.com/rtl-433-hass/rtl_433#device-library-and-user-overrides) for the format, examples, and how to scope an override to one device model. {problems}",
         "data": {
           "user_mappings": "Mappings (YAML)"
         }

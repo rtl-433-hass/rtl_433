@@ -462,8 +462,32 @@ battery_ok:
   object_suffix: B
 ```
 
-Model-scoped overrides (a [`models:` block](#model-scoped-mappings-models)) and
-`skip_keys:` entries work in the editor exactly as in the shipped library.
+`skip_keys:` entries work in the editor exactly as in the shipped library, and so
+do model-scoped overrides — the way to correct a mapping for **one specific
+device model** rather than every device that emits the field. Nest the per-model
+descriptors under a [`models:` block](#model-scoped-mappings-models) keyed by the
+exact rtl_433 `model` string; a model-scoped entry beats any global one for that
+model (see [precedence](#precedence-specificity-first)). For example, to rename
+one model's temperature sensor and round it more finely than the global default,
+leaving every other model untouched:
+
+```yaml
+models:
+  Acurite-Tower: # exact rtl_433 model string
+    temperature_C:
+      platform: sensor
+      device_class: temperature
+      unit_of_measurement: "°C"
+      state_class: measurement
+      name: Outdoor temperature
+      value_transform: { round: 2 }
+      object_suffix: T
+```
+
+Mapping overrides are **global or model-scoped only** — they apply to every device
+of a model, not a single physical unit. To change settings for one specific unit
+(its availability timeout, meter calibration, or motion clear delay), use the
+options flow's *Device settings* step instead.
 
 ### Migrating an existing `rtl_433_mappings.yaml`
 

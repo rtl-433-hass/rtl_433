@@ -315,6 +315,30 @@ top-level keys are rtl_433 field names, values are entry mappings, and they may
 include a `skip_keys:` list. Overrides win over shipped entries (full
 replacement), new fields are added, and `skip_keys` are unioned.
 
+**Overriding one device model.** A top-level key changes a field for *every*
+device that emits it. To correct a mapping for a single model without touching
+others, nest it under a `models:` block keyed by the exact rtl_433 `model`
+string — a model-scoped entry always wins over a global one for that model:
+
+```yaml
+models:
+  Acurite-Tower: # exact rtl_433 model string
+    temperature_C:
+      platform: sensor
+      device_class: temperature
+      unit_of_measurement: "°C"
+      state_class: measurement
+      name: Outdoor temperature # rename just this model's sensor
+      value_transform: { round: 2 }
+      object_suffix: T
+```
+
+Mapping overrides are **global or model-scoped** — they apply to all devices of a
+model, never a single physical unit. Per-*instance* settings (availability
+timeout, meter calibration, motion clear delay) live in **Device settings**
+instead. See [model-scoped mappings](docs/device-library.md#model-scoped-mappings-models)
+for the resolution order and a worked example.
+
 Overrides are stored **per hub** — each hub has its own set. The editor blocks
 invalid YAML and **validates the mapping schema on save**, rejecting bad input
 with a per-field error rather than silently dropping it; on save the hub
