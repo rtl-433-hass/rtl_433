@@ -87,6 +87,12 @@ CONF_SECURE = "secure"
 # Selector key for the device picker on the options device step.
 CONF_DEVICE = "device"
 
+# Documentation link for the Device-mappings step. Passed as a description
+# placeholder (hassfest forbids literal URLs in translation strings).
+MAPPINGS_DOCS_URL = (
+    "https://github.com/rtl-433-hass/rtl_433#device-library-and-user-overrides"
+)
+
 
 def _hub_unique_id(host: str, port: int) -> str:
     """Return the unique_id for a hub entry (one per host:port)."""
@@ -310,7 +316,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         is passed back unchanged so the dialog closes without clobbering options.
         """
         errors: dict[str, str] = {}
-        placeholders: dict[str, str] = {"problems": ""}
+        placeholders: dict[str, str] = {"problems": "", "docs_url": MAPPINGS_DOCS_URL}
 
         if user_input is not None:
             raw = user_input.get(CONF_USER_MAPPINGS) or {}
