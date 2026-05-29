@@ -19,7 +19,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_HOST, CONF_PATH, CONF_PORT, DATA_LIBRARY, DOMAIN
+from .const import CONF_HOST, CONF_PATH, CONF_PORT, DATA_ENTRY_LIBRARY, DOMAIN
 from .coordinator import Rtl433Coordinator
 from .mapping import Registry, lookup
 
@@ -65,7 +65,9 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Return redacted diagnostics for a config entry."""
     domain_data = hass.data.get(DOMAIN, {})
-    registry, skip_keys = domain_data.get(DATA_LIBRARY, (None, set()))
+    registry, skip_keys = domain_data.get(DATA_ENTRY_LIBRARY, {}).get(
+        entry.entry_id, (None, set())
+    )
 
     coordinator = _resolve_coordinator(hass, entry)
 

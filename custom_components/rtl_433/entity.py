@@ -54,7 +54,7 @@ from .const import (
     CONF_DEVICES,
     CONF_MODEL,
     CONSUMPTION_FIELD_KEYS,
-    DATA_LIBRARY,
+    DATA_ENTRY_LIBRARY,
     DEVICE_CALIBRATION,
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
@@ -442,10 +442,14 @@ async def async_setup_hub_platform(
     """
     coordinator: Rtl433Coordinator = hass.data[DOMAIN][entry.entry_id]
 
-    # Use the merged registry (shipped library + user overrides) that the hub
-    # loaded in an executor and cached, so descriptor lookups never re-read the
-    # YAML files on the event loop.
-    registry: Registry | None = hass.data[DOMAIN].get(DATA_LIBRARY, (None, None))[0]
+    # Use the per-entry merged registry (shipped library + this hub's user
+    # overrides) that the hub built at setup and cached, so descriptor lookups
+    # never re-read the YAML files on the event loop.
+    registry: Registry | None = (
+        hass.data[DOMAIN]
+        .get(DATA_ENTRY_LIBRARY, {})
+        .get(entry.entry_id, (None, None))[0]
+    )
 
     # Track created unique_ids per device_key so neither the initial build nor the
     # dynamic-add handlers double-create entities for the same field.

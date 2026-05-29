@@ -13,7 +13,6 @@ import pytest
 from custom_components.rtl_433.mapping import (
     apply_transform,
     load_library,
-    load_user_overrides,
     lookup,
     merge_overrides,
     should_skip,
@@ -180,36 +179,31 @@ def test_should_skip_excludes_skip_keys(library):
         assert should_skip(key, skip_keys) is False
 
 
-def test_user_override_merges_and_adds(tmp_path, library):
-    """A user-override YAML overrides an existing field and adds a new one."""
+def test_user_override_merges_and_adds(library):
+    """A user-override object overrides an existing field and adds a new one."""
     registry, skip_keys = library
 
-    override_file = tmp_path / "rtl_433_mappings.yaml"
-    override_file.write_text(
-        "\n".join(
-            [
-                # Override the existing temperature_C descriptor.
-                "temperature_C:",
-                "  platform: sensor",
-                "  device_class: temperature",
-                "  unit_of_measurement: K",
-                "  state_class: measurement",
-                "  name: Kelvin Temp",
-                "  object_suffix: K",
-                # Add a brand-new field not in the shipped library.
-                "vendor_special_field:",
-                "  platform: sensor",
-                "  name: Special",
-                "  object_suffix: SPC",
-                # Extend the skip-key set.
-                "skip_keys:",
-                "  - vendor_noise",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    overrides = {
+        # Override the existing temperature_C descriptor.
+        "temperature_C": {
+            "platform": "sensor",
+            "device_class": "temperature",
+            "unit_of_measurement": "K",
+            "state_class": "measurement",
+            "name": "Kelvin Temp",
+            "object_suffix": "K",
+        },
+        # Add a brand-new field not in the shipped library.
+        "vendor_special_field": {
+            "platform": "sensor",
+            "name": "Special",
+            "object_suffix": "SPC",
+        },
+        # Extend the skip-key set.
+        "skip_keys": ["vendor_noise"],
+    }
 
-    merged, merged_skips = load_user_overrides(tmp_path, registry, skip_keys)
+    merged, merged_skips = merge_overrides(registry, skip_keys, overrides)
 
     # Override replaced the shipped descriptor.
     overridden = lookup("temperature_C", registry=merged)
@@ -228,10 +222,10 @@ def test_user_override_merges_and_adds(tmp_path, library):
     assert lookup("temperature_C", registry=registry).unit_of_measurement == "°C"
 
 
-def test_user_override_absent_is_noop(tmp_path, library):
-    """No override file means inputs come back unchanged."""
+def test_user_override_absent_is_noop(library):
+    """An empty override object means inputs come back unchanged."""
     registry, skip_keys = library
-    merged, merged_skips = load_user_overrides(tmp_path, registry, skip_keys)
+    merged, merged_skips = merge_overrides(registry, skip_keys, {})
     assert merged == registry
     assert merged_skips == skip_keys
 
