@@ -12,7 +12,8 @@ The public surface consumed by later tasks is:
   ``None``).
 * :func:`should_skip` -- test a field against the skip-key set.
 * :func:`apply_transform` -- turn a raw rtl_433 value into the HA-facing state.
-* :func:`load_user_overrides` -- merge ``<config>/rtl_433_mappings.yaml``.
+* :func:`validate_user_mappings` -- pure validator returning per-entry problems.
+* :func:`normalize_overrides` -- pure, JSON-serialisable, payload-canonical copy.
 * :func:`merge_overrides` -- pure merge helper (used by the loader + tests).
 
 The ``registry`` returned by :func:`load_library` is a :class:`Registry`: a flat
@@ -22,8 +23,8 @@ file's reserved top-level ``models:`` block. :func:`lookup` resolves the
 model-scoped entry for ``(model, field_key)`` first, then the global flat entry.
 
 File I/O is synchronous. Async callers (the integration setup) must
-run :func:`load_library` and :func:`load_user_overrides` off the event loop via
-``hass.async_add_executor_job`` because both touch the filesystem.
+run :func:`load_library` off the event loop via ``hass.async_add_executor_job``
+because it touches the filesystem.
 
 The YAML schema is documented in ``docs/device-library.md``; this module
 conforms to the attribute names used by the ``device_library/`` YAML files.
@@ -31,6 +32,7 @@ conforms to the attribute names used by the ``device_library/`` YAML files.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
@@ -87,6 +89,14 @@ class FieldDescriptor:
 _DESCRIPTOR_ATTRS = frozenset(
     f.name for f in fields(FieldDescriptor) if f.name != "field_key"
 )
+
+# Entity platforms the shipped library uses; the UI validator rejects any
+# ``platform`` value outside this set. Confirmed by the ``platform:`` values in
+# ``device_library/*.yaml``.
+_SUPPORTED_PLATFORMS = frozenset({"sensor", "binary_sensor", "event"})
+
+# Entry attributes a user mapping must supply for a valid descriptor.
+_REQUIRED_ENTRY_ATTRS = ("platform", "name", "object_suffix")
 
 
 @dataclass(frozen=True)
@@ -386,62 +396,110 @@ def merge_overrides(
     return Registry(flat=merged_flat, models=merged_models), merged_skips
 
 
-def _copy_registry(registry: Registry) -> Registry:
-    """Return a shallow-copied :class:`Registry` (new containers, same values).
+def _validate_entry(field_key: str, entry: Any) -> list[str]:
+    """Validate one field entry, returning self-contained problem strings.
 
-    Used by :func:`load_user_overrides`' no-op paths so it always hands back a
-    fresh object, never the caller's instance, matching the pure-merge contract.
+    Mirrors what :func:`_descriptor_from_entry` will accept so the
+    "validator accepts => merge keeps it" invariant holds: the entry must be a
+    mapping, must supply the required ``platform``/``name``/``object_suffix``
+    attributes, and any ``platform`` it does supply must be supported. Unknown
+    extra attributes are tolerated (the descriptor builder ignores them). Each
+    returned problem is prefixed with ``<field_key>: `` so the caller can present
+    it without further context.
     """
-    return Registry(
-        flat=dict(registry.flat),
-        models={model: dict(entries) for model, entries in registry.models.items()},
-    )
+    if not isinstance(entry, dict):
+        return [f"{field_key}: must be a mapping"]
 
+    problems: list[str] = []
+    for attr in _REQUIRED_ENTRY_ATTRS:
+        value = entry.get(attr)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            problems.append(f"{field_key}: missing required {attr!r}")
 
-def load_user_overrides(
-    config_path: str | Path,
-    registry: Registry,
-    skip_keys: set[str],
-) -> tuple[Registry, set[str]]:
-    """Merge ``<config_path>/rtl_433_mappings.yaml`` over the shipped library.
-
-    ``config_path`` is the Home Assistant configuration directory (callers pass
-    ``hass.config.path()`` -- the directory, not the file). If the override file
-    is absent, the inputs are returned unchanged. Parsing/merge errors are logged
-    and swallowed; this function never raises to the caller, so a broken override
-    can never take the integration down.
-
-    Returns new ``(registry, skip_keys)`` objects. Performs blocking file I/O;
-    async callers must invoke it via ``hass.async_add_executor_job``.
-    """
-    path = Path(config_path) / USER_OVERRIDE_FILENAME
-    if not path.is_file():
-        LOGGER.debug("No user override file at %s", path)
-        return _copy_registry(registry), set(skip_keys)
-
-    try:
-        with path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle)
-    except OSError, yaml.YAMLError:
-        LOGGER.warning(
-            "Failed to read/parse user override %s; ignoring it", path, exc_info=True
+    platform = entry.get("platform")
+    if platform is not None and platform != "" and platform not in _SUPPORTED_PLATFORMS:
+        problems.append(
+            f"{field_key}: unknown platform {platform!r} "
+            "(expected one of sensor, binary_sensor, event)"
         )
-        return _copy_registry(registry), set(skip_keys)
 
+    return problems
+
+
+def validate_user_mappings(data: Any) -> list[str]:
+    """Validate a user-supplied mapping object, returning per-entry problems.
+
+    Pure: never raises and never mutates ``data``. An empty list means the object
+    is valid. ``None`` (an empty mapping) is valid. A non-mapping top level yields
+    a single problem. The reserved ``skip_keys`` key must be a list; the reserved
+    ``models`` key must be a mapping of ``model -> {field_key -> entry}``; every
+    other key is a flat field entry. Each problem string is self-contained (it
+    names the offending field/path) so the options step can join them for a form
+    error. The rules deliberately match :func:`_descriptor_from_entry`'s
+    tolerance so anything the validator accepts survives :func:`merge_overrides`.
+    """
     if data is None:
-        LOGGER.debug("User override file %s is empty; nothing to merge", path)
-        return _copy_registry(registry), set(skip_keys)
+        return []
+    if not isinstance(data, dict):
+        return ["top-level mapping must be a YAML object"]
 
-    try:
-        merged, merged_skips = merge_overrides(registry, skip_keys, data)
-    except Exception:  # noqa: BLE001 - override merge must never crash setup
-        LOGGER.warning(
-            "Failed to merge user override %s; ignoring it", path, exc_info=True
-        )
-        return _copy_registry(registry), set(skip_keys)
+    problems: list[str] = []
+    for key, value in data.items():
+        if key == SKIP_KEYS_FIELD:
+            if not isinstance(value, list):
+                problems.append("skip_keys: must be a list")
+            continue
+        if key == MODELS_FIELD:
+            if not isinstance(value, dict):
+                problems.append("models: must be a mapping")
+                continue
+            for model, entries in value.items():
+                if not isinstance(entries, dict):
+                    problems.append(f"models.{model}: must be a mapping")
+                    continue
+                for field_key, entry in entries.items():
+                    problems.extend(
+                        _validate_entry(f"models.{model}.{field_key}", entry)
+                    )
+            continue
+        problems.extend(_validate_entry(str(key), value))
 
-    LOGGER.info("Applied user override mappings from %s", path)
-    return merged, merged_skips
+    return problems
+
+
+def normalize_overrides(data: Any) -> dict[str, Any]:
+    """Return a deep-copied, JSON-serialisable, payload-canonical override dict.
+
+    Pure: never mutates ``data``. Returns ``{}`` for any non-mapping input. Every
+    flat entry and every ``models.<model>.<field_key>`` entry that carries a
+    ``payload`` has it rewritten via :func:`_normalize_payload`, so boolean keys
+    parsed from YAML (``True``/``False``) and bare ``on``/``off`` keys become the
+    canonical string keys ``"on"``/``"off"``. This guarantees the result has no
+    non-string dict keys and is safe to JSON-serialise for storage. The
+    ``skip_keys`` list and the ``models`` block structure are preserved.
+    """
+    if not isinstance(data, dict):
+        return {}
+
+    result: dict[str, Any] = copy.deepcopy(data)
+
+    for key, value in result.items():
+        if key == SKIP_KEYS_FIELD:
+            continue
+        if key == MODELS_FIELD:
+            if not isinstance(value, dict):
+                continue
+            for entries in value.values():
+                if not isinstance(entries, dict):
+                    continue
+                for entry in entries.values():
+                    if isinstance(entry, dict) and "payload" in entry:
+                        entry["payload"] = _normalize_payload(entry["payload"])
+            continue
+        if isinstance(value, dict) and "payload" in value:
+            value["payload"] = _normalize_payload(value["payload"])
+
+    return result
 
 
 def should_skip(field_key: str, skip_keys: set[str] | None = None) -> bool:
