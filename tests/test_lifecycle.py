@@ -91,6 +91,17 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
     coordinator._handle_text_frame(json.dumps(event))
 
 
+def _live(event: dict) -> dict:
+    """Return a copy of ``event`` with no ``time`` so it classifies as live.
+
+    A frame with no usable timestamp is treated as a genuine live transmission
+    (never a reconnect replay), which is what a new device transmitting while HA
+    is connected looks like — the fixture's fixed (stale) ``time`` would instead
+    classify as a stale-gap replay and suppress the new-device notification.
+    """
+    return {k: v for k, v in event.items() if k != "time"}
+
+
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
     """Set up a single hub entry (optionally pre-seeded) and return it."""
     hub = hub_entry_builder(availability_timeout=600, devices=devices, **kwargs)
@@ -1492,7 +1503,7 @@ async def test_new_device_notifies_once_with_stable_id_and_message(
     the model, the device key, and the hub. A second sighting in the same session
     (now persisted) does NOT notify again.
     """
-    power_event = events("power_sensor.json")[0]
+    power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
     hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
@@ -1572,6 +1583,45 @@ async def test_no_notification_for_known_device_on_restart_reload(
         notify.assert_not_called()
 
 
+async def test_no_notification_for_reconnect_replay_frame(hass, hub_entry_builder):
+    """A reconnect-replay frame never raises a "new device" notification.
+
+    On every new websocket connection the rtl_433 server replays its recent
+    event buffer. After a restart/reload the coordinator's in-memory ``devices``
+    set starts empty, so each replayed device looks ``is_new`` even though it is
+    a re-broadcast, not a genuine first-time live transmission. Feeding such a
+    frame (an old ``time``, classified ``is_replay`` because it predates the
+    stale threshold and the high-water mark starts unset) for a device *absent*
+    from the persisted map must NOT notify — yet the device is still wired up so
+    its entities exist and can seed once a live frame arrives.
+    """
+    device_key = "EnergyMeter-2000-1234"
+    # An old timestamp -> the replay classifier marks this a stale-gap replay.
+    replay_frame = {
+        "time": "2020-01-01T00:00:00Z",
+        "model": "EnergyMeter-2000",
+        "id": 1234,
+        "power_W": 1450.5,
+    }
+
+    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    coordinator = _coordinator(hass, hub)
+    # The device is genuinely new to both the in-memory set and the persisted map.
+    assert device_key not in coordinator.devices
+    assert device_key not in hub.data.get(CONF_DEVICES, {})
+
+    with patch(_NOTIFY_TARGET) as notify:
+        _feed(coordinator, replay_frame)
+        await hass.async_block_till_done()
+        # The replay wires the device up (entities exist) but raises no alert.
+        notify.assert_not_called()
+
+    assert device_key in coordinator.devices
+    ent_reg = er.async_get(hass)
+    prefix = f"{hub.entry_id}:{device_key}"
+    assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is not None
+
+
 async def test_no_notification_when_discovery_off(hass, hub_entry_builder, events):
     """With discovery off the callback never fires, so no notification is raised."""
     power_event = events("power_sensor.json")[0]
@@ -1598,7 +1648,7 @@ async def test_delete_then_re_transmit_re_notifies_same_id(
     """
     from custom_components.rtl_433 import async_remove_config_entry_device
 
-    power_event = events("power_sensor.json")[0]
+    power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
     hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)

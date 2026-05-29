@@ -13,8 +13,11 @@ needs as injectable attributes:
 
 - ``skip_keys`` — the set of event keys to drop from measurement fields. Defaults
   to a minimal identity set; the integration setup injects the library skip-keys.
-- ``new_device_callback`` — called with ``(device_key, model)`` the first time an
-  unknown device is seen while discovery is enabled. The integration setup wires this to the
+- ``new_device_callback`` — called with ``(device_key, model, is_replay)`` the
+  first time an unknown device is seen while discovery is enabled; ``is_replay``
+  flags a reconnect-replay/stale-gap frame so the callback can wire up entities
+  without raising a "new device" notification for a mere re-broadcast. The
+  integration setup wires this to the
   discovery flow; the coordinator never imports the config flow.
 - ``effective_timeout_resolver`` — called with ``device_key`` to resolve the
   per-device availability timeout (override → hub default). The integration setup wires this;
@@ -145,7 +148,7 @@ class Rtl433Coordinator:
             state to a ``Store``, and replays it on every reconnect; when
             ``False`` the desired-state ``Store`` is wiped on load and the
             receiver's settings are left untouched.
-        ``new_device_callback``: ``Callable[[str, str], None] | None``.
+        ``new_device_callback``: ``Callable[[str, str, bool], None] | None``.
         ``effective_timeout_resolver``: ``Callable[[str], int] | None``.
         ``effective_clear_delay_resolver``: ``Callable[[str], int] | None``.
 
@@ -208,7 +211,7 @@ class Rtl433Coordinator:
         self.skip_keys.add("time")
 
         # --- Injectable hooks (wired by the integration setup) ----------------
-        self.new_device_callback: Callable[[str, str], None] | None = None
+        self.new_device_callback: Callable[[str, str, bool], None] | None = None
         self.effective_timeout_resolver: Callable[[str], int] | None = None
         self.effective_clear_delay_resolver: Callable[[str], int] | None = None
 
@@ -833,10 +836,13 @@ class Rtl433Coordinator:
 
         # The new-device callback still fires for a replay-discovered device so
         # its entities exist and can seed; its availability stays governed by
-        # liveness (it reads unavailable until a live frame arrives).
+        # liveness (it reads unavailable until a live frame arrives). The
+        # ``is_replay`` flag lets the callback wire up the device without raising
+        # a "new device" notification for a reconnect re-broadcast (a replay is
+        # never a genuine first-time live discovery).
         if is_new and self.discovery_enabled and self.new_device_callback is not None:
             try:
-                self.new_device_callback(key, normalized.model)
+                self.new_device_callback(key, normalized.model, is_replay)
             except Exception:  # noqa: BLE001 - a bad hook must not kill the loop
                 LOGGER.exception("rtl_433 new_device_callback failed for %s", key)
 

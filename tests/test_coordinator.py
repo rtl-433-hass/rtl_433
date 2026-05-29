@@ -216,16 +216,19 @@ def test_mixed_frame_sequence_classifies_correctly(hass, coordinator):
 
 def test_new_device_callback_fires_once_when_discovery_enabled(hass, coordinator):
     """The new-device hook fires only on the first sighting of a device."""
-    seen: list[tuple[str, str]] = []
+    seen: list[tuple[str, str, bool]] = []
     coordinator.discovery_enabled = True
-    coordinator.new_device_callback = lambda key, model: seen.append((key, model))
+    coordinator.new_device_callback = lambda key, model, is_replay: seen.append(
+        (key, model, is_replay)
+    )
 
     frame = '{"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4}'
     with patch(DISPATCH):
         coordinator._handle_text_frame(frame)
         coordinator._handle_text_frame(frame)  # second sighting: no new callback
 
-    assert seen == [("Acurite-606TX-42", "Acurite-606TX")]
+    # A live frame (no usable ``time``) is not a replay.
+    assert seen == [("Acurite-606TX-42", "Acurite-606TX", False)]
 
 
 def test_watchdog_flips_unavailable_then_recovers(hass, coordinator):

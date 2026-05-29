@@ -289,27 +289,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return int(override)
         return DEFAULT_MOTION_CLEAR_DELAY
 
-    def new_device_callback(device_key: str, model: str) -> None:
+    def new_device_callback(device_key: str, model: str, is_replay: bool) -> None:
         """Dispatch the hub-level new-device signal for a newly observed device.
 
         The coordinator only invokes this when discovery is enabled and the
-        device is genuinely new (its ``is_new`` check dedupes), so the platform
-        listeners can add the nested device + its entities directly.
+        device is new to its in-memory set (``is_new``), so the platform
+        listeners can add the nested device + its entities directly. The signal
+        is dispatched for replay-discovered devices too, so a device first seen
+        via a reconnect replay still gets its entities wired up and seeded.
 
-        In addition to wiring up the device, a genuinely-new device (one absent
-        from the persisted ``entry.data[CONF_DEVICES]`` map) raises an in-app
-        persistent notification. ``entry.data[CONF_DEVICES]`` is the restart-safe
-        "ever-adopted" record, so a device already in it is a known device
-        re-observed after a restart/reload (``coordinator.devices`` starts empty)
-        — NOT genuinely new — and is not re-notified. This boolean is captured
-        *before* the dispatch, which schedules the deferred ``async_upsert_device``
-        that adds the key to the map.
+        The in-app persistent notification, however, is raised only for a
+        *genuine* first-time live discovery — a device that is both absent from
+        the persisted ``entry.data[CONF_DEVICES]`` map AND seen on a live (non
+        ``is_replay``) frame. The map is the restart-safe "ever-adopted" record,
+        so a device already in it is a known device re-observed after a
+        restart/reload (``coordinator.devices`` starts empty) and is not
+        re-notified. The ``is_replay`` gate additionally suppresses notifications
+        for the rtl_433 server's reconnect event-buffer replay: those frames are
+        re-broadcasts of already-transmitted events, never a new device's first
+        live transmission, so they must not raise a "new device" alert even if
+        the device has not yet landed in the persisted map. ``is_new_device`` is
+        captured *before* the dispatch, which schedules the deferred
+        ``async_upsert_device`` that adds the key to the map.
         """
         is_new_device = device_key not in entry.data.get(CONF_DEVICES, {})
         async_dispatcher_send(
             hass, signal_new_device(entry.entry_id), device_key, model
         )
-        if is_new_device:
+        if is_new_device and not is_replay:
             name = model or device_key
             persistent_notification.async_create(
                 hass,

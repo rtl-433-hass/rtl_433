@@ -743,7 +743,7 @@ def test_process_event_no_discovery_callback_when_disabled(hass, coordinator):
     """New device callback does NOT fire when discovery_enabled=False."""
     seen = []
     coordinator.discovery_enabled = False
-    coordinator.new_device_callback = lambda k, m: seen.append((k, m))
+    coordinator.new_device_callback = lambda k, m, r: seen.append((k, m))
 
     with freeze_time("2026-05-25T10:00:00+00:00"), patch(DISPATCH):
         coordinator._handle_text_frame(
@@ -768,7 +768,7 @@ def test_process_event_no_callback_when_callback_is_none(hass, coordinator):
 def test_process_event_callback_exception_does_not_break_processing(hass, coordinator):
     """A throwing new_device_callback is caught; device is still added."""
     coordinator.discovery_enabled = True
-    coordinator.new_device_callback = lambda k, m: (_ for _ in ()).throw(
+    coordinator.new_device_callback = lambda k, m, r: (_ for _ in ()).throw(
         RuntimeError("boom")
     )
 
@@ -837,7 +837,7 @@ def test_process_event_new_device_callback_fires_only_on_first(hass, coordinator
     """Discovery callback fires only for new (previously unseen) devices."""
     seen: list[str] = []
     coordinator.discovery_enabled = True
-    coordinator.new_device_callback = lambda k, m: seen.append(k)
+    coordinator.new_device_callback = lambda k, m, r: seen.append(k)
 
     with freeze_time("2026-05-25T10:00:00+00:00"), patch(DISPATCH):
         coordinator._handle_text_frame(
