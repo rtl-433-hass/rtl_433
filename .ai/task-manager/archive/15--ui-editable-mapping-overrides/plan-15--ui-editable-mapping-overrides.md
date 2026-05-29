@@ -248,28 +248,53 @@ graph TD
     T6 --> T7
 ```
 
-### Phase 1: Mapping helpers
+### ✅ Phase 1: Mapping helpers
 **Parallel Tasks:**
-- Task 1: mapping.py validator + normalizer; remove `load_user_overrides`
+- ✔️ Task 1: mapping.py validator + normalizer; remove `load_user_overrides`
 
-### Phase 2: Per-entry merge core
+### ✅ Phase 2: Per-entry merge core
 **Parallel Tasks:**
-- Task 2: per-entry merge + consumer rewiring + reload-on-change (depends on: 1)
+- ✔️ Task 2: per-entry merge + consumer rewiring + reload-on-change (depends on: 1)
 
-### Phase 3: Migration + UI
+### ✅ Phase 3: Migration + UI
 **Parallel Tasks:**
-- Task 3: one-time file-import migration + minor version bump (depends on: 1, 2)
-- Task 4: options-flow "Device mappings" step + translations (depends on: 1, 2)
+- ✔️ Task 3: one-time file-import migration + minor version bump (depends on: 1, 2)
+- ✔️ Task 4: options-flow "Device mappings" step + translations (depends on: 1, 2)
 
-### Phase 4: Verification
+### ✅ Phase 4: Verification
 **Parallel Tasks:**
-- Task 5: tests (depends on: 2, 3, 4)
-- Task 6: documentation (depends on: 2, 3, 4)
+- ✔️ Task 5: tests (depends on: 2, 3, 4)
+- ✔️ Task 6: documentation (depends on: 2, 3, 4)
 
-### Phase 5: Delivery
+### ✅ Phase 5: Delivery
 **Parallel Tasks:**
-- Task 7: draft PR + drive CI green (depends on: 5, 6)
+- ✔️ Task 7: draft PR + drive CI green (depends on: 5, 6)
 
 ### Execution Summary
 - Total Phases: 5
 - Total Tasks: 7
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-05-28
+
+### Results
+All 7 tasks across 5 phases were implemented, committed, and verified. The rtl_433 mapping overrides are now edited entirely in the Home Assistant UI:
+
+- `mapping.py` gained `validate_user_mappings()` (per-field schema problems) and `normalize_overrides()` (JSON-safe, payload-canonical); the file-reading `load_user_overrides()` and the now-orphaned `_copy_registry()` were removed.
+- The override merge moved from a single global cache to a **per-hub** merge: `DATA_LIBRARY` caches the shipped library only; each hub merges `entry.data[user_mappings]` into a per-entry `(registry, skip_keys)` under `DATA_ENTRY_LIBRARY`, consumed by entity build, the options flow, diagnostics, and the coordinator. The update listener reloads a hub when its stored mappings change.
+- A new **Device mappings** options-flow step uses Home Assistant's native YAML editor (`ObjectSelector`), validates on save (per-field errors), and stores the normalized object in `entry.data` (which triggers the reload).
+- A one-time entry migration (minor version → 2) seeds every existing hub's stored mappings from any existing `rtl_433_mappings.yaml` (payloads normalized), then ignores the file (left on disk).
+- 13 new tests added (138 passing total). `docs/device-library.md`, `README.md`, and `AGENTS.md` updated.
+- Draft PR **#34** opened against `main` (`feat(rtl_433): edit mapping overrides in the UI`); all CI checks green: pytest (3.14), Ruff, pre-commit, Hassfest, HACS, conventional-commits (`validate`), and CodeQL (python + actions).
+
+### Noteworthy Events
+- **Pre-existing `async_migrate_entry`**: the codebase already had a v1→v2 hub-consolidation migration. Task 3 *extended* it (added the one-time mappings seed) rather than introducing a duplicate.
+- **Storage in `entry.data`, not `entry.options`**: confirmed during execution that `async_step_hub` replaces `entry.options` wholesale; storing the mappings in `entry.data` (the planned decision) sidesteps that clobber and required no change to the hub step.
+- **Manual UI Self-Validation steps not executed**: plan Self-Validation steps 2–4 (browser screenshots of the YAML editor, syntax-error and schema-error UX) require a running Home Assistant instance with a browser, which is unavailable in this headless environment. The underlying behaviour is covered by automated tests — step 1 (tests + linters), steps 5–7 (reclassification reload, two-hub isolation, migration round-trip incl. JSON-safe `on`/`off`), and step 8 (PR + green CI) were all executed successfully.
+- **Test-harness gotchas** (no production impact): the shared HA test config dir leaked the legacy file across tests (handled by redirecting only `rtl_433_mappings.yaml` to a tmp path); and a second auto-loading entry required immediate per-hub setup to avoid `OperationNotAllowed`.
+
+### Necessary follow-ups
+- A human reviewer should perform the manual UI checks (Self-Validation steps 2–4) on a live HA instance and capture screenshots before marking PR #34 ready for review.
+- PR #34 is intentionally left in **draft** for human review; it is not merged.
