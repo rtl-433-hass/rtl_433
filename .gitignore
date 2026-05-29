@@ -22,6 +22,10 @@ playwright-report/
 .pytest_cache/
 uv.lock
 
+# mutmut mutation-testing working copy and cache
+mutants/
+.mutmut-cache
+
 # AI agent / worktree scratch
 .ai-scratch/
 .claude/worktrees

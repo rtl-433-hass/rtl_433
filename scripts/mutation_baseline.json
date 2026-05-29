@@ -1,0 +1,92 @@
+{
+  "files": {
+    "custom_components/rtl_433/__init__.py": {
+      "killed": 435,
+      "score": 0.935484,
+      "total": 465
+    },
+    "custom_components/rtl_433/binary_sensor.py": {
+      "killed": 77,
+      "score": 0.905882,
+      "total": 85
+    },
+    "custom_components/rtl_433/calibration.py": {
+      "killed": 42,
+      "score": 0.7,
+      "total": 60
+    },
+    "custom_components/rtl_433/config_flow.py": {
+      "killed": 400,
+      "score": 0.849257,
+      "total": 471
+    },
+    "custom_components/rtl_433/const.py": {
+      "killed": 6,
+      "score": 1.0,
+      "total": 6
+    },
+    "custom_components/rtl_433/coordinator/base.py": {
+      "killed": 492,
+      "score": 0.780952,
+      "total": 630
+    },
+    "custom_components/rtl_433/device_trigger.py": {
+      "killed": 114,
+      "score": 0.897638,
+      "total": 127
+    },
+    "custom_components/rtl_433/diagnostics.py": {
+      "killed": 114,
+      "score": 1.0,
+      "total": 114
+    },
+    "custom_components/rtl_433/entity.py": {
+      "killed": 274,
+      "score": 0.858934,
+      "total": 319
+    },
+    "custom_components/rtl_433/event.py": {
+      "killed": 35,
+      "score": 0.853659,
+      "total": 41
+    },
+    "custom_components/rtl_433/mapping.py": {
+      "killed": 476,
+      "score": 0.848485,
+      "total": 561
+    },
+    "custom_components/rtl_433/normalizer.py": {
+      "killed": 72,
+      "score": 0.935065,
+      "total": 77
+    },
+    "custom_components/rtl_433/number.py": {
+      "killed": 29,
+      "score": 1.0,
+      "total": 29
+    },
+    "custom_components/rtl_433/sdr_settings.py": {
+      "killed": 50,
+      "score": 0.833333,
+      "total": 60
+    },
+    "custom_components/rtl_433/select.py": {
+      "killed": 26,
+      "score": 1.0,
+      "total": 26
+    },
+    "custom_components/rtl_433/sensor.py": {
+      "killed": 97,
+      "score": 0.941748,
+      "total": 103
+    },
+    "custom_components/rtl_433/switch.py": {
+      "killed": 28,
+      "score": 1.0,
+      "total": 28
+    }
+  },
+  "floor": 0.7,
+  "tolerance_fraction": 0.02,
+  "tolerance_mutants": 3
+}
