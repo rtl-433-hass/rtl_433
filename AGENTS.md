@@ -466,6 +466,76 @@ uv run pytest --cov=custom_components/rtl_433 tests/
 
 CI runs on Python 3.14 (the minimum Home Assistant 2026.4 supports).
 
+## Mutation testing (mutmut)
+
+Line coverage proves a line ran; it does not prove a test would *fail* if the
+line were wrong. Mutation testing closes that gap: [mutmut](https://github.com/boxed/mutmut)
+introduces small faults ("mutants") into `custom_components/rtl_433/` and checks
+that some test fails for each. A surviving mutant is a behaviour no test asserts.
+
+Config lives in `[tool.mutmut]` in `pyproject.toml` (whole package in scope).
+mutmut copies the package plus `tests/` into a `mutants/` working tree (git-ignored)
+and forks once per mutant.
+
+```bash
+uv run mutmut run                              # full run (writes results under mutants/)
+uv run mutmut results                          # list surviving mutants
+uv run mutmut show <mutant_name>               # see the exact mutation diff
+uv run mutmut run "custom_components.rtl_433.<module>.*"   # re-run one module
+```
+
+Workflow for raising a module's score:
+
+1. `uv run mutmut run` then `uv run mutmut results` to find survivors.
+2. For each survivor, add a **test** that asserts the exact behaviour the mutation
+   breaks (precise return values, both branches, boundaries, dispatched signals,
+   entity attributes). Kill mutants with tests only.
+3. Re-run that module and confirm the survivor is gone.
+
+Hard rules:
+
+- **Never** edit `custom_components/` to make a mutant die — this is test-only work.
+- **Never** add `# pragma: no mutate`, disable a mutator, or otherwise suppress a
+  mutant. Genuinely-equivalent survivors are simply recorded in the baseline.
+- The committed baseline `scripts/mutation_baseline.json` ratchets **upward only**.
+
+The baseline and gate are driven by two stdlib-only helpers:
+
+```bash
+uv run python scripts/mutation_stats.py > stats.json          # per-file killed/total
+uv run python scripts/mutation_ratchet.py --mode floor  --stats stats.json   # CI gate (PR + main)
+uv run python scripts/mutation_ratchet.py --mode strict --stats stats.json   # local: is the baseline still representative?
+uv run python scripts/mutation_ratchet.py --mode floor  --stats stats.json --update  # ratchet baseline upward
+```
+
+CI (`.github/workflows/mutation.yml`) enforces the per-file **floor**: a file
+fails only if its score drops below its recorded value by more than a tolerance
+band of `max(2% of the file's mutants, 3 mutants)`. The band is in mutant units
+because that is how the variance behaves — mutmut drifts a mutant or two
+run-to-run (the async coordinator especially), and a scoped PR run is a slight
+lower bound on the full-suite score (a few mutants are killed only by tests in
+other files). A flat percentage would be far too tight on a small file (1 mutant
+≈ 3% on a 29-mutant file) and needlessly loose on a large one, so the absolute
+floor protects small files while the fraction scales for large ones. A real
+regression kills far more than the band; a sub-band dip on a small file passes the
+PR gate and is re-measured by the nightly full run. The baseline only ratchets
+**upward**: refresh it in the same PR with `--update` when you genuinely improve a
+file. New mutation tests live in `tests/test_mut_*.py`.
+
+Because a full run is slow (~50 min), CI scopes the work by trigger:
+
+- **Pull requests** mutate only the modules the PR could affect — changed package
+  modules, plus the source module a changed `tests/test_*.py` exercises
+  (`scripts/mutation_targets.py` does the mapping). Typical PRs finish in a couple
+  of minutes and still block on a per-file regression in touched code. A change to
+  mutation infra (`pyproject.toml`, `requirements_test.txt`, `scripts/mutation_*`,
+  `tests/conftest.py`, the workflow) or a broad/unmappable test escalates the PR to
+  a full run. For a scoped run, pass the touched files to
+  `scripts/mutation_stats.py --paths` so unscoped (un-run) mutants aren't counted.
+- **Pushes to `main` and a nightly schedule** run the **full** package, so the
+  whole baseline stays honest and the "a test was weakened but its source is
+  unchanged" blind spot is caught within a day.
+
 ## Running the container / screenshot harness
 
 The end-to-end harness drives the integration against **real RF captures** (no
