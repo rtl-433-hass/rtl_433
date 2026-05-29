@@ -380,8 +380,9 @@ contributor-facing.
 Device support is data, not code: each rtl_433 JSON field name maps to one Home
 Assistant entity descriptor. Files live in
 `custom_components/rtl_433/device_library/`; the loader merges every `*.yaml`
-(except `_skip_keys.yaml`) into one field-keyed table, then layers any user
-override file on top.
+(except `_skip_keys.yaml`) into one field-keyed table cached in `DATA_LIBRARY`.
+`DATA_LIBRARY` now caches the **shipped library only** — per-hub user overrides
+are merged separately per entry (see [Per-hub user overrides](#per-hub-user-overrides-data-flow)).
 
 A mapping entry, keyed by the exact rtl_433 field name:
 
@@ -408,16 +409,43 @@ descriptor}`, same per-field schema; `mapping.py` `Registry.models`) carries
 model-scoped → global → `None`. Precedence is **specificity-first**: per-device
 calibration > model-scoped (user > shipped) > global (user > shipped), so a
 *shipped* model entry beats a *user-override global* entry for a matching model.
-The user-override file `<config>/rtl_433_mappings.yaml` supports `models:` too.
-Full detail (incl. the illustrative non-real-model worked example) is in
-`docs/device-library.md`; do not duplicate it here.
+Per-hub user overrides support `models:` too. Full detail (incl. the
+illustrative non-real-model worked example) is in `docs/device-library.md`; do
+not duplicate it here.
 
 **Do not invent attributes here.** The full schema — every attribute, the
 `value_transform` keys and their application order, binary payloads, the
-skip-keys file, and the `<config>/rtl_433_mappings.yaml` user override
-semantics — is defined in:
+skip-keys file, and the per-hub user-override semantics — is defined in:
 
 - **[docs/device-library.md](docs/device-library.md)** (authoritative).
+
+## Per-hub user overrides (data flow)
+
+User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
+(`CONF_USER_MAPPINGS = "user_mappings"`, `const.py`) — **not** a global file.
+
+- **`DATA_LIBRARY` caches the shipped library only.** Per-hub overrides are
+  merged into a per-entry library cached in `DATA_ENTRY_LIBRARY[entry_id]`; the
+  lookup at entity build reads that per-entry merged registry. There is **no**
+  global override layer.
+- **`load_user_overrides` was removed.** Nothing reads
+  `<config>/rtl_433_mappings.yaml` at runtime anymore — the file-reading code
+  path is gone.
+- **One-time import on upgrade** (`async_migrate_entry`, `__init__.py`). On the
+  config-entry migration, any existing `<config>/rtl_433_mappings.yaml` is read
+  **once**, normalized, and folded into each existing entry's
+  `CONF_USER_MAPPINGS`. The file is then **ignored and left untouched** on disk
+  (never edited or deleted). Hubs added after the upgrade start with empty
+  overrides.
+- **Editing surface: `async_step_mappings`** (the options-flow *Device mappings*
+  step, `config_flow.py`). It presents an `ObjectSelector` / `ha-yaml-editor`
+  pre-filled with the hub's current `CONF_USER_MAPPINGS`. The editor blocks
+  invalid YAML syntax; on submit the integration **validates the mapping schema**
+  and re-shows the form with a **per-field error** (offending field + reason)
+  instead of silently dropping invalid entries. A successful save writes
+  `CONF_USER_MAPPINGS` into `entry.data` and triggers an **automatic reload** of
+  that hub (entities rebuild) — no HA restart. The editor returns parsed YAML, so
+  comments/formatting are not preserved.
 
 ## Add-a-mapping workflow
 
@@ -441,8 +469,9 @@ semantics — is defined in:
    [diagnostics feedback loop](docs/device-library.md#diagnostics-feedback-loop).
 
 For an installation-local change that should **not** be committed, use the
-user-override file `<config>/rtl_433_mappings.yaml` instead of editing the
-shipped library (see [User overrides](docs/device-library.md#user-overrides)).
+hub's per-hub user overrides (the options-flow *Device mappings* step) instead
+of editing the shipped library (see
+[User overrides](docs/device-library.md#user-overrides)).
 
 ## Running the unit tests
 

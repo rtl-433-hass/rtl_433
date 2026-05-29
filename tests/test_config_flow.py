@@ -558,3 +558,86 @@ async def test_reconfigure_reloads_entry_exactly_once(hass, hub_entry_builder):
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     reload_spy.assert_called_once_with(entry.entry_id)
+
+
+# --------------------------------------------------------------------------- #
+# Options flow — mappings step (per-hub user-mapping overrides).               #
+# --------------------------------------------------------------------------- #
+async def test_mappings_step_invalid_submit_reshows_form_and_stores_nothing(
+    hass, hub_entry_builder
+):
+    """A schema-invalid mappings object re-shows the form and stores nothing."""
+    from custom_components.rtl_433.const import CONF_USER_MAPPINGS
+
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    data_snapshot = deepcopy(dict(entry.data))
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "mappings"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "mappings"
+
+    # An entry missing the required ``platform`` is rejected by the validator.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_USER_MAPPINGS: {"bad_field": {"name": "X", "object_suffix": "X"}}},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "mappings"
+    assert result["errors"]
+    # Nothing was persisted: entry.data is unchanged (no CONF_USER_MAPPINGS).
+    assert dict(entry.data) == data_snapshot
+    assert CONF_USER_MAPPINGS not in entry.data
+
+
+async def test_mappings_step_valid_submit_writes_data_leaves_options_and_devices(
+    hass, hub_entry_builder
+):
+    """A valid mappings object lands in entry.data, leaving options + devices intact."""
+    from custom_components.rtl_433.const import CONF_USER_MAPPINGS
+
+    device_key = "Acurite-606TX-42"
+    entry = hub_entry_builder(
+        devices={
+            device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
+        },
+        options={CONF_DISCOVERY_ENABLED: True},
+    )
+    entry.add_to_hass(hass)
+    options_snapshot = deepcopy(dict(entry.options))
+    devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
+
+    # The update listener reloads the hub when CONF_USER_MAPPINGS changes; the
+    # entry is not actually set up here, so suppress the scheduled reload.
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "mappings"}
+        )
+        assert result["step_id"] == "mappings"
+
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_USER_MAPPINGS: {
+                    "temperature_C": {
+                        "platform": "sensor",
+                        "name": "Kelvin Temp",
+                        "object_suffix": "K",
+                        "unit_of_measurement": "K",
+                    }
+                }
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    # The override was written (normalized) into entry.data.
+    stored = entry.data[CONF_USER_MAPPINGS]
+    assert stored["temperature_C"]["unit_of_measurement"] == "K"
+    # Options and the devices map are untouched.
+    assert dict(entry.options) == options_snapshot
+    assert entry.data[CONF_DEVICES] == devices_snapshot
