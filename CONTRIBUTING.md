@@ -107,6 +107,26 @@ uv run pytest --cov=custom_components/rtl_433 tests/
 The containerized end-to-end / screenshot harness is separate and documented in
 [tests/integration/README.md](tests/integration/README.md).
 
+## Mutation testing
+
+Beyond line coverage, the project uses [mutmut](https://github.com/boxed/mutmut)
+to check that tests actually *detect* wrong behaviour. CI fails if a source
+file's mutation score drops below its committed baseline.
+
+```bash
+uv run mutmut run                                   # mutate custom_components/rtl_433/
+uv run mutmut results                               # list surviving mutants
+uv run python scripts/mutation_stats.py > stats.json
+uv run python scripts/mutation_ratchet.py --mode floor --stats stats.json
+```
+
+To kill a surviving mutant, add a **test** that asserts the exact behaviour it
+breaks — never edit the integration source, and never add `# pragma: no mutate`
+or disable a mutator. When you legitimately raise a file's score, refresh the
+baseline with `--mode floor ... --update` and commit `scripts/mutation_baseline.json`
+in the same PR; the baseline only ever ratchets upward. See [AGENTS.md](AGENTS.md)
+for the full workflow.
+
 ## CI checks
 
 Every pull request to `main` must pass:
@@ -117,6 +137,10 @@ Every pull request to `main` must pass:
   **hassfest** and **HACS** validation.
 - **Test** (`.github/workflows/test.yml`) — `pytest` on **Python 3.14** with
   coverage.
+- **Mutation** (`.github/workflows/mutation.yml`) — mutmut mutation testing with
+  a per-file score ratchet (a floor with a `max(2%, 3-mutant)` tolerance band).
+  PRs mutate only the modules they change (a couple of minutes); `main` and a
+  nightly run mutate the full package.
 - **Conventional Commits** (`.github/workflows/conventional-commits.yml`) — the
   PR-title check described above.
 
@@ -127,6 +151,8 @@ CodeQL also runs (`.github/workflows/codeql.yml`).
 - [ ] Commits and the PR title follow Conventional Commits.
 - [ ] `ruff check .` and `ruff format --check .` are clean (or run pre-commit).
 - [ ] `pytest tests/` passes.
+- [ ] Mutation score holds: no source file drops below its baseline in
+      `scripts/mutation_baseline.json` (refresh it upward when you improve a file).
 - [ ] New device support is a YAML mapping change with the schema from
       [docs/device-library.md](docs/device-library.md), and `object_suffix`
       values are stable.

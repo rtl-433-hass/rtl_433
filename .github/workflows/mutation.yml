@@ -1,0 +1,125 @@
+name: Mutation
+
+# Mutation testing with mutmut, enforcing a per-file score ratchet against the
+# committed baseline (scripts/mutation_baseline.json).
+#
+# A full-package run is slow (~50 min on a 2-core runner), so the work is split
+# by trigger:
+#
+#   * Pull requests mutate only the source modules the PR could have affected
+#     (changed package modules, plus the source module a changed test exercises;
+#     see scripts/mutation_targets.py). This keeps the common PR to a few minutes
+#     while still BLOCKING on a per-file regression in touched code. A change to
+#     mutation infra or a broad/unmappable test escalates the PR to a full run.
+#   * Pushes to main and a nightly schedule run the FULL package, so the whole
+#     baseline stays honest and the "a test was weakened but its source is
+#     unchanged" blind spot is caught within a day.
+#
+# The gate is a FLOOR with a small tolerance (default 2 points, in the baseline):
+# mutmut's score drifts ~1-2% run-to-run on the async coordinator, so a
+# zero-tolerance gate would fail spuriously. The baseline only ratchets upward.
+#
+# The mutants/ working tree is never cached: a stale cache could report a higher
+# score than reality and let a regression through. Only uv's download cache is reused.
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions: {}
+
+jobs:
+  mutation-pr:
+    name: "Mutation floor (changed modules)"
+    if: github.event_name == 'pull_request'
+    runs-on: "ubuntu-latest"
+    # Scoped runs finish in a few minutes; this timeout is only a backstop. It
+    # must cover the full-package run that a PR escalates to when it changes
+    # mutation infra or a broad/unmappable test (see scripts/mutation_targets.py),
+    # so it matches the full job's budget rather than the scoped common case.
+    timeout-minutes: 90
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Need history back to the base branch to diff the PR's changed files.
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Install requirements
+        run: |
+          uv venv
+          uv pip install -r requirements_test.txt
+
+      - name: Determine mutation targets from the diff
+        id: targets
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          echo "Changed files:"; echo "$changed"
+          uv run python scripts/mutation_targets.py $changed > targets.txt
+          {
+            echo "mode=$(sed -n '1p' targets.txt)"
+            echo "patterns=$(sed -n '2p' targets.txt)"
+            echo "paths=$(sed -n '3p' targets.txt)"
+          } >> "$GITHUB_OUTPUT"
+          cat targets.txt
+
+      - name: Run mutation testing (changed modules)
+        if: steps.targets.outputs.mode == 'all' || steps.targets.outputs.patterns != ''
+        run: |
+          if [ "${{ steps.targets.outputs.mode }}" = "all" ]; then
+            uv run mutmut run
+            uv run python scripts/mutation_stats.py > mutation-stats.json
+          else
+            uv run mutmut run ${{ steps.targets.outputs.patterns }}
+            uv run python scripts/mutation_stats.py --paths ${{ steps.targets.outputs.paths }} > mutation-stats.json
+          fi
+
+      - name: Enforce per-file floor vs baseline
+        if: steps.targets.outputs.mode == 'all' || steps.targets.outputs.patterns != ''
+        run: uv run python scripts/mutation_ratchet.py --mode floor --stats mutation-stats.json
+
+      - name: No mutation targets in this PR
+        if: steps.targets.outputs.mode == 'scoped' && steps.targets.outputs.patterns == ''
+        run: echo "No source modules in scope for mutation testing; nothing to check."
+
+  mutation-full:
+    name: "Mutation floor (full package)"
+    if: github.event_name != 'pull_request'
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 90
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Install requirements
+        run: |
+          uv venv
+          uv pip install -r requirements_test.txt
+
+      - name: Run mutation testing (full package)
+        run: uv run mutmut run
+
+      - name: Export per-file stats
+        run: uv run python scripts/mutation_stats.py > mutation-stats.json
+
+      - name: Enforce per-file floor vs baseline
+        run: uv run python scripts/mutation_ratchet.py --mode floor --stats mutation-stats.json
