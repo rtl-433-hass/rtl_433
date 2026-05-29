@@ -430,10 +430,14 @@ one-time repairs issue flagging the move.
 - **Issue tracker:** <https://github.com/rtl-433-hass/rtl_433/issues>
 
 Run the unit tests locally (dependencies are managed with
-[uv](https://docs.astral.sh/uv/)):
+[uv](https://docs.astral.sh/uv/)). The test stack pins Home Assistant 2026.4+,
+which **requires Python 3.14** — newer than many distros ship — so install that
+interpreter through uv first (no root or system Python changes needed) and pin
+the virtualenv to it:
 
 ```bash
-uv venv
+uv python install 3.14          # standalone CPython 3.14, managed by uv
+uv venv --python 3.14           # create .venv on 3.14 (omitting --python may pick an older system Python and fail to install)
 uv pip install -r requirements_test.txt
 uv run pytest tests/
 ```
