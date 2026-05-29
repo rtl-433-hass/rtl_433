@@ -24,6 +24,8 @@ nested devices and entities automatically.
 
 from __future__ import annotations
 
+import yaml
+
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -63,7 +65,13 @@ from .const import (
     signal_new_device,
 )
 from .coordinator import Rtl433Coordinator
-from .mapping import Registry, load_library, merge_overrides
+from .mapping import (
+    USER_OVERRIDE_FILENAME,
+    Registry,
+    load_library,
+    merge_overrides,
+    normalize_overrides,
+)
 
 # The 0.1.0 per-device config entries stored the set of observed mapped field
 # keys under this literal options key. It is intentionally *not* exported from
@@ -169,6 +177,33 @@ def _migrate_motion_event_to_binary_sensor(
 
     if removed_any:
         repairs.async_raise_motion_moved(hass)
+
+
+def _read_legacy_overrides(path: str) -> dict:
+    """Read + normalize the legacy ``rtl_433_mappings.yaml`` file (sync, executor).
+
+    Used only by the one-time minor-version migration to seed each hub's
+    ``entry.data[CONF_USER_MAPPINGS]`` from any pre-existing file. Returns an
+    empty dict (never raises) when the file is missing, unreadable, malformed,
+    empty, or not a mapping, so a bad/absent file simply migrates to ``{}``. The
+    file is only ever read here; it is never modified or deleted.
+    """
+    try:
+        with open(path, encoding="utf-8") as handle:
+            parsed = yaml.safe_load(handle)
+    except FileNotFoundError:
+        return {}
+    except OSError, yaml.YAMLError:
+        LOGGER.warning(
+            "Could not read legacy mappings file %s; migrating to empty mappings",
+            path,
+            exc_info=True,
+        )
+        return {}
+
+    if parsed is None or not isinstance(parsed, dict):
+        return {}
+    return normalize_overrides(parsed)
 
 
 def _hub_secure(entry: ConfigEntry) -> bool:
@@ -639,6 +674,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     its parent hub (so they survive an early removal) and bumps its version; the
     hub later folds + removes it. Either ordering converges on the same
     invariant, and re-running is safe.
+
+    Version 2 minor 2 additionally seeds the hub's
+    ``entry.data[CONF_USER_MAPPINGS]`` from any pre-existing
+    ``<config>/rtl_433_mappings.yaml`` (read once, in the executor, never
+    modified or deleted). Entries created at the current minor version skip this
+    step; new hubs added after the upgrade start with no mappings.
     """
     if entry.version > 2:
         # Downgrade from a future schema is unsupported.
@@ -654,12 +695,25 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hub_id = entry.data.get(CONF_HUB_ENTRY_ID)
             if hub_id:
                 _rehome_device_objects(hass, entry, hub_id)
-            hass.config_entries.async_update_entry(entry, version=2)
+            hass.config_entries.async_update_entry(entry, version=2, minor_version=2)
             return True
 
         # Hub entry: consolidate all children into the devices map.
         await _migrate_hub_entry(hass, entry)
-        hass.config_entries.async_update_entry(entry, version=2)
+
+    if entry.version < 2 or (entry.minor_version or 1) < 2:
+        # Seed this hub's stored user mappings from the legacy file (read only
+        # during migration). Each entry migrates independently, so every
+        # existing hub gets its own copy of the file contents.
+        overrides = await hass.async_add_executor_job(
+            _read_legacy_overrides, hass.config.path(USER_OVERRIDE_FILENAME)
+        )
+        hass.config_entries.async_update_entry(
+            entry,
+            data={**entry.data, CONF_USER_MAPPINGS: overrides},
+            version=2,
+            minor_version=2,
+        )
 
     return True
 

@@ -2,7 +2,7 @@
 id: 2
 group: "mapping-core"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-05-28
 skills:
   - python

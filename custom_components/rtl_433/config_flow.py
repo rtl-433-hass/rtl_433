@@ -38,6 +38,7 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    ObjectSelector,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -64,6 +65,7 @@ from .const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    CONF_USER_MAPPINGS,
     DATA_ENTRY_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
@@ -77,7 +79,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import CannotConnect, Rtl433Coordinator
-from .mapping import Registry, lookup
+from .mapping import Registry, lookup, normalize_overrides, validate_user_mappings
 
 # Whether to dial the server over ``wss://`` instead of ``ws://``.
 CONF_SECURE = "secure"
@@ -106,6 +108,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle setup of an rtl_433 hub (one config entry per server)."""
 
     VERSION = 2
+    MINOR_VERSION = 2
 
     # ------------------------------------------------------------------ #
     # Hub user flow                                                      #
@@ -258,7 +261,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         """Show the options menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["hub", "device"],
+            menu_options=["hub", "device", "mappings"],
         )
 
     async def async_step_hub(
@@ -292,6 +295,53 @@ class Rtl433OptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="hub", data_schema=schema)
+
+    async def async_step_mappings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit this hub's device-library mapping overrides as YAML.
+
+        Renders Home Assistant's native YAML editor (:class:`ObjectSelector`)
+        pre-filled with the hub's current ``entry.data[CONF_USER_MAPPINGS]``. On
+        submit the parsed object is validated by :func:`validate_user_mappings`;
+        any problems re-show the form (storing nothing) with the offending fields
+        surfaced. A valid object is normalized and written into ``entry.data``
+        (which fires the update listener and reloads the hub); ``entry.options``
+        is passed back unchanged so the dialog closes without clobbering options.
+        """
+        errors: dict[str, str] = {}
+        placeholders: dict[str, str] = {"problems": ""}
+
+        if user_input is not None:
+            raw = user_input.get(CONF_USER_MAPPINGS) or {}
+            problems = validate_user_mappings(raw)
+            if problems:
+                errors["base"] = "invalid_mappings"
+                placeholders["problems"] = "; ".join(problems)
+            else:
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data={
+                        **self.config_entry.data,
+                        CONF_USER_MAPPINGS: normalize_overrides(raw),
+                    },
+                )
+                return self.async_create_entry(
+                    title="", data=dict(self.config_entry.options)
+                )
+
+        current = self.config_entry.data.get(CONF_USER_MAPPINGS) or {}
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_USER_MAPPINGS, default=current): ObjectSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="mappings",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders=placeholders,
+        )
 
     def _device_commodity_default(self, device_key: str) -> str:
         """Best-effort commodity pre-fill from the device's last decoded event.
