@@ -684,7 +684,7 @@ class Rtl433Coordinator:
                 try:
                     self._desired[KEY_GAIN_DB] = float(gain)
                     self._managed.add(KEY_GAIN_DB)
-                except (TypeError, ValueError):
+                except TypeError, ValueError:
                     pass
 
         await self._persist_desired()
@@ -768,7 +768,7 @@ class Rtl433Coordinator:
             # ``as_utc`` treats a naive datetime as DEFAULT_TIME_ZONE and leaves an
             # aware one alone, so both forms reduce to a single comparable basis.
             return dt_util.as_utc(parsed)
-        except (ValueError, TypeError, OverflowError):
+        except ValueError, TypeError, OverflowError:
             return None
 
     def _process_event(self, event: dict[str, Any]) -> None:
