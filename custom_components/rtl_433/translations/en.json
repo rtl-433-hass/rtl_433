@@ -62,7 +62,7 @@
       },
       "hub": {
         "title": "Hub settings",
-        "description": "Configure new-device discovery and the default availability timeout for this rtl_433 server.",
+        "description": "Configure new-device discovery and the default availability timeout for this rtl_433 server. rtl_433 connection settings are in the three-dot overflow menu under \"reconfigure\".",
         "data": {
           "discovery_enabled": "Discover new devices",
           "availability_timeout": "Availability timeout (seconds)",
