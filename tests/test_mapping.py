@@ -8,14 +8,19 @@ percentage), skip-key exclusion, and the user-override merge.
 
 from __future__ import annotations
 
+import json
+
 import pytest
+import yaml
 
 from custom_components.rtl_433.mapping import (
     apply_transform,
     load_library,
     lookup,
     merge_overrides,
+    normalize_overrides,
     should_skip,
+    validate_user_mappings,
 )
 
 
@@ -362,6 +367,164 @@ def test_precedence_specificity_first(library):
     non_matching = lookup(field, "Some-Other-Model", shipped_model_only)
     assert non_matching.name == "User Global"
     assert non_matching.device_class == "gas"
+
+
+# --------------------------------------------------------------------------- #
+# validate_user_mappings — the UI accept/reject contract.                      #
+# --------------------------------------------------------------------------- #
+def test_validate_user_mappings_accepts_valid_object():
+    """A well-formed override object (flat + skip_keys) returns no problems."""
+    data = {
+        "temperature_C": {
+            "platform": "sensor",
+            "name": "Kelvin Temp",
+            "object_suffix": "K",
+            "unit_of_measurement": "K",
+        },
+        "skip_keys": ["vendor_noise"],
+    }
+    assert validate_user_mappings(data) == []
+    # ``None`` (an empty mapping) is also valid.
+    assert validate_user_mappings(None) == []
+
+
+def test_validate_user_mappings_flags_missing_platform():
+    """An entry missing the required ``platform`` names that field in a problem."""
+    problems = validate_user_mappings(
+        {"vendor_field": {"name": "X", "object_suffix": "X"}}
+    )
+    assert any("vendor_field" in p and "platform" in p for p in problems)
+
+
+def test_validate_user_mappings_flags_bad_skip_keys_type():
+    """A non-list ``skip_keys`` produces a problem naming the ``skip_keys`` field."""
+    problems = validate_user_mappings({"skip_keys": "not-a-list"})
+    assert any(p.startswith("skip_keys") for p in problems)
+
+
+def test_validate_user_mappings_flags_unknown_platform():
+    """An unsupported ``platform`` value is rejected with a field-naming problem."""
+    problems = validate_user_mappings(
+        {
+            "vendor_field": {
+                "platform": "switch",
+                "name": "X",
+                "object_suffix": "X",
+            }
+        }
+    )
+    assert any("vendor_field" in p and "switch" in p for p in problems)
+
+
+def test_validate_user_mappings_rejects_non_mapping_top_level():
+    """A non-mapping top level yields a single self-contained problem."""
+    problems = validate_user_mappings(["not", "a", "mapping"])
+    assert len(problems) == 1
+    assert "object" in problems[0]
+
+
+# --------------------------------------------------------------------------- #
+# normalize_overrides — JSON-safe, payload-canonical round-trip.               #
+# --------------------------------------------------------------------------- #
+def test_normalize_overrides_canonicalizes_bare_on_off_and_round_trips(library):
+    """A binary payload with bare ``on``/``off`` becomes string keys and resolves.
+
+    Building the input via ``yaml.safe_load`` genuinely yields ``True``/``False``
+    dict keys (YAML 1.1 parses unquoted ``on``/``off`` as booleans). After
+    ``normalize_overrides`` the keys are the canonical strings ``"on"``/``"off"``,
+    so the result is ``json.dumps``-able (no non-string keys), and feeding it
+    through ``merge_overrides`` + ``apply_transform`` resolves the binary value.
+    """
+    registry, skip_keys = library
+
+    parsed = yaml.safe_load(
+        "battery_low:\n"
+        "  platform: binary_sensor\n"
+        "  device_class: battery\n"
+        "  name: Battery Low\n"
+        "  object_suffix: BL\n"
+        "  payload:\n"
+        "    on: '0'\n"
+        "    off: '1'\n"
+    )
+    # Sanity: PyYAML really did give us boolean keys we need to canonicalise.
+    assert set(parsed["battery_low"]["payload"]) == {True, False}
+
+    normalized = normalize_overrides(parsed)
+
+    # Boolean keys are gone; canonical string keys remain.
+    payload = normalized["battery_low"]["payload"]
+    assert set(payload) == {"on", "off"}
+    assert payload == {"on": "0", "off": "1"}
+    # JSON-serialisable (would raise if any non-string keys survived).
+    assert json.loads(json.dumps(normalized)) == normalized
+
+    # The original input is untouched (pure).
+    assert set(parsed["battery_low"]["payload"]) == {True, False}
+
+    # Merge the normalized override and confirm the binary value resolves: on=='0'.
+    merged, _ = merge_overrides(registry, skip_keys, normalized)
+    descriptor = lookup("battery_low", registry=merged)
+    assert descriptor is not None
+    assert descriptor.platform == "binary_sensor"
+    assert apply_transform(descriptor, "0") is True
+    assert apply_transform(descriptor, "1") is False
+
+
+def test_normalize_overrides_returns_empty_for_non_mapping():
+    """A non-mapping input normalizes to an empty dict (never raises)."""
+    assert normalize_overrides("nope") == {}
+    assert normalize_overrides(None) == {}
+
+
+# --------------------------------------------------------------------------- #
+# Per-entry isolation — two override dicts produce independent registries.     #
+# --------------------------------------------------------------------------- #
+def test_per_override_isolation_does_not_cross_contaminate(library):
+    """Two distinct override sets yield independent merged registries.
+
+    This is the pure-merge core of the per-hub library wiring: hub A overrides
+    temperature to Kelvin, hub B overrides it to Fahrenheit and adds a private
+    field. Each merged registry reflects only its own override, the other's
+    private field is absent, and the shared base registry is untouched.
+    """
+    registry, skip_keys = library
+
+    overrides_a = {
+        "temperature_C": {
+            "platform": "sensor",
+            "name": "A Kelvin",
+            "object_suffix": "K",
+            "unit_of_measurement": "K",
+        }
+    }
+    overrides_b = {
+        "temperature_C": {
+            "platform": "sensor",
+            "name": "B Fahrenheit",
+            "object_suffix": "F",
+            "unit_of_measurement": "°F",
+        },
+        "hub_b_only_field": {
+            "platform": "sensor",
+            "name": "B Only",
+            "object_suffix": "BO",
+        },
+    }
+
+    merged_a, _ = merge_overrides(registry, skip_keys, overrides_a)
+    merged_b, _ = merge_overrides(registry, skip_keys, overrides_b)
+
+    # Each hub sees only its own temperature override.
+    assert lookup("temperature_C", registry=merged_a).unit_of_measurement == "K"
+    assert lookup("temperature_C", registry=merged_b).unit_of_measurement == "°F"
+
+    # Hub B's private field does not leak into hub A.
+    assert lookup("hub_b_only_field", registry=merged_a) is None
+    assert lookup("hub_b_only_field", registry=merged_b) is not None
+
+    # The shared shipped base is untouched by either merge.
+    assert lookup("temperature_C", registry=registry).unit_of_measurement == "°C"
 
 
 def test_existing_themed_file_loads_identically(library, tmp_path):

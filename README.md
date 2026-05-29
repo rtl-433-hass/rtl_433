@@ -34,9 +34,9 @@ requirements.
 - **Data-driven device library** — device support is YAML, not Python. Add or
   correct a device with a small, reviewable
   [mapping change](docs/device-library.md).
-- **Per-installation user overrides** — drop a
-  `<config>/rtl_433_mappings.yaml` file to add or correct mappings without
-  editing the integration.
+- **Per-hub user overrides** — add or correct mappings from the hub's options
+  using Home Assistant's built-in YAML editor; validated before save and applied
+  by an automatic reload. No file editing or restart required.
 - **Automatic nested devices** — each newly observed device is added
   automatically as a device-registry device under the hub, gated by a per-hub
   discovery toggle. Remove one from its device page; with discovery on it
@@ -305,19 +305,24 @@ contributor guide:
   device-library reference.
 
 You can extend or correct the shipped library for your own installation, without
-editing the integration files, by creating:
+editing the integration files and without touching disk, from the hub's options:
 
-```text
-<config>/rtl_433_mappings.yaml
-```
+> **Settings → Devices & Services → rtl_433 → Configure → Device mappings**
 
-(`<config>` is the directory containing your `configuration.yaml`.) It uses the
-same schema as the shipped library: top-level keys are rtl_433 field names,
-values are entry mappings, and it may include a `skip_keys:` list. Overrides win
-over shipped entries (full replacement), new fields are added, and `skip_keys`
-are unioned. See [User overrides](docs/device-library.md#user-overrides) for the
-details and examples. Changes are picked up on the next reload of the
-integration (or a Home Assistant restart).
+This opens Home Assistant's built-in YAML editor pre-filled with that hub's
+current overrides. Overrides use the same schema as the shipped library:
+top-level keys are rtl_433 field names, values are entry mappings, and they may
+include a `skip_keys:` list. Overrides win over shipped entries (full
+replacement), new fields are added, and `skip_keys` are unioned.
+
+Overrides are stored **per hub** — each hub has its own set. The editor blocks
+invalid YAML and **validates the mapping schema on save**, rejecting bad input
+with a per-field error rather than silently dropping it; on save the hub
+**reloads automatically** so the change takes effect with no restart. If you had
+a `<config>/rtl_433_mappings.yaml` from an earlier version, it is **imported once
+into each existing hub** on upgrade and then ignored (the file is left on disk,
+untouched). See [User overrides](docs/device-library.md#user-overrides) for the
+details and examples.
 
 ## Utility-meter calibration
 
