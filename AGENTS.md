@@ -464,7 +464,7 @@ timeout, xdist, freezegun). To match CI, include coverage:
 uv run pytest --cov=custom_components/rtl_433 tests/
 ```
 
-CI runs on Python 3.13 (the minimum Home Assistant 2026.x supports).
+CI runs on Python 3.14 (the minimum Home Assistant 2026.4 supports).
 
 ## Running the container / screenshot harness
 

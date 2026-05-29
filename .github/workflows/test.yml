@@ -17,9 +17,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Home Assistant 2026.x requires Python 3.13+; 3.12 is no longer
-        # supported (and pytest-homeassistant-custom-component drops it too).
-        python-version: ["3.13"]
+        # Home Assistant 2026.4+ requires Python 3.14; older Python versions
+        # are no longer supported (and pytest-homeassistant-custom-component
+        # drops them too).
+        python-version: ["3.14"]
     steps:
       - name: Checkout the repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

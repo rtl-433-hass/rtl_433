@@ -115,8 +115,8 @@ Every pull request to `main` must pass:
   and the pre-commit hooks.
 - **Validate** (`.github/workflows/validate.yml`) — Home Assistant
   **hassfest** and **HACS** validation.
-- **Test** (`.github/workflows/test.yml`) — `pytest` across a Python **3.12 and
-  3.13** matrix with coverage.
+- **Test** (`.github/workflows/test.yml`) — `pytest` on **Python 3.14** with
+  coverage.
 - **Conventional Commits** (`.github/workflows/conventional-commits.yml`) — the
   PR-title check described above.
 

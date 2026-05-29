@@ -9,7 +9,7 @@
 name = "rtl_433"
 version = "0.7.0"   # Version is managed by release-please (also updates manifest.json)
 description = "Home Assistant custom integration for the rtl_433 WebSocket API"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 
 [tool.setuptools]
 packages = ["custom_components.rtl_433"]
@@ -68,7 +68,7 @@ exclude_lines = [
 
 [tool.ruff]
 # Based on https://github.com/home-assistant/core/blob/dev/pyproject.toml
-target-version = "py313"
+target-version = "py314"
 line-length = 88
 
 [tool.ruff.lint]
