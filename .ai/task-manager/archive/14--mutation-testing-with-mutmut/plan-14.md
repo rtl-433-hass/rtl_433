@@ -231,3 +231,28 @@ No end-user/device documentation changes are needed, as there is no runtime beha
 Plan Summary:
 - Plan ID: 14
 - Plan File: /home/andrew.guest/github.com/rtl-433-hass/rtl_433/.ai/task-manager/plans/14--mutation-testing-with-mutmut/plan-14.md
+
+---
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-05-29
+**PR**: #35 (`feat/mutation-testing-mutmut`) — all checks green, marked ready for review.
+
+### Results
+- mutmut 3.5.0 added and configured (`[tool.mutmut]`), pinned in `requirements_test.txt`; `mutants/`/`.mutmut-cache` git-ignored.
+- ~890 behavioural tests across 12 `tests/test_mut_*.py` files raised the package mutation score **63.6% → 86.4% (2767/3202)**, every file ≥ 70%. Full suite: 1024 passed, 0 warnings.
+- Ratchet: `scripts/mutation_stats.py` (+`--paths`), `scripts/mutation_ratchet.py` (per-file floor with a `max(2%, 3-mutant)` tolerance band), `scripts/mutation_targets.py` (diff→targets), committed `scripts/mutation_baseline.json`.
+- CI `.github/workflows/mutation.yml`: diff-scoped floor on PRs (~minutes; escalates to full on infra/broad-test changes), full run on `main`+nightly. Full run observed green in CI at 42.9 min (90-min ceiling).
+- No `custom_components/` source changed; no mutator disabled; no `# pragma: no mutate`/skip/xfail.
+
+### Noteworthy Events
+- **mutmut 3.x replaces the mutated function in the module namespace** — tests that `from module import fn` bind the original and never see the mutation; they must call `module.fn(...)`. This caused a first round of tests to under-kill; a second, survivor-diff-driven round fixed it.
+- **export-cicd-stats is summary-only in 3.x** → wrote `mutation_stats.py` to read per-file `.meta`.
+- **Scoped runs are a lower bound vs full** (e.g. number.py 27/29 scoped, 29/29 full — 2 mutants killed only by cross-file tests), and mutmut drifts ~1-2% run-to-run. A flat-% tolerance was too tight on small files; switched to a `max(fraction, absolute-mutants)` band.
+- **Original full-run-on-every-PR design was ~50 min** — changed to diff-scoping per user feedback. A 30-min PR timeout then cancelled an infra-triggered full-escalation run; raised to 90 min.
+- Several self-inflicted slips were caught by the draft-PR/CI loop and fixed: a zeroed baseline (read mid-run), a lost `mutmut` pin, and codespell hits (`OT`, `DeviceC`) that plain ruff doesn't catch.
+
+### Necessary follow-ups
+- Optionally tighten the PR gate toward zero new survivors on touched files once the baseline matures, and surface mutation-score trends.
