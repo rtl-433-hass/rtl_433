@@ -2,15 +2,16 @@
 
 This module wires the integration's config-entry lifecycle. There is one kind of
 config entry: a **hub** entry that owns one rtl_433 server's WebSocket
-connection. Setting one up loads the mapping library (shipped + user overrides),
-instantiates the push
+connection. Setting one up loads the shipped mapping library (cached once on
+``hass.data[DOMAIN][DATA_LIBRARY]``), merges this hub's stored
+``entry.data[CONF_USER_MAPPINGS]`` over it and caches the per-entry merged
+``(registry, skip_keys)`` on ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]``
+so the entity platforms reuse it, instantiates the push
 :class:`~custom_components.rtl_433.coordinator.Rtl433Coordinator`, injects the
 skip-keys, the effective-timeout resolver, and the new-device callback, registers
 the hub device, starts the coordinator, registers an options-update listener so
 toggling discovery / the timeout takes effect live, and forwards the
-``sensor`` / ``binary_sensor`` platforms once on the hub entry. The loaded
-library is cached on ``hass.data[DOMAIN][DATA_LIBRARY]`` so the entity platforms
-reuse it.
+``sensor`` / ``binary_sensor`` platforms once on the hub entry.
 
 RF devices are represented as **device-registry devices nested under the hub
 entry** (rfxtrx-style), not as their own config entries. They are recreated on
@@ -44,6 +45,8 @@ from .const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    CONF_USER_MAPPINGS,
+    DATA_ENTRY_LIBRARY,
     DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
@@ -60,7 +63,7 @@ from .const import (
     signal_new_device,
 )
 from .coordinator import Rtl433Coordinator
-from .mapping import Registry, load_library, load_user_overrides
+from .mapping import Registry, load_library, merge_overrides
 
 # The 0.1.0 per-device config entries stored the set of observed mapped field
 # keys under this literal options key. It is intentionally *not* exported from
@@ -226,12 +229,13 @@ def _calibration_map(entry: ConfigEntry) -> dict[str, dict]:
 async def _async_load_library(
     hass: HomeAssistant,
 ) -> tuple[Registry, set[str]]:
-    """Load (and cache) the shipped library merged with user overrides.
+    """Load (and cache) the shipped library.
 
-    Both the glob/parse and the override merge touch the filesystem, so they run
-    in the executor. The merged ``(registry, skip_keys)`` is cached on
-    ``hass.data[DOMAIN][DATA_LIBRARY]`` so the entity platforms and additional
-    hubs reuse a single load.
+    The glob/parse touches the filesystem, so it runs in the executor. The
+    shipped ``(registry, skip_keys)`` is cached on
+    ``hass.data[DOMAIN][DATA_LIBRARY]`` so additional hubs reuse a single load.
+    Per-hub user overrides are merged over this result in
+    :func:`_merge_entry_library` and cached separately per entry.
     """
     domain_data = hass.data.setdefault(DOMAIN, {})
     cached = domain_data.get(DATA_LIBRARY)
@@ -239,11 +243,43 @@ async def _async_load_library(
         return cached
 
     registry, skip_keys = await hass.async_add_executor_job(load_library)
-    registry, skip_keys = await hass.async_add_executor_job(
-        load_user_overrides, hass.config.path(), registry, skip_keys
-    )
     domain_data[DATA_LIBRARY] = (registry, skip_keys)
     return registry, skip_keys
+
+
+def _merge_entry_library(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    shipped_registry: Registry,
+    shipped_skip_keys: set[str],
+) -> tuple[Registry, set[str]]:
+    """Merge this hub's stored user overrides over the shipped library.
+
+    Reads ``entry.data[CONF_USER_MAPPINGS]`` (the per-hub normalized override
+    object) and layers it over the shipped ``(registry, skip_keys)`` via the pure
+    :func:`merge_overrides` (no I/O, so no executor needed). Defensive: any
+    unexpected error is logged and the shipped inputs (copied) are returned so a
+    bad override never crashes setup.
+    """
+    overrides = entry.data.get(CONF_USER_MAPPINGS) or {}
+    try:
+        return merge_overrides(shipped_registry, shipped_skip_keys, overrides)
+    except Exception:  # noqa: BLE001 - never let a bad override crash setup
+        LOGGER.warning(
+            "Failed to merge user mappings for hub %s; using shipped library",
+            entry.entry_id,
+            exc_info=True,
+        )
+        return (
+            Registry(
+                flat=dict(shipped_registry.flat),
+                models={
+                    model: dict(entries)
+                    for model, entries in shipped_registry.models.items()
+                },
+            ),
+            set(shipped_skip_keys),
+        )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -255,7 +291,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """
     hass.data.setdefault(DOMAIN, {})
 
-    _registry, skip_keys = await _async_load_library(hass)
+    shipped_registry, shipped_skip_keys = await _async_load_library(hass)
+    entry_registry, entry_skip_keys = _merge_entry_library(
+        hass, entry, shipped_registry, shipped_skip_keys
+    )
+    hass.data[DOMAIN].setdefault(DATA_ENTRY_LIBRARY, {})[entry.entry_id] = (
+        entry_registry,
+        entry_skip_keys,
+    )
 
     def effective_timeout_resolver(device_key: str) -> int:
         """Resolve a device's effective timeout (per-device override > hub default).
@@ -348,7 +391,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         discovery_enabled=_hub_discovery_enabled(entry),
         manage_settings=_hub_manage_settings(entry),
         availability_timeout=_hub_availability_timeout(entry),
-        skip_keys=skip_keys,
+        skip_keys=entry_skip_keys,
     )
     coordinator.new_device_callback = new_device_callback
     coordinator.effective_timeout_resolver = effective_timeout_resolver
@@ -357,6 +400,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # real calibration change (and reload) while ignoring routine devices-map
     # upserts — the same change-vs-snapshot pattern as ``manage_settings``.
     coordinator.calibration_snapshot = _calibration_map(entry)
+    # Snapshot the stored user mappings so the update listener can detect a real
+    # mappings change (and reload to rebuild the merged library + entities) while
+    # ignoring routine devices-map upserts.
+    coordinator.user_mappings_snapshot = entry.data.get(CONF_USER_MAPPINGS) or {}
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
     await coordinator.async_start()
@@ -415,6 +462,13 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
         await hass.config_entries.async_reload(entry.entry_id)
         return
 
+    if (entry.data.get(CONF_USER_MAPPINGS) or {}) != coordinator.user_mappings_snapshot:
+        # The user mappings drive the merged library (descriptors + skip_keys),
+        # which is consumed at construction time, so reload to rebuild the merged
+        # library and the affected entities.
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+
     coordinator.discovery_enabled = _hub_discovery_enabled(entry)
     coordinator.availability_timeout = _hub_availability_timeout(entry)
     LOGGER.debug(
@@ -437,6 +491,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if coordinator is not None:
         await coordinator.async_stop()
     hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    hass.data.get(DOMAIN, {}).get(DATA_ENTRY_LIBRARY, {}).pop(entry.entry_id, None)
     repairs.async_clear_hub_unreachable(hass, entry)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

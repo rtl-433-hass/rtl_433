@@ -558,11 +558,12 @@ async def test_entity_setup_uses_cached_registry_not_event_loop_load(
     Regression: the platform previously called ``lookup(field_key)`` with no
     registry, which triggered the lazy module-level ``load_library`` and opened
     YAML files on the event loop (Home Assistant flags this as a blocking call).
-    The descriptor lookups during setup and dynamic add must use the registry
-    cached on ``hass.data[DOMAIN][DATA_LIBRARY]`` instead.
+    The descriptor lookups during setup and dynamic add must use the per-entry
+    merged registry cached on
+    ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]`` instead.
     """
     from custom_components.rtl_433 import entity as entity_mod
-    from custom_components.rtl_433.const import DATA_LIBRARY
+    from custom_components.rtl_433.const import DATA_ENTRY_LIBRARY
 
     real_lookup = entity_mod.lookup
     seen_registries: list = []
@@ -589,7 +590,7 @@ async def test_entity_setup_uses_cached_registry_not_event_loop_load(
         )
         await hass.async_block_till_done()
 
-    cached_registry = hass.data[DOMAIN][DATA_LIBRARY][0]
+    cached_registry = hass.data[DOMAIN][DATA_ENTRY_LIBRARY][hub.entry_id][0]
     assert cached_registry is not None
     assert seen_registries, "expected descriptor lookups during entity setup"
     # Every lookup used the cached registry object — never None (the lazy,

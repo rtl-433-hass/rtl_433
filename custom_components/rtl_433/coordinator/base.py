@@ -223,6 +223,13 @@ class Rtl433Coordinator:
         # triggers a reload. Wired by the integration setup in ``__init__.py``.
         self.calibration_snapshot: dict[str, dict[str, Any]] = {}
 
+        # Per-hub user mappings snapshot captured at setup (analogous to
+        # ``calibration_snapshot``): the stored ``entry.data[CONF_USER_MAPPINGS]``
+        # override object. ``_async_update_listener`` reloads the hub only when the
+        # live mappings differ from this snapshot, so a routine devices-map upsert
+        # never triggers a reload. Wired by the integration setup in ``__init__.py``.
+        self.user_mappings_snapshot: dict[str, Any] = {}
+
         # Per-device removal callbacks registered by the entity platforms. When a
         # device is removed (async_remove_config_entry_device) each is called with
         # the device_key so the platforms can drop their per-device dedup cache and

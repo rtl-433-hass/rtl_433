@@ -64,7 +64,7 @@ from .const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
-    DATA_LIBRARY,
+    DATA_ENTRY_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
     DEFAULT_MOTION_CLEAR_DELAY,
@@ -307,15 +307,20 @@ class Rtl433OptionsFlow(OptionsFlow):
         return commodity_from_fields(fields)
 
     def _registry(self) -> Registry | None:
-        """Return the merged device-library registry the hub cached at setup.
+        """Return this hub's merged device-library registry cached at setup.
 
-        The hub loads the shipped library + user overrides once in an executor and
-        caches ``(registry, skip_keys)`` on ``hass.data[DOMAIN][DATA_LIBRARY]``;
-        reuse it so descriptor lookups never re-read the YAML on the event loop.
-        Returns ``None`` if the hub has not finished loading (the conditional
-        clear-delay field then simply does not appear).
+        The hub builds the shipped library + this hub's user overrides at setup
+        and caches ``(registry, skip_keys)`` per entry under
+        ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]``; reuse it so descriptor
+        lookups never re-read the YAML on the event loop. Returns ``None`` if the
+        hub has not finished loading (the conditional clear-delay field then
+        simply does not appear).
         """
-        return self.hass.data.get(DOMAIN, {}).get(DATA_LIBRARY, (None, None))[0]
+        return (
+            self.hass.data.get(DOMAIN, {})
+            .get(DATA_ENTRY_LIBRARY, {})
+            .get(self.config_entry.entry_id, (None, None))[0]
+        )
 
     def _is_motion_bearing(self, device_key: str) -> bool:
         """Return ``True`` if the device has a field carrying a ``clear_delay``.
