@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.7.0...v0.8.0) (2026-05-30)
+
+
+### Features
+
+* **rtl_433:** edit mapping overrides in the UI ([#34](https://github.com/rtl-433-hass/rtl_433/issues/34)) ([9354ca3](https://github.com/rtl-433-hass/rtl_433/commit/9354ca39facb40c63f10b7cfd8939913cb3020c8))
+
+
+### Bug Fixes
+
+* **ci:** scope mutation runs for non-conforming test names ([#38](https://github.com/rtl-433-hass/rtl_433/issues/38)) ([73bb925](https://github.com/rtl-433-hass/rtl_433/commit/73bb925207e008b61397c8ab8ecc1040a0a33f45))
+* **rtl_433:** don't notify for new devices on reconnect replay ([c0168b3](https://github.com/rtl-433-hass/rtl_433/commit/c0168b3b8911ff846f32b2df8727664b12aea593))
+
+
+### Documentation
+
+* **readme:** note Python 3.14 requirement for the test venv ([97b3f00](https://github.com/rtl-433-hass/rtl_433/commit/97b3f001d5232341e2ff1c966a9c5d68bc5ffdc9))
+* **rtl_433:** point to reconfigure for connection settings ([#32](https://github.com/rtl-433-hass/rtl_433/issues/32)) ([eae8cb2](https://github.com/rtl-433-hass/rtl_433/commit/eae8cb2843b269382fea6f6b75b20aeed29e7738))
+* **tasks:** add plan 14 (mutation testing) and task breakdown ([e051682](https://github.com/rtl-433-hass/rtl_433/commit/e051682602e8bb2864665eb95d4ebd870752f5d4))
+* **tasks:** archive plan 14 with execution summary ([3789a61](https://github.com/rtl-433-hass/rtl_433/commit/3789a613db4297237b61309e4ce1bd2f262085b5))
+
 ## [0.7.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.6.0...v0.7.0) (2026-05-29)
 
 
