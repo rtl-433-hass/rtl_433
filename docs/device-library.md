@@ -22,7 +22,7 @@ custom_components/rtl_433/device_library/
 ├── air_quality.yaml        # pm2.5 / pm10 / co2
 ├── binary_states.yaml      # contacts, tamper, alarm, door state
 ├── events.yaml             # momentary RF: button, doorbell
-├── humidity_moisture.yaml  # humidity, moisture, leak, depth
+├── humidity_moisture.yaml  # humidity, moisture, leak, depth, WH51 soil AD/boost
 ├── light_uv.yaml           # illuminance, UV
 ├── misc.yaml               # battery %, timestamp, signal, lightning
 ├── power_electrical.yaml   # power, energy, current, voltage, consumption

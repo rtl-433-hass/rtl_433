@@ -55,6 +55,27 @@ def test_lookup_resolves_representative_descriptors(library):
     assert lookup("totally_unknown_field", registry=registry) is None
 
 
+def test_wh51_soil_ad_and_boost_resolve_as_diagnostics(library):
+    """The WH51 `ad_raw` and `boost` fields map to integer diagnostic sensors."""
+    registry, _ = library
+
+    ad_raw = lookup("ad_raw", registry=registry)
+    assert ad_raw is not None
+    assert ad_raw.platform == "sensor"
+    assert ad_raw.entity_category == "diagnostic"
+    assert ad_raw.object_suffix == "ad_raw"
+    # Raw ADC count is coerced to a plain int (no unit / device_class).
+    assert ad_raw.unit_of_measurement is None
+    assert apply_transform(ad_raw, "278") == 278
+
+    boost = lookup("boost", registry=registry)
+    assert boost is not None
+    assert boost.platform == "sensor"
+    assert boost.entity_category == "diagnostic"
+    assert boost.object_suffix == "boost"
+    assert apply_transform(boost, "7") == 7
+
+
 def test_event_fields_resolve_to_event_platform(library):
     """The shipped event fields resolve to ``event`` descriptors.
 
