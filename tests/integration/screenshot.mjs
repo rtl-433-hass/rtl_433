@@ -11,9 +11,11 @@
 //              defaults on). There is NO discovery card to accept. Navigate to
 //              the integration's devices, open the nested device, and capture the
 //              device page; then open the options flow MENU (Hub settings /
-//              Device settings), capture it, open Hub settings, set a low
-//              availability timeout (15s) so the unavailable stage is fast, and
-//              capture the hub-settings form too.
+//              Device settings / Device mappings), capture it, open Hub settings,
+//              set a low availability timeout (15s) so the unavailable stage is
+//              fast, capture the hub-settings form too, then re-open the menu,
+//              open Device mappings, pre-fill the YAML editor with an example
+//              override and capture it.
 //   unavail  - (after run-harness.sh stops the rtl433 replay and waits past the
 //              timeout) capture the device page with all entities Unavailable.
 //   full     - add, then unavail (the orchestrator stops replay in between).
@@ -44,6 +46,28 @@ const RTL_PATH = process.env.RTL_PATH || "/ws";
 // Low timeout so the unavailable stage is fast to demonstrate.
 const SHORT_TIMEOUT = process.env.SHORT_TIMEOUT || "15";
 const STAGE = process.env.STAGE || "full";
+
+// Example override pre-filled into the Device-mappings YAML editor for the
+// screenshot. Mirrors the documented "User overrides" example (docs/
+// device-library.md): adds an unmapped field and re-classifies battery_ok as a
+// low-battery binary problem sensor. Content only — the shot does not save it.
+const EXAMPLE_MAPPINGS = `custom_field_C:
+  platform: sensor
+  device_class: temperature
+  unit_of_measurement: "°C"
+  state_class: measurement
+  name: Custom Probe
+  value_transform: { round: 1 }
+  object_suffix: TC
+
+battery_ok:
+  platform: binary_sensor
+  device_class: battery
+  name: Battery
+  payload: { on: "0", off: "1" }
+  entity_category: diagnostic
+  object_suffix: B
+`;
 
 const shot = async (page, name) => {
   await page.screenshot({ path: resolve(SHOTS, name) });
@@ -99,28 +123,8 @@ async function addHubAndCapture(page) {
   await page.waitForTimeout(3000);
   await shot(page, "02-device-page.png");
 
-  // --- Options flow MENU (Hub settings / Device settings) -------------------
-  await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(2500);
-  const hubHeader = page.locator(`text=rtl_433 (${RTL_HOST})`).first();
-  const box = await hubHeader.boundingBox();
-  // The gear (options/Configure) icon sits at the right edge of the hub header.
-  if (box) {
-    await page.mouse.click(1243, box.y + box.height / 2);
-  } else {
-    // Fallback: open Configure from a kebab/Configure button if the header
-    // layout shifts.
-    await page.getByRole("button", { name: /configure/i }).first().click({ timeout: 5000 }).catch(() => {});
-  }
-  // The options flow now opens on the menu step (Hub settings / Device settings).
-  // The menu items render as list rows (not button-role), so wait on / click by
-  // text rather than by role.
-  await page
-    .locator("text=Hub settings")
-    .first()
-    .waitFor({ state: "visible", timeout: 8000 })
-    .catch(() => {});
-  await page.waitForTimeout(1500);
+  // --- Options flow MENU (Hub settings / Device settings / Device mappings) -
+  await openOptionsMenu(page);
   await shot(page, "03-options-flow.png");
 
   // --- Hub settings form: lower the availability timeout, then submit -------
@@ -140,6 +144,60 @@ async function addHubAndCapture(page) {
   }
   await page.getByRole("button", { name: /^submit$/i }).first().click({ timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(2500);
+
+  // --- Device mappings editor (NEW: UI-editable per-hub overrides) ----------
+  // Re-open the menu, open Device mappings, pre-fill the YAML editor with an
+  // example override, and capture it. We do NOT submit — saving validates and
+  // reloads the hub; the screenshot only needs the editor showing real content.
+  await openOptionsMenu(page);
+  await captureMappings(page);
+}
+
+// Open the per-entry options flow, which lands on the menu step
+// (Hub settings / Device settings / Device mappings). The menu items render as
+// list rows (not button-role), so callers wait on / click by text.
+async function openOptionsMenu(page) {
+  await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  const hubHeader = page.locator(`text=rtl_433 (${RTL_HOST})`).first();
+  const box = await hubHeader.boundingBox();
+  // The gear (options/Configure) icon sits at the right edge of the hub header.
+  if (box) {
+    await page.mouse.click(1243, box.y + box.height / 2);
+  } else {
+    // Fallback: open Configure from a kebab/Configure button if the header
+    // layout shifts.
+    await page.getByRole("button", { name: /configure/i }).first().click({ timeout: 5000 }).catch(() => {});
+  }
+  await page
+    .locator("text=Hub settings")
+    .first()
+    .waitFor({ state: "visible", timeout: 8000 })
+    .catch(() => {});
+  await page.waitForTimeout(1500);
+}
+
+// From the open options menu, enter the Device mappings step and pre-fill the
+// native YAML editor (ObjectSelector -> ha-yaml-editor -> ha-code-editor, a
+// CodeMirror contenteditable). We seed it via clipboard paste: CodeMirror
+// inserts pasted text verbatim, whereas typed Enter keys would auto-indent and
+// mangle the YAML. Permissions are granted on the context in run().
+async function captureMappings(page) {
+  await page.locator("text=Device mappings").first().click({ timeout: 8000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  const editor = page
+    .locator("ha-dialog ha-code-editor .cm-content, dialog ha-code-editor .cm-content")
+    .first();
+  await editor.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
+  if (await editor.count()) {
+    await editor.click();
+    await page.keyboard.press("Control+a");
+    await page.evaluate((text) => navigator.clipboard.writeText(text), EXAMPLE_MAPPINGS);
+    await page.keyboard.press("Control+v");
+    // Let CodeMirror re-render the pasted document before the capture.
+    await page.waitForTimeout(1500);
+  }
+  await shot(page, "05-mapping-overrides.png");
 }
 
 async function captureUnavailable(page) {
@@ -153,6 +211,8 @@ async function captureUnavailable(page) {
 async function run() {
   const browser = await chromium.launch({ args: ["--no-sandbox"] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  // Needed to seed the Device-mappings YAML editor via clipboard paste.
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
   const page = await context.newPage();
   try {
     await login(page);

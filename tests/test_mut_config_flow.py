@@ -58,6 +58,8 @@ from custom_components.rtl_433.const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    CONF_USER_MAPPINGS,
+    DATA_ENTRY_LIBRARY,
     DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
@@ -70,6 +72,7 @@ from custom_components.rtl_433.const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
+from custom_components.rtl_433.mapping import FieldDescriptor, Registry
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.data_entry_flow import FlowResultType
@@ -581,7 +584,7 @@ async def test_reconfigure_same_host_port_does_not_collide_with_self(
 
 
 async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_builder):
-    """Options init step shows a menu with 'hub' and 'device' options."""
+    """Options init step shows a menu with 'hub', 'device', and 'mappings'."""
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -589,7 +592,8 @@ async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_build
     assert result["step_id"] == "init"
     assert "hub" in result["menu_options"]
     assert "device" in result["menu_options"]
-    assert len(result["menu_options"]) == 2
+    assert "mappings" in result["menu_options"]
+    assert len(result["menu_options"]) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -2111,3 +2115,527 @@ async def test_reconfigure_validates_correct_params(hass, hub_entry_builder):
     mock_validate.assert_called_once_with(
         hass, "newhost", 5678, "/newpath", secure=False
     )
+
+
+# ===========================================================================
+# PR #34 fallout: extra mutation-killers.
+#
+# The motion/registry tests above seed ``DATA_LIBRARY`` (the shipped-library
+# cache key), but ``_registry()`` actually reads
+# ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]`` -- the per-entry merged
+# cache holding a ``(Registry, skip_keys)`` tuple. The helpers below seed THAT
+# exact structure so ``_registry`` / ``_is_motion_bearing`` are genuinely
+# exercised and their mutants observable.
+# ===========================================================================
+
+
+def _pr34_motion_descriptor(field_key="motion"):
+    return FieldDescriptor(
+        field_key=field_key,
+        platform="binary_sensor",
+        name="Motion",
+        object_suffix="motion",
+        clear_delay=30,
+    )
+
+
+def _pr34_plain_descriptor(field_key="temperature_C"):
+    return FieldDescriptor(
+        field_key=field_key,
+        platform="sensor",
+        name="Temp",
+        object_suffix="temp",
+    )
+
+
+def _pr34_seed_entry_library(hass, entry, *, flat=None, models=None, skip_keys=None):
+    """Cache ``(Registry, skip_keys)`` under DATA_ENTRY_LIBRARY[entry_id].
+
+    This is the exact tuple ``_registry()`` reads (element ``[0]`` Registry,
+    element ``[1]`` skip_keys).
+    """
+    registry = Registry(flat=flat or {}, models=models or {})
+    hass.data.setdefault(DOMAIN, {}).setdefault(DATA_ENTRY_LIBRARY, {})[
+        entry.entry_id
+    ] = (registry, skip_keys if skip_keys is not None else set())
+    return registry
+
+
+# --------------------------------------------------------------------------- #
+# _registry: returns element [0] (Registry), not [1] (skip_keys).             #
+# --------------------------------------------------------------------------- #
+async def test_pr34_registry_returns_registry_makes_field_appear(
+    hass, hub_entry_builder
+):
+    """With the per-entry cache holding the motion Registry, the knob appears.
+
+    A mutant returning ``[1]`` (skip_keys, a set) instead of ``[0]`` would hand
+    ``lookup`` a set, which cannot resolve the descriptor -- so the field would
+    be absent. Kills _registry__mutmut_13 ([0]->[1]).
+    """
+    field_key = "motion"
+    device_key = "PR34-Reg0"
+    entry = hub_entry_builder(
+        devices={device_key: {CONF_MODEL: "RegDev", DEVICE_FIELDS: [field_key]}}
+    )
+    entry.add_to_hass(hass)
+    _pr34_seed_entry_library(
+        hass, entry, flat={field_key: _pr34_motion_descriptor(field_key)}
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
+
+
+async def test_pr34_registry_keyed_by_entry_id(hass, hub_entry_builder):
+    """The cache is keyed by THIS entry's id; the wrong key yields no field.
+
+    Two hubs: only the active entry has its motion Registry cached under its own
+    id. Kills _registry__mutmut_1 (``.get(None, ...)``) and __mutmut_5
+    (``.get(None, {})`` for DATA_ENTRY_LIBRARY) and __mutmut_9
+    (``hass.data.get(None, {})``) -- each makes the lookup miss the cache and
+    drop the field.
+    """
+    field_key = "motion"
+    other = hub_entry_builder(host="other.local", port=1)
+    other.add_to_hass(hass)
+    device_key = "PR34-Keyed"
+    entry = hub_entry_builder(
+        devices={device_key: {CONF_MODEL: "KeyedDev", DEVICE_FIELDS: [field_key]}}
+    )
+    entry.add_to_hass(hass)
+    # Cache ONLY under the active entry's id.
+    _pr34_seed_entry_library(
+        hass, entry, flat={field_key: _pr34_motion_descriptor(field_key)}
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
+
+
+# --------------------------------------------------------------------------- #
+# _is_motion_bearing: model arg, registry arg, field-set, record defaults.     #
+# --------------------------------------------------------------------------- #
+async def test_pr34_motion_bearing_model_scoped_via_entry_cache(
+    hass, hub_entry_builder
+):
+    """The descriptor lives only in the model-scoped table; model must be passed.
+
+    Kills _is_motion_bearing__mutmut_10 (``model = None``) and __mutmut_11
+    (``record.get(None)``) and __mutmut_16 (``lookup(field_key, None, ...)``):
+    each loses the model and the model-scoped descriptor cannot resolve.
+    """
+    field_key = "motion"
+    model = "PR34ScopedOnly"
+    device_key = "PR34-Scoped"
+    entry = hub_entry_builder(
+        devices={device_key: {CONF_MODEL: model, DEVICE_FIELDS: [field_key]}}
+    )
+    entry.add_to_hass(hass)
+    _pr34_seed_entry_library(
+        hass, entry, models={model: {field_key: _pr34_motion_descriptor(field_key)}}
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
+
+
+async def test_pr34_motion_bearing_uses_entry_registry_arg(hass, hub_entry_builder):
+    """lookup must receive the entry-cached registry (3rd positional arg).
+
+    The field ``pr34_custom_motion`` exists ONLY in this hub's cached registry,
+    never in the shipped library. Kills __mutmut_12 (``registry = None``),
+    __mutmut_17 (``lookup(field_key, model, None)``), __mutmut_19 (drops the
+    registry arg) and __mutmut_20 (trailing-comma drop of the registry arg):
+    without the real registry the field cannot resolve.
+    """
+    field_key = "pr34_custom_motion"
+    device_key = "PR34-CustomReg"
+    entry = hub_entry_builder(
+        devices={device_key: {CONF_MODEL: "CustomDev", DEVICE_FIELDS: [field_key]}}
+    )
+    entry.add_to_hass(hass)
+    _pr34_seed_entry_library(
+        hass, entry, flat={field_key: _pr34_motion_descriptor(field_key)}
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
+
+
+async def test_pr34_motion_bearing_only_inspects_listed_fields(hass, hub_entry_builder):
+    """Only DEVICE_FIELDS entries are inspected; an unlisted motion field is ignored.
+
+    The registry knows a motion descriptor for ``motion`` but the device lists
+    only ``temperature_C`` -> NOT motion-bearing -> knob absent. Kills
+    __mutmut_23 (``record.get(DEVICE_FIELDS, None)``) and __mutmut_25 (drops the
+    ``[]`` default) -- both would iterate the wrong field set (or crash on None)
+    rather than the listed fields.
+    """
+    device_key = "PR34-NoMotionField"
+    entry = hub_entry_builder(
+        devices={device_key: {CONF_MODEL: "MixedDev", DEVICE_FIELDS: ["temperature_C"]}}
+    )
+    entry.add_to_hass(hass)
+    _pr34_seed_entry_library(
+        hass,
+        entry,
+        flat={
+            "motion": _pr34_motion_descriptor("motion"),
+            "temperature_C": _pr34_plain_descriptor("temperature_C"),
+        },
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert DEVICE_MOTION_CLEAR_DELAY not in _schema_keys(result)
+
+
+async def test_pr34_motion_bearing_reads_named_device_record(hass, hub_entry_builder):
+    """_is_motion_bearing reads the SELECTED device's record (model + fields).
+
+    Two devices: a motion one and a plain one. With the motion device present
+    the knob appears; this exercises the record/model/fields read on a record
+    that actually exists. Kills __mutmut_3 (``.get(device_key, None)``),
+    __mutmut_5 (drops the ``{}`` record default), __mutmut_7
+    (``.get(CONF_DEVICES, None)``) and __mutmut_9 (drops the CONF_DEVICES
+    default) -- each crashes or mis-reads the per-device record.
+    """
+    motion_key = "PR34-Mover"
+    plain_key = "PR34-Still"
+    entry = hub_entry_builder(
+        devices={
+            motion_key: {CONF_MODEL: "Mover", DEVICE_FIELDS: ["motion"]},
+            plain_key: {CONF_MODEL: "Still", DEVICE_FIELDS: ["temperature_C"]},
+        }
+    )
+    entry.add_to_hass(hass)
+    _pr34_seed_entry_library(
+        hass,
+        entry,
+        flat={
+            "motion": _pr34_motion_descriptor("motion"),
+            "temperature_C": _pr34_plain_descriptor("temperature_C"),
+        },
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    # The hub has a motion-bearing device, so the knob is offered.
+    assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
+
+
+# --------------------------------------------------------------------------- #
+# async_step_device: clear-delay default branches (single vs multi device).    #
+# --------------------------------------------------------------------------- #
+async def test_pr34_clear_delay_default_constant_when_multi_motion(
+    hass, hub_entry_builder
+):
+    """Two motion devices -> clear-delay default is the constant (not stored, not None).
+
+    Exercises the ``len(devices) == 1`` inner guard being False and the default
+    falling back to DEFAULT_MOTION_CLEAR_DELAY even though each device stores a
+    different override.
+    """
+    field_key = "motion"
+    dev_a = "PR34-Multi-A"
+    dev_b = "PR34-Multi-B"
+    entry = hub_entry_builder(
+        devices={
+            dev_a: {
+                CONF_MODEL: "MA",
+                DEVICE_FIELDS: [field_key],
+                DEVICE_MOTION_CLEAR_DELAY: 11,
+            },
+            dev_b: {
+                CONF_MODEL: "MB",
+                DEVICE_FIELDS: [field_key],
+                DEVICE_MOTION_CLEAR_DELAY: 22,
+            },
+        }
+    )
+    entry.add_to_hass(hass)
+    _pr34_seed_entry_library(
+        hass, entry, flat={field_key: _pr34_motion_descriptor(field_key)}
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert _schema_default(result, DEVICE_MOTION_CLEAR_DELAY) == (
+        DEFAULT_MOTION_CLEAR_DELAY
+    )
+
+
+async def test_pr34_clear_delay_default_single_reads_stored(hass, hub_entry_builder):
+    """One motion device with a stored clear-delay pre-fills that exact value."""
+    field_key = "motion"
+    device_key = "PR34-SingleStored"
+    entry = hub_entry_builder(
+        devices={
+            device_key: {
+                CONF_MODEL: "MS",
+                DEVICE_FIELDS: [field_key],
+                DEVICE_MOTION_CLEAR_DELAY: 73,
+            }
+        }
+    )
+    entry.add_to_hass(hass)
+    _pr34_seed_entry_library(
+        hass, entry, flat={field_key: _pr34_motion_descriptor(field_key)}
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert _schema_default(result, DEVICE_MOTION_CLEAR_DELAY) == 73
+
+
+async def test_pr34_device_picker_label_is_model_and_key(hass, hub_entry_builder):
+    """The picker option label is exactly '{model} ({device_key})'."""
+    device_key = "PR34-Label-7"
+    entry = hub_entry_builder(
+        devices={device_key: {CONF_MODEL: "LabelModel", DEVICE_FIELDS: ["temp"]}}
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    label = None
+    for marker in result["data_schema"].schema:
+        key = marker.schema if hasattr(marker, "schema") else str(marker)
+        if key == CONF_DEVICE:
+            selector = result["data_schema"].schema[marker]
+            label = selector.config["options"][0]["label"]
+            break
+    assert label == f"LabelModel ({device_key})"
+
+
+# --------------------------------------------------------------------------- #
+# _write_device_record: record starts from existing record; opt records keyed. #
+# --------------------------------------------------------------------------- #
+async def test_pr34_write_record_merges_into_existing_record(hass, hub_entry_builder):
+    """A new override merges into the device's existing record (model preserved).
+
+    ``record = dict(new_devices.get(device_key, {}))`` must seed from the current
+    record. Kills __mutmut_11 (``.get(None, {})``), __mutmut_12
+    (``.get(device_key, None)`` -> ``dict(None)`` crash), __mutmut_14 (drops the
+    ``{}`` default), __mutmut_6 (``data.get(CONF_DEVICES, None)``) and
+    __mutmut_8 (drops CONF_DEVICES default).
+    """
+    device_key = "PR34-Merge"
+    entry = hub_entry_builder(
+        devices={
+            device_key: {CONF_MODEL: "MergeModel", DEVICE_FIELDS: ["temperature_C"]}
+        }
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_DEVICE: device_key, DEVICE_TIMEOUT_OVERRIDE: 88},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    record = entry.data[CONF_DEVICES][device_key]
+    assert record[DEVICE_TIMEOUT_OVERRIDE] == 88
+    assert record[CONF_MODEL] == "MergeModel"
+    assert record[DEVICE_FIELDS] == ["temperature_C"]
+
+
+async def test_pr34_write_record_opt_record_keyed_per_device(hass, hub_entry_builder):
+    """Blanking one device's motion delay leaves OTHER devices' opt records.
+
+    ``opt_record = dict(opt_devices.get(device_key, {}))`` and
+    ``opt_devices = dict(options.get(CONF_DEVICES, {}))`` must key on the edited
+    device only. Kills __mutmut_35 (``options.get(None, {})``) and __mutmut_41
+    (``opt_devices.get(None, {})``) which would read the wrong record.
+    """
+    edited = "PR34-Opt-Edit"
+    other = "PR34-Opt-Keep"
+    entry = hub_entry_builder(
+        devices={
+            edited: {CONF_MODEL: "E", DEVICE_FIELDS: ["temperature_C"]},
+            other: {CONF_MODEL: "K", DEVICE_FIELDS: ["temperature_C"]},
+        },
+        options={
+            CONF_DEVICES: {
+                edited: {DEVICE_MOTION_CLEAR_DELAY: 5},
+                other: {DEVICE_MOTION_CLEAR_DELAY: 99},
+            }
+        },
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    # Submit the edited device with no clear-delay -> clears its opt record only.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: edited}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    opt_devices = entry.options[CONF_DEVICES]
+    assert edited not in opt_devices
+    assert opt_devices[other][DEVICE_MOTION_CLEAR_DELAY] == 99
+
+
+# --------------------------------------------------------------------------- #
+# async_step_calibration: pre-fill reads the SELECTED device's record.         #
+# --------------------------------------------------------------------------- #
+async def test_pr34_calibration_prefill_reads_selected_device(hass, hub_entry_builder):
+    """Calibration unit/scale pre-fill reads the SELECTED device's calibration.
+
+    Two devices, each with a different stored water calibration; selecting one
+    must pre-fill from that device. Kills __mutmut_18 (``.get(device_key,
+    None)``), __mutmut_20 (drops device_key default), __mutmut_22
+    (``.get(CONF_DEVICES, None)``) and __mutmut_24 (drops CONF_DEVICES default)
+    in the calibration pre-fill read.
+    """
+    target = "PR34-Cal-Target"
+    decoy = "PR34-Cal-Decoy"
+    entry = hub_entry_builder(
+        devices={
+            target: {
+                CONF_MODEL: "T",
+                DEVICE_FIELDS: ["consumption_data"],
+                DEVICE_CALIBRATION: {
+                    CALIBRATION_COMMODITY: COMMODITY_WATER,
+                    CALIBRATION_UNIT: UnitOfVolume.GALLONS,
+                    CALIBRATION_SCALE: 4.0,
+                },
+            },
+            decoy: {
+                CONF_MODEL: "D",
+                DEVICE_FIELDS: ["consumption_data"],
+                DEVICE_CALIBRATION: {
+                    CALIBRATION_COMMODITY: COMMODITY_WATER,
+                    CALIBRATION_UNIT: UnitOfVolume.LITERS,
+                    CALIBRATION_SCALE: 9.0,
+                },
+            },
+        }
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_DEVICE: target, CALIBRATION_COMMODITY: COMMODITY_WATER},
+    )
+    assert result["step_id"] == "calibration"
+    assert _schema_default(result, CALIBRATION_UNIT) == UnitOfVolume.GALLONS
+    assert _schema_default(result, CALIBRATION_SCALE) == pytest.approx(4.0)
+
+
+# --------------------------------------------------------------------------- #
+# async_step_mappings: normalize on store, problem-join, prefill default.      #
+# --------------------------------------------------------------------------- #
+async def test_pr34_mappings_valid_stores_submitted_object(hass, hub_entry_builder):
+    """A valid non-empty mapping is normalized and stored (not blanked to {}).
+
+    Kills the mutant ``normalize_overrides(None)`` (which would store ``{}``);
+    we assert the stored object carries the submitted override exactly.
+    """
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "mappings"}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                CONF_USER_MAPPINGS: {
+                    "humidity": {
+                        "platform": "sensor",
+                        "name": "Humidity",
+                        "object_suffix": "hum",
+                        "unit_of_measurement": "%",
+                    }
+                }
+            },
+        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    stored = entry.data[CONF_USER_MAPPINGS]
+    assert stored != {}
+    assert stored["humidity"]["unit_of_measurement"] == "%"
+    assert stored["humidity"]["name"] == "Humidity"
+
+
+async def test_pr34_mappings_invalid_joins_problem_strings(hass, hub_entry_builder):
+    """Invalid mappings re-show the form with a non-empty joined problems string.
+
+    The ``"; ".join(problems)`` placeholder must be a non-empty string naming the
+    offending field. Kills the mutant joining ``None`` (would raise) and the one
+    blanking the placeholder.
+    """
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "mappings"}
+    )
+    # A flat field entry missing the required 'platform' is invalid.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_USER_MAPPINGS: {"bad": {"name": "X", "object_suffix": "x"}}},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "mappings"
+    assert result["errors"]["base"] == "invalid_mappings"
+    problems = result["description_placeholders"]["problems"]
+    assert isinstance(problems, str)
+    assert problems != ""
+    assert "bad" in problems
+
+
+async def test_pr34_mappings_form_prefilled_with_current(hass, hub_entry_builder):
+    """The mappings editor default equals the hub's current user_mappings.
+
+    Kills mutants changing the schema default away from ``current`` (the stored
+    mapping) -- e.g. defaulting to ``None`` or ``{}``.
+    """
+    current = {
+        "temperature_C": {
+            "platform": "sensor",
+            "name": "T",
+            "object_suffix": "t",
+        }
+    }
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_USER_MAPPINGS: current}
+    )
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "mappings"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert _schema_default(result, CONF_USER_MAPPINGS) == current

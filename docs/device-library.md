@@ -256,7 +256,7 @@ models:
 The `models:` block is **additive and optional**: every existing themed file
 parses exactly as before, and the flat top-level keys remain the global default.
 It may appear in any themed file (most naturally `power_electrical.yaml`) and in
-the [user-override file](#user-overrides). `models` is a reserved top-level key —
+[user overrides](#user-overrides). `models` is a reserved top-level key —
 the loader intercepts it, so you cannot have a *field* literally named `models`.
 
 ### Lookup resolution order
@@ -395,20 +395,34 @@ is fixed by a one-line YAML addition.
 ## User overrides
 
 You can extend or correct the shipped library **without editing the integration
-files** by dropping a YAML file at:
+files** — and without touching disk — directly from the Home Assistant UI:
 
-```
-<config>/rtl_433_mappings.yaml
-```
+> **Settings → Devices & Services → rtl_433 → Configure → Device mappings**
 
-(`<config>` is your Home Assistant configuration directory — the one containing
-`configuration.yaml`.) This file uses the **same schema** as the themed library
-files: top-level keys are rtl_433 field names, values are entry mappings. It may
+The *Device mappings* step opens Home Assistant's built-in YAML editor
+(`ha-yaml-editor`) pre-filled with that hub's current overrides. You edit the
+overrides as YAML, using the **same schema** as the themed library files:
+top-level keys are rtl_433 field names, values are entry mappings. They may
 optionally include a `skip_keys:` list to add extra skip entries, and an optional
 [`models:` block](#model-scoped-mappings-models) to add or override model-scoped
 descriptors.
 
-The loader layers this file **on top of** the shipped library:
+Overrides are stored **per hub** in that hub's config entry — each hub has its
+own independent set. The editor:
+
+- **Blocks invalid YAML syntax** before you can submit.
+- **Validates the mapping schema on save** and rejects bad input with a
+  per-field error naming the offending field and the reason. Invalid entries are
+  **no longer silently dropped** — a bad mapping fails the save loudly so you can
+  fix it.
+- **Applies the change by reloading that hub automatically** when you save
+  (entities rebuild). **No Home Assistant restart is required.**
+
+> **Comments and formatting are not preserved.** The editor returns parsed YAML,
+> so any comments or hand-formatting in what you paste are dropped once the
+> overrides are stored. The mapping *content* is preserved exactly.
+
+The overrides layer **on top of** the shipped library:
 
 - A field present in both the override and the shipped library: the **override
   wins** (full entry replacement, not a deep merge), so you can correct a unit,
@@ -423,11 +437,11 @@ The loader layers this file **on top of** the shipped library:
   either source) always beats a global one — so a **shipped** `models:` entry
   outranks a **user-override global** entry for a matching model.
 
-Example override that adds an unmapped field and re-classifies `battery_ok` as a
-low-battery binary problem sensor:
+Paste an override like the following into the *Device mappings* editor. This
+example adds an unmapped field and re-classifies `battery_ok` as a low-battery
+binary problem sensor:
 
 ```yaml
-# <config>/rtl_433_mappings.yaml
 custom_field_C:
   platform: sensor
   device_class: temperature
@@ -448,10 +462,43 @@ battery_ok:
   object_suffix: B
 ```
 
-Changes to the override file are picked up on the next reload of the
-integration (or HA restart). A full graphical mapping editor is intentionally
-out of scope; the drop-in override file covers the "users can add their own
-mappings" need.
+`skip_keys:` entries work in the editor exactly as in the shipped library, and so
+do model-scoped overrides — the way to correct a mapping for **one specific
+device model** rather than every device that emits the field. Nest the per-model
+descriptors under a [`models:` block](#model-scoped-mappings-models) keyed by the
+exact rtl_433 `model` string; a model-scoped entry beats any global one for that
+model (see [precedence](#precedence-specificity-first)). For example, to rename
+one model's temperature sensor and round it more finely than the global default,
+leaving every other model untouched:
+
+```yaml
+models:
+  Acurite-Tower: # exact rtl_433 model string
+    temperature_C:
+      platform: sensor
+      device_class: temperature
+      unit_of_measurement: "°C"
+      state_class: measurement
+      name: Outdoor temperature
+      value_transform: { round: 2 }
+      object_suffix: T
+```
+
+Mapping overrides are **global or model-scoped only** — they apply to every device
+of a model, not a single physical unit. To change settings for one specific unit
+(its availability timeout, meter calibration, or motion clear delay), use the
+options flow's *Device settings* step instead.
+
+### Migrating an existing `rtl_433_mappings.yaml`
+
+Earlier versions read overrides from a `<config>/rtl_433_mappings.yaml` file.
+That file is **no longer read at runtime**. On upgrade, the integration performs
+a **one-time import**: the contents of any existing
+`<config>/rtl_433_mappings.yaml` are normalized and copied into the stored
+overrides of **each existing hub**, after which the file is **ignored**. The
+file is **left untouched on disk** — it is never edited or deleted — but it has
+no further effect; edit your overrides in the *Device mappings* step from then
+on. Hubs added **after** the upgrade start with empty overrides.
 
 ## Notes on fields that cannot be expressed declaratively
 

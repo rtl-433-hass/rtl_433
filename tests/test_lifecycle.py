@@ -558,11 +558,12 @@ async def test_entity_setup_uses_cached_registry_not_event_loop_load(
     Regression: the platform previously called ``lookup(field_key)`` with no
     registry, which triggered the lazy module-level ``load_library`` and opened
     YAML files on the event loop (Home Assistant flags this as a blocking call).
-    The descriptor lookups during setup and dynamic add must use the registry
-    cached on ``hass.data[DOMAIN][DATA_LIBRARY]`` instead.
+    The descriptor lookups during setup and dynamic add must use the per-entry
+    merged registry cached on
+    ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]`` instead.
     """
     from custom_components.rtl_433 import entity as entity_mod
-    from custom_components.rtl_433.const import DATA_LIBRARY
+    from custom_components.rtl_433.const import DATA_ENTRY_LIBRARY
 
     real_lookup = entity_mod.lookup
     seen_registries: list = []
@@ -589,7 +590,7 @@ async def test_entity_setup_uses_cached_registry_not_event_loop_load(
         )
         await hass.async_block_till_done()
 
-    cached_registry = hass.data[DOMAIN][DATA_LIBRARY][0]
+    cached_registry = hass.data[DOMAIN][DATA_ENTRY_LIBRARY][hub.entry_id][0]
     assert cached_registry is not None
     assert seen_registries, "expected descriptor lookups during entity setup"
     # Every lookup used the cached registry object — never None (the lazy,
@@ -1678,3 +1679,183 @@ async def test_delete_then_re_transmit_re_notifies_same_id(
         await hass.async_block_till_done()
         assert notify.call_count == 2
         assert notify.call_args.kwargs["notification_id"] == expected_id
+
+
+# --------------------------------------------------------------------------- #
+# Per-hub user-mapping overrides: each hub caches its own merged registry.     #
+# --------------------------------------------------------------------------- #
+async def test_per_hub_user_mappings_isolated_in_entry_library(hass, hub_entry_builder):
+    """Two hubs with different ``CONF_USER_MAPPINGS`` cache distinct registries.
+
+    Each hub is set up through the real lifecycle, so ``async_setup_entry`` merges
+    that hub's own ``entry.data[CONF_USER_MAPPINGS]`` over the shipped library and
+    caches the result under ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]``.
+    Hub A overrides ``temperature_C`` to Kelvin; hub B leaves it shipped and adds a
+    private field. The two cached registries must resolve independently — an
+    override on hub A does not affect hub B's lookups, and vice versa.
+    """
+    from custom_components.rtl_433.const import CONF_USER_MAPPINGS, DATA_ENTRY_LIBRARY
+    from custom_components.rtl_433.mapping import lookup
+
+    async def _hub_with_mappings(host, port, mappings):
+        entry = hub_entry_builder(host=host, port=port)
+        # Seed CONF_USER_MAPPINGS into the entry data *before* setup so the merge
+        # happens during async_setup_entry (no post-setup update -> no reload).
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title=entry.title,
+            data={**entry.data, CONF_USER_MAPPINGS: mappings},
+            unique_id=entry.unique_id,
+            version=2,
+            minor_version=2,
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        return entry
+
+    hub_a = await _hub_with_mappings(
+        "a.local",
+        8433,
+        {
+            "temperature_C": {
+                "platform": "sensor",
+                "name": "A Kelvin",
+                "object_suffix": "K",
+                "unit_of_measurement": "K",
+            }
+        },
+    )
+    hub_b = await _hub_with_mappings(
+        "b.local",
+        9000,
+        {
+            "hub_b_only_field": {
+                "platform": "sensor",
+                "name": "B Only",
+                "object_suffix": "BO",
+            }
+        },
+    )
+
+    library = hass.data[DOMAIN][DATA_ENTRY_LIBRARY]
+    registry_a = library[hub_a.entry_id][0]
+    registry_b = library[hub_b.entry_id][0]
+    assert registry_a is not registry_b
+
+    # Hub A's Kelvin override is visible only on hub A.
+    assert lookup("temperature_C", registry=registry_a).unit_of_measurement == "K"
+    assert lookup("temperature_C", registry=registry_b).unit_of_measurement == "°C"
+
+    # Hub B's private field is visible only on hub B.
+    assert lookup("hub_b_only_field", registry=registry_a) is None
+    assert lookup("hub_b_only_field", registry=registry_b) is not None
+
+
+# --------------------------------------------------------------------------- #
+# minor_version 1 -> 2 mappings seed migration (file import).                  #
+# --------------------------------------------------------------------------- #
+def _patch_config_path(hass, monkeypatch, mappings_path):
+    """Point ``hass.config.path(rtl_433_mappings.yaml)`` at a test-owned file.
+
+    The shared ``testing_config`` dir is reused across tests, so the migration
+    must not read/write the real config dir. This redirects only the mappings
+    filename to ``mappings_path`` (a ``pathlib.Path``), delegating any other path
+    to the real implementation.
+    """
+    real_path = hass.config.path
+
+    def _fake_path(*parts):
+        if parts == ("rtl_433_mappings.yaml",):
+            return str(mappings_path)
+        return real_path(*parts)
+
+    monkeypatch.setattr(hass.config, "path", _fake_path)
+
+
+async def test_migration_seeds_user_mappings_from_legacy_file(
+    hass, tmp_path, monkeypatch
+):
+    """The minor-version migration imports the legacy mappings file into entries.
+
+    A temp ``rtl_433_mappings.yaml`` (redirected via ``hass.config.path``) holds a
+    binary override whose payload uses bare ``on``/``off`` (YAML booleans). Two
+    v2/minor-1 hubs are migrated: each gets its own normalized copy in
+    ``entry.data[CONF_USER_MAPPINGS]`` (payload keys canonicalised to strings), the
+    minor_version bumps to 2, the file is left on disk, and a second migrate call
+    is a no-op.
+    """
+    import os
+
+    from custom_components.rtl_433 import async_migrate_entry
+    from custom_components.rtl_433.const import CONF_USER_MAPPINGS
+
+    legacy = (
+        "battery_low:\n"
+        "  platform: binary_sensor\n"
+        "  device_class: battery\n"
+        "  name: Battery Low\n"
+        "  object_suffix: BL\n"
+        "  payload:\n"
+        "    on: '0'\n"
+        "    off: '1'\n"
+    )
+    mappings_path = tmp_path / "rtl_433_mappings.yaml"
+    mappings_path.write_text(legacy, encoding="utf-8")
+    _patch_config_path(hass, monkeypatch, mappings_path)
+
+    def _make_hub(host, port):
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title=f"rtl_433 ({host})",
+            data={CONF_HOST: host, CONF_PORT: port, CONF_PATH: "/ws"},
+            unique_id=f"hub:{host}:{port}",
+            version=2,
+            minor_version=1,
+        )
+        entry.add_to_hass(hass)
+        return entry
+
+    hub_a = _make_hub("a.local", 8433)
+    hub_b = _make_hub("b.local", 9000)
+
+    for hub in (hub_a, hub_b):
+        assert await async_migrate_entry(hass, hub) is True
+        assert hub.minor_version == 2
+        overrides = hub.data[CONF_USER_MAPPINGS]
+        # Each hub got its own normalized copy: payload bare on/off -> string keys.
+        assert overrides["battery_low"]["payload"] == {"on": "0", "off": "1"}
+
+    # The legacy file is left on disk (never deleted by the migration).
+    assert os.path.exists(mappings_path)
+
+    # A second migrate call is a no-op: already at minor 2, mappings unchanged.
+    snapshot = dict(hub_a.data[CONF_USER_MAPPINGS])
+    assert await async_migrate_entry(hass, hub_a) is True
+    assert hub_a.minor_version == 2
+    assert hub_a.data[CONF_USER_MAPPINGS] == snapshot
+
+
+async def test_migration_seeds_empty_mappings_when_file_missing(
+    hass, tmp_path, monkeypatch
+):
+    """With no legacy file present, the migration seeds an empty mappings dict."""
+    from custom_components.rtl_433 import async_migrate_entry
+    from custom_components.rtl_433.const import CONF_USER_MAPPINGS
+
+    # Point at a non-existent path in the tmp dir (no file written).
+    _patch_config_path(hass, monkeypatch, tmp_path / "rtl_433_mappings.yaml")
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="rtl_433 (c.local)",
+        data={CONF_HOST: "c.local", CONF_PORT: 8433, CONF_PATH: "/ws"},
+        unique_id="hub:c.local:8433",
+        version=2,
+        minor_version=1,
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 2
+    assert entry.data[CONF_USER_MAPPINGS] == {}

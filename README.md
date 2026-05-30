@@ -34,9 +34,9 @@ requirements.
 - **Data-driven device library** — device support is YAML, not Python. Add or
   correct a device with a small, reviewable
   [mapping change](docs/device-library.md).
-- **Per-installation user overrides** — drop a
-  `<config>/rtl_433_mappings.yaml` file to add or correct mappings without
-  editing the integration.
+- **Per-hub user overrides** — add or correct mappings from the hub's options
+  using Home Assistant's built-in YAML editor; validated before save and applied
+  by an automatic reload. No file editing or restart required.
 - **Automatic nested devices** — each newly observed device is added
   automatically as a device-registry device under the hub, gated by a per-hub
   discovery toggle. Remove one from its device page; with discovery on it
@@ -305,19 +305,48 @@ contributor guide:
   device-library reference.
 
 You can extend or correct the shipped library for your own installation, without
-editing the integration files, by creating:
+editing the integration files and without touching disk, from the hub's options:
 
-```text
-<config>/rtl_433_mappings.yaml
+> **Settings → Devices & Services → rtl_433 → Configure → Device mappings**
+
+This opens Home Assistant's built-in YAML editor pre-filled with that hub's
+current overrides. Overrides use the same schema as the shipped library:
+top-level keys are rtl_433 field names, values are entry mappings, and they may
+include a `skip_keys:` list. Overrides win over shipped entries (full
+replacement), new fields are added, and `skip_keys` are unioned.
+
+**Overriding one device model.** A top-level key changes a field for *every*
+device that emits it. To correct a mapping for a single model without touching
+others, nest it under a `models:` block keyed by the exact rtl_433 `model`
+string — a model-scoped entry always wins over a global one for that model:
+
+```yaml
+models:
+  Acurite-Tower: # exact rtl_433 model string
+    temperature_C:
+      platform: sensor
+      device_class: temperature
+      unit_of_measurement: "°C"
+      state_class: measurement
+      name: Outdoor temperature # rename just this model's sensor
+      value_transform: { round: 2 }
+      object_suffix: T
 ```
 
-(`<config>` is the directory containing your `configuration.yaml`.) It uses the
-same schema as the shipped library: top-level keys are rtl_433 field names,
-values are entry mappings, and it may include a `skip_keys:` list. Overrides win
-over shipped entries (full replacement), new fields are added, and `skip_keys`
-are unioned. See [User overrides](docs/device-library.md#user-overrides) for the
-details and examples. Changes are picked up on the next reload of the
-integration (or a Home Assistant restart).
+Mapping overrides are **global or model-scoped** — they apply to all devices of a
+model, never a single physical unit. Per-*instance* settings (availability
+timeout, meter calibration, motion clear delay) live in **Device settings**
+instead. See [model-scoped mappings](docs/device-library.md#model-scoped-mappings-models)
+for the resolution order and a worked example.
+
+Overrides are stored **per hub** — each hub has its own set. The editor blocks
+invalid YAML and **validates the mapping schema on save**, rejecting bad input
+with a per-field error rather than silently dropping it; on save the hub
+**reloads automatically** so the change takes effect with no restart. If you had
+a `<config>/rtl_433_mappings.yaml` from an earlier version, it is **imported once
+into each existing hub** on upgrade and then ignored (the file is left on disk,
+untouched). See [User overrides](docs/device-library.md#user-overrides) for the
+details and examples.
 
 ## Utility-meter calibration
 
@@ -380,11 +409,21 @@ temperature, humidity, and battery sensors, plus RSSI / SNR / noise diagnostics.
 
 ### Hub options flow
 
-The hub options flow (**Configure** on the hub) exposes the discovery toggle and
-the default availability timeout under **Hub settings**, and per-device timeout
-overrides under **Device settings**.
+The hub options flow (**Configure** on the hub) opens a menu: the discovery
+toggle and default availability timeout live under **Hub settings**, per-device
+timeout overrides and calibration under **Device settings**, and the per-hub
+mapping overrides under **Device mappings**.
 
-![Hub options flow with the discovery toggle and availability-timeout field](docs/images/03-options-flow.png)
+![Hub options flow menu showing Hub settings, Device settings, and Device mappings](docs/images/03-options-flow.png)
+
+### Device mappings
+
+The **Device mappings** step opens Home Assistant's built-in YAML editor
+pre-filled with that hub's current overrides. Edit the per-hub mappings as
+YAML — the schema matches the shipped library — and the hub reloads
+automatically on save. See [User overrides](docs/device-library.md#user-overrides).
+
+![Device mappings step showing the YAML editor pre-filled with an example override that adds a custom field and re-classifies battery_ok as a low-battery problem sensor](docs/images/05-mapping-overrides.png)
 
 ### Unavailable state
 

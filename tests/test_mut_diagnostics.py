@@ -7,7 +7,7 @@ Covers every surviving mutant in diffs_diagnostics.txt:
 - async_get_config_entry_diagnostics: all exact key names and values, both
   coordinator-present and coordinator-absent paths, devices block structure
   (model, identity, fields, available, last_seen as ISO string), seen_field_keys,
-  DATA_LIBRARY key for registry lookup
+  DATA_ENTRY_LIBRARY key for registry lookup
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from custom_components.rtl_433.const import (
     CONF_HOST,
     CONF_PATH,
     CONF_PORT,
-    DATA_LIBRARY,
+    DATA_ENTRY_LIBRARY,
     DOMAIN,
 )
 from custom_components.rtl_433.diagnostics import (
@@ -83,10 +83,18 @@ def _setup_hass_with_coordinator(
     registry: Registry | None = None,
     skip_keys: set | None = None,
 ) -> None:
-    """Register domain data and coordinator in hass."""
+    """Register domain data and coordinator in hass.
+
+    Diagnostics resolves the library per entry from
+    ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]`` (a ``(registry, skip_keys)``
+    tuple), so mirror that shape when a registry is supplied.
+    """
     hass.data.setdefault(DOMAIN, {})
     if registry is not None:
-        hass.data[DOMAIN][DATA_LIBRARY] = (registry, skip_keys or set())
+        hass.data[DOMAIN].setdefault(DATA_ENTRY_LIBRARY, {})[entry.entry_id] = (
+            registry,
+            skip_keys or set(),
+        )
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
 
@@ -328,12 +336,13 @@ async def test_diag_coordinator_absent_uses_domain_key(
 async def test_diag_data_library_key_used(
     hass: HomeAssistant, hub_entry_builder
 ) -> None:
-    """Registry must be read using DATA_LIBRARY key, not None.
+    """Registry must be read using the per-entry DATA_ENTRY_LIBRARY key, not None.
 
-    mutmut_7 replaces DATA_LIBRARY with None in domain_data.get(DATA_LIBRARY,...).
-    We put the registry under DATA_LIBRARY. With the mutant, the registry is
-    None and any field will appear as unmatched. With the real code, fields
-    matching the registry are excluded.
+    Diagnostics resolves the merged library from
+    ``domain_data.get(DATA_ENTRY_LIBRARY, {}).get(entry_id, (None, set()))``. We
+    store the registry there; a mutant that nulls the key (or the entry lookup)
+    yields a None registry so every seen field appears unmatched, whereas the real
+    code excludes fields that resolve against the registry.
     """
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
@@ -347,8 +356,8 @@ async def test_diag_data_library_key_used(
     )
     registry = Registry(flat={"synthetic_test_known_field_xyz": descriptor}, models={})
     hass.data.setdefault(DOMAIN, {})
-    # Store under DATA_LIBRARY key exactly
-    hass.data[DOMAIN][DATA_LIBRARY] = (registry, set())
+    # Diagnostics resolves the per-entry library from DATA_ENTRY_LIBRARY[entry_id].
+    hass.data[DOMAIN][DATA_ENTRY_LIBRARY] = {entry.entry_id: (registry, set())}
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     diag = await async_get_config_entry_diagnostics(hass, entry)

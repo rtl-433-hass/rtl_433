@@ -87,6 +87,11 @@ DEVICE_EVENT_TYPES: Final = "event_types"
 # base unit + ``total_increasing`` + a value scale). Absent (or commodity =
 # ``none``) means the consumption field keeps its library/global descriptor.
 DEVICE_CALIBRATION: Final = "calibration"
+# Per-hub user mapping overrides. Holds the normalized override object (the same
+# shape ``merge_overrides`` consumes: flat field entries, an optional ``models``
+# block, and an optional ``skip_keys`` list) edited via the options flow and
+# merged over the shipped library at setup.
+CONF_USER_MAPPINGS: Final = "user_mappings"
 # Sub-keys inside the calibration record.
 CALIBRATION_COMMODITY: Final = "commodity"  # one of CALIBRATION_COMMODITIES
 CALIBRATION_UNIT: Final = "unit"  # an HA-convertible unit for the commodity
@@ -114,11 +119,17 @@ CONSUMPTION_FIELD_KEYS: Final[frozenset[str]] = frozenset(
 )
 
 # --- hass.data keys ---------------------------------------------------------
-# Key under ``hass.data[DOMAIN]`` holding the once-loaded mapping library tuple
-# ``(registry, skip_keys)``. The library is loaded in an executor during hub
-# setup and shared by the coordinator, the entity platforms, and diagnostics so
-# nothing re-reads the YAML files on the event loop.
+# Key under ``hass.data[DOMAIN]`` holding the once-loaded **shipped** mapping
+# library tuple ``(registry, skip_keys)`` (no user overrides). The library is
+# loaded in an executor during hub setup and shared across hubs so nothing
+# re-reads the YAML files on the event loop. Per-hub user overrides are merged
+# over this and cached separately under ``DATA_ENTRY_LIBRARY``.
 DATA_LIBRARY: Final = "_library"
+# Key under ``hass.data[DOMAIN]`` holding the per-entry merged library map
+# ``{entry_id: (registry, skip_keys)}`` — the shipped library with that hub's
+# stored ``CONF_USER_MAPPINGS`` overrides merged in. The coordinator, entity
+# platforms, options flow, and diagnostics read their hub's entry here.
+DATA_ENTRY_LIBRARY: Final = "_entry_library"
 
 # --- Defaults ---------------------------------------------------------------
 # Default rtl_433 HTTP server port (the documented "-F http" default).
