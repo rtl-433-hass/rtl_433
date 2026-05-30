@@ -16,8 +16,14 @@ Mapping rules (given changed paths on argv):
   ``custom_components/rtl_433/<name>.py`` (also trying ``<a>/<b>.py`` for a
   ``<a>_<b>`` name, e.g. ``coordinator_base`` → ``coordinator/base.py``). This
   closes the "a test was weakened but its source is unchanged" blind spot for the
-  common case. A test that can't be resolved to one module (e.g. the broad
-  ``test_lifecycle.py``) escalates to a full run.
+  common case. A test that can't be resolved to one module escalates to a full run.
+* A few tests don't follow that 1:1 convention — compound tests that exercise
+  several modules (``test_diagnostics_repairs``), the ``coordinator`` package
+  root, and the ``__init__`` root (no ``init.py`` exists for the resolver to
+  find). They are listed in ``EXPLICIT_TEST_SOURCES`` with the exact modules
+  they cover, so touching them scopes rather than escalates. Genuinely broad
+  integration tests (e.g. ``test_lifecycle.py``) are deliberately left out, so
+  they still escalate — a full run is correct when they change.
 * Any change to mutation infrastructure or shared test scaffolding
   (``pyproject.toml``, ``requirements_test.txt``, ``tests/conftest.py``,
   ``scripts/mutation_*.py``, the mutation workflow) escalates to a full run,
@@ -49,6 +55,32 @@ FULL_RUN_TRIGGERS = {
     "scripts/mutation_ratchet.py",
     "scripts/mutation_targets.py",
     ".github/workflows/mutation.yml",
+}
+
+# Tests whose filename does not map 1:1 to a source module via the naming
+# convention below, declared with the modules they actually exercise so a PR
+# touching them scopes instead of escalating to a full run. Covers compound
+# tests (``test_diagnostics_repairs`` -> diagnostics + repairs), the
+# ``coordinator`` package root, and the ``__init__`` root (``source_for_test``
+# cannot reach ``__init__.py`` — there is no ``init.py``).
+#
+# Genuinely broad integration tests (``test_lifecycle.py`` drives the whole
+# config-entry setup across __init__, entity, and every platform) are
+# intentionally absent so they still escalate. Values are module paths under
+# ``custom_components/rtl_433/``. An entry that under-specifies a test's modules
+# is caught by the push-to-main + nightly FULL runs (which re-verify the entire
+# baseline), so it is a delayed catch, never a silent floor blind spot.
+EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
+    "tests/test_coordinator.py": ["coordinator/base.py"],
+    "tests/test_mut_init.py": ["__init__.py"],
+    "tests/test_binary_sensor_motion.py": ["binary_sensor.py", "event.py"],
+    "tests/test_diagnostics_repairs.py": ["diagnostics.py", "repairs.py"],
+    "tests/test_sdr_controls.py": [
+        "number.py",
+        "select.py",
+        "switch.py",
+        "sdr_settings.py",
+    ],
 }
 
 
@@ -86,6 +118,10 @@ def resolve(changed: list[str]) -> tuple[bool, set[str]]:
         if f.startswith(f"{PKG}/") and f.endswith(".py"):
             sources.add(f)
         elif f.startswith("tests/") and f.endswith(".py"):
+            explicit = EXPLICIT_TEST_SOURCES.get(f)
+            if explicit is not None:
+                sources.update(f"{PKG}/{module}" for module in explicit)
+                continue
             src = source_for_test(Path(f).stem)
             if src is None:
                 # A broad/unmappable test changed — be safe and run everything.
