@@ -59,3 +59,35 @@ depth_cm:
   name: Depth
   value_transform: { float: true }
   object_suffix: D
+
+# --- Fine Offset / Ecowitt WH51 (also WN31, SwitchDoc Labs SM23) soil moisture ---
+# Raw/diagnostic fields that sit behind the `moisture` percentage. Only the
+# upstream WH51 soil-moisture decoder emits `ad_raw` and `boost`, so a flat
+# (global) mapping is collision-free. See the WH51 notes in upstream
+# `src/devices/fineoffset.c`.
+
+# Raw 9-bit ADC reading (~70 dry .. ~450 wet) the sensor derives `moisture` from.
+# Exposed as a diagnostic so users can recalibrate the dry/wet endpoints when the
+# sensor's own percentage is inaccurate at the extremes.
+ad_raw:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: measurement
+  name: AD Raw
+  value_transform: { int: true }
+  entity_category: diagnostic
+  object_suffix: ad_raw
+
+# Transmission period boost: a 3-bit counter set to its max on a moisture change
+# and decremented on each transmission (>0 => 10 s send period, 0 => 70 s). A
+# non-zero value flags recent soil-moisture activity / a faster send cadence.
+boost:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: measurement
+  name: Transmission Boost
+  value_transform: { int: true }
+  entity_category: diagnostic
+  object_suffix: boost
