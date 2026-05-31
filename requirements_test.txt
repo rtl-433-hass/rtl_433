@@ -18,7 +18,7 @@
 # testing, and pins the Home Assistant version used for the test run.
 # Requires Python 3.14 (0.13.317+) and pulls in Home Assistant 2026.4+,
 # matching the minimum versions declared in pyproject.toml and hacs.json.
-pytest-homeassistant-custom-component==0.13.333
+pytest-homeassistant-custom-component==0.13.334
 
 # Mutation testing. mutmut 3.x copies the package into a mutants/ working tree
 # and forks once per mutant, running the pytest suite with coverage-based test
