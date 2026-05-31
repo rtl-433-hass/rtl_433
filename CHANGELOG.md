@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.8.0...v0.9.0) (2026-05-31)
+
+
+### Features
+
+* **device-library:** map WH51 soil ad_raw and boost fields ([#39](https://github.com/rtl-433-hass/rtl_433/issues/39)) ([e73013d](https://github.com/rtl-433-hass/rtl_433/commit/e73013deb30b9cad68a8cb72c6b9fadab8614cab))
+* **sensor:** ship Last seen disabled by default ([#41](https://github.com/rtl-433-hass/rtl_433/issues/41)) ([b08de9f](https://github.com/rtl-433-hass/rtl_433/commit/b08de9f65f2eb0f63ba27594b53e3a41fb1f8268))
+
 ## [0.8.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.7.0...v0.8.0) (2026-05-30)
 
 
