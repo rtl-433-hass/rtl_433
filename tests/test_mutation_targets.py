@@ -48,6 +48,8 @@ mt = _load_targets_module()
 _NO_SINGLE_MODULE = {
     "tests/test_lifecycle.py",  # broad: the whole config-entry lifecycle
     "tests/test_mutation_targets.py",  # meta: tests this very script
+    # broad: timeout resolution spans const.py + __init__.py + coordinator + entity
+    "tests/test_availability_class_defaults.py",
 }
 
 
