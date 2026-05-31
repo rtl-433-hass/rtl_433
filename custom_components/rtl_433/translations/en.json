@@ -71,7 +71,7 @@
         },
         "data_description": {
           "discovery_enabled": "When on, newly observed devices on this server are added automatically as nested devices.",
-          "availability_timeout": "Mark a device unavailable after this many seconds without an event.",
+          "availability_timeout": "Mark a device unavailable after this many seconds without an event. Use 0 to never mark devices unavailable. Devices that send rare events (door, window, motion) automatically get a longer default.",
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched."
         }
       },
@@ -86,7 +86,7 @@
         },
         "data_description": {
           "device": "The device whose settings you want to change.",
-          "timeout_override": "Mark this device unavailable after this many seconds without an event. Leave blank to use the hub default.",
+          "timeout_override": "Mark this device unavailable after this many seconds without an event. Use 0 to never mark it unavailable. Leave blank to use the automatic default for this device's type (longer for door/window/motion sensors).",
           "commodity": "What this meter measures. Pick Energy, Gas, or Water to calibrate the consumption sensor (next step) so it works in the Energy dashboard. Pick None to leave it unitless (and clear any existing calibration).",
           "motion_clear_delay": "For a motion sensor, auto-clear it to off this many seconds after the last motion. Leave blank to use the default."
         }
