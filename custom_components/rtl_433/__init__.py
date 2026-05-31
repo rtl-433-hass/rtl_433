@@ -254,14 +254,26 @@ def _hub_discovery_enabled(entry: ConfigEntry) -> bool:
     )
 
 
+def _explicit_hub_timeout(entry: ConfigEntry) -> int | None:
+    """Return the hub's *explicitly set* availability timeout, or ``None``.
+
+    Unlike :func:`_hub_availability_timeout`, this distinguishes "user set a hub
+    default" from "unset" by testing membership (``in``) rather than ``.get`` with
+    a default. ``None`` means no hub default was configured, letting the resolver
+    fall through to the device-class default. An explicit ``0`` is a real value
+    (never-expire) and is returned as ``0``, never treated as unset.
+    """
+    if CONF_AVAILABILITY_TIMEOUT in entry.options:
+        return int(entry.options[CONF_AVAILABILITY_TIMEOUT])
+    if CONF_AVAILABILITY_TIMEOUT in entry.data:
+        return int(entry.data[CONF_AVAILABILITY_TIMEOUT])
+    return None
+
+
 def _hub_availability_timeout(entry: ConfigEntry) -> int:
     """Resolve the hub's default availability timeout (options > data > default)."""
-    return int(
-        entry.options.get(
-            CONF_AVAILABILITY_TIMEOUT,
-            entry.data.get(CONF_AVAILABILITY_TIMEOUT, DEFAULT_AVAILABILITY_TIMEOUT),
-        )
-    )
+    explicit = _explicit_hub_timeout(entry)
+    return DEFAULT_AVAILABILITY_TIMEOUT if explicit is None else explicit
 
 
 def _hub_manage_settings(entry: ConfigEntry) -> bool:
@@ -368,12 +380,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry_skip_keys,
     )
 
-    def effective_timeout_resolver(device_key: str) -> int:
-        """Resolve a device's effective timeout (per-device override > hub default).
+    def effective_timeout_resolver(device_key: str) -> int | None:
+        """Resolve a device's *explicit* effective timeout, or ``None``.
 
-        Reads the per-device ``timeout_override`` from the hub's devices map
-        (``entry.data[CONF_DEVICES][device_key]``); falls back to the hub-level
-        default when none is set.
+        Resolution order for the two explicit tiers handled here:
+        per-device ``timeout_override`` (``entry.data[CONF_DEVICES][device_key]``)
+        → explicit hub default (only when ``CONF_AVAILABILITY_TIMEOUT`` is actually
+        present in the entry's options/data). Returns ``None`` when neither is set,
+        signalling the coordinator to apply the device-class default from the
+        device's latest payload. An explicit ``0`` at either tier means
+        never-expire and is returned as ``0`` (never falls through).
         """
         override = (
             entry.data.get(CONF_DEVICES, {})
@@ -382,7 +398,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         if override is not None:
             return int(override)
-        return _hub_availability_timeout(entry)
+        return _explicit_hub_timeout(entry)
 
     def effective_clear_delay_resolver(device_key: str) -> int:
         """Resolve a device's effective motion clear-delay (override > default).

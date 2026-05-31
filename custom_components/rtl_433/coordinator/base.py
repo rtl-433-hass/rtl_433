@@ -49,11 +49,13 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..const import (
+    AVAILABILITY_TIMEOUT_NEVER,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_PATH,
     DEFAULT_PORT,
     LOGGER,
     SDR_STORE_VERSION,
+    class_default_timeout,
     sdr_store_key,
     signal_device_update,
     signal_hub_update,
@@ -149,7 +151,10 @@ class Rtl433Coordinator:
             ``False`` the desired-state ``Store`` is wiped on load and the
             receiver's settings are left untouched.
         ``new_device_callback``: ``Callable[[str, str, bool], None] | None``.
-        ``effective_timeout_resolver``: ``Callable[[str], int] | None``.
+        ``effective_timeout_resolver``: ``Callable[[str], int | None] | None``.
+            Returns the device's explicit timeout (per-device override → explicit
+            hub default), or ``None`` when neither is set so the coordinator
+            applies the device-class default from the device's latest payload.
         ``effective_clear_delay_resolver``: ``Callable[[str], int] | None``.
 
     Runtime state (read by ``diagnostics.py``):
@@ -212,7 +217,7 @@ class Rtl433Coordinator:
 
         # --- Injectable hooks (wired by the integration setup) ----------------
         self.new_device_callback: Callable[[str, str, bool], None] | None = None
-        self.effective_timeout_resolver: Callable[[str], int] | None = None
+        self.effective_timeout_resolver: Callable[[str], int | None] | None = None
         self.effective_clear_delay_resolver: Callable[[str], int] | None = None
 
         # Per-device calibration snapshot captured at setup (analogous to
@@ -887,15 +892,40 @@ class Rtl433Coordinator:
     # ------------------------------------------------------------------ #
     # Availability watchdog                                              #
     # ------------------------------------------------------------------ #
+    def _class_default_timeout(self, device_key: str) -> int:
+        """Return the device-class default timeout from the latest payload.
+
+        The classifier reads the device's last normalized measurement fields
+        (``self.devices[device_key].fields`` — the rtl_433 payload with identity
+        and skip-keys removed; the event-driven open/close/motion keys are
+        measurement fields and survive there). An event-driven device gets the
+        longer event default, everything else the periodic default. A device not
+        yet seen falls back to the periodic default.
+        """
+        normalized = self.devices.get(device_key)
+        payload = normalized.fields if normalized is not None else None
+        return class_default_timeout(payload)
+
     def _effective_timeout(self, device_key: str) -> int:
-        """Resolve the effective timeout for a device (override → hub default)."""
+        """Resolve the effective timeout for a device.
+
+        Resolution order: per-device override → explicit hub default → device-class
+        default (from the latest payload) → ``DEFAULT_AVAILABILITY_TIMEOUT``. The
+        resolver returns a concrete int for the two explicit tiers (including
+        ``0`` = never-expire) or ``None`` when neither is set, in which case the
+        device-class default applies.
+        """
         if self.effective_timeout_resolver is not None:
             try:
-                return self.effective_timeout_resolver(device_key)
-            except Exception:  # noqa: BLE001 - fall back to the hub default
+                resolved = self.effective_timeout_resolver(device_key)
+            except Exception:  # noqa: BLE001 - fall back to the class default
                 LOGGER.exception(
                     "rtl_433 effective_timeout_resolver failed for %s", device_key
                 )
+            else:
+                if resolved is not None:
+                    return resolved
+                return self._class_default_timeout(device_key)
         return self.availability_timeout
 
     async def _async_watchdog(self, _now: datetime) -> None:
@@ -903,6 +933,11 @@ class Rtl433Coordinator:
         now = dt_util.utcnow()
         for device_key, seen in list(self.last_seen.items()):
             timeout = self._effective_timeout(device_key)
+            if timeout == AVAILABILITY_TIMEOUT_NEVER:
+                # Never-expire: a device seen at least once is never flipped to
+                # unavailable due to silence. (The back-online path on a live
+                # event still applies.)
+                continue
             stale = (now - seen) > timedelta(seconds=timeout)
             currently = self.available.get(device_key, True)
             if stale and currently:
