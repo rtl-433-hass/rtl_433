@@ -33,6 +33,7 @@ from freezegun import freeze_time
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+    async_fire_time_changed,
     mock_restore_cache,
 )
 
@@ -109,6 +110,24 @@ async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
     assert await hass.config_entries.async_setup(hub.entry_id)
     await hass.async_block_till_done()
     return hub
+
+
+async def _enable_entity(hass, hub, entity_id):
+    """Clear a default-disabled entity's ``disabled_by`` and reload the hub.
+
+    The "Last seen" sensor ships disabled-by-default, so the tests that exercise
+    its live state must first re-enable it (as a user would) so the platform
+    instantiates it. Clearing ``disabled_by`` schedules a debounced reload; fire
+    that single reload (rather than adding a second, explicit one) so no stale
+    reload is left pending to fire when a later test step advances time.
+    """
+    from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
+
+    er.async_get(hass).async_update_entity(entity_id, disabled_by=None)
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=RELOAD_AFTER_UPDATE_DELAY + 1)
+    )
+    await hass.async_block_till_done()
 
 
 def _ts(value):
@@ -777,10 +796,12 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
 # Per-device synthetic "Last seen" sensor.                                     #
 # --------------------------------------------------------------------------- #
 async def test_last_seen_created_for_every_device(hass, hub_entry_builder):
-    """Every device gets exactly one enabled diagnostic timestamp Last-seen.
+    """Every device gets exactly one diagnostic timestamp Last-seen, disabled.
 
-    Covers both the seeded-map setup path (including a device with no mapped
-    fields) and the live-event new-device path with discovery on.
+    The Last-seen sensor ships disabled-by-default, so each registry entry is
+    created ``disabled_by`` the integration. Covers both the seeded-map setup
+    path (including a device with no mapped fields) and the live-event
+    new-device path with discovery on.
     """
     mapped_key = "EnergyMeter-2000-1234"
     bare_key = "MysteryThing-7"  # no library-mapped fields
@@ -805,17 +826,21 @@ async def test_last_seen_created_for_every_device(hass, hub_entry_builder):
             if e.platform == DOMAIN and e.domain == "sensor" and e.unique_id == suffix
         ]
 
-    # Exactly one Last-seen sensor per seeded device — even the no-field one.
+    # Exactly one Last-seen sensor per seeded device — even the no-field one —
+    # and each is created disabled-by-default.
     for key in (mapped_key, bare_key):
         ids = last_seen_ids(key)
         assert len(ids) == 1, (key, ids)
         entry = ent_reg.async_get(ids[0])
         assert entry.entity_category is EntityCategory.DIAGNOSTIC
-        assert entry.disabled_by is None  # enabled by default
+        assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
 
-    # The state exposes the timestamp device_class once added (seeded with a
+    # Disabled-by-default means no state object is created until enabled; once
+    # re-enabled the state exposes the timestamp device_class (seeded with a
     # baseline "now" by the base entity even before any live event).
     mapped_eid = last_seen_ids(mapped_key)[0]
+    assert hass.states.get(mapped_eid) is None
+    await _enable_entity(hass, hub, mapped_eid)
     assert hass.states.get(mapped_eid).attributes["device_class"] == "timestamp"
 
     # A brand-new device fed via a live event (discovery on) also gets exactly
@@ -844,7 +869,6 @@ async def test_last_seen_updates_and_stays_available(hass, hub_entry_builder):
             device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
         },
     )
-    coordinator = _coordinator(hass, hub)
     ent_reg = er.async_get(hass)
     last_seen_eid = ent_reg.async_get_entity_id(
         "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
@@ -854,6 +878,11 @@ async def test_last_seen_updates_and_stays_available(hass, hub_entry_builder):
     )
     assert last_seen_eid is not None
     assert watts_eid is not None
+
+    # Ships disabled-by-default; re-enable it to exercise its live state. The
+    # reload rebuilds the coordinator, so capture it after enabling.
+    await _enable_entity(hass, hub, last_seen_eid)
+    coordinator = _coordinator(hass, hub)
 
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -899,7 +928,6 @@ async def test_last_seen_restores_prior_not_baseline(hass, hub_entry_builder):
             device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
         },
     )
-    coordinator = _coordinator(hass, hub)
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
         "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
@@ -908,6 +936,12 @@ async def test_last_seen_restores_prior_not_baseline(hass, hub_entry_builder):
     # The hardcoded restore entity_id must match the registry-assigned one, or
     # the restore cache would not be picked up.
     assert eid == restore_eid
+
+    # Ships disabled-by-default; re-enable it so it loads and restores. The
+    # restore cache survives the reload, so the prior state is still applied.
+    # The reload rebuilds the coordinator, so capture it after enabling.
+    await _enable_entity(hass, hub, eid)
+    coordinator = _coordinator(hass, hub)
 
     # No live event yet: the sensor shows the restored prior time, NOT a fresh
     # baseline "now". Comparing parsed datetimes guards against ISO formatting.
@@ -1821,7 +1855,7 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
 
     for hub in (hub_a, hub_b):
         assert await async_migrate_entry(hass, hub) is True
-        assert hub.minor_version == 2
+        assert hub.minor_version == 3
         overrides = hub.data[CONF_USER_MAPPINGS]
         # Each hub got its own normalized copy: payload bare on/off -> string keys.
         assert overrides["battery_low"]["payload"] == {"on": "0", "off": "1"}
@@ -1829,10 +1863,10 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
     # The legacy file is left on disk (never deleted by the migration).
     assert os.path.exists(mappings_path)
 
-    # A second migrate call is a no-op: already at minor 2, mappings unchanged.
+    # A second migrate call is a no-op: already at minor 3, mappings unchanged.
     snapshot = dict(hub_a.data[CONF_USER_MAPPINGS])
     assert await async_migrate_entry(hass, hub_a) is True
-    assert hub_a.minor_version == 2
+    assert hub_a.minor_version == 3
     assert hub_a.data[CONF_USER_MAPPINGS] == snapshot
 
 
@@ -1857,5 +1891,82 @@ async def test_migration_seeds_empty_mappings_when_file_missing(
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     assert entry.data[CONF_USER_MAPPINGS] == {}
+
+
+# --------------------------------------------------------------------------- #
+# minor_version 2 -> 3 disables already-created "Last seen" sensors.           #
+# --------------------------------------------------------------------------- #
+async def test_migration_disables_existing_last_seen_sensors(
+    hass, tmp_path, monkeypatch
+):
+    """The minor 2 -> 3 migration disables already-created Last-seen sensors.
+
+    A pre-existing, user-enabled Last-seen sensor is disabled by the integration;
+    a non-Last-seen sensor is untouched; a Last-seen sensor the user had already
+    disabled (e.g. manually) keeps its existing disabler. The minor_version bumps
+    to 3 and a second migrate call is a no-op.
+    """
+    from custom_components.rtl_433 import async_migrate_entry
+    from custom_components.rtl_433.const import CONF_USER_MAPPINGS
+
+    # The seed step also runs; point it at a missing file so it no-ops to {}.
+    _patch_config_path(hass, monkeypatch, tmp_path / "rtl_433_mappings.yaml")
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="rtl_433 (d.local)",
+        data={
+            CONF_HOST: "d.local",
+            CONF_PORT: 8433,
+            CONF_PATH: "/ws",
+            CONF_USER_MAPPINGS: {},
+        },
+        unique_id="hub:d.local:8433",
+        version=2,
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+
+    ent_reg = er.async_get(hass)
+
+    def _register(object_suffix, *, disabled_by=None):
+        """Register one entity owned by the hub entry; return its entity_id."""
+        return ent_reg.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}:Acurite-606TX-42:{object_suffix}",
+            config_entry=entry,
+            disabled_by=disabled_by,
+        ).entity_id
+
+    enabled_last_seen = _register("last_seen")
+    other_sensor = _register("temperature")
+    # A user-disabled Last-seen on a second device (distinct unique_id).
+    already_disabled = ent_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{entry.entry_id}:Acurite-606TX-99:last_seen",
+        config_entry=entry,
+        disabled_by=er.RegistryEntryDisabler.USER,
+    ).entity_id
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 3
+
+    # The enabled Last-seen sensor is now disabled by the integration.
+    assert (
+        ent_reg.async_get(enabled_last_seen).disabled_by
+        is er.RegistryEntryDisabler.INTEGRATION
+    )
+    # The non-Last-seen sensor is untouched.
+    assert ent_reg.async_get(other_sensor).disabled_by is None
+    # The already user-disabled Last-seen keeps its existing disabler.
+    assert (
+        ent_reg.async_get(already_disabled).disabled_by is er.RegistryEntryDisabler.USER
+    )
+
+    # A second migrate call is a no-op: already at minor 3.
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 3
