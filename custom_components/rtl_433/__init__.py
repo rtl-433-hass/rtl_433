@@ -91,6 +91,11 @@ PHANTOM_DEVICE_KEY = "unknown"
 # matching ``DEVICE_EVENT_TYPES`` slot so the event platform never recreates it.
 _MOTION_OBJECT_SUFFIX = "motion"
 
+# The ``object_suffix`` (and unique-id tail) of the per-device "Last seen"
+# timestamp sensor. It now ships disabled-by-default; the one-time migration
+# sweep below disables any already-created instances on existing installs.
+_LAST_SEEN_OBJECT_SUFFIX = "last_seen"
+
 
 def _cleanup_phantom_unknown_device(
     hass: HomeAssistant, entry: ConfigEntry, device_registry: dr.DeviceRegistry
@@ -177,6 +182,34 @@ def _migrate_motion_event_to_binary_sensor(
 
     if removed_any:
         repairs.async_raise_motion_moved(hass)
+
+
+def _disable_existing_last_seen_sensors(
+    hass: HomeAssistant, entry: ConfigEntry, entity_registry: er.EntityRegistry
+) -> None:
+    """Disable already-created per-device "Last seen" sensors.
+
+    The "Last seen" sensor now ships disabled-by-default, but
+    ``entity_registry_enabled_default`` only takes effect when an entity is first
+    *created*, so existing installs keep their already-enabled instances. This
+    one-time sweep finds this hub's ``sensor``-domain registry entries whose
+    unique-id tail is ``:last_seen`` (unique-id shape
+    ``f"{hub_entry_id}:{device_key}:{object_suffix}"``) and disables any the user
+    has not already disabled, marking them ``RegistryEntryDisabler.INTEGRATION``.
+
+    Driven once from :func:`async_migrate_entry` behind the minor-version 3 bump
+    so a sensor the user later re-enables is never re-disabled on restart.
+    """
+    for ent in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
+        if (
+            ent.domain != "sensor"
+            or not ent.unique_id.endswith(f":{_LAST_SEEN_OBJECT_SUFFIX}")
+            or ent.disabled_by is not None
+        ):
+            continue
+        entity_registry.async_update_entity(
+            ent.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION
+        )
 
 
 def _read_legacy_overrides(path: str) -> dict:
@@ -678,8 +711,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     Version 2 minor 2 additionally seeds the hub's
     ``entry.data[CONF_USER_MAPPINGS]`` from any pre-existing
     ``<config>/rtl_433_mappings.yaml`` (read once, in the executor, never
-    modified or deleted). Entries created at the current minor version skip this
-    step; new hubs added after the upgrade start with no mappings.
+    modified or deleted). Version 2 minor 3 disables any already-created
+    "Last seen" sensors, which now ship disabled-by-default. Entries created at
+    the current minor version skip these steps; new hubs added after the upgrade
+    start with no mappings and their "Last seen" sensors already disabled.
     """
     if entry.version > 2:
         # Downgrade from a future schema is unsupported.
@@ -714,6 +749,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             version=2,
             minor_version=2,
         )
+
+    if (entry.minor_version or 1) < 3:
+        # The "Last seen" sensor now ships disabled-by-default; disable any
+        # already-created instances so existing installs match. Gated by the
+        # minor-version bump so a user who later re-enables one keeps it.
+        _disable_existing_last_seen_sensors(hass, entry, er.async_get(hass))
+        hass.config_entries.async_update_entry(entry, version=2, minor_version=3)
 
     return True
 

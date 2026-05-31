@@ -97,7 +97,7 @@ LAST_SEEN_DESCRIPTOR = FieldDescriptor(
     object_suffix="last_seen",
     device_class="timestamp",
     entity_category="diagnostic",
-    enabled_by_default=True,
+    enabled_by_default=False,
 )
 
 

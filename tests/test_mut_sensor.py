@@ -35,6 +35,7 @@ cover every class and every branch in the module:
 
 from __future__ import annotations
 
+from datetime import timedelta
 import json
 from unittest.mock import MagicMock, patch
 
@@ -42,6 +43,7 @@ from freezegun import freeze_time
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+    async_fire_time_changed,
     mock_restore_cache,
 )
 
@@ -104,6 +106,28 @@ async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
     return hub
 
 
+async def _enable_last_seen(hass, hub, device_key):
+    """Re-enable a device's disabled-by-default Last-seen sensor and reload.
+
+    The sensor ships disabled-by-default, so tests that exercise its live state
+    must clear ``disabled_by`` (as a user would) and let the debounced reload
+    rebuild the platform. Returns the (stable) entity_id.
+    """
+    from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
+
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
+    )
+    assert eid is not None
+    ent_reg.async_update_entity(eid, disabled_by=None)
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=RELOAD_AFTER_UPDATE_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+    return eid
+
+
 # ---------------------------------------------------------------------------
 # 1. Module-level constants
 # ---------------------------------------------------------------------------
@@ -154,8 +178,8 @@ class TestLastSeenSentinel:
     def test_descriptor_entity_category(self):
         assert LAST_SEEN_DESCRIPTOR.entity_category == "diagnostic"
 
-    def test_descriptor_enabled_by_default(self):
-        assert LAST_SEEN_DESCRIPTOR.enabled_by_default is True
+    def test_descriptor_disabled_by_default(self):
+        assert LAST_SEEN_DESCRIPTOR.enabled_by_default is False
 
 
 # ---------------------------------------------------------------------------
@@ -935,11 +959,7 @@ async def test_last_seen_sensor_device_class_is_timestamp(hass, hub_entry_builde
             device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
         },
     )
-    ent_reg = er.async_get(hass)
-    last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
-    )
-    assert last_seen_eid is not None
+    last_seen_eid = await _enable_last_seen(hass, hub, device_key)
     state = hass.states.get(last_seen_eid)
     # Before any live event the sensor has the baseline set by the base entity.
     assert state.attributes["device_class"] == "timestamp"
@@ -959,26 +979,10 @@ async def test_last_seen_sensor_available_only_when_value_set(hass, hub_entry_bu
             device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
         },
     )
-    ent_reg = er.async_get(hass)
-    last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
-    )
-    # The base entity baselines last_seen -> Rtl433LastSeenSensor sees a device
-    # entry in coordinator.devices? No — the baseline is set but the devices
-    # map entry is only set by a real event.  So native_value starts None, but
-    # the base entity's async_added_to_hass baselines coordinator.last_seen,
-    # and the __init__ checks coordinator.devices.get(device_key) which IS None
-    # at setup (no live event). So at setup time, last_seen sensor's value is
-    # None unless there's a prior restore cache.
-    #
-    # Then the base entity sets coordinator.last_seen[device_key] = now in
-    # async_added_to_hass.  The last-seen sensor does NOT see the devices map
-    # at init time (nothing to seed from), so it stays None initially.
-    # After the baseline, subsequent reads of available go through the
-    # Rtl433LastSeenSensor.available override which checks native_value.
-    #
-    # Confirm that a live event makes it available.
-    assert last_seen_eid is not None
+    # Re-enable the disabled-by-default Last-seen sensor; the reload rebuilds the
+    # coordinator, so capture it afterwards. Confirm a live event makes it
+    # available (native_value set, available True).
+    last_seen_eid = await _enable_last_seen(hass, hub, device_key)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, {"model": "EnergyMeter-2000", "id": 1234, "power_W": 5.0})
     await hass.async_block_till_done()
@@ -999,12 +1003,8 @@ async def test_last_seen_sensor_updates_on_dispatch(hass, hub_entry_builder):
             device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
         },
     )
+    last_seen_eid = await _enable_last_seen(hass, hub, device_key)
     coordinator = _coordinator(hass, hub)
-    ent_reg = er.async_get(hass)
-    last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
-    )
-    assert last_seen_eid is not None
 
     with freeze_time(start):
         _feed(coordinator, {"model": "EnergyMeter-2000", "id": 1234, "power_W": 5.0})
@@ -1031,14 +1031,11 @@ async def test_last_seen_sensor_apply_value_is_noop(hass, hub_entry_builder):
             device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
         },
     )
+    last_seen_eid = await _enable_last_seen(hass, hub, device_key)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, {"model": "EnergyMeter-2000", "id": 1234, "power_W": 5.0})
     await hass.async_block_till_done()
 
-    ent_reg = er.async_get(hass)
-    last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
-    )
     before = hass.states.get(last_seen_eid).state
 
     # Feed an event that carries __last_seen__ as a field (won't happen in
@@ -1080,6 +1077,10 @@ async def test_last_seen_restores_datetime_when_no_live_value(hass, hub_entry_bu
     assert eid is not None
     assert eid == restore_eid
 
+    # Re-enable the disabled-by-default sensor so it loads and restores; the
+    # restore cache survives the reload.
+    await _enable_last_seen(hass, hub, device_key)
+
     state = hass.states.get(eid)
     # The restored ISO string is parsed back to a datetime.
     restored = dt_util.parse_datetime(state.state)
@@ -1117,10 +1118,9 @@ async def test_last_seen_restore_ignores_unknown_state(hass, hub_entry_builder):
         assert await hass.config_entries.async_setup(hub.entry_id)
         await hass.async_block_till_done()
 
-        ent_reg = er.async_get(hass)
-        eid = ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
-        )
+        # Re-enable the disabled-by-default sensor so it loads; the reload
+        # rebuilds the coordinator, so capture it afterwards.
+        eid = await _enable_last_seen(hass, hub, device_key)
         coordinator = _coordinator(hass, hub)
         # Feed a live event: native_value should now be the coordinator's last_seen,
         # not the non-restorable string (which was never stored as native_value).
@@ -1149,11 +1149,11 @@ async def test_last_seen_stays_available_after_timeout_watchdog(
             device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
         },
     )
+    # Re-enable the disabled-by-default Last-seen sensor; the reload rebuilds the
+    # coordinator, so capture it and look up entities afterwards.
+    last_seen_eid = await _enable_last_seen(hass, hub, device_key)
     coordinator = _coordinator(hass, hub)
     ent_reg = er.async_get(hass)
-    last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
-    )
     watts_eid = ent_reg.async_get_entity_id(
         "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:watts"
     )
@@ -1195,23 +1195,21 @@ async def test_last_seen_seeded_when_coordinator_has_prior_device(
             device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
         },
     )
+    # Re-enable the disabled-by-default Last-seen sensor first (the reload
+    # rebuilds the coordinator), then feed so the live timestamp is recorded.
+    last_seen_eid = await _enable_last_seen(hass, hub, device_key)
     coordinator = _coordinator(hass, hub)
     t_feed = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
     with freeze_time(t_feed):
         _feed(coordinator, {"model": "EnergyMeter-2000", "id": 1234, "power_W": 5.0})
         await hass.async_block_till_done()
 
-    # Reload: coordinator.devices still has device_key from the prior event.
+    # Reload: coordinator.devices still has device_key from the prior event, so
+    # the rebuilt sensor seeds from coordinator.last_seen.
     assert await hass.config_entries.async_reload(hub.entry_id)
     await hass.async_block_till_done()
 
-    ent_reg = er.async_get(hass)
-    last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:last_seen"
-    )
     state = hass.states.get(last_seen_eid)
-    # coordinator.last_seen[device_key] was set by the live event; the rebuilt
-    # sensor seeds from it (not unavailable).
     assert state.state != "unavailable"
     assert state.state != "unknown"
 
