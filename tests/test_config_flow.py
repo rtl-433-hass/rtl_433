@@ -29,6 +29,7 @@ from custom_components.rtl_433.const import (
     CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
     CONF_HOST,
+    CONF_INITIAL_FREQUENCY,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
@@ -718,13 +719,16 @@ async def test_hassio_discovery_happy_path_creates_entry(hass):
     entry = result["result"]
     assert entry.unique_id == "serial:0123"
     assert entry.title == "rtl_433 (core-rtl433:8433)"
-    # Exact data shape: connection params + the default manage-settings toggle.
+    # Exact data shape: connection params + the default toggles. Submitting the
+    # empty confirm form applies the schema defaults (manage-settings default +
+    # discovery enabled True, no initial frequency).
     assert entry.data == {
         CONF_HOST: "core-rtl433",
         CONF_PORT: 8433,
         CONF_PATH: "/ws",
         "secure": False,
         CONF_MANAGE_SETTINGS: DEFAULT_MANAGE_SETTINGS,
+        CONF_DISCOVERY_ENABLED: True,
     }
 
 
@@ -972,3 +976,85 @@ async def test_hassio_confirm_cannot_connect_reshows_form(hass):
         "host": "core-rtl433",
         "port": "8433",
     }
+
+
+# --------------------------------------------------------------------------- #
+# Setup toggles + initial frequency (manual user step and discovery confirm).  #
+# --------------------------------------------------------------------------- #
+async def test_user_step_persists_discovery_off_and_initial_frequency(hass):
+    """Managed add with discovery off + a frequency persists both into entry.data."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "rtl433.local",
+                CONF_PORT: 8433,
+                CONF_PATH: "/ws",
+                "secure": False,
+                CONF_MANAGE_SETTINGS: True,
+                CONF_DISCOVERY_ENABLED: False,
+                CONF_INITIAL_FREQUENCY: 868.3,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    assert entry.data[CONF_DISCOVERY_ENABLED] is False
+    # The frequency rides the managed path; persisted as a float (MHz).
+    assert entry.data[CONF_INITIAL_FREQUENCY] == 868.3
+
+
+async def test_user_step_drops_initial_frequency_when_unmanaged(hass):
+    """A frequency entered with management off is not persisted (managed-only path)."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "rtl433.local",
+                CONF_PORT: 8433,
+                CONF_PATH: "/ws",
+                "secure": False,
+                CONF_MANAGE_SETTINGS: False,
+                CONF_DISCOVERY_ENABLED: True,
+                CONF_INITIAL_FREQUENCY: 868.3,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    assert CONF_INITIAL_FREQUENCY not in entry.data
+
+
+async def test_hassio_confirm_persists_toggles_and_frequency(hass):
+    """The discovery confirm form persists manage/discovery/frequency into entry.data."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=_disc()
+    )
+    assert result["step_id"] == "hassio_confirm"
+
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_MANAGE_SETTINGS: True,
+                CONF_DISCOVERY_ENABLED: False,
+                CONF_INITIAL_FREQUENCY: 915.0,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    assert entry.data[CONF_MANAGE_SETTINGS] is True
+    assert entry.data[CONF_DISCOVERY_ENABLED] is False
+    assert entry.data[CONF_INITIAL_FREQUENCY] == 915.0

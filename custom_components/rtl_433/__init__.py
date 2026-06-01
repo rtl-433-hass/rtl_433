@@ -43,6 +43,7 @@ from .const import (
     CONF_ENTRY_TYPE,
     CONF_HOST,
     CONF_HUB_ENTRY_ID,
+    CONF_INITIAL_FREQUENCY,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
@@ -476,6 +477,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         discovery_enabled=_hub_discovery_enabled(entry),
         manage_settings=_hub_manage_settings(entry),
         availability_timeout=_hub_availability_timeout(entry),
+        initial_center_frequency=entry.data.get(CONF_INITIAL_FREQUENCY),
         skip_keys=entry_skip_keys,
     )
     coordinator.new_device_callback = new_device_callback
