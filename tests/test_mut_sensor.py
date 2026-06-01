@@ -288,7 +288,7 @@ class TestHubSensorsDescriptors:
         d = self._by_suffix("center_frequency")
         assert d.name == "Center frequency"
         assert d.device_class == SensorDeviceClass.FREQUENCY
-        assert d.native_unit == UnitOfFrequency.HERTZ
+        assert d.native_unit == UnitOfFrequency.MEGAHERTZ
         assert d.state_class is None
         assert d.attrs is not None
 
@@ -396,7 +396,8 @@ class TestHubSensorsDescriptors:
                 "frames": {"events": 40, "count": 12, "fsk": 3},
             },
         )
-        assert by_suffix["center_frequency"].value(c) == 433920000
+        # The center_frequency sensor reports MHz (meta Hz / 1e6).
+        assert by_suffix["center_frequency"].value(c) == 433.92
         assert by_suffix["sample_rate"].value(c) == 250000
         assert by_suffix["conversion_mode"].value(c) == 1
         assert by_suffix["hop_interval"].value(c) == 600
@@ -513,7 +514,7 @@ class TestRtl433HubSensorProperties:
     def test_native_value_center_frequency(self):
         d = _desc_by_suffix("center_frequency")
         sensor = _make_hub_sensor(d, meta={"center_frequency": 433920000})
-        assert sensor.native_value == 433920000
+        assert sensor.native_value == 433.92
 
     def test_native_value_decoded_events(self):
         d = _desc_by_suffix("decoded_events")
@@ -578,7 +579,7 @@ class TestRtl433HubSensorProperties:
     def test_native_unit_set_from_desc(self):
         d = _desc_by_suffix("center_frequency")
         sensor = _make_hub_sensor(d)
-        assert sensor._attr_native_unit_of_measurement == UnitOfFrequency.HERTZ
+        assert sensor._attr_native_unit_of_measurement == UnitOfFrequency.MEGAHERTZ
 
     def test_state_class_set_from_desc_total_increasing(self):
         d = _desc_by_suffix("decoded_events")
@@ -1333,9 +1334,9 @@ async def test_hub_sensor_center_frequency_metadata(hass, hub_entry_builder):
     eid = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
     assert eid is not None
     state = hass.states.get(eid)
-    assert state.state == "433920000"
+    assert state.state == "433.92"
     assert state.attributes["device_class"] == "frequency"
-    assert state.attributes["unit_of_measurement"] == "Hz"
+    assert state.attributes["unit_of_measurement"] == "MHz"
     assert state.attributes["frequencies"] == [433920000]
     assert state.attributes["hop_times"] == [600]
 

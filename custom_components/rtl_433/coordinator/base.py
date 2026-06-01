@@ -62,12 +62,40 @@ from ..const import (
 )
 from ..normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent, normalize
 from ..sdr_settings import (
+    KEY_CENTER_FREQUENCY,
     KEY_GAIN_AUTO,
     KEY_GAIN_DB,
     SDR_SETTINGS,
     SDR_SETTINGS_BY_KEY,
     gain_command_arg,
 )
+
+
+class _SdrStore(Store[dict[str, Any]]):
+    """Per-hub desired-state Store with a Hz->MHz center-frequency migration.
+
+    Version 1 persisted ``values["center_frequency"]`` in Hz; version 2 stores it
+    in MHz (matching the control entity and the setup field). ``async_load``
+    invokes this migrator when the on-disk version is older than
+    :data:`SDR_STORE_VERSION`, so an existing managed hub's frequency converts
+    transparently on the next load.
+    """
+
+    async def _async_migrate_func(
+        self,
+        old_major_version: int,
+        old_minor_version: int,
+        old_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Convert a version-1 payload's center frequency from Hz to MHz."""
+        if old_major_version < 2:
+            values = old_data.get("values")
+            if isinstance(values, dict):
+                hz = values.get(KEY_CENTER_FREQUENCY)
+                if isinstance(hz, (int, float)):
+                    values[KEY_CENTER_FREQUENCY] = float(hz) / 1_000_000
+        return old_data
+
 
 # Backoff bounds for the reconnect loop (seconds). Starts at 1s, doubles on
 # each consecutive failure, capped at 60s so the loop never spins hot.
@@ -275,7 +303,7 @@ class Rtl433Coordinator:
         self._desired: dict[str, Any] = {}
         self._managed: set[str] = set()
         self._cmd_lock = asyncio.Lock()
-        self._store: Store[dict[str, Any]] = Store(
+        self._store: Store[dict[str, Any]] = _SdrStore(
             hass, SDR_STORE_VERSION, sdr_store_key(entry.entry_id)
         )
 

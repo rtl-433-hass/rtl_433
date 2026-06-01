@@ -41,12 +41,14 @@ from custom_components.rtl_433.const import (
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.sdr_settings import (
+    KEY_CENTER_FREQUENCY,
     KEY_CONVERSION_MODE,
     KEY_GAIN_AUTO,
     KEY_GAIN_DB,
     KEY_HOP_INTERVAL,
     KEY_PPM_ERROR,
     KEY_SAMPLE_RATE,
+    SDR_SETTINGS_BY_KEY,
 )
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.helpers import entity_registry as er
@@ -132,7 +134,7 @@ def test_write_path_command_mapping(hass, coordinator, aioclient_mock):
     cases = [
         (
             "center_frequency",
-            868000000,
+            868.0,
             {"cmd": "center_frequency", "val": "868000000"},
         ),
         (KEY_SAMPLE_RATE, 1024000, {"cmd": "sample_rate", "val": "1024000"}),
@@ -203,8 +205,8 @@ def test_adoption_normal_populates_and_marks_managed(hass, coordinator):
     coordinator.meta = dict(_META_SINGLE)
     _run(hass, coordinator._adopt_from_server())
 
-    # Center frequency IS adopted when not hopping.
-    assert coordinator.get_desired("center_frequency") == 433920000
+    # Center frequency IS adopted when not hopping (meta Hz -> desired MHz).
+    assert coordinator.get_desired("center_frequency") == 433.92
     assert coordinator.is_managed("center_frequency")
     assert coordinator.get_desired(KEY_SAMPLE_RATE) == 250000
     assert coordinator.get_desired(KEY_PPM_ERROR) == 2
@@ -261,7 +263,7 @@ def test_enforcement_replays_all_managed_on_each_connect(
     coordinator.connected = True
     # Seed desired state directly (as adoption / the Store would).
     coordinator._desired = {
-        "center_frequency": 433920000,
+        "center_frequency": 433.92,
         KEY_SAMPLE_RATE: 250000,
         KEY_PPM_ERROR: 2,
         KEY_CONVERSION_MODE: 1,
@@ -302,7 +304,7 @@ async def test_store_persistence_across_recreate(hass, hub_entry_builder, hass_s
     entry.add_to_hass(hass)
 
     first = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
-    first._desired = {"center_frequency": 868000000, KEY_GAIN_AUTO: True}
+    first._desired = {"center_frequency": 868.0, KEY_GAIN_AUTO: True}
     first._managed = {"center_frequency", KEY_GAIN_AUTO}
     await first._persist_desired()
 
@@ -314,7 +316,7 @@ async def test_store_persistence_across_recreate(hass, hub_entry_builder, hass_s
     second = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
     assert second.get_desired("center_frequency") is None  # not loaded yet
     await second.async_load_desired_state()
-    assert second.get_desired("center_frequency") == 868000000
+    assert second.get_desired("center_frequency") == 868.0
     assert second.get_desired(KEY_GAIN_AUTO) is True
     assert second.is_managed("center_frequency")
     assert second.is_managed(KEY_GAIN_AUTO)
@@ -326,7 +328,7 @@ async def test_store_wiped_when_management_off(hass, hub_entry_builder, hass_sto
     entry.add_to_hass(hass)
 
     managed = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
-    managed._desired = {"center_frequency": 868000000}
+    managed._desired = {"center_frequency": 868.0}
     managed._managed = {"center_frequency"}
     await managed._persist_desired()
     assert sdr_store_key(entry.entry_id) in hass_storage
@@ -336,6 +338,97 @@ async def test_store_wiped_when_management_off(hass, hub_entry_builder, hass_sto
     assert off.get_desired("center_frequency") is None
     assert off._managed == set()
     assert sdr_store_key(entry.entry_id) not in hass_storage
+
+
+def _seed_store(hass_storage, entry_id, *, version, values, managed):
+    """Pre-seed the per-hub SDR Store with an on-disk payload at ``version``."""
+    hass_storage[sdr_store_key(entry_id)] = {
+        "version": version,
+        "data": {"values": values, "managed": managed},
+    }
+
+
+async def test_store_migration_v1_hz_to_mhz(hass, hub_entry_builder, hass_storage):
+    """A version-1 payload's center frequency is migrated Hz -> MHz on load."""
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+    _seed_store(
+        hass_storage,
+        entry.entry_id,
+        version=1,
+        values={"center_frequency": 433920000},
+        managed=["center_frequency"],
+    )
+
+    coordinator = Rtl433Coordinator(
+        hass, entry, host="rtl433.local", manage_settings=True
+    )
+    await coordinator.async_load_desired_state()
+
+    assert coordinator.get_desired("center_frequency") == 433.92
+    assert coordinator.is_managed("center_frequency")
+
+
+async def test_store_migration_v2_value_unchanged(
+    hass, hub_entry_builder, hass_storage
+):
+    """An already-current (version-2) MHz value is loaded as-is (no re-division)."""
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+    _seed_store(
+        hass_storage,
+        entry.entry_id,
+        version=2,
+        values={"center_frequency": 433.92},
+        managed=["center_frequency"],
+    )
+
+    coordinator = Rtl433Coordinator(
+        hass, entry, host="rtl433.local", manage_settings=True
+    )
+    await coordinator.async_load_desired_state()
+
+    assert coordinator.get_desired("center_frequency") == 433.92
+
+
+async def test_store_migration_v1_without_center_frequency(
+    hass, hub_entry_builder, hass_storage
+):
+    """A version-1 payload lacking center_frequency migrates other fields untouched."""
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+    _seed_store(
+        hass_storage,
+        entry.entry_id,
+        version=1,
+        values={KEY_SAMPLE_RATE: 250000, KEY_GAIN_AUTO: True},
+        managed=[KEY_SAMPLE_RATE, KEY_GAIN_AUTO],
+    )
+
+    coordinator = Rtl433Coordinator(
+        hass, entry, host="rtl433.local", manage_settings=True
+    )
+    await coordinator.async_load_desired_state()
+
+    assert coordinator.get_desired("center_frequency") is None
+    assert coordinator.get_desired(KEY_SAMPLE_RATE) == 250000
+    assert coordinator.get_desired(KEY_GAIN_AUTO) is True
+
+
+# --------------------------------------------------------------------------- #
+# Center-frequency registry setting: MHz read / Hz to_command round-trip.      #
+# --------------------------------------------------------------------------- #
+def test_center_frequency_setting_mhz_round_trip():
+    """``read`` converts meta Hz -> MHz; ``to_command`` converts MHz -> integer Hz."""
+    cf = SDR_SETTINGS_BY_KEY[KEY_CENTER_FREQUENCY]
+
+    assert cf.read({"center_frequency": 915_000_000}) == 915.0
+    assert cf.read({"center_frequency": 433_920_000}) == 433.92
+
+    for mhz, hz in ((915.0, 915_000_000), (433.92, 433_920_000), (868.3, 868_300_000)):
+        sent = cf.to_command(mhz)
+        assert sent == hz
+        assert isinstance(sent, int)
 
 
 # --------------------------------------------------------------------------- #
@@ -535,10 +628,10 @@ def test_write_failure_keeps_desired_value(hass, coordinator, aioclient_mock):
 
     with patch(DISPATCH):
         # Must not raise even though the send fails.
-        _run(hass, coordinator.set_sdr("center_frequency", 868000000))
+        _run(hass, coordinator.set_sdr("center_frequency", 868.0))
 
     # The desired value + managed flag survive the failed send.
-    assert coordinator.get_desired("center_frequency") == 868000000
+    assert coordinator.get_desired("center_frequency") == 868.0
     assert coordinator.is_managed("center_frequency")
 
 
@@ -548,7 +641,7 @@ def test_enforcement_failure_keeps_desired_and_event_stream_works(
     """A failed enforcement keeps desired state; a normal event still processes."""
     aioclient_mock.get(_CMD_URL, status=500)  # every /cmd fails
     coordinator.connected = True
-    coordinator._desired = {"center_frequency": 868000000, KEY_GAIN_AUTO: True}
+    coordinator._desired = {"center_frequency": 868.0, KEY_GAIN_AUTO: True}
     coordinator._managed = {"center_frequency", KEY_GAIN_AUTO}
 
     with patch(DISPATCH):
@@ -556,7 +649,7 @@ def test_enforcement_failure_keeps_desired_and_event_stream_works(
         _run(hass, coordinator._enforce_all())
 
     # Desired state is retained despite every send failing.
-    assert coordinator.get_desired("center_frequency") == 868000000
+    assert coordinator.get_desired("center_frequency") == 868.0
     assert coordinator.is_managed(KEY_GAIN_AUTO)
 
     # A normal device event fed afterwards is still processed (stream undisturbed).

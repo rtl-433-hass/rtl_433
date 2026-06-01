@@ -16,7 +16,8 @@ or the platform modules.
 Outbound ``/cmd`` commands follow ``WEBSOCKET_API.md`` exactly (no invented
 fields):
 
-- center frequency -> ``center_frequency``, ``val`` = Hz (live).
+- center frequency -> ``center_frequency``, ``val`` = Hz (live). Presented to
+  the user in MHz; the registry's read/to_command convert at that boundary.
 - sample rate -> ``sample_rate``, ``val`` = Hz (live).
 - ppm -> ``ppm_error``, ``val`` = integer (live).
 - gain -> ``gain``, ``arg`` = dB string, empty string = auto (live).
@@ -174,7 +175,19 @@ class SdrSetting:
 # Per-field read helpers (defensive: a missing meta key reads as None).         #
 # --------------------------------------------------------------------------- #
 def _read_center_frequency(meta: dict[str, Any]) -> Any:
-    return meta.get("center_frequency")
+    """Read the center frequency from meta (Hz) as MHz, or None when absent.
+
+    The wire protocol and ``meta`` keep center frequency in Hz; this is the only
+    read path that converts it to the MHz the desired-state value and the control
+    entity present.
+    """
+    hz = meta.get("center_frequency")
+    if hz is None:
+        return None
+    try:
+        return float(hz) / 1_000_000
+    except TypeError, ValueError:
+        return None
 
 
 def _read_sample_rate(meta: dict[str, Any]) -> Any:
@@ -234,6 +247,16 @@ def _int_command(value: Any) -> int:
     return int(value)
 
 
+def _mhz_to_hz_command(value: Any) -> int:
+    """Map a desired center frequency in MHz to the integer Hz ``val``.
+
+    Inverse of :func:`_read_center_frequency`. ``round`` keeps typical
+    kHz-resolution frequencies exact (e.g. 433.92 MHz -> 433920000 Hz) despite
+    binary-float imprecision in ``value * 1_000_000``.
+    """
+    return int(round(float(value) * 1_000_000))
+
+
 # --------------------------------------------------------------------------- #
 # The registry.                                                                 #
 # --------------------------------------------------------------------------- #
@@ -249,12 +272,13 @@ SDR_SETTINGS: tuple[SdrSetting, ...] = (
         command="center_frequency",
         arg_kind="val",
         read=_read_center_frequency,
-        to_command=_int_command,
-        # 0 .. 6 GHz covers RTL-SDR through wideband front-ends.
+        to_command=_mhz_to_hz_command,
+        # Presented in MHz (converted to Hz on the wire). 0 .. 6000 MHz covers
+        # RTL-SDR through wideband front-ends; 0.001 MHz = 1 kHz resolution.
         native_min=0,
-        native_max=6_000_000_000,
-        native_step=1,
-        native_unit=UnitOfFrequency.HERTZ,
+        native_max=6000,
+        native_step=0.001,
+        native_unit=UnitOfFrequency.MEGAHERTZ,
         mode=NumberMode.BOX,
         device_class=NumberDeviceClass.FREQUENCY,
         # Hidden under hop mode: a single value cannot represent the hop list and

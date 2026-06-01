@@ -1471,7 +1471,8 @@ def test_command_args_gain_auto_false_uses_db_value(hass, coordinator):
 
 def test_command_args_center_frequency(hass, coordinator):
     """KEY_CENTER_FREQUENCY resolves to center_frequency command with val."""
-    coordinator._desired = {KEY_CENTER_FREQUENCY: 433920000}
+    # Desired state is MHz; to_command maps it to integer Hz for the wire.
+    coordinator._desired = {KEY_CENTER_FREQUENCY: 433.92}
     result = coordinator._command_args(KEY_CENTER_FREQUENCY)
     assert result is not None
     command, val, arg = result
@@ -1692,7 +1693,8 @@ def test_adopt_from_server_single_frequency_adopts_center_freq(hass, coordinator
     with patch.object(coordinator._store, "async_save", new_callable=AsyncMock):
         _run(hass, coordinator._adopt_from_server())
 
-    assert coordinator._desired.get(KEY_CENTER_FREQUENCY) == 433920000
+    # Adoption reads meta Hz through the setting and stores MHz in desired state.
+    assert coordinator._desired.get(KEY_CENTER_FREQUENCY) == 433.92
     assert KEY_CENTER_FREQUENCY in coordinator._managed
 
 
