@@ -145,12 +145,49 @@ RF devices announce their presence only by transmitting, so the integration uses
 a silence-based availability model: if no event for a device arrives within its
 **availability timeout**, its entities become `unavailable`.
 
-- **Hub default** — set on the hub options flow (**Hub settings**). The shipped
-  default is **600 seconds (10 minutes)**.
+**Two transmit cadences.** How long a device can reasonably stay silent before
+"silent" really means "gone" depends on what kind of device it is:
+
+- **Periodic transmitters** (weather / temperature / soil / air quality) send on
+  a fixed cadence regardless of any event, so a short timeout suits them — a few
+  missed transmissions is a real problem.
+- **Event-driven devices** (door/window contacts, motion/PIR, security sensors)
+  only transmit on an event, plus at most an occasional supervision heartbeat.
+  Long silences are *normal* — a short timeout would flap them to `unavailable`
+  constantly. Some cheap generic sensors send **no heartbeat at all**.
+
+| Device | Type | Typical cadence |
+| --- | --- | --- |
+| Acurite temperature | Periodic | ~16 s |
+| Ecowitt / Fine Offset WH51 soil | Periodic | ~72 s |
+| Ecowitt WH41 air quality | Periodic | ~10 min |
+| GE / Interlogix motion | Event-driven | heartbeat ~1 h |
+| Honeywell 5800 contacts | Event-driven | heartbeat ~70–90 min |
+| Generic EV1527 door / PIR | Event-driven | **none** — silent for days |
+| TPMS (parked vehicle) | Event-driven | **none** — silent until driven |
+
+- **Hub default** — set on the hub options flow (**Hub settings**). When you
+  leave it unset, the timeout is chosen **per device by its Home Assistant device
+  class** (see below). If you set it explicitly, your value becomes the default
+  for every device on the hub that has no per-device override.
+- **Device-class-aware defaults** — when no explicit timeout applies, the
+  integration picks the default from the device's class: event-driven
+  binary-sensor classes (door, window, opening/contact, motion) default to
+  **7200 seconds (2 hours)** to ride out their long quiet periods, while periodic
+  sensors keep **600 seconds (10 minutes)**. This applies **automatically**,
+  including to existing installs that never customized the hub timeout; any
+  explicit per-device or hub value you have set is always preserved.
+- **Never expire** — set the timeout to `0` (as the hub default or a per-device
+  override) and the device is **never** marked `unavailable`. Recommended for
+  heartbeat-less generic door/PIR sensors and for TPMS that go silent while the
+  vehicle is parked.
 - **Per-device override** — set through the hub options flow (**Device
-  settings**): pick a device and give it an optional timeout that overrides the
-  hub default for that one device. Leave it empty to clear the override and fall
-  back to the hub default.
+  settings**): pick a device and give it an optional timeout (including `0`) that
+  overrides the hub default for that one device. Leave it empty to clear the
+  override and fall back to the hub default (or, if that is unset, the
+  device-class default).
+- **Resolution order** — per-device override → hub default (if you set one) →
+  device-class default → 600 s fallback.
 - **Restart behavior** — on a Home Assistant restart, the last known states are
   **restored first**, then the timeout runs from the restart; entities only flip
   to `unavailable` once the (restored) silence window elapses without a fresh

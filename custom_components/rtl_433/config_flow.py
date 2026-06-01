@@ -114,7 +114,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle setup of an rtl_433 hub (one config entry per server)."""
 
     VERSION = 2
-    MINOR_VERSION = 3
+    MINOR_VERSION = 4
 
     # ------------------------------------------------------------------ #
     # Hub user flow                                                      #
@@ -296,7 +296,7 @@ class Rtl433OptionsFlow(OptionsFlow):
                 vol.Required(CONF_DISCOVERY_ENABLED, default=discovery_default): bool,
                 vol.Required(
                     CONF_AVAILABILITY_TIMEOUT, default=timeout_default
-                ): vol.All(int, vol.Range(min=1)),
+                ): vol.All(int, vol.Range(min=0)),
                 vol.Required(CONF_MANAGE_SETTINGS, default=manage_default): bool,
             }
         )
@@ -515,7 +515,7 @@ class Rtl433OptionsFlow(OptionsFlow):
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Optional(DEVICE_TIMEOUT_OVERRIDE): vol.All(int, vol.Range(min=1)),
+            vol.Optional(DEVICE_TIMEOUT_OVERRIDE): vol.All(int, vol.Range(min=0)),
             vol.Optional(
                 CALIBRATION_COMMODITY, default=commodity_default
             ): SelectSelector(

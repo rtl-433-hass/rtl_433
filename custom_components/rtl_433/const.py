@@ -8,7 +8,7 @@ the coordinator, config/options flow, entity platforms, and tests. Later tasks
 from __future__ import annotations
 
 import logging
-from typing import Final
+from typing import Any, Final
 
 from homeassistant.const import Platform
 
@@ -141,12 +141,63 @@ DEFAULT_PATH: Final = "/ws"
 # reporters while still detecting genuinely offline devices. Configurable per
 # hub and overridable per device, so this is not a magic constant elsewhere.
 DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
+# The pre-device-class-defaults global default. Older versions persisted this
+# exact value into a hub entry's options whenever the options flow was saved, so
+# an entry still carrying it is assumed to be on the old default (not a
+# deliberate user choice) and is migrated to the device-class-aware defaults (see
+# ``async_migrate_entry``). Equal to ``DEFAULT_AVAILABILITY_TIMEOUT`` today, but
+# pinned separately so the one-time migration stays correct if that default ever
+# changes.
+LEGACY_DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
+# Sentinel availability-timeout value meaning "never expire": a device that has
+# been seen at least once stays available indefinitely (the watchdog skips the
+# staleness flip and the entity's ``available`` short-circuits to True). Set
+# explicitly per device or, as an explicit hub default, for every non-overridden
+# device.
+AVAILABILITY_TIMEOUT_NEVER: Final = 0
+# Default availability window (seconds) for *event-driven* devices — those whose
+# rtl_433 payload carries an open/close/motion binary-sensor key (see
+# ``EVENT_DRIVEN_DEVICE_CLASS_KEYS``). Such devices transmit only on a state
+# change (a door opening, motion detected), so they can be silent for long
+# stretches while still online; a longer 2h default avoids spurious
+# unavailability. Used only when neither a per-device override nor an explicit
+# hub default is set.
+DEFAULT_EVENT_DEVICE_TIMEOUT: Final = 7200
+# rtl_433 payload keys that mark a device as event-driven (open/close/motion
+# classes). Presence of any one of these in a device's latest payload selects
+# ``DEFAULT_EVENT_DEVICE_TIMEOUT`` as the device-class default. A subset of
+# ``BINARY_DEVICE_CLASS_KEYS`` — ``tamper``/``battery_ok`` are excluded since
+# those alone do not make a device event-driven.
+EVENT_DRIVEN_DEVICE_CLASS_KEYS: Final[frozenset[str]] = frozenset(
+    {"motion", "occupancy", "contact", "opened", "door", "window"}
+)
 # Default seconds after which a motion/event binary_sensor auto-clears to "off"
 # when no explicit clear signal arrives. Overridable per device.
 DEFAULT_MOTION_CLEAR_DELAY: Final = 90
 # Default for the per-hub manage-settings toggle. New hubs adopt and manage the
 # SDR settings by default; users can opt out per hub via the options flow.
 DEFAULT_MANAGE_SETTINGS: Final = True
+
+
+def class_default_timeout(payload: dict[str, Any] | None) -> int:
+    """Return the device-class default availability timeout for a payload.
+
+    Pure classifier (no I/O, no HA deps) used as the third tier of the
+    availability-timeout resolution order: when neither a per-device override nor
+    an explicit hub default is set, a device's *class default* is chosen from its
+    latest rtl_433 payload. If the payload is a mapping carrying any
+    :data:`EVENT_DRIVEN_DEVICE_CLASS_KEYS` key (an open/close/motion device, which
+    transmits only on a state change) it gets the longer
+    :data:`DEFAULT_EVENT_DEVICE_TIMEOUT`; everything else (periodic reporters)
+    gets :data:`DEFAULT_AVAILABILITY_TIMEOUT`. A missing/non-dict payload (device
+    not yet seen) falls back to the periodic default.
+    """
+    if isinstance(payload, dict) and not EVENT_DRIVEN_DEVICE_CLASS_KEYS.isdisjoint(
+        payload
+    ):
+        return DEFAULT_EVENT_DEVICE_TIMEOUT
+    return DEFAULT_AVAILABILITY_TIMEOUT
+
 
 # --- Managed-SDR desired-state Store ---------------------------------------
 # The coordinator persists the desired SDR settings in a

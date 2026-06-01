@@ -48,6 +48,7 @@ from homeassistant.util import dt as dt_util
 
 from .calibration import COMMODITY_DEVICE_CLASS, normalize_calibration
 from .const import (
+    AVAILABILITY_TIMEOUT_NEVER,
     CALIBRATION_COMMODITY,
     CALIBRATION_SCALE,
     CALIBRATION_UNIT,
@@ -170,23 +171,21 @@ class Rtl433Entity(RestoreEntity):
         Mirrors the coordinator's watchdog logic but evaluated lazily so the
         value is correct between watchdog ticks too. On startup the entity
         baselines ``last_seen`` to "now" (see :meth:`async_added_to_hass`), so a
-        restored entity reads available until the timeout elapses.
+        restored entity reads available until the timeout elapses. A timeout of
+        ``0`` is never-expire: once the device has been seen at least once it
+        stays available indefinitely (still unavailable when never seen).
+
+        Routes through the coordinator's ``_effective_timeout`` so the
+        device-class-aware resolution (and never-expire) is identical to the
+        watchdog's.
         """
         last_seen = self._coordinator.last_seen.get(self._device_key)
         if last_seen is None:
             return False
-        timeout = self._effective_timeout()
+        timeout = self._coordinator._effective_timeout(self._device_key)
+        if timeout == AVAILABILITY_TIMEOUT_NEVER:
+            return True
         return (dt_util.utcnow() - last_seen) <= timedelta(seconds=timeout)
-
-    def _effective_timeout(self) -> int:
-        """Resolve the per-device timeout (override -> hub default)."""
-        resolver = self._coordinator.effective_timeout_resolver
-        if resolver is not None:
-            try:
-                return resolver(self._device_key)
-            except Exception:  # noqa: BLE001 - fall back to the hub default
-                pass
-        return self._coordinator.availability_timeout
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                          #

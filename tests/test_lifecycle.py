@@ -38,6 +38,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.rtl_433.const import (
+    AVAILABILITY_TIMEOUT_NEVER,
     CALIBRATION_COMMODITY,
     CALIBRATION_SCALE,
     CALIBRATION_UNIT,
@@ -59,6 +60,7 @@ from custom_components.rtl_433.const import (
     DOMAIN,
     ENTRY_TYPE_DEVICE,
     ENTRY_TYPE_HUB,
+    LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
     signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
@@ -1855,7 +1857,7 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
 
     for hub in (hub_a, hub_b):
         assert await async_migrate_entry(hass, hub) is True
-        assert hub.minor_version == 3
+        assert hub.minor_version == 4
         overrides = hub.data[CONF_USER_MAPPINGS]
         # Each hub got its own normalized copy: payload bare on/off -> string keys.
         assert overrides["battery_low"]["payload"] == {"on": "0", "off": "1"}
@@ -1863,10 +1865,10 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
     # The legacy file is left on disk (never deleted by the migration).
     assert os.path.exists(mappings_path)
 
-    # A second migrate call is a no-op: already at minor 3, mappings unchanged.
+    # A second migrate call is a no-op: already at minor 4, mappings unchanged.
     snapshot = dict(hub_a.data[CONF_USER_MAPPINGS])
     assert await async_migrate_entry(hass, hub_a) is True
-    assert hub_a.minor_version == 3
+    assert hub_a.minor_version == 4
     assert hub_a.data[CONF_USER_MAPPINGS] == snapshot
 
 
@@ -1891,7 +1893,7 @@ async def test_migration_seeds_empty_mappings_when_file_missing(
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 3
+    assert entry.minor_version == 4
     assert entry.data[CONF_USER_MAPPINGS] == {}
 
 
@@ -1953,7 +1955,7 @@ async def test_migration_disables_existing_last_seen_sensors(
     ).entity_id
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 3
+    assert entry.minor_version == 4
 
     # The enabled Last-seen sensor is now disabled by the integration.
     assert (
@@ -1967,6 +1969,101 @@ async def test_migration_disables_existing_last_seen_sensors(
         ent_reg.async_get(already_disabled).disabled_by is er.RegistryEntryDisabler.USER
     )
 
-    # A second migrate call is a no-op: already at minor 3.
+    # A second migrate call is a no-op: already at minor 4.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 3
+    assert entry.minor_version == 4
+
+
+# --------------------------------------------------------------------------- #
+# minor_version 3 -> 4 drops a legacy default hub availability timeout.        #
+# --------------------------------------------------------------------------- #
+def _timeout_hub(options, *, minor_version=3):
+    """Build a v2 hub entry (minor 3 by default) carrying the given options."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title="rtl_433 (rtl433.local)",
+        version=2,
+        minor_version=minor_version,
+        unique_id="hub:rtl433.local:8433",
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_HOST: "rtl433.local",
+            CONF_PORT: 8433,
+            CONF_PATH: "/ws",
+        },
+        options=options,
+    )
+
+
+async def test_migration_drops_legacy_default_timeout(hass):
+    """A hub pinned to the legacy 600s default has that option dropped.
+
+    Plan 7 made the timeout device-class-aware; an explicit hub option still
+    equal to the old global default (600s) would mask the per-class defaults, so
+    the minor 3 -> 4 migration drops exactly that value and lets resolution fall
+    through to the device-class default.
+    """
+    from custom_components.rtl_433 import async_migrate_entry
+
+    entry = _timeout_hub(
+        {CONF_AVAILABILITY_TIMEOUT: LEGACY_DEFAULT_AVAILABILITY_TIMEOUT}
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 4
+    assert CONF_AVAILABILITY_TIMEOUT not in entry.options
+
+    # A second migrate call is a no-op: already at minor 4.
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 4
+    assert CONF_AVAILABILITY_TIMEOUT not in entry.options
+
+
+@pytest.mark.parametrize(
+    "configured", [1234, AVAILABILITY_TIMEOUT_NEVER], ids=["custom", "never"]
+)
+async def test_migration_keeps_deliberate_timeout(hass, configured):
+    """A deliberately-set hub timeout (not the legacy default) is preserved.
+
+    Includes the never-expire sentinel (0): a real, intentional choice that must
+    survive the migration untouched.
+    """
+    from custom_components.rtl_433 import async_migrate_entry
+
+    entry = _timeout_hub({CONF_AVAILABILITY_TIMEOUT: configured})
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 4
+    assert entry.options[CONF_AVAILABILITY_TIMEOUT] == configured
+
+
+async def test_migration_timeout_no_option_just_bumps_version(hass):
+    """A hub with no stored timeout migrates cleanly (only the version bumps)."""
+    from custom_components.rtl_433 import async_migrate_entry
+
+    entry = _timeout_hub({})
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 4
+    assert CONF_AVAILABILITY_TIMEOUT not in entry.options
+
+
+async def test_migration_timeout_minor2_through_to_4(hass):
+    """An entry at minor 2 walks minor<3 then minor<4 in one call, ending at 4."""
+    from custom_components.rtl_433 import async_migrate_entry
+
+    entry = _timeout_hub(
+        {CONF_AVAILABILITY_TIMEOUT: LEGACY_DEFAULT_AVAILABILITY_TIMEOUT},
+        minor_version=2,
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 4
+    assert CONF_AVAILABILITY_TIMEOUT not in entry.options
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 4
