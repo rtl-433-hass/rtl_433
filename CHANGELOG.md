@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.9.1...v0.10.0) (2026-06-01)
+
+
+### Features
+
+* **config_flow:** choose manage/discovery toggles and an initial frequency at setup ([16a954d](https://github.com/rtl-433-hass/rtl_433/commit/16a954d240b8bdfc5a5c4b573d1e9a05db902ced))
+* **sdr:** present center frequency in MHz with a store upgrade path ([53777e6](https://github.com/rtl-433-hass/rtl_433/commit/53777e6623813b03675f27a503c410d4972ff3a5))
+
+
+### Documentation
+
+* document add-time toggles, initial frequency, and MHz center frequency ([082df07](https://github.com/rtl-433-hass/rtl_433/commit/082df07d43258d9c3e4940e209b730644d04d55d))
+
 ## [0.9.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.9.0...v0.9.1) (2026-06-01)
 
 
