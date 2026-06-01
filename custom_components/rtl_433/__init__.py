@@ -60,6 +60,7 @@ from .const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
+    LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
     LOGGER,
     PLATFORMS,
     signal_new_device,
@@ -728,9 +729,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ``entry.data[CONF_USER_MAPPINGS]`` from any pre-existing
     ``<config>/rtl_433_mappings.yaml`` (read once, in the executor, never
     modified or deleted). Version 2 minor 3 disables any already-created
-    "Last seen" sensors, which now ship disabled-by-default. Entries created at
-    the current minor version skip these steps; new hubs added after the upgrade
-    start with no mappings and their "Last seen" sensors already disabled.
+    "Last seen" sensors, which now ship disabled-by-default. Version 2 minor 4
+    drops a hub availability timeout still pinned to the legacy global default
+    (600s) so the new device-class defaults apply. Entries created at the current
+    minor version skip these steps; new hubs added after the upgrade start with
+    no mappings and their "Last seen" sensors already disabled.
     """
     if entry.version > 2:
         # Downgrade from a future schema is unsupported.
@@ -772,6 +775,29 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # minor-version bump so a user who later re-enables one keeps it.
         _disable_existing_last_seen_sensors(hass, entry, er.async_get(hass))
         hass.config_entries.async_update_entry(entry, version=2, minor_version=3)
+
+    if (entry.minor_version or 1) < 4:
+        # The availability timeout grew device-class-aware defaults (a longer
+        # window for event-driven door/motion sensors, the periodic default for
+        # the rest). Entries that persisted the old global default (600s) as an
+        # explicit hub option would mask those per-class defaults, so drop that
+        # exact value and let the class default apply. A hub timeout the user
+        # deliberately set to anything else is preserved.
+        new_options = dict(entry.options)
+        if (
+            new_options.get(CONF_AVAILABILITY_TIMEOUT)
+            == LEGACY_DEFAULT_AVAILABILITY_TIMEOUT
+        ):
+            del new_options[CONF_AVAILABILITY_TIMEOUT]
+            LOGGER.info(
+                "Dropped the legacy %ss hub availability timeout from rtl_433 "
+                "entry %s; device-class defaults now apply",
+                LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
+                entry.entry_id,
+            )
+        hass.config_entries.async_update_entry(
+            entry, options=new_options, version=2, minor_version=4
+        )
 
     return True
 

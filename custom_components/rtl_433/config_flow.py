@@ -114,7 +114,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle setup of an rtl_433 hub (one config entry per server)."""
 
     VERSION = 2
-    MINOR_VERSION = 3
+    MINOR_VERSION = 4
 
     # ------------------------------------------------------------------ #
     # Hub user flow                                                      #
