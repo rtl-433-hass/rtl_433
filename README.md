@@ -92,6 +92,8 @@ Each hub points at one rtl_433 server's WebSocket endpoint.
 | **Path** | `/ws` | The WebSocket path on the rtl_433 HTTP server. |
 | **Secure** | off | When on, connect with `wss://` instead of `ws://` (TLS). |
 | **Manage rtl_433 settings from Home Assistant** | on | When on, expose SDR controls on the hub and let Home Assistant adopt and enforce the receiver's settings. See [Managing SDR settings from Home Assistant](#managing-sdr-settings-from-home-assistant). |
+| **Discover new devices** | on | When on, newly observed devices on this server are added automatically. Turn off to start with discovery disabled; changeable later in the hub options. |
+| **Initial frequency (MHz)** | *(blank)* | Optional. Set the receiver's center frequency in MHz (e.g. `433.92`) at setup. Leave blank to keep the server's current frequency. Only applies when **Manage rtl_433 settings from Home Assistant** is on. |
 
 The integration validates that it can reach the WebSocket before creating the
 hub. The hub's identity is derived from `host:port`, so the same server cannot
@@ -106,8 +108,10 @@ If you run the
 [rtl_433 add-on](https://github.com/rtl-433-hass/rtl_433-hass-addons) on Home
 Assistant OS, each radio it detects is published to Home Assistant's Supervisor
 discovery and shows up under **Settings → Devices & Services** as a discovered
-**rtl_433** card. Click **Add**, confirm the prompt, and the radio is configured
-automatically — no host or port to type.
+**rtl_433** card. Click **Add** and confirm; the radio is configured
+automatically — no host or port to type. The confirm step offers the same
+optional setup choices as the manual flow (**Manage rtl_433 settings**,
+**Discover new devices**, and an **Initial frequency** in MHz).
 
 - **Stable across restarts and port changes.** A discovered radio keeps the same
   config entry (and its nested-device history) across add-on restarts and USB
@@ -300,8 +304,9 @@ By default a new hub adopts and manages the receiver's SDR settings. With
 **Manage rtl_433 settings from Home Assistant** on, the hub gains a set of
 **controls** (under the hub device, in the config-entity category):
 
-- **Center frequency** (number, Hz) — shown only when the receiver uses a
-  **single** frequency (see the hopping note below).
+- **Center frequency** (number, MHz) — shown only when the receiver uses a
+  **single** frequency (see the hopping note below). You can also set it once at
+  setup via the **Initial frequency** field.
 - **Sample rate** (number, Hz)
 - **Frequency correction** (number, ppm)
 - **Gain** (number, dB) paired with an **Auto gain** switch — with Auto gain
