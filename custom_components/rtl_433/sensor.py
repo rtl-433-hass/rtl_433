@@ -171,6 +171,21 @@ def _meta(coordinator: Rtl433Coordinator, key: str) -> Any:
     return coordinator.meta.get(key)
 
 
+def _center_frequency_mhz(coordinator: Rtl433Coordinator) -> Any:
+    """Read ``center_frequency`` from meta (Hz) as MHz, or None when absent.
+
+    Mirrors the MHz presentation of the editable Center-frequency control; the
+    raw per-frequency Hz list stays in the sensor's attributes.
+    """
+    hz = coordinator.meta.get("center_frequency")
+    if hz is None:
+        return None
+    try:
+        return float(hz) / 1_000_000
+    except TypeError, ValueError:
+        return None
+
+
 def _frames(coordinator: Rtl433Coordinator, key: str) -> Any:
     """Read a key from the ``frames`` sub-dict of ``coordinator.stats``."""
     frames = coordinator.stats.get("frames")
@@ -208,9 +223,9 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
     HubSensorDesc(
         suffix="center_frequency",
         name="Center frequency",
-        value=lambda c: _meta(c, "center_frequency"),
+        value=_center_frequency_mhz,
         device_class=SensorDeviceClass.FREQUENCY,
-        native_unit=UnitOfFrequency.HERTZ,
+        native_unit=UnitOfFrequency.MEGAHERTZ,
         attrs=lambda c: {
             "frequencies": c.meta.get("frequencies"),
             "hop_times": c.meta.get("hop_times"),

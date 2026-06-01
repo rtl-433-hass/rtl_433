@@ -316,9 +316,9 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
 
     # --- The center-frequency SDR sensor still renders -------------------- #
     cf = hass.states.get(sensor_id("center_frequency"))
-    assert cf.state == "433920000"
+    assert cf.state == "433.92"
     assert cf.attributes["device_class"] == "frequency"
-    assert cf.attributes["unit_of_measurement"] == "Hz"
+    assert cf.attributes["unit_of_measurement"] == "MHz"
     assert cf.attributes["frequencies"] == [433920000]
     assert cf.attributes["hop_times"] == [600]
 
@@ -378,7 +378,7 @@ async def test_hub_diagnostic_sensors_unmanaged(hass, hub_entry_builder):
         return hass.states.get(eid)
 
     # All six SDR sensors are present (nothing folded away).
-    assert state("center_frequency").state == "433920000"
+    assert state("center_frequency").state == "433.92"
     assert state("sample_rate").state == "250000"
     assert state("conversion_mode").state == "1"
     assert state("hop_interval").state == "600"

@@ -52,6 +52,10 @@ CONF_MANAGE_SETTINGS: Final = "manage_settings"
 # Effective "go unavailable after this many seconds of silence" window.
 # Lives on the hub as the default and may be overridden per device.
 CONF_AVAILABILITY_TIMEOUT: Final = "availability_timeout"
+# Optional one-shot initial center frequency (MHz) chosen at add time and seeded
+# into the hub's managed desired state on first connect. Absent means "adopt the
+# server's current frequency". Only applied when ``manage_settings`` is on.
+CONF_INITIAL_FREQUENCY: Final = "initial_frequency"
 
 # --- Per-device config-entry keys ------------------------------------------
 # entry id of the parent hub entry; enables cascade removal when a hub is
@@ -204,7 +208,9 @@ def class_default_timeout(payload: dict[str, Any] | None) -> int:
 # ``homeassistant.helpers.storage.Store`` keyed by the hub ``entry_id`` so a
 # value change never churns the config entry. ``SDR_STORE_VERSION`` is the Store
 # schema version; ``sdr_store_key`` builds the per-hub key.
-SDR_STORE_VERSION: Final = 1
+# Version 2 stores ``center_frequency`` in MHz; version 1 stored it in Hz and is
+# migrated on load by the coordinator's Store (see ``_SdrStore``).
+SDR_STORE_VERSION: Final = 2
 
 
 def sdr_store_key(entry_id: str) -> str:
