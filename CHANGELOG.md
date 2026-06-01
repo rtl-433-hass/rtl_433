@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.9.0...v0.9.1) (2026-06-01)
+
+
+### Bug Fixes
+
+* **config_flow:** refine hassio confirm dialog copy ([aeb8d72](https://github.com/rtl-433-hass/rtl_433/commit/aeb8d729d0359f6b4564f7fbe264d8a3e9113293))
+
 ## [0.9.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.8.0...v0.9.0) (2026-06-01)
 
 
