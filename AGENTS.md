@@ -64,10 +64,27 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   `docs/device-library.md` — keep this contributor-facing.
 - `Rtl433ConfigFlow` also implements `async_step_reconfigure` (`config_flow.py`)
   to edit a hub's connection params (host/port/path/secure) in place — "same
-  server, new address". The `host:port` `unique_id` is recomputed (aborting only
-  on collision with a *different* entry), and the nested-device map is preserved
-  because the new params are merged via `data_updates=` (which leaves
-  `entry.data["devices"]` and `manage_settings` untouched).
+  server, new address". The nested-device map is preserved because the new params
+  are merged via `data_updates=` (which leaves `entry.data["devices"]` and
+  `manage_settings` untouched). The `unique_id` handling is identity-aware: a
+  legacy/manual entry (`hub:…` or none) **recomputes** `hub:{host}:{port}`
+  (aborting only on collision with a *different* entry); a discovered/adopted
+  entry **preserves** its stable radio `unique_id` rather than recomputing.
+- **Config-flow sources and dual identity scheme.** `Rtl433ConfigFlow` supports
+  `user` (manual add), `reconfigure`, and `hassio` (Supervisor add-on discovery),
+  plus the options flow above. Two `unique_id` schemes coexist:
+  - **Manual hubs** key on `unique_id = hub:{host}:{port}` (`_hub_unique_id`).
+  - **Add-on-discovered radios** key on the add-on's advertised stable per-radio
+    `unique_id` (`serial:…` / `usbpath:…` / `template:…`), carried in the
+    `hassio` discovery message.
+  `async_step_hassio` (`config_flow.py`) reconciles the two: a discovery message
+  that matches an existing entry by `host:port` (`_find_entry_by_host_port`)
+  **adopts/re-keys** that entry onto the stable radio id (migration; aborts
+  `already_configured`), so a manually-added hub and its later discovery never
+  duplicate and the entry's history is preserved. A genuinely new radio is routed
+  through `async_step_hassio_confirm` (an input-less confirmation that revalidates
+  connectivity before creating the entry); `async_step_user` likewise aborts
+  `already_configured` if a `host:port` is already owned by a discovered entry.
 
 ## Per-device "Last seen" sensor (synthetic, non-field-driven)
 
