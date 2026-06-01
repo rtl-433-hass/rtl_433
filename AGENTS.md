@@ -82,9 +82,15 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   **adopts/re-keys** that entry onto the stable radio id (migration; aborts
   `already_configured`), so a manually-added hub and its later discovery never
   duplicate and the entry's history is preserved. A genuinely new radio is routed
-  through `async_step_hassio_confirm` (an input-less confirmation that revalidates
-  connectivity before creating the entry); `async_step_user` likewise aborts
+  through `async_step_hassio_confirm` (a confirmation that revalidates
+  connectivity before creating the entry and offers the same setup choices as the
+  manual flow — `manage_settings`, `discovery_enabled`, and an optional
+  `initial_frequency` in MHz); `async_step_user` likewise aborts
   `already_configured` if a `host:port` is already owned by a discovered entry.
+  Both add flows persist `discovery_enabled` and, when `manage_settings` is on and
+  a frequency was entered, `initial_frequency` (MHz) into `entry.data`; the latter
+  is seeded into the managed desired state on the coordinator's first-ever connect
+  (layered over adoption, then never re-seeded).
 
 ## Per-device "Last seen" sensor (synthetic, non-field-driven)
 
@@ -305,8 +311,13 @@ contributor-facing.
   authoritative list; each `SdrSetting` is pure data plus tiny callables so the
   coordinator and the platforms can iterate it **without importing each other**.
   Six fields (gain is a **pair** sharing one command — seven registry entries):
-  - `center_frequency` → number, command `center_frequency`, `val` = Hz; read
-    `meta["center_frequency"]`.
+  - `center_frequency` → number, command `center_frequency`, `val` = Hz on the
+    wire, but **presented in MHz**: `read` converts `meta["center_frequency"]`
+    Hz→MHz and `to_command` converts the desired MHz value back to integer Hz, so
+    the desired-state value, the Number control, and the diagnostic sensor are all
+    MHz while `meta` stays Hz. The desired-state Store is versioned
+    (`SDR_STORE_VERSION = 2`); `_SdrStore._async_migrate_func` converts a v1
+    (Hz) persisted `center_frequency` to MHz on load.
   - `sample_rate` → number, command `sample_rate`, `val` = Hz; read
     `meta["samp_rate"]` (the meta key differs from the registry key).
   - `ppm_error` → number, command `ppm_error`, `val` = int; read
