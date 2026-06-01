@@ -141,6 +141,14 @@ DEFAULT_PATH: Final = "/ws"
 # reporters while still detecting genuinely offline devices. Configurable per
 # hub and overridable per device, so this is not a magic constant elsewhere.
 DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
+# The pre-device-class-defaults global default. Older versions persisted this
+# exact value into a hub entry's options whenever the options flow was saved, so
+# an entry still carrying it is assumed to be on the old default (not a
+# deliberate user choice) and is migrated to the device-class-aware defaults (see
+# ``async_migrate_entry``). Equal to ``DEFAULT_AVAILABILITY_TIMEOUT`` today, but
+# pinned separately so the one-time migration stays correct if that default ever
+# changes.
+LEGACY_DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
 # Sentinel availability-timeout value meaning "never expire": a device that has
 # been seen at least once stays available indefinitely (the watchdog skips the
 # staleness flip and the entity's ``available`` short-circuits to True). Set
