@@ -40,11 +40,16 @@
           "path": "WebSocket endpoint path on the server (default /ws).",
           "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy)."
         }
+      },
+      "hassio_confirm": {
+        "title": "Add discovered rtl_433 radio",
+        "description": "Home Assistant discovered an rtl_433 radio published by the {addon} add-on at {host}:{port}. Add it to keep its devices and history stable across restarts and port changes."
       }
     },
     "abort": {
       "already_configured": "This rtl_433 server is already configured.",
-      "reconfigure_successful": "Connection settings updated."
+      "reconfigure_successful": "Connection settings updated.",
+      "invalid_discovery_info": "The discovery message was missing required information."
     },
     "error": {
       "cannot_connect": "Failed to connect. Check the host, port, and path, and that the rtl_433 server is reachable."

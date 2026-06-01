@@ -15,6 +15,8 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
 from custom_components.rtl_433 import async_remove_config_entry_device
 from custom_components.rtl_433.const import (
     CALIBRATION_COMMODITY,
@@ -31,14 +33,16 @@ from custom_components.rtl_433.const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    DEFAULT_MANAGE_SETTINGS,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
-from homeassistant.config_entries import SOURCE_USER
+from homeassistant.config_entries import SOURCE_HASSIO, SOURCE_USER
 from homeassistant.const import UnitOfVolume
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
 VALIDATE = "custom_components.rtl_433.config_flow.Rtl433Coordinator.validate_connection"
 
@@ -458,8 +462,9 @@ async def test_reconfigure_updates_data_and_preserves_devices(hass, hub_entry_bu
     assert entry.data[CONF_DEVICES] == devices_snapshot
     assert entry.data[CONF_MANAGE_SETTINGS] is True
 
-    # unique_id reconciled to the new host:port.
+    # unique_id reconciled to the new host:port, and the title follows the host.
     assert entry.unique_id == "hub:new.local:9000"
+    assert entry.title == "rtl_433 (new.local)"
 
 
 async def test_reconfigure_cannot_connect_keeps_form_and_data(hass, hub_entry_builder):
@@ -641,3 +646,329 @@ async def test_mappings_step_valid_submit_writes_data_leaves_options_and_devices
     # Options and the devices map are untouched.
     assert dict(entry.options) == options_snapshot
     assert entry.data[CONF_DEVICES] == devices_snapshot
+
+
+# --------------------------------------------------------------------------- #
+# Supervisor (hassio) discovery flow.                                          #
+# --------------------------------------------------------------------------- #
+def _disc(host="core-rtl433", port=8433, uid="serial:0123"):
+    """Build a Supervisor add-on discovery payload for one radio."""
+    return HassioServiceInfo(
+        config={
+            CONF_HOST: host,
+            CONF_PORT: port,
+            CONF_PATH: "/ws",
+            "secure": False,
+            "unique_id": uid,
+            "addon": "rtl_433",
+        },
+        name="rtl_433",
+        slug="abc123",
+        uuid="deadbeef",
+    )
+
+
+def _radio_entry(host="core-rtl433", port=8433, uid="serial:0123"):
+    """Build a discovered-style hub entry keyed by a stable radio unique_id."""
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title=f"rtl_433 ({host})",
+        unique_id=uid,
+        data={
+            CONF_HOST: host,
+            CONF_PORT: port,
+            CONF_PATH: "/ws",
+            "secure": False,
+            CONF_MANAGE_SETTINGS: False,
+        },
+        version=2,
+    )
+
+
+def _flow_title_placeholders(hass):
+    """Return the in-progress flow's context title_placeholders."""
+    flow = next(iter(hass.config_entries.flow._progress.values()))
+    return flow.context.get("title_placeholders")
+
+
+async def test_hassio_discovery_happy_path_creates_entry(hass):
+    """Discovery -> confirm form -> create entry keyed by the advertised radio id."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=_disc()
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "hassio_confirm"
+    # The confirm form surfaces exactly which add-on/radio it is.
+    assert result["description_placeholders"] == {
+        "addon": "rtl_433",
+        "host": "core-rtl433",
+        "port": "8433",
+    }
+    # The discovered card title is set from the add-on name and host:port.
+    assert _flow_title_placeholders(hass) == {"name": "rtl_433 (core-rtl433:8433)"}
+
+    with patch(VALIDATE, return_value=True) as validate:
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        await hass.async_block_till_done()
+
+    # Connectivity is revalidated against the discovered target before adoption.
+    validate.assert_called_once_with(hass, "core-rtl433", 8433, "/ws", secure=False)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    assert entry.unique_id == "serial:0123"
+    assert entry.title == "rtl_433 (core-rtl433:8433)"
+    # Exact data shape: connection params + the default manage-settings toggle.
+    assert entry.data == {
+        CONF_HOST: "core-rtl433",
+        CONF_PORT: 8433,
+        CONF_PATH: "/ws",
+        "secure": False,
+        CONF_MANAGE_SETTINGS: DEFAULT_MANAGE_SETTINGS,
+    }
+
+
+async def test_hassio_discovery_non_default_fields_propagate(hass):
+    """A discovery carrying non-default path/secure/addon propagates them through."""
+    disc = HassioServiceInfo(
+        config={
+            CONF_HOST: "core-rtl433",
+            CONF_PORT: 8500,
+            CONF_PATH: "/socket",
+            "secure": True,
+            "unique_id": "usbpath:1-1.4",
+            "addon": "Custom rtl_433",
+        },
+        name="rtl_433",
+        slug="abc123",
+        uuid="deadbeef",
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=disc
+    )
+    assert result["description_placeholders"] == {
+        "addon": "Custom rtl_433",
+        "host": "core-rtl433",
+        "port": "8500",
+    }
+
+    with patch(VALIDATE, return_value=True) as validate:
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        await hass.async_block_till_done()
+
+    validate.assert_called_once_with(hass, "core-rtl433", 8500, "/socket", secure=True)
+    entry = result["result"]
+    assert entry.unique_id == "usbpath:1-1.4"
+    assert entry.data[CONF_PATH] == "/socket"
+    assert entry.data["secure"] is True
+
+
+async def test_hassio_discovery_missing_optional_fields_use_defaults(hass):
+    """A discovery with only host/port/unique_id falls back to path/secure/addon defaults."""
+    disc = HassioServiceInfo(
+        config={CONF_HOST: "core-rtl433", CONF_PORT: 8433, "unique_id": "serial:0123"},
+        name="rtl_433",
+        slug="abc123",
+        uuid="deadbeef",
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=disc
+    )
+    # addon name falls back to "rtl_433" when the message omits it.
+    assert result["description_placeholders"] == {
+        "addon": "rtl_433",
+        "host": "core-rtl433",
+        "port": "8433",
+    }
+
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        await hass.async_block_till_done()
+
+    entry = result["result"]
+    assert entry.data[CONF_PATH] == "/ws"
+    assert entry.data["secure"] is False
+
+
+async def test_hassio_discovery_missing_unique_id_aborts(hass):
+    """A discovery message without a unique_id is rejected as malformed."""
+    disc = HassioServiceInfo(
+        config={CONF_HOST: "core-rtl433", CONF_PORT: 8433},
+        name="rtl_433",
+        slug="abc123",
+        uuid="deadbeef",
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=disc
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "invalid_discovery_info"
+
+
+async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
+    """Discovery of a manually-added host:port re-keys it to the radio id and aborts."""
+    entry = hub_entry_builder(host="core-rtl433", port=8433, path="/ws")
+    entry.add_to_hass(hass)
+    assert entry.unique_id == "hub:core-rtl433:8433"
+
+    # Advertise a different path/secure so we can prove the connection data is
+    # refreshed (not just the unique_id re-keyed) during adoption.
+    disc = HassioServiceInfo(
+        config={
+            CONF_HOST: "core-rtl433",
+            CONF_PORT: 8433,
+            CONF_PATH: "/ws2",
+            "secure": True,
+            "unique_id": "serial:0123",
+            "addon": "rtl_433",
+        },
+        name="rtl_433",
+        slug="abc123",
+        uuid="deadbeef",
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=disc
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+    entries = hass.config_entries.async_entries(DOMAIN)
+    assert len(entries) == 1
+    adopted = entries[0]
+    assert adopted.unique_id == "serial:0123"
+    # Connection data refreshed from discovery...
+    assert adopted.data[CONF_PATH] == "/ws2"
+    assert adopted.data["secure"] is True
+    # ...while pre-existing keys (the manual entry's discovery toggle) survive.
+    assert adopted.data[CONF_DISCOVERY_ENABLED] is True
+
+
+async def test_hassio_discovery_distinct_port_is_treated_as_new_radio(hass):
+    """A different host:port (with a new id) is a new radio, not an adoption."""
+    entry = _radio_entry(host="core-rtl433", port=8433, uid="serial:0123")
+    entry.add_to_hass(hass)
+
+    # Same host, different port, different stable id -> no host:port match.
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(port=9999, uid="serial:NEW"),
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "hassio_confirm"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_hassio_discovery_updates_changed_port_in_place(hass):
+    """A re-advertised radio on a new port updates the stored connection and aborts."""
+    entry = _radio_entry(port=8433)
+    entry.add_to_hass(hass)
+
+    # Same stable id, new port + path so we prove every field is updated.
+    disc = HassioServiceInfo(
+        config={
+            CONF_HOST: "core-rtl433",
+            CONF_PORT: 8434,
+            CONF_PATH: "/ws9",
+            "secure": True,
+            "unique_id": "serial:0123",
+            "addon": "rtl_433",
+        },
+        name="rtl_433",
+        slug="abc123",
+        uuid="deadbeef",
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=disc
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+    entries = hass.config_entries.async_entries(DOMAIN)
+    assert len(entries) == 1
+    assert entries[0].data[CONF_PORT] == 8434
+    assert entries[0].data[CONF_PATH] == "/ws9"
+    assert entries[0].data["secure"] is True
+
+
+async def test_user_step_dedups_against_discovered_entry(hass):
+    """The manual user step aborts when host:port is already owned by a radio entry."""
+    entry = _radio_entry(host="core-rtl433", port=8433)
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "core-rtl433",
+                CONF_PORT: 8433,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_reconfigure_preserves_stable_radio_unique_id(hass):
+    """Reconfiguring a discovered entry keeps its stable radio id (not hub:...)."""
+    entry = _radio_entry(host="core-rtl433", port=8433, uid="serial:0123")
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["step_id"] == "reconfigure"
+
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/socket",
+                "secure": True,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    # Stable radio id preserved, not rewritten to hub:host:port.
+    assert entry.unique_id == "serial:0123"
+    assert entry.data[CONF_HOST] == "new.local"
+    assert entry.data[CONF_PORT] == 9000
+    assert entry.data[CONF_PATH] == "/socket"
+    assert entry.data["secure"] is True
+
+
+async def test_hassio_confirm_cannot_connect_reshows_form(hass):
+    """A failed validation on confirm re-shows the form with cannot_connect."""
+    from custom_components.rtl_433.coordinator import CannotConnect
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=_disc()
+    )
+    assert result["step_id"] == "hassio_confirm"
+
+    with patch(VALIDATE, side_effect=CannotConnect("nope")):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "hassio_confirm"
+    assert result["errors"] == {"base": "cannot_connect"}
+    # The re-shown form keeps the addon/host/port context.
+    assert result["description_placeholders"] == {
+        "addon": "rtl_433",
+        "host": "core-rtl433",
+        "port": "8433",
+    }

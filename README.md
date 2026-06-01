@@ -100,6 +100,26 @@ be added twice.
 The **Manage rtl_433 settings from Home Assistant** toggle can be changed later
 from the hub options (see [Editing options](#editing-options)).
 
+### Automatic discovery (Home Assistant OS add-on)
+
+If you run the
+[rtl_433 add-on](https://github.com/rtl-433-hass/rtl_433-hass-addons) on Home
+Assistant OS, each radio it detects is published to Home Assistant's Supervisor
+discovery and shows up under **Settings → Devices & Services** as a discovered
+**rtl_433** card. Click **Add**, confirm the prompt, and the radio is configured
+automatically — no host or port to type.
+
+- **Stable across restarts and port changes.** A discovered radio keeps the same
+  config entry (and its nested-device history) across add-on restarts and USB
+  port reassignments, because the add-on advertises a stable per-radio
+  identifier. Multi-dongle stability is best when each dongle stays in a fixed
+  USB port or is flashed with a unique serial; see the
+  [add-on](https://github.com/rtl-433-hass/rtl_433-hass-addons) for the
+  hardware-identity details.
+- **Manual setup still works.** Entering host/port yourself (above) remains fully
+  supported for remote or non-add-on rtl_433 servers, and a radio already added
+  via discovery is never added a second time.
+
 To point an existing hub at the same server's new address, open **Settings →
 Devices & Services → rtl_433 → the hub → Reconfigure** and update the
 host/port/path/secure connection target in place; nested devices and their

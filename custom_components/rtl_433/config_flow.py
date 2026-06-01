@@ -44,6 +44,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
 )
+from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
 from .calibration import (
     COMMODITY_UNITS,
@@ -116,6 +117,16 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 2
     MINOR_VERSION = 4
 
+    # Connection params carried from ``async_step_hassio`` into the confirm step.
+    _discovery: dict[str, Any] | None = None
+
+    def _find_entry_by_host_port(self, host: str, port: int) -> ConfigEntry | None:
+        """Return an existing entry targeting this host:port, if any."""
+        for entry in self._async_current_entries():
+            if entry.data.get(CONF_HOST) == host and entry.data.get(CONF_PORT) == port:
+                return entry
+        return None
+
     # ------------------------------------------------------------------ #
     # Hub user flow                                                      #
     # ------------------------------------------------------------------ #
@@ -139,6 +150,10 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             else:
+                # Guard against duplicating a radio already added by discovery
+                # (which keys entries by a stable radio id, not host:port).
+                if self._find_entry_by_host_port(host, port) is not None:
+                    return self.async_abort(reason="already_configured")
                 await self.async_set_unique_id(_hub_unique_id(host, port))
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
@@ -205,19 +220,34 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             else:
-                new_unique_id = _hub_unique_id(host, port)
-                await self.async_set_unique_id(new_unique_id)
-                # Abort only if a *different* entry already owns this unique_id;
-                # the entry being reconfigured must not abort against itself.
-                for other in self._async_current_entries():
-                    if (
-                        other.unique_id == new_unique_id
-                        and other.entry_id != entry.entry_id
-                    ):
-                        return self.async_abort(reason="already_configured")
+                current_uid = entry.unique_id or ""
+                if current_uid.startswith("hub:") or not current_uid:
+                    # Legacy manual entry: keep the host:port identity scheme.
+                    new_unique_id = _hub_unique_id(host, port)
+                    await self.async_set_unique_id(new_unique_id)
+                    # Abort only if a *different* entry already owns this
+                    # unique_id; the entry being reconfigured must not abort
+                    # against itself.
+                    for other in self._async_current_entries():
+                        if (
+                            other.unique_id == new_unique_id
+                            and other.entry_id != entry.entry_id
+                        ):
+                            return self.async_abort(reason="already_configured")
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        unique_id=new_unique_id,
+                        title=f"rtl_433 ({host})",
+                        data_updates={
+                            CONF_HOST: host,
+                            CONF_PORT: port,
+                            CONF_PATH: path,
+                            CONF_SECURE: secure,
+                        },
+                    )
+                # Discovered/adopted entry: preserve its stable radio unique_id.
                 return self.async_update_reload_and_abort(
                     entry,
-                    unique_id=new_unique_id,
                     title=f"rtl_433 ({host})",
                     data_updates={
                         CONF_HOST: host,
@@ -231,6 +261,118 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reconfigure",
             data_schema=self._reconfigure_schema(entry),
             errors=errors,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Supervisor (hassio) discovery flow                                 #
+    # ------------------------------------------------------------------ #
+    async def async_step_hassio(
+        self, discovery_info: HassioServiceInfo
+    ) -> ConfigFlowResult:
+        """Handle a Supervisor add-on discovery message for one radio.
+
+        Reads the advertised connection target and the add-on's stable per-radio
+        ``unique_id``. A pre-existing entry on the same ``host:port`` is adopted
+        onto that stable id (migration; aborts ``already_configured``). Otherwise
+        the stable id is set so a re-advertisement updates the stored connection
+        in place, and a genuinely new radio is routed to the confirm step.
+        """
+        config = discovery_info.config
+        radio_uid = config.get("unique_id")
+        if not radio_uid:
+            return self.async_abort(reason="invalid_discovery_info")
+
+        host: str = config[CONF_HOST]
+        port: int = config[CONF_PORT]
+        path: str = config.get(CONF_PATH, DEFAULT_PATH)
+        secure: bool = config.get(CONF_SECURE, False)
+        addon: str = config.get("addon", "rtl_433")
+
+        # Adopt/migrate a pre-existing entry on the same server onto the stable id.
+        existing = self._find_entry_by_host_port(host, port)
+        if existing is not None and existing.unique_id != radio_uid:
+            self.hass.config_entries.async_update_entry(
+                existing,
+                unique_id=radio_uid,
+                data={
+                    **existing.data,
+                    CONF_HOST: host,
+                    CONF_PORT: port,
+                    CONF_PATH: path,
+                    CONF_SECURE: secure,
+                },
+            )
+            return self.async_abort(reason="already_configured")
+
+        # Same radio (matched by stable id) — update connection target in place.
+        await self.async_set_unique_id(radio_uid)
+        self._abort_if_unique_id_configured(
+            updates={
+                CONF_HOST: host,
+                CONF_PORT: port,
+                CONF_PATH: path,
+                CONF_SECURE: secure,
+            }
+        )
+
+        self._discovery = {
+            CONF_HOST: host,
+            CONF_PORT: port,
+            CONF_PATH: path,
+            CONF_SECURE: secure,
+            "addon": addon,
+        }
+        self.context["title_placeholders"] = {"name": f"{addon} ({host}:{port})"}
+        return await self.async_step_hassio_confirm()
+
+    async def async_step_hassio_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm adoption of a discovered radio, then create the entry.
+
+        Shows an input-less confirmation form with ``addon``/``host``/``port``
+        placeholders. On submit, validates connectivity and creates the hub
+        entry; a failed validation re-shows the form with ``cannot_connect``.
+        """
+        assert self._discovery is not None
+        disc = self._discovery
+        placeholders = {
+            "addon": disc["addon"],
+            "host": disc[CONF_HOST],
+            "port": str(disc[CONF_PORT]),
+        }
+
+        if user_input is not None:
+            try:
+                await Rtl433Coordinator.validate_connection(
+                    self.hass,
+                    disc[CONF_HOST],
+                    disc[CONF_PORT],
+                    disc[CONF_PATH],
+                    secure=disc[CONF_SECURE],
+                )
+            except CannotConnect:
+                return self.async_show_form(
+                    step_id="hassio_confirm",
+                    data_schema=vol.Schema({}),
+                    errors={"base": "cannot_connect"},
+                    description_placeholders=placeholders,
+                )
+            return self.async_create_entry(
+                title=f"rtl_433 ({disc[CONF_HOST]}:{disc[CONF_PORT]})",
+                data={
+                    CONF_HOST: disc[CONF_HOST],
+                    CONF_PORT: disc[CONF_PORT],
+                    CONF_PATH: disc[CONF_PATH],
+                    CONF_SECURE: disc[CONF_SECURE],
+                    CONF_MANAGE_SETTINGS: DEFAULT_MANAGE_SETTINGS,
+                },
+            )
+
+        return self.async_show_form(
+            step_id="hassio_confirm",
+            data_schema=vol.Schema({}),
+            description_placeholders=placeholders,
         )
 
     # ------------------------------------------------------------------ #
