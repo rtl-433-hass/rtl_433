@@ -56,6 +56,10 @@ CONF_AVAILABILITY_TIMEOUT: Final = "availability_timeout"
 # into the hub's managed desired state on first connect. Absent means "adopt the
 # server's current frequency". Only applied when ``manage_settings`` is on.
 CONF_INITIAL_FREQUENCY: Final = "initial_frequency"
+# Pre-filled value for the add-time initial-frequency field: the common 433.92 MHz
+# ISM band most rtl_433 sensors use. Users can clear it to adopt the server's
+# current frequency instead.
+DEFAULT_INITIAL_FREQUENCY: Final = 433.92
 
 # --- Per-device config-entry keys ------------------------------------------
 # entry id of the parent hub entry; enables cascade removal when a hub is
