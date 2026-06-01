@@ -217,6 +217,7 @@ class Rtl433Coordinator:
         discovery_enabled: bool = True,
         manage_settings: bool = True,
         availability_timeout: int = DEFAULT_AVAILABILITY_TIMEOUT,
+        initial_center_frequency: float | None = None,
         skip_keys: set[str] | frozenset[str] | None = None,
     ) -> None:
         """Initialize the coordinator with connection params and runtime state."""
@@ -234,6 +235,11 @@ class Rtl433Coordinator:
         # and pre-Task-3 wiring) keeps adopting + enforcing the SDR settings.
         self.manage_settings = manage_settings
         self.availability_timeout = availability_timeout
+        # One-shot center frequency (MHz) chosen at add time. Seeded into the
+        # managed desired state on the first-ever connect (over adoption) and
+        # never re-applied once desired state is persisted; ``None`` means "adopt
+        # the server's current frequency". Only consulted when managing settings.
+        self.initial_center_frequency = initial_center_frequency
         self.skip_keys: set[str] = (
             set(skip_keys) if skip_keys is not None else set(DEFAULT_SKIP_KEYS)
         )
@@ -415,6 +421,17 @@ class Rtl433Coordinator:
                         try:
                             if not self._desired:
                                 await self._adopt_from_server()
+                                # Layer the setup frequency over adoption: an
+                                # explicit user choice overrides the adopted (and
+                                # hop-mode-skipped) value. Persisting makes
+                                # ``_desired`` non-empty, so this runs only on the
+                                # first-ever connect and is never re-seeded after.
+                                if self.initial_center_frequency is not None:
+                                    self._desired[KEY_CENTER_FREQUENCY] = (
+                                        self.initial_center_frequency
+                                    )
+                                    self._managed.add(KEY_CENTER_FREQUENCY)
+                                    await self._persist_desired()
                             await self._enforce_all()
                         except Exception as err:  # noqa: BLE001 - never kill loop
                             LOGGER.debug(

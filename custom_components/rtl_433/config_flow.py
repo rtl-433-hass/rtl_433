@@ -62,6 +62,7 @@ from .const import (
     CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
     CONF_HOST,
+    CONF_INITIAL_FREQUENCY,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
@@ -100,6 +101,19 @@ def _hub_unique_id(host: str, port: int) -> str:
     return f"hub:{host}:{port}"
 
 
+# Optional initial center-frequency field shared by both add flows. Presented in
+# MHz (the unit the Center-frequency control uses); blank means "adopt the
+# server's current frequency". Only honored when ``manage_settings`` is on.
+_FREQUENCY_SELECTOR = NumberSelector(
+    NumberSelectorConfig(
+        min=0,
+        step="any",
+        mode=NumberSelectorMode.BOX,
+        unit_of_measurement="MHz",
+    )
+)
+
+
 STEP_USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
@@ -107,6 +121,8 @@ STEP_USER_SCHEMA = vol.Schema(
         vol.Required(CONF_PATH, default=DEFAULT_PATH): str,
         vol.Optional(CONF_SECURE, default=False): bool,
         vol.Optional(CONF_MANAGE_SETTINGS, default=DEFAULT_MANAGE_SETTINGS): bool,
+        vol.Optional(CONF_DISCOVERY_ENABLED, default=True): bool,
+        vol.Optional(CONF_INITIAL_FREQUENCY): _FREQUENCY_SELECTOR,
     }
 )
 
@@ -156,15 +172,22 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                     return self.async_abort(reason="already_configured")
                 await self.async_set_unique_id(_hub_unique_id(host, port))
                 self._abort_if_unique_id_configured()
+                data: dict[str, Any] = {
+                    CONF_HOST: host,
+                    CONF_PORT: port,
+                    CONF_PATH: path,
+                    CONF_SECURE: secure,
+                    CONF_MANAGE_SETTINGS: manage_settings,
+                    CONF_DISCOVERY_ENABLED: user_input[CONF_DISCOVERY_ENABLED],
+                }
+                # The initial frequency rides the managed desired-state path, so
+                # it is only meaningful (and only persisted) when managing settings.
+                freq = user_input.get(CONF_INITIAL_FREQUENCY)
+                if manage_settings and freq is not None:
+                    data[CONF_INITIAL_FREQUENCY] = float(freq)
                 return self.async_create_entry(
                     title=f"rtl_433 ({host})",
-                    data={
-                        CONF_HOST: host,
-                        CONF_PORT: port,
-                        CONF_PATH: path,
-                        CONF_SECURE: secure,
-                        CONF_MANAGE_SETTINGS: manage_settings,
-                    },
+                    data=data,
                 )
 
         return self.async_show_form(
@@ -330,9 +353,11 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Confirm adoption of a discovered radio, then create the entry.
 
-        Shows an input-less confirmation form with ``addon``/``host``/``port``
-        placeholders. On submit, validates connectivity and creates the hub
-        entry; a failed validation re-shows the form with ``cannot_connect``.
+        Shows a confirmation form (``addon``/``host``/``port`` placeholders) that
+        offers the same setup choices as the manual flow: the manage-settings and
+        discover-new-devices toggles and an optional initial frequency. On submit,
+        validates connectivity and creates the hub entry; a failed validation
+        re-shows the form with ``cannot_connect``.
         """
         assert self._discovery is not None
         disc = self._discovery
@@ -341,6 +366,15 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             "host": disc[CONF_HOST],
             "port": str(disc[CONF_PORT]),
         }
+        confirm_schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_MANAGE_SETTINGS, default=DEFAULT_MANAGE_SETTINGS
+                ): bool,
+                vol.Optional(CONF_DISCOVERY_ENABLED, default=True): bool,
+                vol.Optional(CONF_INITIAL_FREQUENCY): _FREQUENCY_SELECTOR,
+            }
+        )
 
         if user_input is not None:
             try:
@@ -354,24 +388,32 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             except CannotConnect:
                 return self.async_show_form(
                     step_id="hassio_confirm",
-                    data_schema=vol.Schema({}),
+                    data_schema=confirm_schema,
                     errors={"base": "cannot_connect"},
                     description_placeholders=placeholders,
                 )
+            manage_settings: bool = user_input[CONF_MANAGE_SETTINGS]
+            data: dict[str, Any] = {
+                CONF_HOST: disc[CONF_HOST],
+                CONF_PORT: disc[CONF_PORT],
+                CONF_PATH: disc[CONF_PATH],
+                CONF_SECURE: disc[CONF_SECURE],
+                CONF_MANAGE_SETTINGS: manage_settings,
+                CONF_DISCOVERY_ENABLED: user_input[CONF_DISCOVERY_ENABLED],
+            }
+            # As in the manual flow, the initial frequency only applies (and is
+            # only persisted) when settings are managed.
+            freq = user_input.get(CONF_INITIAL_FREQUENCY)
+            if manage_settings and freq is not None:
+                data[CONF_INITIAL_FREQUENCY] = float(freq)
             return self.async_create_entry(
                 title=f"rtl_433 ({disc[CONF_HOST]}:{disc[CONF_PORT]})",
-                data={
-                    CONF_HOST: disc[CONF_HOST],
-                    CONF_PORT: disc[CONF_PORT],
-                    CONF_PATH: disc[CONF_PATH],
-                    CONF_SECURE: disc[CONF_SECURE],
-                    CONF_MANAGE_SETTINGS: DEFAULT_MANAGE_SETTINGS,
-                },
+                data=data,
             )
 
         return self.async_show_form(
             step_id="hassio_confirm",
-            data_schema=vol.Schema({}),
+            data_schema=confirm_schema,
             description_placeholders=placeholders,
         )
 
