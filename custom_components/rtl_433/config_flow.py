@@ -70,6 +70,7 @@ from .const import (
     CONF_USER_MAPPINGS,
     DATA_ENTRY_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
+    DEFAULT_INITIAL_FREQUENCY,
     DEFAULT_MANAGE_SETTINGS,
     DEFAULT_MOTION_CLEAR_DELAY,
     DEFAULT_PATH,
@@ -102,8 +103,9 @@ def _hub_unique_id(host: str, port: int) -> str:
 
 
 # Optional initial center-frequency field shared by both add flows. Presented in
-# MHz (the unit the Center-frequency control uses); blank means "adopt the
-# server's current frequency". Only honored when ``manage_settings`` is on.
+# MHz (the unit the Center-frequency control uses) and pre-filled with the common
+# 433.92 MHz band; clearing it means "adopt the server's current frequency". Only
+# honored when ``manage_settings`` is on.
 _FREQUENCY_SELECTOR = NumberSelector(
     NumberSelectorConfig(
         min=0,
@@ -121,8 +123,10 @@ STEP_USER_SCHEMA = vol.Schema(
         vol.Required(CONF_PATH, default=DEFAULT_PATH): str,
         vol.Optional(CONF_SECURE, default=False): bool,
         vol.Optional(CONF_MANAGE_SETTINGS, default=DEFAULT_MANAGE_SETTINGS): bool,
+        vol.Optional(
+            CONF_INITIAL_FREQUENCY, default=DEFAULT_INITIAL_FREQUENCY
+        ): _FREQUENCY_SELECTOR,
         vol.Optional(CONF_DISCOVERY_ENABLED, default=True): bool,
-        vol.Optional(CONF_INITIAL_FREQUENCY): _FREQUENCY_SELECTOR,
     }
 )
 
@@ -371,8 +375,10 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_MANAGE_SETTINGS, default=DEFAULT_MANAGE_SETTINGS
                 ): bool,
+                vol.Optional(
+                    CONF_INITIAL_FREQUENCY, default=DEFAULT_INITIAL_FREQUENCY
+                ): _FREQUENCY_SELECTOR,
                 vol.Optional(CONF_DISCOVERY_ENABLED, default=True): bool,
-                vol.Optional(CONF_INITIAL_FREQUENCY): _FREQUENCY_SELECTOR,
             }
         )
 

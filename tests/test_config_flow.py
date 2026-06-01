@@ -34,6 +34,7 @@ from custom_components.rtl_433.const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    DEFAULT_INITIAL_FREQUENCY,
     DEFAULT_MANAGE_SETTINGS,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
@@ -721,7 +722,8 @@ async def test_hassio_discovery_happy_path_creates_entry(hass):
     assert entry.title == "rtl_433 (core-rtl433:8433)"
     # Exact data shape: connection params + the default toggles. Submitting the
     # empty confirm form applies the schema defaults (manage-settings default +
-    # discovery enabled True, no initial frequency).
+    # discovery enabled True + the pre-filled 433.92 MHz initial frequency, which
+    # is persisted because manage-settings is on).
     assert entry.data == {
         CONF_HOST: "core-rtl433",
         CONF_PORT: 8433,
@@ -729,6 +731,7 @@ async def test_hassio_discovery_happy_path_creates_entry(hass):
         "secure": False,
         CONF_MANAGE_SETTINGS: DEFAULT_MANAGE_SETTINGS,
         CONF_DISCOVERY_ENABLED: True,
+        CONF_INITIAL_FREQUENCY: DEFAULT_INITIAL_FREQUENCY,
     }
 
 
@@ -1007,6 +1010,31 @@ async def test_user_step_persists_discovery_off_and_initial_frequency(hass):
     assert entry.data[CONF_DISCOVERY_ENABLED] is False
     # The frequency rides the managed path; persisted as a float (MHz).
     assert entry.data[CONF_INITIAL_FREQUENCY] == 868.3
+
+
+async def test_user_step_applies_default_initial_frequency(hass):
+    """Leaving the frequency field untouched seeds the pre-filled 433.92 MHz default."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "rtl433.local",
+                CONF_PORT: 8433,
+                CONF_PATH: "/ws",
+                "secure": False,
+                CONF_MANAGE_SETTINGS: True,
+                CONF_DISCOVERY_ENABLED: True,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    assert entry.data[CONF_INITIAL_FREQUENCY] == DEFAULT_INITIAL_FREQUENCY
 
 
 async def test_user_step_drops_initial_frequency_when_unmanaged(hass):

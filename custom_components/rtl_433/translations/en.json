@@ -26,7 +26,7 @@
           "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy).",
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
           "discovery_enabled": "When on, newly observed devices on this server are added automatically as nested devices. You can change this later in the hub options.",
-          "initial_frequency": "Optional. Set the receiver's center frequency in MHz (for example 433.92) at setup. Leave blank to keep the server's current frequency. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
+          "initial_frequency": "Set the receiver's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
         }
       },
       "reconfigure": {
@@ -56,7 +56,7 @@
         "data_description": {
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
           "discovery_enabled": "When on, newly observed devices on this server are added automatically as nested devices. You can change this later in the hub options.",
-          "initial_frequency": "Optional. Set the receiver's center frequency in MHz (for example 433.92) at setup. Leave blank to keep the server's current frequency. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
+          "initial_frequency": "Set the receiver's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
         }
       }
     },
