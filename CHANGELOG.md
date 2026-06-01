@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.9.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.8.0...v0.9.0) (2026-06-01)
+
+
+### Features
+
+* **availability:** allow 0 (never) in config flow, docs for class defaults ([eda8286](https://github.com/rtl-433-hass/rtl_433/commit/eda82866cbdf8d0038e29e3b99de516f1b425b1e))
+* **availability:** device-class-aware timeouts and never-expire resolution ([7a59c40](https://github.com/rtl-433-hass/rtl_433/commit/7a59c4069d4d011aa5fcf07bcf60e55b4daefcbe))
+* **availability:** migrate legacy 600s hub timeout to class defaults ([acc8ec3](https://github.com/rtl-433-hass/rtl_433/commit/acc8ec3d10950e4ac50105d5543ad1571801381a))
+* **config_flow:** support Supervisor (hassio) radio discovery ([7d3da09](https://github.com/rtl-433-hass/rtl_433/commit/7d3da09fde1422c64435d970162fcae3f6249f8e))
+* **device-library:** map WH51 soil ad_raw and boost fields ([#39](https://github.com/rtl-433-hass/rtl_433/issues/39)) ([e73013d](https://github.com/rtl-433-hass/rtl_433/commit/e73013deb30b9cad68a8cb72c6b9fadab8614cab))
+* **sensor:** ship Last seen disabled by default ([#41](https://github.com/rtl-433-hass/rtl_433/issues/41)) ([b08de9f](https://github.com/rtl-433-hass/rtl_433/commit/b08de9f65f2eb0f63ba27594b53e3a41fb1f8268))
+
+
+### Documentation
+
+* **plan:** archive completed plan 07 (availability timeout device-class defaults) ([5feb2a4](https://github.com/rtl-433-hass/rtl_433/commit/5feb2a4b4e96b026f69fae57dee053fbc2b7cd67))
+
 ## [0.8.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.7.0...v0.8.0) (2026-05-30)
 
 
