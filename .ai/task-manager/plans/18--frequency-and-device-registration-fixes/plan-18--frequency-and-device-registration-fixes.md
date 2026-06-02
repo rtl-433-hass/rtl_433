@@ -149,9 +149,9 @@ graph TD
     002 --> 003
 ```
 
-### Phase 1: Registration gate
+### Phase 1: Registration gate ✅
 **Parallel Tasks:**
-- Task 001: Connection timestamp primitive + post-connection device registration gate (Issue 1), with tests
+- ✔️ Task 001: Connection timestamp primitive + post-connection device registration gate (Issue 1), with tests
 
 ### Phase 2: Frequency fix
 **Parallel Tasks:**

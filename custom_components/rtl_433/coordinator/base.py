@@ -116,6 +116,15 @@ _WATCHDOG_INTERVAL = timedelta(seconds=30)
 # events are suppressed). Assumes the server and HA clocks are roughly NTP-synced.
 REPLAY_STALE_THRESHOLD = timedelta(seconds=30)
 
+# Skew grace for the post-connection device-registration gate. A previously
+# unknown device auto-registers only once a frame timestamped at or after
+# ``_connection_time - DISCOVERY_BACKLOG_GRACE`` is seen; older frames are the
+# server's pre-connection backlog and seed runtime state without registering.
+# The grace absorbs modest rtl_433-vs-HA clock skew + transmission latency and
+# assumes the server and HA clocks are roughly NTP-synced (a frame with no
+# parseable ``time`` is treated as live, preserving "never drop a real one").
+DISCOVERY_BACKLOG_GRACE = timedelta(seconds=5)
+
 # Timeout (seconds) for the short-lived connection attempt used by the config
 # flow's reachability check.
 _VALIDATE_TIMEOUT = 10.0
@@ -292,6 +301,19 @@ class Rtl433Coordinator:
         # buffer tail is recognised as already-seen and never re-fires.
         self._event_high_water: datetime | None = None
 
+        # UTC time of the current successful WebSocket connection (``None`` while
+        # disconnected). Set on every (re)connect and cleared on drop, it gates
+        # device auto-registration to post-connection messages: a server replays
+        # up to its last 100 events on connect, and those pre-connection backlog
+        # frames must seed runtime state without registering new devices.
+        self._connection_time: datetime | None = None
+
+        # Device keys already offered to ``new_device_callback`` this process.
+        # Kept separate from ``self.devices`` (which a backlog frame populates for
+        # liveness/replay) so a device first seen in the backlog can still register
+        # on its first genuine post-connection event. Not persisted.
+        self._discovered: set[str] = set()
+
         # --- Hub-scoped runtime state (rendered by the hub entities) ---------
         # Latest meta/SDR configuration (assembled from the HTTP getters in Task 2)
         # and the latest server-stats payload. Populated over HTTP, not the socket.
@@ -367,6 +389,8 @@ class Rtl433Coordinator:
         self.last_seen.pop(device_key, None)
         self.available.pop(device_key, None)
         self.device_fields.pop(device_key, None)
+        # Re-arm discovery so a later live event re-registers the device.
+        self._discovered.discard(device_key)
 
     async def async_stop(self) -> None:
         """Stop the connect loop, close the socket, and cancel the watchdog."""
@@ -405,6 +429,7 @@ class Rtl433Coordinator:
                 async with session.ws_connect(self.ws_url, heartbeat=30) as ws:
                     self._ws = ws
                     self.connected = True
+                    self._connection_time = dt_util.utcnow()
                     backoff = _BACKOFF_MIN  # reset after a successful connect
                     self._emit_hub_update()
                     LOGGER.debug("rtl_433 connected to %s", self.ws_url)
@@ -447,6 +472,7 @@ class Rtl433Coordinator:
             finally:
                 self._ws = None
                 self.connected = False
+                self._connection_time = None
                 self._emit_hub_update()
 
             if self._stop_event.is_set():
@@ -842,8 +868,6 @@ class Rtl433Coordinator:
         normalized = normalize(event, self.skip_keys)
         key = normalized.device_key
 
-        is_new = key not in self.devices
-
         now = dt_util.utcnow()
 
         # Read the raw ``time`` independently of ``normalize`` (which drops it)
@@ -891,13 +915,32 @@ class Rtl433Coordinator:
             self.last_seen[key] = now
             self.available[key] = True
 
+        # Gate auto-registration to post-connection messages: a frame timestamped
+        # before ``_connection_time - DISCOVERY_BACKLOG_GRACE`` belongs to the
+        # server's pre-connection backlog (replayed on connect) and must seed
+        # runtime state above without creating a device. A frame with no parseable
+        # ``time`` is treated as post-connection ("never drop a real one"), as is
+        # any frame once disconnected (``_connection_time is None``). Registration
+        # keys off ``self._discovered`` rather than ``is_new`` so a device first
+        # seen in the backlog still registers on its first true live event.
+        is_post_connection = (
+            self._connection_time is None
+            or event_time is None
+            or event_time >= self._connection_time - DISCOVERY_BACKLOG_GRACE
+        )
         # The new-device callback still fires for a replay-discovered device so
         # its entities exist and can seed; its availability stays governed by
         # liveness (it reads unavailable until a live frame arrives). The
         # ``is_replay`` flag lets the callback wire up the device without raising
         # a "new device" notification for a reconnect re-broadcast (a replay is
         # never a genuine first-time live discovery).
-        if is_new and self.discovery_enabled and self.new_device_callback is not None:
+        if (
+            key not in self._discovered
+            and is_post_connection
+            and self.discovery_enabled
+            and self.new_device_callback is not None
+        ):
+            self._discovered.add(key)
             try:
                 self.new_device_callback(key, normalized.model, is_replay)
             except Exception:  # noqa: BLE001 - a bad hook must not kill the loop
