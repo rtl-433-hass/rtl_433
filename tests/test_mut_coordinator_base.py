@@ -854,6 +854,85 @@ def test_process_event_new_device_callback_fires_only_on_first(hass, coordinator
 
 
 # ---------------------------------------------------------------------------
+# _process_event: post-connection device-registration gate
+# ---------------------------------------------------------------------------
+
+
+def test_process_event_backlog_event_does_not_register(hass, coordinator):
+    """A pre-connection backlog frame seeds state but does not register."""
+    seen: list[str] = []
+    coordinator.discovery_enabled = True
+    coordinator.new_device_callback = lambda k, m, r: seen.append(k)
+    # Connected at 10:00:00; a frame timestamped a minute earlier is backlog.
+    coordinator._connection_time = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
+
+    with freeze_time("2026-05-25T10:00:01+00:00"), patch(DISPATCH):
+        coordinator._handle_text_frame(
+            '{"time": "2026-05-25T09:59:00Z", "model": "Old", "id": 1, "val": 1}'
+        )
+
+    # No registration, but runtime state is still seeded so a later live frame
+    # can register the device.
+    assert seen == []
+    assert "Old-1" in coordinator.devices
+
+
+def test_process_event_backlog_then_live_registers_once(hass, coordinator):
+    """A device first seen in the backlog registers on its first live frame."""
+    seen: list[str] = []
+    coordinator.discovery_enabled = True
+    coordinator.new_device_callback = lambda k, m, r: seen.append(k)
+    coordinator._connection_time = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
+
+    with freeze_time("2026-05-25T10:00:05+00:00"), patch(DISPATCH):
+        # Backlog frame (before connect) -> no registration.
+        coordinator._handle_text_frame(
+            '{"time": "2026-05-25T09:59:00Z", "model": "Dev", "id": 1, "val": 1}'
+        )
+        # Live frame (after connect) -> registers exactly once.
+        coordinator._handle_text_frame(
+            '{"time": "2026-05-25T10:00:05Z", "model": "Dev", "id": 1, "val": 2}'
+        )
+        # A further live frame does not re-register.
+        coordinator._handle_text_frame(
+            '{"time": "2026-05-25T10:00:06Z", "model": "Dev", "id": 1, "val": 3}'
+        )
+
+    assert seen == ["Dev-1"]
+
+
+def test_process_event_within_grace_registers(hass, coordinator):
+    """A frame just inside the skew grace before connect still registers."""
+    seen: list[str] = []
+    coordinator.discovery_enabled = True
+    coordinator.new_device_callback = lambda k, m, r: seen.append(k)
+    coordinator._connection_time = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
+
+    # 3s before connect is inside the 5s DISCOVERY_BACKLOG_GRACE window.
+    with freeze_time("2026-05-25T10:00:01+00:00"), patch(DISPATCH):
+        coordinator._handle_text_frame(
+            '{"time": "2026-05-25T09:59:57Z", "model": "Dev", "id": 1, "val": 1}'
+        )
+
+    assert seen == ["Dev-1"]
+
+
+def test_process_event_no_timestamp_registers_despite_connection_time(
+    hass, coordinator
+):
+    """A frame with no parseable time is treated as live ("never drop a real one")."""
+    seen: list[str] = []
+    coordinator.discovery_enabled = True
+    coordinator.new_device_callback = lambda k, m, r: seen.append(k)
+    coordinator._connection_time = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
+
+    with freeze_time("2026-05-25T10:00:01+00:00"), patch(DISPATCH):
+        coordinator._handle_text_frame('{"model": "Dev", "id": 1, "val": 1}')
+
+    assert seen == ["Dev-1"]
+
+
+# ---------------------------------------------------------------------------
 # _dispatch: is_replay override
 # ---------------------------------------------------------------------------
 
