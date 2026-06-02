@@ -167,3 +167,50 @@ Run the validation gate (`POST_PHASE.md`) after each phase; the full `uv run pyt
 ### Execution Summary
 - Total Phases: 3
 - Total Tasks: 3
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-06-01
+
+### Results
+All three tasks completed across three phases on branch
+`feature/18--frequency-and-device-registration-fixes`:
+
+- **Issue 1 — post-connection registration gate** (`coordinator/base.py`):
+  added a per-connection `_connection_time` (set on connect, cleared on drop), a
+  `DISCOVERY_BACKLOG_GRACE` (5 s) skew constant, and a registration gate in
+  `_process_event` that fires `new_device_callback` for a previously-unknown
+  device only when the triggering frame is timestamped at/after the connection.
+  Registration now keys off a separate `_discovered` set (re-armed by
+  `forget_device`) so a backlog-seen device still registers on its first live
+  frame; frames without a parseable `time` are treated as live. Four new tests.
+- **Issue 2 — authoritative initial frequency** (`coordinator/base.py`):
+  extracted `_seed_desired_on_first_connect` and gated the one-time frequency
+  override on a persisted `initial_freq_seeded` flag instead of an empty desired
+  store, so the configured value wins over adopted/persisted state exactly once
+  and survives later user changes. Removed the test-only `_seed_initial_frequency`
+  helper that masked the bug; added a regression that fails on the old code.
+- **Documentation**: updated `AGENTS.md` and `README.md`; corrected the stale
+  Initial-frequency setup-field row (now pre-filled 433.92 MHz).
+
+Validation: full `uv run pytest tests/` suite green; `ruff` and `codespell`
+clean. The Issue-2 regression was confirmed to fail against the pre-fix gating
+and pass against the fix.
+
+### Noteworthy Events
+- Static reading suggested the Issue-2 frequency path was correct; the decisive
+  clue was the existing `test_initial_frequency_not_seeded_when_desired_nonempty`
+  test plus its `_seed_initial_frequency` helper, which re-implemented the
+  production branch and so let the real `if not self._desired` regression pass
+  undetected. That test documented the bug as intended behavior; it was inverted
+  into the new regression.
+- Per the agreed "behavior change OK" clarification, no storage migration was
+  needed: the new `initial_freq_seeded` Store key is additive (defaults to
+  `False`; the v1→v2 migrator preserves unknown keys), and existing registered
+  devices are untouched.
+
+### Necessary follow-ups
+- None required. The timestamp gate assumes the rtl_433 server and HA clocks are
+  roughly NTP-synced (documented); if field reports show clock skew issues, the
+  `DISCOVERY_BACKLOG_GRACE` window is the single tuning point.
