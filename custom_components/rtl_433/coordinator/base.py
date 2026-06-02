@@ -319,6 +319,10 @@ class Rtl433Coordinator:
         # and the latest server-stats payload. Populated over HTTP, not the socket.
         self.meta: dict[str, Any] = {}
         self.stats: dict[str, Any] = {}
+        # Getters (by command name) currently returning malformed JSON. Used to
+        # log the "server returned invalid JSON" error once per command until it
+        # recovers, so the 60s refresh tick can never flood the log.
+        self._malformed_cmds: set[str] = set()
 
         # --- Managed-SDR desired state (restart-surviving) -------------------
         # ``_desired`` maps a registry key -> the desired value HA wants applied;
@@ -550,9 +554,32 @@ class Rtl433Coordinator:
                 url, params={"cmd": command}, timeout=_GETTER_TIMEOUT
             ) as resp:
                 resp.raise_for_status()
-                # rtl_433 may not set a strict ``application/json`` content-type
-                # for scalar getters, so do not require one.
-                return await resp.json(content_type=None)
+                try:
+                    # rtl_433 may not set a strict ``application/json`` content-type
+                    # for scalar getters, so do not require one.
+                    payload = await resp.json(content_type=None)
+                except ValueError as err:
+                    # The endpoint is reachable and returned 2xx, but the body is
+                    # not valid JSON. The known cause is an rtl_433 server-side
+                    # bug that truncates/corrupts large ``get_stats`` responses
+                    # (the per-protocol ``stats`` array overflows a fixed output
+                    # buffer). Unlike a hidden ``/cmd`` (a connection/4xx error,
+                    # expected behind a proxy and kept at debug), malformed data is
+                    # a genuine server fault worth surfacing at error level -- but
+                    # only once per command until it recovers, so the periodic
+                    # refresh tick can't flood the log.
+                    if command not in self._malformed_cmds:
+                        self._malformed_cmds.add(command)
+                        LOGGER.error(
+                            "rtl_433 getter %s at %s returned malformed JSON; "
+                            "the corresponding hub sensors will not update: %s",
+                            command,
+                            url,
+                            err,
+                        )
+                    return None
+                self._malformed_cmds.discard(command)
+                return payload
         except Exception as err:  # noqa: BLE001 - getters must never kill the loop
             LOGGER.debug("rtl_433 getter %s failed at %s: %s", command, url, err)
             return None

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import json
+import logging
 from unittest.mock import patch
 
 from freezegun import freeze_time
@@ -369,6 +370,47 @@ def test_getter_failure_leaves_values_intact(hass, coordinator, aioclient_mock):
     assert coordinator.connected is True
     # No successful getter -> no hub-update emitted.
     dispatch.assert_not_called()
+
+
+def test_refresh_stats_malformed_json_logs_error_once(
+    hass, coordinator, aioclient_mock, caplog
+):
+    """A reachable /cmd returning invalid JSON logs an error once, not per tick.
+
+    This is the rtl_433 server-side truncation case (an oversized ``get_stats``
+    overflows the server's output buffer and emits corrupt JSON): the endpoint
+    answers 200, the body fails to parse, and the stats sensors stay "unknown".
+    The error must surface (unlike a hidden ``/cmd``, which stays at debug) but
+    must not flood the log across the 60s refresh ticks.
+    """
+    url = "http://rtl433.local:8433/cmd"
+    aioclient_mock.get(url, params={"cmd": "get_stats"}, text='{"frames":')
+
+    with caplog.at_level(logging.ERROR), patch(DISPATCH):
+        _run(hass, coordinator._refresh_stats())
+        _run(hass, coordinator._refresh_stats())
+
+    malformed = [
+        r
+        for r in caplog.records
+        if r.levelname == "ERROR" and "malformed JSON" in r.getMessage()
+    ]
+    assert len(malformed) == 1
+    assert "get_stats" in malformed[0].getMessage()
+    # The body never parses, so stats is left empty rather than half-populated.
+    assert coordinator.stats == {}
+
+
+def test_getter_clears_malformed_flag_on_recovery(hass, coordinator, aioclient_mock):
+    """A subsequent valid response clears the once-logged flag so it can re-warn."""
+    _mock_cmd(aioclient_mock)
+    coordinator._malformed_cmds.add("get_stats")
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._refresh_stats())
+
+    assert "get_stats" not in coordinator._malformed_cmds
+    assert coordinator.stats["frames"]["events"] == 9
 
 
 def test_refresh_tick_refreshes_meta_and_stats_while_connected(
