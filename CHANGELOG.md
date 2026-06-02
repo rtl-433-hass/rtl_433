@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.10.0...v0.11.0) (2026-06-02)
+
+
+### Features
+
+* **config_flow:** default initial frequency to 433.92 MHz and reorder add-time fields ([f955e08](https://github.com/rtl-433-hass/rtl_433/commit/f955e08dea31e138b58d19a73e2ee06787568159))
+
 ## [0.10.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.9.1...v0.10.0) (2026-06-01)
 
 
