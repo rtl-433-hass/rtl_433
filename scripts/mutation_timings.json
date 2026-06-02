@@ -1,0 +1,25 @@
+{
+  "files": {
+    "custom_components/rtl_433/__init__.py": 1309.607,
+    "custom_components/rtl_433/binary_sensor.py": 162.65,
+    "custom_components/rtl_433/calibration.py": 145.267,
+    "custom_components/rtl_433/config_flow.py": 70.924,
+    "custom_components/rtl_433/const.py": 2.063,
+    "custom_components/rtl_433/coordinator/base.py": 1600.199,
+    "custom_components/rtl_433/device_trigger.py": 59.789,
+    "custom_components/rtl_433/diagnostics.py": 31.973,
+    "custom_components/rtl_433/entity.py": 1687.15,
+    "custom_components/rtl_433/event.py": 95.529,
+    "custom_components/rtl_433/hub_settings.py": 78.297,
+    "custom_components/rtl_433/library.py": 616.217,
+    "custom_components/rtl_433/mapping.py": 2055.993,
+    "custom_components/rtl_433/migration.py": 1229.75,
+    "custom_components/rtl_433/normalizer.py": 117.852,
+    "custom_components/rtl_433/number.py": 38.295,
+    "custom_components/rtl_433/options_flow.py": 147.718,
+    "custom_components/rtl_433/sdr_settings.py": 161.687,
+    "custom_components/rtl_433/select.py": 47.458,
+    "custom_components/rtl_433/sensor.py": 194.588,
+    "custom_components/rtl_433/switch.py": 9.516
+  }
+}

@@ -4,16 +4,38 @@ name: Mutation
 # committed baseline (scripts/mutation_baseline.json).
 #
 # A full-package run is slow (~50 min on a 2-core runner), so the work is split
-# by trigger:
+# two ways: by *scope* (how many modules) and by *shard* (parallel across modules).
 #
-#   * Pull requests mutate only the source modules the PR could have affected
-#     (changed package modules, plus the source module a changed test exercises;
-#     see scripts/mutation_targets.py). This keeps the common PR to a few minutes
-#     while still BLOCKING on a per-file regression in touched code. A change to
-#     mutation infra or a broad/unmappable test escalates the PR to a full run.
-#   * Pushes to main and a nightly schedule run the FULL package, so the whole
-#     baseline stays honest and the "a test was weakened but its source is
-#     unchanged" blind spot is caught within a day.
+#   * Scope is chosen by trigger. Pull requests mutate only the source modules the
+#     PR could have affected (changed package modules, plus the source module a
+#     changed test exercises; see scripts/mutation_targets.py), keeping the common
+#     PR to a few minutes while still BLOCKING on a per-file regression in touched
+#     code. A change to mutation infra or a broad/unmappable test escalates the PR
+#     to the full package. Pushes to main and a nightly schedule always run the
+#     FULL package, so the whole baseline stays honest and the "a test was weakened
+#     but its source is unchanged" blind spot is caught within a day.
+#
+#   * Whatever is in scope is then split across a 6-way matrix (job `mutation`):
+#     each shard mutates a disjoint, TIME-balanced subset of the in-scope modules
+#     (scripts/mutation_shards.py does a deterministic LPT partition over the whole
+#     package, weighting each module by its measured mutmut run time from
+#     scripts/mutation_timings.json — count-balancing is wrong because per-mutant
+#     time varies ~2.5x across modules — then `--restrict` keeps only this shard's
+#     in-scope modules). The union of the six shard checks equals a whole-scope check — mutmut
+#     copies the whole package into mutants/ regardless of the filter (so imports
+#     resolve), the filter only restricts which mutants execute, and
+#     `mutation_stats.py --paths` plus the per-file floor scope the gate to each
+#     shard's files, so no file is double-counted or skipped. A full run drops from
+#     ~50 min to roughly the cost of its heaviest single module (the six shards
+#     run in parallel), and a scoped PR fans its handful of modules out too. Six (not
+#     more) shards because only ~5 modules dominate the time; extra shards would sit
+#     near-idle and widen the spread without lowering the pole (the slowest module).
+#
+# The single matrix job runs on every trigger and decides its own scope, so no
+# matrix leg is skipped at the job level (a job-level skip would surface the
+# unexpanded `${{ matrix.shard }}` name as a phantom check). The `mutation-gate`
+# job fans the matrix back into one stable status check that fails if any shard
+# failed.
 #
 # The gate is a FLOOR with a small tolerance (default 2 points, in the baseline):
 # mutmut's score drifts ~1-2% run-to-run on the async coordinator, so a
@@ -35,20 +57,23 @@ on:
 permissions: {}
 
 jobs:
-  mutation-pr:
-    name: "Mutation floor (changed modules)"
-    if: github.event_name == 'pull_request'
+  mutation:
+    name: "Mutation floor — shard ${{ matrix.shard }}"
     runs-on: "ubuntu-latest"
-    # Scoped runs finish in a few minutes; this timeout is only a backstop. It
-    # must cover the full-package run that a PR escalates to when it changes
-    # mutation infra or a broad/unmappable test (see scripts/mutation_targets.py),
-    # so it matches the full job's budget rather than the scoped common case.
-    timeout-minutes: 90
+    # A single shard mutates at most the package's heaviest module, so it finishes
+    # well inside this backstop; the six shards run in parallel. (The old single
+    # full job used 90.)
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
     steps:
       - name: Checkout the repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          # Need history back to the base branch to diff the PR's changed files.
+          # Need history back to the base branch to diff a PR's changed files;
+          # harmless (and quick) on push/schedule, which ignore it.
           fetch-depth: 0
 
       - name: Install uv
@@ -62,64 +87,65 @@ jobs:
           uv venv
           uv pip install -r requirements_test.txt
 
-      - name: Determine mutation targets from the diff
-        id: targets
+      - name: Determine scope for this trigger
+        id: scope
         run: |
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-          changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
-          echo "Changed files:"; echo "$changed"
-          uv run python scripts/mutation_targets.py $changed > targets.txt
-          {
-            echo "mode=$(sed -n '1p' targets.txt)"
-            echo "patterns=$(sed -n '2p' targets.txt)"
-            echo "paths=$(sed -n '3p' targets.txt)"
-          } >> "$GITHUB_OUTPUT"
-          cat targets.txt
-
-      - name: Run mutation testing (changed modules)
-        if: steps.targets.outputs.mode == 'all' || steps.targets.outputs.patterns != ''
-        run: |
-          if [ "${{ steps.targets.outputs.mode }}" = "all" ]; then
-            uv run mutmut run
-            uv run python scripts/mutation_stats.py > mutation-stats.json
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+            echo "Changed files:"; echo "$changed"
+            uv run python scripts/mutation_targets.py $changed > targets.txt
+            cat targets.txt
+            {
+              echo "mode=$(sed -n '1p' targets.txt)"
+              echo "paths=$(sed -n '3p' targets.txt)"
+            } >> "$GITHUB_OUTPUT"
           else
-            uv run mutmut run ${{ steps.targets.outputs.patterns }}
-            uv run python scripts/mutation_stats.py --paths ${{ steps.targets.outputs.paths }} > mutation-stats.json
+            # Push to main / nightly: always the full package.
+            echo "mode=all" >> "$GITHUB_OUTPUT"
+            echo "paths=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Enforce per-file floor vs baseline
-        if: steps.targets.outputs.mode == 'all' || steps.targets.outputs.patterns != ''
-        run: uv run python scripts/mutation_ratchet.py --mode floor --stats mutation-stats.json
-
-      - name: No mutation targets in this PR
-        if: steps.targets.outputs.mode == 'scoped' && steps.targets.outputs.patterns == ''
-        run: echo "No source modules in scope for mutation testing; nothing to check."
-
-  mutation-full:
-    name: "Mutation floor (full package)"
-    if: github.event_name != 'pull_request'
-    runs-on: "ubuntu-latest"
-    timeout-minutes: 90
-    steps:
-      - name: Checkout the repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          python-version: "3.14"
-          enable-cache: true
-
-      - name: Install requirements
+      - name: Determine this shard's modules
+        id: shard
         run: |
-          uv venv
-          uv pip install -r requirements_test.txt
+          if [ "${{ steps.scope.outputs.mode }}" = "all" ]; then
+            uv run python scripts/mutation_shards.py --shard ${{ matrix.shard }} --of 6 > shard.txt
+          elif [ -n "${{ steps.scope.outputs.paths }}" ]; then
+            uv run python scripts/mutation_shards.py --shard ${{ matrix.shard }} --of 6 --restrict ${{ steps.scope.outputs.paths }} > shard.txt
+          else
+            # Scoped run with nothing in scope (e.g. a docs-only PR): no work.
+            printf '\n\n' > shard.txt
+          fi
+          {
+            echo "patterns=$(sed -n '1p' shard.txt)"
+            echo "paths=$(sed -n '2p' shard.txt)"
+          } >> "$GITHUB_OUTPUT"
+          cat shard.txt
 
-      - name: Run mutation testing (full package)
-        run: uv run mutmut run
-
-      - name: Export per-file stats
-        run: uv run python scripts/mutation_stats.py > mutation-stats.json
+      - name: Run mutation testing (this shard's modules)
+        if: steps.shard.outputs.patterns != ''
+        run: |
+          uv run mutmut run ${{ steps.shard.outputs.patterns }}
+          uv run python scripts/mutation_stats.py --paths ${{ steps.shard.outputs.paths }} > mutation-stats.json
 
       - name: Enforce per-file floor vs baseline
+        if: steps.shard.outputs.patterns != ''
         run: uv run python scripts/mutation_ratchet.py --mode floor --stats mutation-stats.json
+
+      - name: No modules in this shard
+        if: steps.shard.outputs.patterns == ''
+        run: echo "No modules in scope for this shard; nothing to check."
+
+  mutation-gate:
+    name: "Mutation floor"
+    needs: [mutation]
+    if: always()
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Aggregate shard results
+        run: |
+          if [ "${{ needs.mutation.result }}" != "success" ]; then
+            echo "One or more mutation shards failed."; exit 1
+          fi
+          echo "All mutation shards passed."
