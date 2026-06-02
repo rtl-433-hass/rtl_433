@@ -157,9 +157,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 002: Authoritative initial-frequency seed + test de-duplication (Issue 2) (depends on: 001)
 
-### Phase 3: Documentation
+### Phase 3: Documentation ✅
 **Parallel Tasks:**
-- Task 003: Document the registration-gate and initial-frequency behavior changes (depends on: 001, 002)
+- ✔️ Task 003: Document the registration-gate and initial-frequency behavior changes (depends on: 001, 002)
 
 ### Post-phase Actions
 Run the validation gate (`POST_PHASE.md`) after each phase; the full `uv run pytest tests/ -q` suite must pass before advancing.

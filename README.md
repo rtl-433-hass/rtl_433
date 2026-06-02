@@ -93,7 +93,7 @@ Each hub points at one rtl_433 server's WebSocket endpoint.
 | **Secure** | off | When on, connect with `wss://` instead of `ws://` (TLS). |
 | **Manage rtl_433 settings from Home Assistant** | on | When on, expose SDR controls on the hub and let Home Assistant adopt and enforce the receiver's settings. See [Managing SDR settings from Home Assistant](#managing-sdr-settings-from-home-assistant). |
 | **Discover new devices** | on | When on, newly observed devices on this server are added automatically. Turn off to start with discovery disabled; changeable later in the hub options. |
-| **Initial frequency (MHz)** | *(blank)* | Optional. Set the receiver's center frequency in MHz (e.g. `433.92`) at setup. Leave blank to keep the server's current frequency. Only applies when **Manage rtl_433 settings from Home Assistant** is on. |
+| **Initial frequency (MHz)** | `433.92` | The receiver's center frequency in MHz, pre-filled with the common 433.92 MHz band. The value you enter is applied **once** at first connect and takes priority over the frequency the server is currently using. Only applies when **Manage rtl_433 settings from Home Assistant** is on. |
 
 The integration validates that it can reach the WebSocket before creating the
 hub. The hub's identity is derived from `host:port`, so the same server cannot
@@ -153,6 +153,12 @@ no card to accept or dismiss:
   notification** (stable per-device id, so a deleted device that later
   re-appears replaces its notification rather than duplicating it). Restarting
   Home Assistant does **not** re-notify for already-known devices.
+- **Only devices heard after connecting are added.** On connect the rtl_433
+  server replays its recent backlog; the hub ignores those older messages for the
+  purpose of adding devices, so a new hub does **not** get flooded with everything
+  the receiver decoded before you connected. A previously-unknown device is added
+  the first time it transmits *after* the connection. (This relies on the rtl_433
+  server and Home Assistant clocks being roughly in sync.)
 - To get rid of an unwanted device, open it under **Settings → Devices &
   Services → rtl_433 → the device → Delete**. There is no persistent ignore
   list: with discovery **on**, a deleted device **re-appears** the next time it
@@ -321,7 +327,11 @@ What "managed" means:
 
 - On the **first connect** Home Assistant **adopts** the server's current
   settings into its desired state, then **re-applies all managed settings on
-  every reconnect**, so your values survive an rtl_433 restart.
+  every reconnect**, so your values survive an rtl_433 restart. If you set an
+  **Initial frequency** at setup, that value is applied **once** and takes
+  priority over the adopted frequency, so the receiver tunes to the frequency you
+  chose rather than the server's current one. After that the **Center frequency**
+  control owns the value and your later changes are preserved.
 - **Home Assistant becomes the authority.** Once a hub is managed, change these
   settings **in Home Assistant**, not in the rtl_433 config file — Home
   Assistant re-applies its stored values on the next reconnect and will override
