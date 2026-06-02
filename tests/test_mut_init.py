@@ -14,17 +14,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rtl_433 import (
-    LEGACY_CONF_OBSERVED_FIELDS,
-    PHANTOM_DEVICE_KEY,
     _async_update_listener,
-    _calibration_map,
-    _cleanup_phantom_unknown_device,
-    _hub_availability_timeout,
-    _hub_discovery_enabled,
-    _hub_manage_settings,
-    _hub_secure,
-    _migrate_motion_event_to_binary_sensor,
-    _rehome_device_objects,
     async_migrate_entry,
     async_remove_config_entry_device,
 )
@@ -60,6 +50,20 @@ from custom_components.rtl_433.const import (
     PLATFORMS,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.hub_settings import (
+    _calibration_map,
+    _hub_availability_timeout,
+    _hub_discovery_enabled,
+    _hub_manage_settings,
+    _hub_secure,
+)
+from custom_components.rtl_433.migration import (
+    LEGACY_CONF_OBSERVED_FIELDS,
+    PHANTOM_DEVICE_KEY,
+    _cleanup_phantom_unknown_device,
+    _migrate_motion_event_to_binary_sensor,
+    _rehome_device_objects,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
