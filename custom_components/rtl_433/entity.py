@@ -65,11 +65,32 @@ from .const import (
     signal_new_device,
 )
 from .mapping import FieldDescriptor, Registry, lookup
+from .normalizer import _safe_token
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
     from .normalizer import NormalizedEvent
     from .sdr_settings import SdrSetting
+
+
+def _device_display_name(model: str, device_key: str) -> str:
+    """Human-readable device name: the model plus its distinguishing id suffix.
+
+    ``device_key`` is ``<model-token>-<id>[-ch..][-st..]`` (see ``normalizer``),
+    so naively combining the model with the whole key duplicates the model — e.g.
+    ``Fineoffset-WH51 (Fineoffset-WH51-00c50f)``. Strip the model-token prefix and
+    keep only the suffix, giving ``Fineoffset-WH51 00c50f``: the canonical rtl_433
+    model (matching the device's ``model`` field) plus just the id that
+    distinguishes one unit from another. Falls back to the raw ``device_key`` when
+    there is no model, and to the bare model for a model-only device (no suffix).
+    """
+    if not model:
+        return device_key
+    suffix = device_key.removeprefix(f"{_safe_token(model)}-")
+    if not suffix or suffix == device_key:
+        # Model-only device (key == model token), or an unexpected key shape.
+        return model
+    return f"{model} {suffix}"
 
 
 def _resolve_entity_category(value: str | None) -> EntityCategory | None:
@@ -150,7 +171,7 @@ class Rtl433Entity(RestoreEntity):
         if descriptor.icon is not None:
             self._attr_icon = descriptor.icon
 
-        device_name = f"{model} ({device_key})" if model else device_key
+        device_name = _device_display_name(model, device_key)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{hub_entry_id}:{device_key}")},
             name=device_name,

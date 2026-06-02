@@ -824,7 +824,7 @@ async def test_sensor_apply_value_multiple_updates(hass, hub_entry_builder):
 async def test_sensor_async_restore_state_live_value_wins(hass, hub_entry_builder):
     """A live-seeded sensor does NOT overwrite its value on restore."""
     device_key = "EnergyMeter-2000-1234"
-    restore_entity_id = "sensor.energymeter_2000_energymeter_2000_1234_power"
+    restore_entity_id = "sensor.energymeter_2000_1234_power"
 
     # Seed a restoration cache value.
     mock_restore_cache(hass, (State(restore_entity_id, "99.9"),))
@@ -854,7 +854,7 @@ async def test_sensor_async_restore_state_restores_when_no_live_value(
 ):
     """Without a live seeded value, the sensor restores the prior state."""
     device_key = "Acurite-606TX-42"
-    restore_entity_id = "sensor.acurite_606tx_acurite_606tx_42_temperature"
+    restore_entity_id = "sensor.acurite_606tx_42_temperature"
     mock_restore_cache(hass, (State(restore_entity_id, "19.9"),))
 
     hub = await _setup_hub(
@@ -887,7 +887,7 @@ async def test_sensor_async_restore_state_non_restorable_states_not_applied(
     after a live event overwrites.
     """
     device_key = "Acurite-606TX-42"
-    restore_entity_id = "sensor.acurite_606tx_acurite_606tx_42_temperature"
+    restore_entity_id = "sensor.acurite_606tx_42_temperature"
 
     # Positive case first: a real numeric state IS restored.
     mock_restore_cache(hass, (State(restore_entity_id, "19.9"),))
@@ -1057,7 +1057,7 @@ async def test_last_seen_sensor_apply_value_is_noop(hass, hub_entry_builder):
 async def test_last_seen_restores_datetime_when_no_live_value(hass, hub_entry_builder):
     """Rtl433LastSeenSensor restores a prior ISO timestamp as a tz-aware datetime."""
     device_key = "Acurite-606TX-42"
-    restore_eid = "sensor.acurite_606tx_acurite_606tx_42_last_seen"
+    restore_eid = "sensor.acurite_606tx_42_last_seen"
     prior = "2026-05-20T08:30:00+00:00"
     mock_restore_cache(hass, (State(restore_eid, prior),))
 
@@ -1102,7 +1102,7 @@ async def test_last_seen_restore_ignores_unknown_state(hass, hub_entry_builder):
     test_last_seen_restores_datetime_when_no_live_value).
     """
     device_key = "Acurite-606TX-42"
-    restore_eid = "sensor.acurite_606tx_acurite_606tx_42_last_seen"
+    restore_eid = "sensor.acurite_606tx_42_last_seen"
 
     for bad_state in ("unknown", "unavailable"):
         mock_restore_cache(hass, (State(restore_eid, bad_state),))

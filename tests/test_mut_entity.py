@@ -403,7 +403,7 @@ async def test_device_info_manufacturer(hass, hub_entry_builder):
 
 
 async def test_device_name_with_model(hass, hub_entry_builder):
-    """Device name is '{model} ({device_key})' when model is non-empty."""
+    """Device name is '{model} {id-suffix}' (no redundant model) when model set."""
     model = "EnergyMeter-2000"
     device_key = f"{model}-1234"
     hub = await _setup_hub(
@@ -421,7 +421,8 @@ async def test_device_name_with_model(hass, hub_entry_builder):
         identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
     )
     assert device_entry is not None
-    expected_name = f"{model} ({device_key})"
+    # Only the distinguishing id suffix follows the model, not the whole key.
+    expected_name = f"{model} 1234"
     assert device_entry.name == expected_name
 
 
@@ -444,6 +445,29 @@ async def test_device_name_without_model_is_device_key(hass, hub_entry_builder):
     )
     # The name is device_key when model is falsy
     assert device_entry.name == device_key
+
+
+async def test_device_name_model_only_has_no_suffix(hass, hub_entry_builder):
+    """A model-only device (key == model token) is named with just the model."""
+    model = "Foo"
+    device_key = model  # no id/channel/subtype -> key is the bare model token
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: model,
+                DEVICE_FIELDS: [],
+            }
+        },
+    )
+    dev_reg = dr.async_get(hass)
+    device_entry = dev_reg.async_get_device(
+        identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+    )
+    assert device_entry is not None
+    # No redundant "Foo (Foo)" and no trailing space — just the model.
+    assert device_entry.name == model
 
 
 async def test_device_model_set_when_model_present(hass, hub_entry_builder):

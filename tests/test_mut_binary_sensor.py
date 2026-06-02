@@ -441,9 +441,10 @@ async def test_added_to_hass_no_timer_for_door_sensor_seeded_on(
 
 # Pre-computed entity_ids based on HA's slugification of the model and device key.
 # These do NOT depend on the hub entry_id (which is the unique_id prefix, not
-# the entity_id). Verified from test run logs.
-_DOOR_ENTITY_ID = "binary_sensor.genericdoor_x1_genericdoor_x1_88_opening"
-_MOTION_ENTITY_ID = "binary_sensor.genericpir_z1_genericpir_z1_5_motion"
+# the entity_id). The device name is "{model} {id-suffix}" (the model is not
+# duplicated), so the slug is "<model>_<id>_<field>". Verified from test run logs.
+_DOOR_ENTITY_ID = "binary_sensor.genericdoor_x1_88_opening"
+_MOTION_ENTITY_ID = "binary_sensor.genericpir_z1_5_motion"
 
 
 # ===========================================================================
