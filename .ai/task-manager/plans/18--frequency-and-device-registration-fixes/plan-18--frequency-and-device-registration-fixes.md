@@ -153,9 +153,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 001: Connection timestamp primitive + post-connection device registration gate (Issue 1), with tests
 
-### Phase 2: Frequency fix
+### Phase 2: Frequency fix ✅
 **Parallel Tasks:**
-- Task 002: Authoritative initial-frequency seed + test de-duplication (Issue 2) (depends on: 001)
+- ✔️ Task 002: Authoritative initial-frequency seed + test de-duplication (Issue 2) (depends on: 001)
 
 ### Phase 3: Documentation
 **Parallel Tasks:**

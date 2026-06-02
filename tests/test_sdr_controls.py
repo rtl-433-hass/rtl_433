@@ -232,23 +232,6 @@ def test_adoption_hop_mode_skips_center_frequency(hass, coordinator):
     assert coordinator.is_managed(KEY_GAIN_AUTO)
 
 
-async def _seed_initial_frequency(coordinator):
-    """Run the first-connect seeding the connect loop performs (adopt + layer).
-
-    Mirrors the ``if not self._desired:`` branch of ``_connect_loop``: adopt the
-    server's settings, then layer the setup ``initial_center_frequency`` over the
-    adopted value, marking it managed and persisting. Only runs while empty.
-    """
-    if not coordinator._desired:
-        await coordinator._adopt_from_server()
-        if coordinator.initial_center_frequency is not None:
-            coordinator._desired[KEY_CENTER_FREQUENCY] = (
-                coordinator.initial_center_frequency
-            )
-            coordinator._managed.add(KEY_CENTER_FREQUENCY)
-            await coordinator._persist_desired()
-
-
 async def test_initial_frequency_seeds_over_adoption_on_first_connect(
     hass, hub_entry_builder, hass_storage
 ):
@@ -265,7 +248,7 @@ async def test_initial_frequency_seeds_over_adoption_on_first_connect(
     coordinator.meta = dict(_META_SINGLE)  # would adopt 433.92 absent the override
     assert coordinator._desired == {}
 
-    await _seed_initial_frequency(coordinator)
+    await coordinator._seed_desired_on_first_connect()
 
     # The setup choice (MHz) wins over the adopted value and is managed.
     assert coordinator.get_desired(KEY_CENTER_FREQUENCY) == 915.0
@@ -276,14 +259,20 @@ async def test_initial_frequency_seeds_over_adoption_on_first_connect(
         915000000,
         None,
     )
-    # The seed was persisted, so a reload would not re-seed.
+    # The seed was persisted (incl. the one-time flag), so a reload won't re-seed.
     assert sdr_store_key(entry.entry_id) in hass_storage
+    assert coordinator._initial_freq_seeded is True
 
 
-async def test_initial_frequency_not_seeded_when_desired_nonempty(
+async def test_initial_frequency_wins_when_desired_already_populated(
     hass, hub_entry_builder, hass_storage
 ):
-    """With desired state already present, the setup frequency is NOT re-applied."""
+    """Regression: the setup frequency wins even if desired state already exists.
+
+    Reproduces the reported bug — a non-empty desired store (e.g. an adopted
+    center frequency persisted by an earlier connect) previously caused the
+    user's configured frequency to be dropped in favour of the server default.
+    """
     entry = hub_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(
@@ -293,15 +282,43 @@ async def test_initial_frequency_not_seeded_when_desired_nonempty(
         manage_settings=True,
         initial_center_frequency=915.0,
     )
-    # A prior session already established a desired center frequency.
+    # A prior connect already adopted + persisted the server's 433.92 MHz default.
     coordinator._desired = {KEY_CENTER_FREQUENCY: 433.92}
     coordinator._managed = {KEY_CENTER_FREQUENCY}
+    coordinator._initial_freq_seeded = False
     coordinator.meta = dict(_META_SINGLE)
 
-    await _seed_initial_frequency(coordinator)
+    await coordinator._seed_desired_on_first_connect()
 
-    # The existing value survives; the setup seed did not overwrite it.
-    assert coordinator.get_desired(KEY_CENTER_FREQUENCY) == 433.92
+    # The configured setup value wins over the already-present adopted value.
+    assert coordinator.get_desired(KEY_CENTER_FREQUENCY) == 915.0
+    assert coordinator.is_managed(KEY_CENTER_FREQUENCY)
+    assert coordinator._initial_freq_seeded is True
+
+
+async def test_initial_frequency_seeded_once_preserves_user_change(
+    hass, hub_entry_builder, hass_storage
+):
+    """Once consumed, the one-time seed never overwrites a later user change."""
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+    coordinator = Rtl433Coordinator(
+        hass,
+        entry,
+        host="rtl433.local",
+        manage_settings=True,
+        initial_center_frequency=915.0,
+    )
+    # The user has since changed the frequency via the control; seed is consumed.
+    coordinator._desired = {KEY_CENTER_FREQUENCY: 868.0}
+    coordinator._managed = {KEY_CENTER_FREQUENCY}
+    coordinator._initial_freq_seeded = True
+    coordinator.meta = dict(_META_SINGLE)
+
+    await coordinator._seed_desired_on_first_connect()
+
+    # The user's value survives the (re)connect; the setup seed does not re-fire.
+    assert coordinator.get_desired(KEY_CENTER_FREQUENCY) == 868.0
 
 
 def test_adoption_cmd_down_adopts_nothing(hass, coordinator, aioclient_mock):
