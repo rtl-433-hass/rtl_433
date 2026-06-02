@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.11.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.11.0...v0.11.1) (2026-06-02)
+
+
+### Bug Fixes
+
+* **coordinator:** gate device registration to post-connection messages ([323396e](https://github.com/rtl-433-hass/rtl_433/commit/323396e1973e8ffe5c72df165671d3be003f4686))
+* **coordinator:** make setup-time initial frequency authoritative ([f96e2b4](https://github.com/rtl-433-hass/rtl_433/commit/f96e2b4ef3970353b0deac373102fec502377074))
+* **coordinator:** surface malformed getter JSON at error level ([d7e5236](https://github.com/rtl-433-hass/rtl_433/commit/d7e52360dee608621ee2725b2ce767a8e51d939f))
+* **entity:** drop redundant model from device name ([be99f6d](https://github.com/rtl-433-hass/rtl_433/commit/be99f6dfd0180721e728d6be1c21ec28d43b9879))
+
+
+### Documentation
+
+* document post-connection registration gate and authoritative initial frequency ([fa1a437](https://github.com/rtl-433-hass/rtl_433/commit/fa1a437a226f318464fa0c93957ff627954b4046))
+* **tasks:** add plan 18 for frequency and device-registration fixes ([0da3b71](https://github.com/rtl-433-hass/rtl_433/commit/0da3b7121f7e0e6fd95d8e30d6daa761b7ef48cd))
+* **tasks:** archive plan 19 (mutation matrix) ([5a766d1](https://github.com/rtl-433-hass/rtl_433/commit/5a766d1b8a6bf6d2c1e011ac92417ef5966c2877))
+
 ## [0.11.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.10.0...v0.11.0) (2026-06-02)
 
 
