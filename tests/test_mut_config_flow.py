@@ -37,11 +37,7 @@ from unittest.mock import patch
 import pytest
 
 from custom_components.rtl_433.calibration import COMMODITY_UNITS
-from custom_components.rtl_433.config_flow import (
-    CONF_DEVICE,
-    CONF_SECURE,
-    _hub_unique_id,
-)
+from custom_components.rtl_433.config_flow import CONF_SECURE, _hub_unique_id
 from custom_components.rtl_433.const import (
     CALIBRATION_COMMODITY,
     CALIBRATION_SCALE,
@@ -73,6 +69,7 @@ from custom_components.rtl_433.const import (
     DOMAIN,
 )
 from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+from custom_components.rtl_433.options_flow import CONF_DEVICE
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.data_entry_flow import FlowResultType
