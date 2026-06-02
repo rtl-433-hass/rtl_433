@@ -330,6 +330,12 @@ class Rtl433Coordinator:
         # can never interleave requests to the same server.
         self._desired: dict[str, Any] = {}
         self._managed: set[str] = set()
+        # Whether the one-time setup ``initial_center_frequency`` seed has already
+        # been applied (persisted with the desired state). Gating the seed on this
+        # — rather than on ``_desired`` being empty — makes the configured value
+        # win over adopted/persisted state exactly once at setup, and never
+        # re-applies after the user later changes the frequency via the control.
+        self._initial_freq_seeded: bool = False
         self._cmd_lock = asyncio.Lock()
         self._store: Store[dict[str, Any]] = _SdrStore(
             hass, SDR_STORE_VERSION, sdr_store_key(entry.entry_id)
@@ -444,19 +450,7 @@ class Rtl433Coordinator:
                     # here too so nothing can break the connection / event stream.
                     if self.manage_settings:
                         try:
-                            if not self._desired:
-                                await self._adopt_from_server()
-                                # Layer the setup frequency over adoption: an
-                                # explicit user choice overrides the adopted (and
-                                # hop-mode-skipped) value. Persisting makes
-                                # ``_desired`` non-empty, so this runs only on the
-                                # first-ever connect and is never re-seeded after.
-                                if self.initial_center_frequency is not None:
-                                    self._desired[KEY_CENTER_FREQUENCY] = (
-                                        self.initial_center_frequency
-                                    )
-                                    self._managed.add(KEY_CENTER_FREQUENCY)
-                                    await self._persist_desired()
+                            await self._seed_desired_on_first_connect()
                             await self._enforce_all()
                         except Exception as err:  # noqa: BLE001 - never kill loop
                             LOGGER.debug(
@@ -642,15 +636,24 @@ class Rtl433Coordinator:
         if not self.manage_settings:
             await self._store.async_remove()  # re-enable will re-adopt
             self._desired, self._managed = {}, set()
+            self._initial_freq_seeded = False
             return
         data = await self._store.async_load() or {}
         self._desired = dict(data.get("values", {}))
         self._managed = set(data.get("managed", []))
+        # Absent in stores written before this flag existed -> treat as not yet
+        # seeded; the seed only applies when an ``initial_center_frequency`` is
+        # configured, so a legacy store without one is unaffected.
+        self._initial_freq_seeded = bool(data.get("initial_freq_seeded", False))
 
     async def _persist_desired(self) -> None:
         """Persist the desired-state map + managed-set to the per-hub Store."""
         await self._store.async_save(
-            {"values": self._desired, "managed": sorted(self._managed)}
+            {
+                "values": self._desired,
+                "managed": sorted(self._managed),
+                "initial_freq_seeded": self._initial_freq_seeded,
+            }
         )
 
     async def _send_cmd(
@@ -733,6 +736,28 @@ class Rtl433Coordinator:
         # Reconcile self.meta from the server; swallow its own failures.
         await self._refresh_meta()
 
+    async def _seed_desired_on_first_connect(self) -> None:
+        """Establish the desired state on the first managed connect.
+
+        Two independent one-time steps, both safe to call on every connect:
+
+        - Adopt the server's current settings while ``_desired`` is empty (the
+          very first connect). Once adopted+persisted, later connects skip this.
+        - Apply the setup-time ``initial_center_frequency`` exactly once, gated on
+          a persisted ``_initial_freq_seeded`` flag rather than on ``_desired``
+          being empty. This makes the user's explicit choice win over the adopted
+          (and hop-mode-skipped) value even when the Store already holds desired
+          state, and never re-applies after the user later changes the frequency
+          via the control.
+        """
+        if not self._desired:
+            await self._adopt_from_server()
+        if self.initial_center_frequency is not None and not self._initial_freq_seeded:
+            self._desired[KEY_CENTER_FREQUENCY] = self.initial_center_frequency
+            self._managed.add(KEY_CENTER_FREQUENCY)
+            self._initial_freq_seeded = True
+            await self._persist_desired()
+
     async def _adopt_from_server(self) -> None:
         """Seed the desired state from the server's current ``self.meta``.
 
@@ -813,6 +838,7 @@ class Rtl433Coordinator:
     async def clear_desired_state(self) -> None:
         """Drop all desired state and remove the Store (management turned off)."""
         self._desired, self._managed = {}, set()
+        self._initial_freq_seeded = False
         await self._store.async_remove()
 
     # ------------------------------------------------------------------ #
