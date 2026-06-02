@@ -27,11 +27,14 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   per-hub `entry.data["devices"]` map (the single source of truth: model,
   observed mapped fields, optional per-device timeout override) and added at
   runtime via the new-device dispatcher signal — gated by the hub's discovery
-  toggle (the Quality-Scale `dynamic-devices` rule). `new_device_callback`
-  (`__init__.py`) also raises a `persistent_notification` with a stable
-  per-device `notification_id`, gated on `entry.data[CONF_DEVICES]` (not the
-  coordinator's per-session `is_new`) so restarts/reloads don't re-notify;
-  in-app only.
+  toggle (the Quality-Scale `dynamic-devices` rule) **and by the post-connection
+  registration gate** (see the coordinator's replay/registration notes: a
+  previously-unknown device auto-registers only once a frame timestamped at/after
+  the connection is seen, so a server's pre-connection backlog never floods the
+  device list). `new_device_callback` (`__init__.py`) also raises a
+  `persistent_notification` with a stable per-device `notification_id`, gated on
+  `entry.data[CONF_DEVICES]` (not the coordinator's per-session discovery state)
+  so restarts/reloads don't re-notify; in-app only.
 - `async_remove_config_entry_device` (`__init__.py`) backs the per-device
   **Delete** affordance (the `stale-devices` rule): it returns `False` for the
   hub device (so the hub can't be removed out from under its entry) and `True`
@@ -89,8 +92,10 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   `already_configured` if a `host:port` is already owned by a discovered entry.
   Both add flows persist `discovery_enabled` and, when `manage_settings` is on and
   a frequency was entered, `initial_frequency` (MHz) into `entry.data`; the latter
-  is seeded into the managed desired state on the coordinator's first-ever connect
-  (layered over adoption, then never re-seeded).
+  is applied to the managed desired state **exactly once** at first connect —
+  authoritatively overriding the adopted/persisted center frequency (gated on a
+  persisted `initial_freq_seeded` flag, not on the desired store being empty), and
+  never re-applied after the user later changes the frequency via the control.
 
 ## Per-device "Last seen" sensor (synthetic, non-field-driven)
 
@@ -246,10 +251,9 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   ever parsed (a frame at or below it is an **already-seen replay**) plus the
   event **age vs `REPLAY_STALE_THRESHOLD`** (30 s — an unseen-but-old frame is a
   **stale gap event** that occurred while HA was disconnected). Either outcome
-  **seeds sensor values** (and still fires the new-device callback so a
-  replay-discovered device's entities exist) but must **NOT** fire `event`
-  entities or refresh `last_seen` / `available`, so a genuinely-offline device is
-  not resurrected by the replay. A suppressed `event` transmission logs **once at
+  **seeds sensor values** but must **NOT** fire `event` entities or refresh
+  `last_seen` / `available`, so a genuinely-offline device is not resurrected by
+  the replay. A suppressed `event` transmission logs **once at
   INFO** (`Rtl433Event._handle_dispatch`). The classification rides on the
   dispatch carrier: `NormalizedEvent.is_replay` / `event_time` (stamped via
   `dataclasses.replace` after `normalize`; live is the default), so dispatch
@@ -259,6 +263,21 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   (local-naive `time` is read in HA's time zone). **Limitation:** with server
   timestamps disabled (`report_meta notime`) there is no usable `time`, so every
   frame is treated as live and **events fire on replay**.
+- **Post-connection device-registration gate** (`_process_event`,
+  `_connection_time`, `DISCOVERY_BACKLOG_GRACE`). Distinct from the replay/event
+  classification above: it governs **whether a previously-unknown device
+  auto-registers**, not whether events fire. The coordinator stamps
+  `_connection_time` (UTC) on every successful connect and clears it on drop. A
+  previously-unknown device fires `new_device_callback` only when the triggering
+  frame is timestamped at/after `_connection_time - DISCOVERY_BACKLOG_GRACE`
+  (5 s skew grace), so the server's pre-connection backlog (replayed on connect)
+  seeds runtime state **without** registering devices. Registration keys off a
+  separate per-process `_discovered` set (not `devices` membership), so a device
+  first seen in the backlog still registers on its first genuine post-connection
+  frame; `forget_device` re-arms it. A frame with **no parseable `time`** is
+  treated as post-connection (registers), and once disconnected
+  (`_connection_time is None`) the gate is open. **Assumes the server and HA
+  clocks are roughly NTP-synced.**
 - **Hub observability data source.** SDR/meta and server stats are **not** read
   from the socket. They come from one-shot HTTP GETs to `scheme://host:port/cmd`
   at the **server root** (`https` when `secure`/`wss`, else `http`) —
@@ -353,12 +372,18 @@ contributor-facing.
     is never pinned. The API has no command to set the frequency *list*, so these
     modes are mutually exclusive and set in the rtl_433 config.
 - **Adoption + full enforcement on reconnect** (`coordinator/base.py`,
-  `_connect_loop`). When `manage_settings` is on: on first connect (when
-  `_desired` is empty) `_adopt_from_server()` seeds the desired state from
-  `self.meta`; then `_enforce_all()` **replays every managed field on every
-  (re)connect**, so values survive an rtl_433 restart. Both run after
-  `_refresh_meta`, are wrapped so a failure can never kill the connect loop, and
-  every `/cmd` is best-effort.
+  `_connect_loop` → `_seed_desired_on_first_connect`). When `manage_settings` is
+  on: on first connect (when `_desired` is empty) `_adopt_from_server()` seeds the
+  desired state from `self.meta`; then `_enforce_all()` **replays every managed
+  field on every (re)connect**, so values survive an rtl_433 restart. Both run
+  after `_refresh_meta`, are wrapped so a failure can never kill the connect loop,
+  and every `/cmd` is best-effort.
+  - **Authoritative setup frequency:** a configured `initial_center_frequency` is
+    applied **once** in `_seed_desired_on_first_connect` (gated on the persisted
+    `initial_freq_seeded` flag, **independent of whether `_desired` is empty**), so
+    the user's explicit setup choice wins over the adopted/persisted center
+    frequency even on a re-connect or after management was toggled on later, and is
+    never re-applied once the user changes it via the control.
   - **Hop-mode guard:** adoption **skips `center_frequency` when
     `len(frequencies) > 1`** so HA never pins a hopping receiver to one freq.
   - **`/cmd`-down guard:** if `self.meta` is empty (getters failed / proxy hides
