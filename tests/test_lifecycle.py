@@ -488,7 +488,7 @@ async def test_late_field_creates_entity_and_persists_across_reload(
 async def test_restore_entity_restores_last_state(hass, hub_entry_builder):
     """A restored sensor shows its previous value before any live event arrives."""
     device_key = "Acurite-606TX-42"
-    restore_entity_id = "sensor.acurite_606tx_acurite_606tx_42_temperature"
+    restore_entity_id = "sensor.acurite_606tx_42_temperature"
 
     mock_restore_cache(hass, (State(restore_entity_id, "19.9"),))
 
@@ -919,7 +919,7 @@ async def test_last_seen_restores_prior_not_baseline(hass, hub_entry_builder):
     Then a real event overwrites it with the fresh ``coordinator.last_seen``.
     """
     device_key = "Acurite-606TX-42"
-    restore_eid = "sensor.acurite_606tx_acurite_606tx_42_last_seen"
+    restore_eid = "sensor.acurite_606tx_42_last_seen"
     prior = "2026-05-20T08:30:00+00:00"
     mock_restore_cache(hass, (State(restore_eid, prior),))
 
