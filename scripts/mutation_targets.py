@@ -72,7 +72,9 @@ FULL_RUN_TRIGGERS = {
 # baseline), so it is a delayed catch, never a silent floor blind spot.
 EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
     "tests/test_coordinator.py": ["coordinator/base.py"],
-    "tests/test_mut_init.py": ["__init__.py"],
+    "tests/test_mut_init.py": ["__init__.py", "migration.py", "hub_settings.py"],
+    "tests/test_config_flow.py": ["config_flow.py", "options_flow.py"],
+    "tests/test_mut_config_flow.py": ["config_flow.py", "options_flow.py"],
     "tests/test_binary_sensor_motion.py": ["binary_sensor.py", "event.py"],
     "tests/test_diagnostics_repairs.py": ["diagnostics.py", "repairs.py"],
     "tests/test_sdr_controls.py": [

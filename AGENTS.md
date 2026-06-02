@@ -12,6 +12,13 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
   - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`, `mapping.py`,
     `normalizer.py`, `diagnostics.py`, `repairs.py`, `sensor.py`,
     `binary_sensor.py`, `event.py`, `translations/en.json`.
+  - `__init__.py` keeps only the steady-state config-entry lifecycle
+    (`async_setup_entry` / `async_unload_entry` / `_async_update_listener` /
+    `async_remove_config_entry_device`). Three sibling modules hold the rest:
+    `migration.py` (config-entry v1→v2 migration + one-time legacy cleanups,
+    re-exported `async_migrate_entry`), `library.py` (mapping-library load/merge),
+    and `hub_settings.py` (hub-entry setting resolvers: `_hub_*`,
+    `_calibration_map`).
 - `docs/device-library.md` — **authoritative** device-library reference.
 - `tests/` — unit tests. `tests/integration/` — container/screenshot harness.
 
@@ -42,7 +49,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   its `device_key` from coordinator runtime state** (`coordinator.forget_device`)
   so it can re-appear if it transmits again with discovery on. There is no
   persistent ignore list.
-- `async_migrate_entry` (`__init__.py`, config-entry `VERSION` 1 → 2) performs a
+- `async_migrate_entry` (`migration.py`, config-entry `VERSION` 1 → 2) performs a
   **seamless in-place upgrade from 0.1.0**: it re-homes the legacy per-device
   config entries' registry devices/entities onto the hub entry (preserving
   unique_ids, entity_ids, and history), folds their state into the hub's devices
@@ -193,7 +200,7 @@ timer. Contracts that must survive refactors:
   `Rtl433BinarySensor._effective_clear_delay` consumes it (falling back to the
   descriptor default if the resolver errors/returns `None`).
 - **event → binary migration** (`_migrate_motion_event_to_binary_sensor`,
-  `__init__.py`). Earlier versions exposed motion as `event.*_motion`; the
+  `migration.py`). Earlier versions exposed motion as `event.*_motion`; the
   entity_id is now `binary_sensor.*_motion` (**a BC break**). At setup the sweep
   removes the orphaned `event`-domain registry entries whose unique-id tail is
   `:motion`, drops the `motion` slot from any persisted `DEVICE_EVENT_TYPES` (so
@@ -312,7 +319,7 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
     long-term statistics); `enabled` → enabled decoders is a gauge →
     **`MEASUREMENT`**; `stats[]` / `since` are surfaced as attributes.
 - **Phantom-unknown cleanup.** `async_setup_entry` (`__init__.py`) calls
-  `_cleanup_phantom_unknown_device`, which **idempotently** removes a legacy
+  `_cleanup_phantom_unknown_device` (`migration.py`), which **idempotently** removes a legacy
   persisted `"unknown"` device from `entry.data["devices"]` and the matching
   registry device `(DOMAIN, f"{entry_id}:unknown")`. Safe on every setup; the
   classifier above prevents recreation.
@@ -484,7 +491,7 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
 - **`load_user_overrides` was removed.** Nothing reads
   `<config>/rtl_433_mappings.yaml` at runtime anymore — the file-reading code
   path is gone.
-- **One-time import on upgrade** (`async_migrate_entry`, `__init__.py`). On the
+- **One-time import on upgrade** (`async_migrate_entry`, `migration.py`). On the
   config-entry migration, any existing `<config>/rtl_433_mappings.yaml` is read
   **once**, normalized, and folded into each existing entry's
   `CONF_USER_MAPPINGS`. The file is then **ignored and left untouched** on disk
@@ -604,19 +611,43 @@ PR gate and is re-measured by the nightly full run. The baseline only ratchets
 **upward**: refresh it in the same PR with `--update` when you genuinely improve a
 file. New mutation tests live in `tests/test_mut_*.py`.
 
-Because a full run is slow (~50 min), CI scopes the work by trigger:
+Because a full run is slow (~50 min), CI splits the work two ways — by **scope**
+(how many modules) and by **shard** (parallel across modules):
 
-- **Pull requests** mutate only the modules the PR could affect — changed package
-  modules, plus the source module a changed `tests/test_*.py` exercises
-  (`scripts/mutation_targets.py` does the mapping). Typical PRs finish in a couple
-  of minutes and still block on a per-file regression in touched code. A change to
-  mutation infra (`pyproject.toml`, `requirements_test.txt`, `scripts/mutation_*`,
-  `tests/conftest.py`, the workflow) or a broad/unmappable test escalates the PR to
-  a full run. For a scoped run, pass the touched files to
-  `scripts/mutation_stats.py --paths` so unscoped (un-run) mutants aren't counted.
-- **Pushes to `main` and a nightly schedule** run the **full** package, so the
-  whole baseline stays honest and the "a test was weakened but its source is
-  unchanged" blind spot is caught within a day.
+- **Scope is chosen by trigger.** **Pull requests** mutate only the modules the PR
+  could affect — changed package modules, plus the source module a changed
+  `tests/test_*.py` exercises (`scripts/mutation_targets.py` does the mapping).
+  Typical PRs finish in a couple of minutes and still block on a per-file
+  regression in touched code. A change to mutation infra (`pyproject.toml`,
+  `requirements_test.txt`, `scripts/mutation_*`, `tests/conftest.py`, the workflow)
+  or a broad/unmappable test escalates the PR to the full package. **Pushes to
+  `main` and a nightly schedule** always run the **full** package, so the whole
+  baseline stays honest and the "a test was weakened but its source is unchanged"
+  blind spot is caught within a day. For a scoped run, the touched files are passed
+  to `scripts/mutation_stats.py --paths` so unscoped (un-run) mutants aren't counted.
+- **Whatever is in scope is split across a 6-way matrix** (one `mutation` job,
+  shards 0–5). `scripts/mutation_shards.py` does a deterministic LPT partition of
+  the whole package, weighting each module by its **measured mutmut run time**
+  from `scripts/mutation_timings.json` (count-balancing is wrong — per-mutant time
+  varies ~2.5x across modules, e.g. `entity.py` vs `coordinator/base.py`), then
+  `--restrict` keeps only this shard's in-scope modules. So a full run fans out
+  down to roughly the slowest single module (`mapping.py`); a scoped PR fans its
+  handful of modules out too. Six shards (not more) because only ~5 modules
+  dominate the time — extra shards sit near-idle and widen the spread without
+  lowering the pole. The union of the shard checks equals a single whole-scope
+  check (mutmut copies the whole package into `mutants/` regardless of the filter,
+  so imports resolve; the filter only restricts which mutants execute). The job
+  runs on every trigger and decides its own scope, so no matrix leg is skipped at
+  the job level. A `mutation-gate` job (status check name "Mutation floor") fans
+  the matrix back into one stable signal that fails if any shard failed.
+  - `scripts/mutation_timings.json` is a committed profile, refreshed like the
+    baseline: after a full `mutmut run`, `python scripts/mutation_timings.py`
+    rewrites it. A module absent from it falls back to a count-based estimate, so
+    a stale profile degrades gracefully (a slightly suboptimal split, never wrong).
+  - Note: mutmut strips the `__init__` segment from mutant names, so a package
+    `__init__.py`'s mutants live directly under the package's dotted name. The
+    sharder matches those via the `x_*`/`xǁ*` trampoline prefixes (not the naive
+    `<pkg>.__init__.*`, which matches nothing and would leave them unrun).
 
 ## Running the container / screenshot harness
 

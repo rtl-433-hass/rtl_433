@@ -1,9 +1,9 @@
 {
   "files": {
     "custom_components/rtl_433/__init__.py": {
-      "killed": 435,
-      "score": 0.935484,
-      "total": 465
+      "killed": 222,
+      "score": 0.863813,
+      "total": 257
     },
     "custom_components/rtl_433/binary_sensor.py": {
       "killed": 77,
@@ -16,9 +16,9 @@
       "total": 60
     },
     "custom_components/rtl_433/config_flow.py": {
-      "killed": 400,
-      "score": 0.849257,
-      "total": 471
+      "killed": 241,
+      "score": 0.948819,
+      "total": 254
     },
     "custom_components/rtl_433/const.py": {
       "killed": 6,
@@ -50,10 +50,25 @@
       "score": 0.853659,
       "total": 41
     },
+    "custom_components/rtl_433/hub_settings.py": {
+      "killed": 43,
+      "score": 0.934783,
+      "total": 46
+    },
+    "custom_components/rtl_433/library.py": {
+      "killed": 18,
+      "score": 0.486486,
+      "total": 37
+    },
     "custom_components/rtl_433/mapping.py": {
       "killed": 476,
       "score": 0.848485,
       "total": 561
+    },
+    "custom_components/rtl_433/migration.py": {
+      "killed": 272,
+      "score": 0.954386,
+      "total": 285
     },
     "custom_components/rtl_433/normalizer.py": {
       "killed": 72,
@@ -64,6 +79,11 @@
       "killed": 29,
       "score": 1.0,
       "total": 29
+    },
+    "custom_components/rtl_433/options_flow.py": {
+      "killed": 371,
+      "score": 0.843182,
+      "total": 440
     },
     "custom_components/rtl_433/sdr_settings.py": {
       "killed": 50,
