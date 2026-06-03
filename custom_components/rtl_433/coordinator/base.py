@@ -25,6 +25,11 @@ needs as injectable attributes:
 - ``effective_clear_delay_resolver`` — called with ``device_key`` to resolve the
   per-device motion clear-delay (override → default). The integration setup wires
   this; the binary_sensor reads it. The fallback is the motion default.
+- ``hub_info_callback`` — called (no args) when the SDR device identity
+  (``dev_info``/``dev_query``, learned from ``get_dev_info``/``get_dev_query`` on
+  each connect) is first seen or changes. The integration setup wires this to
+  refresh the hub device-registry entry's model/manufacturer/serial; the
+  coordinator never touches the device registry itself.
 """
 
 from __future__ import annotations
@@ -262,6 +267,10 @@ class Rtl433Coordinator:
         self.new_device_callback: Callable[[str, str, bool], None] | None = None
         self.effective_timeout_resolver: Callable[[str], int | None] | None = None
         self.effective_clear_delay_resolver: Callable[[str], int] | None = None
+        # Called (no args) when the SDR device identity (``dev_info``/``dev_query``)
+        # is first learned or changes on a (re)connect, so the setup layer can
+        # refresh the hub device-registry entry's model/manufacturer/serial.
+        self.hub_info_callback: Callable[[], None] | None = None
 
         # Per-device calibration snapshot captured at setup (analogous to
         # ``manage_settings``): ``{device_key: {commodity, unit, scale}}`` for
@@ -319,6 +328,12 @@ class Rtl433Coordinator:
         # and the latest server-stats payload. Populated over HTTP, not the socket.
         self.meta: dict[str, Any] = {}
         self.stats: dict[str, Any] = {}
+        # SDR device identity, fetched once per (re)connect (static per dongle).
+        # ``dev_info`` is the librtlsdr USB label as ``{"vendor", "product",
+        # "serial"}``; ``dev_query`` is the ``-d`` selector rtl_433 opened. Both
+        # stay empty when no SDR device is open (e.g. ``-D manual``).
+        self.dev_info: dict[str, Any] = {}
+        self.dev_query: str | None = None
         # Getters (by command name) currently returning malformed JSON. Used to
         # log the "server returned invalid JSON" error once per command until it
         # recovers, so the 60s refresh tick can never flood the log.
@@ -448,6 +463,9 @@ class Rtl433Coordinator:
                     # (e.g. behind a proxy) cannot break the connection.
                     await self._refresh_meta()
                     await self._refresh_stats()
+                    # Learn the SDR's model/serial so the hub device shows which
+                    # physical dongle it is (static per dongle; cheap on reconnect).
+                    await self._refresh_dev_info()
                     # Adopt the server's settings on first connect, then replay
                     # the managed desired state on every (re)connect. Both are
                     # best-effort and swallow their own ``/cmd`` errors, but wrap
@@ -634,6 +652,46 @@ class Rtl433Coordinator:
         if isinstance(stats, dict):
             self.stats = stats
             self._emit_hub_update()
+
+    async def _refresh_dev_info(self) -> None:
+        """Fetch the SDR device identity into ``dev_info`` / ``dev_query``.
+
+        ``get_dev_info`` is the librtlsdr USB device label as a JSON object
+        (``{"vendor": ..., "product": ..., "serial": ...}``); ``get_dev_query`` is
+        the ``-d`` selector rtl_433 opened. Both are static for a given dongle, so
+        this only runs on (re)connect — re-running on reconnect keeps them correct
+        if the dongle behind the server is swapped. Either may be empty/unset when
+        no SDR device is open (e.g. ``-D manual``); the stored value is then left
+        untouched so the hub keeps its last known identity.
+
+        When the identity changes, ``hub_info_callback`` is invoked so the setup
+        layer can refresh the hub device-registry entry. The callback is guarded
+        so a registry hiccup can never break the streaming connection.
+        """
+        info = self._unwrap_result(await self._fetch_cmd("get_dev_info"))
+        query = self._unwrap_result(await self._fetch_cmd("get_dev_query"))
+
+        # Over ``/cmd`` the JSON object is embedded directly, but accept a JSON
+        # string too (WS framing / a proxy) so the parse is transport-agnostic.
+        if isinstance(info, str):
+            try:
+                info = json.loads(info)
+            except ValueError:
+                info = None
+
+        changed = False
+        if isinstance(info, dict) and info and info != self.dev_info:
+            self.dev_info = info
+            changed = True
+        if isinstance(query, str) and query and query != self.dev_query:
+            self.dev_query = query
+            changed = True
+
+        if changed and self.hub_info_callback is not None:
+            try:
+                self.hub_info_callback()
+            except Exception as err:  # noqa: BLE001 - never kill the connect loop
+                LOGGER.debug("rtl_433 hub_info_callback failed: %s", err)
 
     async def _async_refresh_tick(self, _now: datetime) -> None:
         """Re-fetch meta + stats on the interval, only while connected.

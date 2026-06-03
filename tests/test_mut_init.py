@@ -559,6 +559,42 @@ async def test_setup_entry_registers_hub_device(hass, hub_entry_builder):
     assert hub_device.model == "rtl_433 server"
 
 
+async def test_hub_info_callback_updates_hub_device_identity(hass, hub_entry_builder):
+    """Once the SDR identity is known, the hub device shows its model/serial."""
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+
+    coordinator.dev_info = {
+        "vendor": "Realtek",
+        "product": "RTL2838UHIDIR",
+        "serial": "00000001",
+    }
+    coordinator.hub_info_callback()
+    await hass.async_block_till_done()
+
+    dev_reg = dr.async_get(hass)
+    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    assert hub_device.manufacturer == "Realtek"
+    assert hub_device.model == "RTL2838UHIDIR"
+    assert hub_device.serial_number == "00000001"
+
+
+async def test_hub_info_callback_noop_when_identity_empty(hass, hub_entry_builder):
+    """With no SDR identity (e.g. ``-D manual``) the hub keeps its placeholders."""
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+
+    coordinator.dev_info = {}
+    coordinator.hub_info_callback()
+    await hass.async_block_till_done()
+
+    dev_reg = dr.async_get(hass)
+    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    assert hub_device.manufacturer == "rtl_433"
+    assert hub_device.model == "rtl_433 server"
+    assert hub_device.serial_number is None
+
+
 async def test_setup_entry_stores_coordinator_in_hass_data(hass, hub_entry_builder):
     """async_setup_entry puts the coordinator in hass.data[DOMAIN][entry_id]."""
     hub = await _setup_hub(hass, hub_entry_builder)

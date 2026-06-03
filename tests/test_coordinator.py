@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import timedelta
 import json
 import logging
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from freezegun import freeze_time
 import pytest
@@ -411,6 +411,124 @@ def test_getter_clears_malformed_flag_on_recovery(hass, coordinator, aioclient_m
 
     assert "get_stats" not in coordinator._malformed_cmds
     assert coordinator.stats["frames"]["events"] == 9
+
+
+# --------------------------------------------------------------------------- #
+# SDR device identity (get_dev_info / get_dev_query)                           #
+# --------------------------------------------------------------------------- #
+_DEV_INFO_RESULT = {
+    "vendor": "Realtek",
+    "product": "RTL2838UHIDIR",
+    "serial": "00000001",
+}
+
+
+def _mock_dev_info(aioclient_mock, *, info=_DEV_INFO_RESULT, query=":00000001"):
+    """Register ``/cmd`` stubs for the device-identity getters.
+
+    Both are wrapped in the ``result`` envelope, mirroring the real ``/cmd``
+    responder. ``info`` may be a dict (the embedded object ``/cmd`` returns) or a
+    str (a JSON string, as the WS framing / a proxy might deliver it).
+    """
+    url = "http://rtl433.local:8433/cmd"
+    aioclient_mock.get(url, params={"cmd": "get_dev_info"}, json={"result": info})
+    aioclient_mock.get(url, params={"cmd": "get_dev_query"}, json={"result": query})
+
+
+def test_refresh_dev_info_populates_identity(hass, coordinator, aioclient_mock):
+    """get_dev_info/get_dev_query populate the identity and fire the callback."""
+    _mock_dev_info(aioclient_mock)
+    info_callback = Mock()
+    coordinator.hub_info_callback = info_callback
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._refresh_dev_info())
+
+    assert coordinator.dev_info == {
+        "vendor": "Realtek",
+        "product": "RTL2838UHIDIR",
+        "serial": "00000001",
+    }
+    assert coordinator.dev_query == ":00000001"
+    info_callback.assert_called_once_with()
+
+
+def test_refresh_dev_info_parses_json_string(hass, coordinator, aioclient_mock):
+    """A ``get_dev_info`` result delivered as a JSON string is parsed to a dict."""
+    _mock_dev_info(
+        aioclient_mock,
+        info='{"vendor": "Realtek", "product": "RTL2832U", "serial": "abc"}',
+    )
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._refresh_dev_info())
+
+    assert coordinator.dev_info["product"] == "RTL2832U"
+    assert coordinator.dev_info["serial"] == "abc"
+
+
+def test_refresh_dev_info_unparsable_string_left_unchanged(
+    hass, coordinator, aioclient_mock
+):
+    """A non-JSON ``get_dev_info`` string leaves ``dev_info`` untouched."""
+    _mock_dev_info(aioclient_mock, info="not json", query=":42")
+    info_callback = Mock()
+    coordinator.hub_info_callback = info_callback
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._refresh_dev_info())
+
+    # The unparsable info is ignored, but the query still updates -> callback.
+    assert coordinator.dev_info == {}
+    assert coordinator.dev_query == ":42"
+    info_callback.assert_called_once_with()
+
+
+def test_refresh_dev_info_empty_preserves_and_skips_callback(
+    hass, coordinator, aioclient_mock
+):
+    """An empty identity (no SDR open) leaves prior values and fires no callback."""
+    coordinator.dev_info = {"vendor": "Realtek", "product": "RTL2838UHIDIR"}
+    coordinator.dev_query = ":00000001"
+    info_callback = Mock()
+    coordinator.hub_info_callback = info_callback
+    url = "http://rtl433.local:8433/cmd"
+    aioclient_mock.get(url, params={"cmd": "get_dev_info"}, json={"result": ""})
+    aioclient_mock.get(url, params={"cmd": "get_dev_query"}, json={"result": ""})
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._refresh_dev_info())
+
+    assert coordinator.dev_info == {"vendor": "Realtek", "product": "RTL2838UHIDIR"}
+    assert coordinator.dev_query == ":00000001"
+    info_callback.assert_not_called()
+
+
+def test_refresh_dev_info_callback_only_on_change(hass, coordinator, aioclient_mock):
+    """An unchanged identity on reconnect does not re-fire the callback."""
+    _mock_dev_info(aioclient_mock)
+    info_callback = Mock()
+    coordinator.hub_info_callback = info_callback
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._refresh_dev_info())
+        _run(hass, coordinator._refresh_dev_info())
+
+    info_callback.assert_called_once_with()
+
+
+def test_refresh_dev_info_callback_error_is_swallowed(
+    hass, coordinator, aioclient_mock
+):
+    """A raising callback can never break the connect loop / streaming."""
+    _mock_dev_info(aioclient_mock)
+    coordinator.hub_info_callback = Mock(side_effect=RuntimeError("registry boom"))
+
+    with patch(DISPATCH):
+        # Must not raise despite the callback blowing up.
+        _run(hass, coordinator._refresh_dev_info())
+
+    assert coordinator.dev_info["product"] == "RTL2838UHIDIR"
 
 
 def test_refresh_tick_refreshes_meta_and_stats_while_connected(

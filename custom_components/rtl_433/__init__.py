@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -161,6 +161,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
 
     # Register the hub device so nested devices can link to it via ``via_device``.
+    # The manufacturer/model start generic and are refined to the real SDR's
+    # vendor/product/serial once the coordinator connects (``hub_info_callback``).
     device_registry = dr.async_get(hass)
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -185,7 +187,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         initial_center_frequency=entry.data.get(CONF_INITIAL_FREQUENCY),
         skip_keys=entry_skip_keys,
     )
+
+    @callback
+    def hub_info_callback() -> None:
+        """Refresh the hub device's identity from the SDR's ``dev_info``.
+
+        ``coordinator.dev_info`` is the librtlsdr USB label
+        (``{"vendor", "product", "serial"}``); map it onto the hub device so the
+        device page shows which physical dongle this hub is, instead of the
+        generic ``rtl_433`` / ``rtl_433 server`` placeholders. Absent fields (e.g.
+        ``-D manual`` with no SDR open) leave the existing values untouched.
+        """
+        info = coordinator.dev_info
+        updates: dict[str, str] = {}
+        if info.get("vendor"):
+            updates["manufacturer"] = info["vendor"]
+        if info.get("product"):
+            updates["model"] = info["product"]
+        if info.get("serial"):
+            updates["serial_number"] = info["serial"]
+        if not updates:
+            return
+        device = device_registry.async_get_device(
+            identifiers={(DOMAIN, entry.entry_id)}
+        )
+        if device is not None:
+            device_registry.async_update_device(device.id, **updates)
+
     coordinator.new_device_callback = new_device_callback
+    coordinator.hub_info_callback = hub_info_callback
     coordinator.effective_timeout_resolver = effective_timeout_resolver
     coordinator.effective_clear_delay_resolver = effective_clear_delay_resolver
     # Snapshot the per-device calibration so the update listener can detect a
