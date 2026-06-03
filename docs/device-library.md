@@ -332,8 +332,11 @@ unrelated fields like `temperature_C` are unaffected on every model.
 
 `_skip_keys.yaml` lists fields that must never produce an entity — device
 identity (`model`, `id`, `channel`, `subtype`, `type`), message bookkeeping
-(`mic`, `mod`, `sequence_num`, `message_type`, `exception`, `raw_msg`), and
-radio-tuning fields (`freq`, `freq1`, `freq2`, `protocol`):
+(`mic`, `mod`, `sequence_num`, `message_type`, `exception`, `raw_msg`), and the
+secondary radio-tuning fields (`freq1`, `freq2`, `protocol`). The primary
+per-event `freq` is **not** skipped — it is mapped in `misc.yaml` to a
+diagnostic Frequency sensor (disabled by default) alongside `rssi`, `snr`, and
+`noise`, so the tuned frequency can be recorded when rtl_433 reports level data:
 
 ```yaml
 skip_keys:
