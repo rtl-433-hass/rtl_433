@@ -294,10 +294,18 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   errors (`_fetch_cmd`) so it can never raise into the connect loop or watchdog.
   The request uses the `cmd` query param; scalar getters are read defensively
   through a `{"result": ...}` unwrap (`_unwrap_result`).
-- **Exact getter set** (`_refresh_meta` + `_refresh_stats`): `get_meta` +
-  `get_gain` + `get_ppm_error` + `get_stats`. **Gain and ppm are absent from
+- **Exact getter set** (`_refresh_meta` + `_refresh_stats` + `_refresh_dev_info`):
+  `get_meta` + `get_gain` + `get_ppm_error` + `get_stats` + `get_dev_info` +
+  `get_dev_query`. **Gain and ppm are absent from
   `get_meta`** — they come from `get_gain` (string; empty ⇒ `auto`) and
   `get_ppm_error` (int) respectively. **Hop interval = `hop_times[0]`.**
+  `get_dev_info`/`get_dev_query` are the SDR's identity and are fetched **only on
+  (re)connect** (`_refresh_dev_info`, not on the interval tick): they are static
+  per dongle. When the identity changes, the coordinator's `hub_info_callback`
+  fires so `__init__.py` refreshes the **hub** device-registry entry's
+  `manufacturer`/`model`/`serial_number` (replacing the generic `rtl_433` /
+  `rtl_433 server` placeholders). Empty when no SDR is open (e.g. `-D manual`),
+  in which case the placeholders are kept.
   `_async_refresh_tick` re-polls **both** `_refresh_meta` and `_refresh_stats`
   on a fixed interval (`_REFRESH_INTERVAL`, 60 s) while connected, on top of the
   once-per-(re)connect refresh and the post-write read-back. Re-polling meta on
@@ -311,6 +319,10 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
     `frequencies[]`, `hop_times[]`, `duration`, `stats_interval`, `report_*`
     flags (**no `gain`, no `ppm`**).
   - `get_gain` → string (empty ⇒ auto); `get_ppm_error` → int.
+  - `get_dev_info` → librtlsdr USB label JSON
+    `{"vendor": <str>, "product": <str>, "serial": <str>}` (mapped to the hub
+    device's `manufacturer`/`model`/`serial_number`); `get_dev_query` → the `-d`
+    selector string rtl_433 opened. Both empty/unset when no SDR device is open.
   - `get_stats` → `{"enabled": <int>, "since": <str>, "frames": {"count":
     <ook>, "fsk": <fsk>, "events": <decoded>}, "stats": [<per-protocol>...]}`.
     Hub sensors map `frames.events` → decoded events, `frames.count` → OOK
