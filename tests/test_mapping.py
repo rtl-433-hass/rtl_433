@@ -196,12 +196,13 @@ def test_should_skip_excludes_skip_keys(library):
     _, skip_keys = library
 
     # Identity / transport keys from the shipped _skip_keys.yaml.
-    for key in ("model", "id", "channel", "subtype", "mic", "protocol", "freq"):
+    for key in ("model", "id", "channel", "subtype", "mic", "protocol", "freq1"):
         assert should_skip(key, skip_keys) is True
 
     # Measurement keys (and ``time``, which the library maps to a timestamp
-    # sensor rather than skipping) must not be skipped.
-    for key in ("temperature_C", "humidity", "power_W", "time"):
+    # sensor, and ``freq``, mapped to a diagnostic Frequency sensor) must not be
+    # skipped.
+    for key in ("temperature_C", "humidity", "power_W", "time", "freq"):
         assert should_skip(key, skip_keys) is False
 
 

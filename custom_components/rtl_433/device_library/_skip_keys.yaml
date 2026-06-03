@@ -17,7 +17,9 @@ skip_keys:
   - id
   - mic
   - mod
-  - freq
+  # `freq` is NOT skipped: it is mapped to a diagnostic Frequency sensor
+  # (disabled by default) in misc.yaml so the per-event tuned frequency can be
+  # recorded when rtl_433 reports level data.
   - sequence_num
   - message_type
   - exception

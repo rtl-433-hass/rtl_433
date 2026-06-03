@@ -821,12 +821,13 @@ class TestShouldSkip:
     def test_shipped_skip_keys(self, lib):
         """Shipped skip keys from _skip_keys.yaml are all present."""
         _, skip_keys = lib
-        for key in ("model", "id", "channel", "mic", "protocol", "freq"):
+        for key in ("model", "id", "channel", "mic", "protocol", "freq1"):
             assert should_skip(key, skip_keys) is True
 
     def test_measurement_keys_not_skipped(self, lib):
         _, skip_keys = lib
-        for key in ("temperature_C", "humidity", "power_W"):
+        # ``freq`` is mapped to a diagnostic Frequency sensor, not skipped.
+        for key in ("temperature_C", "humidity", "power_W", "freq"):
             assert should_skip(key, skip_keys) is False
 
 
