@@ -55,6 +55,10 @@ requirements.
   Assistant adopts the server's current values and re-applies them after every
   reconnect, so your settings survive an rtl_433 restart. See
   [Managing SDR settings from Home Assistant](#managing-sdr-settings-from-home-assistant).
+- **Per-device signal diagnostics** — when rtl_433 reports level data, each
+  device exposes disabled-by-default `Frequency`, `RSSI`, `SNR`, and `Noise`
+  diagnostic sensors. See
+  [Per-device signal diagnostics](#per-device-signal-diagnostics).
 - **Diagnostics feedback loop** — downloadable diagnostics list the
   `unmatched_field_keys` a hub has seen, telling you exactly what to add to the
   library.
@@ -272,6 +276,29 @@ To instead change the hub's connection target (host/port/path/secure) — the
 same server at a new address — use **Reconfigure** rather than **Configure**;
 nested devices and their history are preserved (see
 [Configuration](#configuration)).
+
+## Per-device signal diagnostics
+
+When rtl_433 is configured to report **level data**, each event carries the
+radio's per-transmission **frequency**, **RSSI**, **SNR**, and **noise**. The
+integration maps these to four **diagnostic** sensors on the device —
+`Frequency` (MHz), `RSSI`, `SNR`, and `Noise` (dB) — that are **disabled by
+default**. Enable the ones you want from the device page (or in the entity
+settings) to chart signal strength and reception quality over time, e.g. to find
+a better antenna placement.
+
+These fields are only present when rtl_433 emits level data:
+
+- **Using the [rtl_433 Home Assistant add-on](https://github.com/rtl-433-hass/rtl_433-hass-addons)?**
+  Update to a version that enables level reporting (`report_meta level`, the
+  config-file equivalent of the `-M level` CLI flag); recent versions do this out
+  of the box.
+- **Running rtl_433 yourself?** Start it with `-M level` (or add
+  `report_meta level` to your rtl_433 config file).
+
+If your rtl_433 does not report level data, these four sensors simply never
+appear — nothing else is affected, so the integration works the same on older
+setups.
 
 ## Hub entities
 
