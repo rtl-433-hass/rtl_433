@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.12.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.11.1...v0.12.0) (2026-06-03)
+
+
+### Features
+
+* add per-device signal level diagnostic sensors ([02e3a4f](https://github.com/rtl-433-hass/rtl_433/commit/02e3a4f7f34a09c5ad6bf787e1b3ac82fea2f37c))
+* **hub:** show the SDR model and serial on the hub device ([82f2ab9](https://github.com/rtl-433-hass/rtl_433/commit/82f2ab91463b9b5f460df0e23bd152ca4ecb6185))
+
+
+### Documentation
+
+* document per-device signal level diagnostics ([a162702](https://github.com/rtl-433-hass/rtl_433/commit/a162702e20d2f33c3fe928cff6389346ec7bfa22))
+
 ## [0.11.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.11.0...v0.11.1) (2026-06-02)
 
 
