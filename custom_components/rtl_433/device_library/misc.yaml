@@ -30,8 +30,22 @@ time:
   icon: "mdi:clock-in"
   object_suffix: UTC
 
-# Radio signal diagnostics. Present in the upstream mappings table (not in
-# SKIP_KEYS) and surfaced as diagnostic sensors.
+# Radio signal diagnostics (frequency, RSSI, SNR, noise). These are only emitted
+# by rtl_433 when level reporting is on (the add-on / CLI `-M level`, i.e.
+# `report_meta level`). They are surfaced as diagnostic sensors disabled by
+# default — enable the ones you want per device — and simply produce no entity
+# on installs whose rtl_433 does not report them.
+freq:
+  platform: sensor
+  device_class: frequency
+  unit_of_measurement: MHz
+  state_class: measurement
+  name: Frequency
+  value_transform: { round: 4 }
+  entity_category: diagnostic
+  enabled_by_default: false
+  object_suffix: freq
+
 rssi:
   platform: sensor
   device_class: signal_strength
@@ -40,6 +54,7 @@ rssi:
   name: RSSI
   value_transform: { round: 2 }
   entity_category: diagnostic
+  enabled_by_default: false
   object_suffix: rssi
 
 snr:
@@ -50,6 +65,7 @@ snr:
   name: SNR
   value_transform: { round: 2 }
   entity_category: diagnostic
+  enabled_by_default: false
   object_suffix: snr
 
 noise:
@@ -60,6 +76,7 @@ noise:
   name: Noise
   value_transform: { round: 2 }
   entity_category: diagnostic
+  enabled_by_default: false
   object_suffix: noise
 
 # Lightning detector fields.
