@@ -79,7 +79,16 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   `manage_settings` untouched). The `unique_id` handling is identity-aware: a
   legacy/manual entry (`hub:…` or none) **recomputes** `hub:{host}:{port}`
   (aborting only on collision with a *different* entry); a discovered/adopted
-  entry **preserves** its stable radio `unique_id` rather than recomputing.
+  entry **preserves** its stable radio `unique_id` by default, but the form also
+  offers an optional `radio_id` field to **rebind** it to a *new* stable radio id
+  — the "replace a dead dongle" path. Rebinds funnel through the module-level
+  `async_rebind_hub(hass, entry, new_unique_id, conn_updates, title=…)` helper,
+  which preserves `entry_id` (so every nested device/entity/history survives),
+  aborts `already_configured` when the target id is owned by a *populated* entry,
+  and adopts-and-deletes an *empty orphan* entry that already holds the target id
+  (the duplicate Supervisor discovery may auto-create on a new `host:port`). The
+  same helper backs the discovery `hassio_replace` step and the rebind form
+  embedded in the `server_unreachable` repair fix flow (`repairs.py`).
 - **Config-flow sources and dual identity scheme.** `Rtl433ConfigFlow` supports
   `user` (manual add), `reconfigure`, and `hassio` (Supervisor add-on discovery),
   plus the options flow above. Two `unique_id` schemes coexist:
@@ -91,8 +100,13 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   that matches an existing entry by `host:port` (`_find_entry_by_host_port`)
   **adopts/re-keys** that entry onto the stable radio id (migration; aborts
   `already_configured`), so a manually-added hub and its later discovery never
-  duplicate and the entry's history is preserved. A genuinely new radio is routed
-  through `async_step_hassio_confirm` (a confirmation that revalidates
+  duplicate and the entry's history is preserved. A genuinely new radio
+  (unknown stable id, no `host:port` match) is routed through
+  `async_step_hassio_replace` **when at least one hub already exists** — a guided
+  step that offers to rebind one of those hubs onto the new radio (the likely
+  "replacement landed on a new `host:port`" case) or to add it as new; with no
+  existing hubs it goes straight to `async_step_hassio_confirm` (a confirmation
+  that revalidates
   connectivity before creating the entry and offers the same setup choices as the
   manual flow — `manage_settings`, `discovery_enabled`, and an optional
   `initial_frequency` in MHz); `async_step_user` likewise aborts
