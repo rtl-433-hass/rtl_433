@@ -176,6 +176,12 @@ coordinator watchdog, and the devices map:
   `async_upsert_event_types` (idempotent union write, stored sorted). The entity
   reads the persisted list in `__init__` from `coordinator.entry.data` (a
   **copy**, so in-place growth never mutates the persisted dict).
+- **Optional `event_map` (doorbell `ring`).** A descriptor's `event_map` maps a
+  stringified raw value to a named type (unmapped values pass through as
+  `str(value)`); doorbell `secret_knock` maps `0 → ring`, `1 → secret_knock`.
+  Mapped types are declared up front in `event_types`, and a `device_class:
+  doorbell` entity must advertise `ring` (`DoorbellEventType.RING`, HA standard;
+  else removed in HA 2027.4) — the constructor force-inserts it if absent.
 - **Type-only fired event.** `_trigger_event(event_type)` is called with **no
   extra attributes** (the type is the whole payload); there is **no `payload`
   and no `value_transform`** — the raw value is stringified directly.

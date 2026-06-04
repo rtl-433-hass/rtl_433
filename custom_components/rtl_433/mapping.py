@@ -77,6 +77,7 @@ class FieldDescriptor:
     state_class: str | None = None
     value_transform: dict[str, Any] | None = None
     payload: dict[str, Any] | None = None
+    event_map: dict[str, str] | None = None
     force_update: bool = False
     entity_category: str | None = None
     enabled_by_default: bool = True
@@ -138,6 +139,17 @@ def _descriptor_from_entry(field_key: str, entry: dict[str, Any]) -> FieldDescri
 
     if "payload" in known:
         known["payload"] = _normalize_payload(known["payload"])
+
+    if "event_map" in known:
+        raw = known["event_map"]
+        if not isinstance(raw, dict):
+            LOGGER.debug("Ignoring invalid 'event_map' %r on field %r", raw, field_key)
+            known.pop("event_map")
+        else:
+            # rtl_433 emits raw values as strings/numbers; coerce both keys and
+            # values to ``str`` so the lookup in the entity is value-stable
+            # (mirrors the ``payload`` string normalization).
+            known["event_map"] = {str(k): str(v) for k, v in raw.items()}
 
     if "clear_delay" in known:
         raw = known["clear_delay"]

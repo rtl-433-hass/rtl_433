@@ -569,7 +569,10 @@ class TestEventTypesForEntryPersisted:
         )
         assert knock_eid is not None, "secret_knock event entity not found"
         knock_entry = ent_reg.async_get(knock_eid)
-        assert dt._event_types_for_entry(hass, knock_entry) == ["ring"]
+        # The doorbell descriptor declares ``event_map`` types (``ring`` /
+        # ``secret_knock``), which the entity seeds and persists on add, so both
+        # are listed even though only ``ring`` was pre-seeded into the map.
+        assert dt._event_types_for_entry(hass, knock_entry) == ["ring", "secret_knock"]
 
     async def test_hub_entry_is_none_check_polarity(self, hass, hub_entry_builder):
         """mutmut_8: ``if hub_entry is None:`` instead of ``if hub_entry is not None:``.

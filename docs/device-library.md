@@ -72,6 +72,7 @@ temperature_C:
 | `object_suffix`       | yes      | string          | Short, stable token appended to the device key to form the entity's unique id. **Must be stable** — changing it orphans existing entities. |
 | `value_transform`     | no       | mapping         | Declarative numeric transform applied before the value is stored. See [Value transforms](#value-transforms). Omit for binary fields. |
 | `payload`             | no       | `{ on: <raw>, off: <raw> }` | For `binary_sensor` only: maps the raw rtl_433 value to the HA on/off state. See [Binary payloads](#binary-payloads). |
+| `event_map`           | no       | `{ <raw-string>: <event-type> }` | For `event` only: maps a stringified raw value to a named `event_type`; mapped types are declared up front in `event_types`. See [Event entities](#event-entities). |
 | `clear_delay`         | no       | int (seconds)   | For `binary_sensor` only: seconds after a detection to **synthesize** an off, for detect-only hardware that sends no off (e.g. motion/PIR). Reschedules on each detection; per-device override via the options flow. See [Motion / occupancy](#motion--occupancy). |
 | `force_update`        | no       | bool            | Mirrors upstream `force_update`; write state even when the value is unchanged. Defaults to false. |
 | `entity_category`     | no       | `diagnostic` \| `config` \| `null` | Categorizes the entity in the HA UI. Diagnostic fields (battery, signal, tamper) use `diagnostic`. |
@@ -186,27 +187,58 @@ button:
 
 How event entries differ from `sensor` / `binary_sensor`:
 
-- **The fired `event_type` is the stringified field value** (`str(value)`).
-  There is **no `payload` and no `value_transform`** — the raw value is
-  stringified directly.
-- **`event_types` are auto-populated, not declared.** Each newly observed value
-  is recorded as a valid type the first time it is seen and **persisted per
-  device**, so after a restart the entity rebuilds knowing the types it has
-  seen before. You never list them in the YAML.
-- A field that only ever emits **one distinct value** (a doorbell press) is a
-  **momentary single-type trigger** — it fires that one type on every
-  transmission. A field whose value varies (a remote that reports which button
-  was pressed) auto-populates several types.
+- **By default the fired `event_type` is the stringified field value**
+  (`str(value)`). There is **no `payload` and no `value_transform`** — the raw
+  value is stringified directly.
+- **By default `event_types` are auto-populated, not declared.** Each newly
+  observed value is recorded as a valid type the first time it is seen and
+  **persisted per device**, so after a restart the entity rebuilds knowing the
+  types it has seen before. You never list them in the YAML.
+- A field whose value varies (a remote that reports which button was pressed)
+  auto-populates several types; a field that only ever emits one distinct value
+  fires that one type on every transmission.
 - **The fired event carries no extra attributes** — the type is the only
   payload.
 - `device_class` is an `EventDeviceClass` (`button`, `doorbell`).
+
+#### `event_map`: naming raw values
+
+The optional `event_map` attribute overrides the default stringified behavior:
+it maps a **stringified raw value → named `event_type`**. When present:
+
+- A transmission whose raw value is in the map fires the **mapped** type;
+  values **not** in the map still pass through as `str(value)`.
+- The mapped types are **declared up front** in `event_types` (in map order),
+  rather than only appearing once observed — so a `device_trigger` lists them
+  even before the first press.
+
+The doorbell is the shipped example. `secret_knock` is emitted on **every**
+press: raw `0` is a regular single press and raw `1` is a "secret knock" (the
+button pressed three times rapidly). It maps both onto Home Assistant's doorbell
+standard:
+
+```yaml
+secret_knock:
+  platform: event
+  device_class: doorbell
+  name: Doorbell
+  object_suffix: secret_knock
+  event_map:
+    "0": ring          # DoorbellEventType.RING — the HA standard type
+    "1": secret_knock  # custom type for the 3x-rapid "secret knock"
+```
+
+`ring` is Home Assistant's standard `DoorbellEventType.RING`. A
+`device_class: doorbell` entity **must** advertise `ring` or HA logs a
+deprecation warning and removes the entity in **HA 2027.4**; the entity
+guarantees `ring` is present even if no map supplies it.
 
 The shipped `events.yaml` has two examples:
 
 | Field | `device_class` | Notes |
 |-------|----------------|-------|
 | `button` | `button` | Remote / key-fob button code; the value is the pressed code, so distinct presses auto-populate several types. |
-| `secret_knock` | `doorbell` | Honeywell ActivLink doorbell press; a single momentary value. |
+| `secret_knock` | `doorbell` | Honeywell ActivLink doorbell press; emitted on every press (`0` regular → `ring`, `1` secret knock → `secret_knock`) via `event_map`. |
 
 > **`motion` is not an event entity.** PIR / occupancy decoders emit `motion`
 > on detection but never send an off, so it is modelled as a detect-only

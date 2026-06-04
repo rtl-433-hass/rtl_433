@@ -1074,15 +1074,126 @@ async def test_event_single_value_momentary_fires_each_transmission(
             )
             await hass.async_block_till_done()
         state = hass.states.get(doorbell_eid)
-        assert state.attributes["event_type"] == "1"
+        # A secret-knock press (raw ``1``) maps to the ``secret_knock`` type.
+        assert state.attributes["event_type"] == "secret_knock"
         timestamps.append(state.state)
 
     # The second transmission fired again (a later, distinct timestamp).
     assert timestamps[1] != timestamps[0]
     assert dt_util.parse_datetime(timestamps[1]) > dt_util.parse_datetime(timestamps[0])
     state = hass.states.get(doorbell_eid)
-    assert state.attributes["event_types"] == ["1"]
+    # The doorbell advertises both declared map types (``ring`` first so the
+    # HA doorbell-standard check passes), regardless of which one fired.
+    assert state.attributes["event_types"] == ["ring", "secret_knock"]
     assert state.attributes["device_class"] == "doorbell"
+
+
+async def test_doorbell_maps_raw_values_to_named_event_types(
+    hass, hub_entry_builder, caplog
+):
+    """The doorbell maps raw ``0``/``1`` presses to ``ring``/``secret_knock``.
+
+    A regular press (``secret_knock=0``) fires ``ring``; a secret-knock press
+    (``secret_knock=1``) fires ``secret_knock``. Distinct ``time`` values keep
+    both frames genuine live transmissions (not a watchdog re-dispatch), and HA
+    logs no doorbell ``ring`` deprecation warning because the entity advertises
+    ``ring`` from construction.
+    """
+    from homeassistant.components.event.const import ATTR_EVENT_TYPE
+
+    device_key = "Honeywell-Doorbell-7"
+    with caplog.at_level(logging.WARNING):
+        hub = await _setup_hub(
+            hass,
+            hub_entry_builder,
+            devices={
+                device_key: {
+                    CONF_MODEL: "Honeywell-Doorbell",
+                    DEVICE_FIELDS: ["secret_knock"],
+                }
+            },
+        )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:secret_knock"
+    )
+    assert eid is not None
+
+    # Adding the entity to hass emitted no doorbell ``ring`` deprecation warning.
+    assert "does not support the 'ring' event type" not in caplog.text
+
+    # A regular press (raw ``0``) maps to ``ring``.
+    with freeze_time("2026-05-25T10:00:00+00:00"):
+        _feed(coordinator, {"model": "Honeywell-Doorbell", "id": 7, "secret_knock": 0})
+        await hass.async_block_till_done()
+    assert hass.states.get(eid).attributes[ATTR_EVENT_TYPE] == "ring"
+
+    # A fresh secret-knock press (raw ``1``, distinct ``time``) maps to
+    # ``secret_knock``.
+    with freeze_time("2026-05-25T10:00:05+00:00"):
+        _feed(coordinator, {"model": "Honeywell-Doorbell", "id": 7, "secret_knock": 1})
+        await hass.async_block_till_done()
+    assert hass.states.get(eid).attributes[ATTR_EVENT_TYPE] == "secret_knock"
+
+
+async def test_doorbell_advertises_ring_before_any_press(hass, hub_entry_builder):
+    """The shipped doorbell advertises ``ring`` immediately on add (RING invariant).
+
+    Before any transmission, the entity's ``event_types`` already contains
+    ``ring`` (declared first), so Home Assistant's doorbell-standard deprecation
+    check passes. ``secret_knock`` is also declared from the descriptor map.
+    """
+    device_key = "Honeywell-Doorbell-7"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Honeywell-Doorbell",
+                DEVICE_FIELDS: ["secret_knock"],
+            }
+        },
+    )
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:secret_knock"
+    )
+    assert eid is not None
+
+    # No press has fired yet, but the declared map types are already advertised
+    # with ``ring`` present (and first), satisfying the doorbell standard.
+    state = hass.states.get(eid)
+    assert state.state == "unknown"
+    assert "ring" in state.attributes["event_types"]
+    assert state.attributes["event_types"] == ["ring", "secret_knock"]
+    assert state.attributes["device_class"] == "doorbell"
+
+
+async def test_non_doorbell_button_fires_stringified_raw_value(hass, hub_entry_builder):
+    """A non-doorbell ``button`` field (no ``event_map``) fires ``str(value)``.
+
+    Regression guard: the value-mapping path is doorbell-specific. A button with
+    no declared map must still fire the stringified raw value verbatim.
+    """
+    from homeassistant.components.event.const import ATTR_EVENT_TYPE
+
+    device_key = "Acurite-606TX-42"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["button"]}},
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{device_key}:button"
+    )
+    assert eid is not None
+
+    _feed(coordinator, {"model": "Acurite-606TX", "id": 42, "button": 14})
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).attributes[ATTR_EVENT_TYPE] == "14"
 
 
 async def test_event_rebuilds_event_types_from_persisted(hass, hub_entry_builder):
@@ -1274,7 +1385,8 @@ async def test_gap_event_is_suppressed_and_logged(
         _feed(coordinator, _doorbell_press(events, "2026-05-25T10:00:00Z"))
         await hass.async_block_till_done()
     fired = hass.states.get(eid)
-    assert fired.attributes["event_type"] == "1"
+    # The fixture press (raw ``1``) maps to the ``secret_knock`` doorbell type.
+    assert fired.attributes["event_type"] == "secret_knock"
     fired_at = fired.state
 
     # Reconnect: a gap event at 10:01:00 arrives at 10:05:00 -> 240s old -> stale.
@@ -1288,7 +1400,7 @@ async def test_gap_event_is_suppressed_and_logged(
     # The event entity did NOT fire again: last-fire state/timestamp unchanged.
     after = hass.states.get(eid)
     assert after.state == fired_at
-    assert after.attributes["event_type"] == "1"
+    assert after.attributes["event_type"] == "secret_knock"
     # The suppression was logged at INFO (mentions the suppressed transmission).
     assert any(
         "suppressed" in r.message and r.levelno == logging.INFO for r in caplog.records
@@ -1315,7 +1427,7 @@ async def test_no_double_fire_on_blip_replay(hass, hub_entry_builder, events):
 
     after = hass.states.get(eid)
     assert after.state == fired_at  # unchanged -> did not re-fire
-    assert after.attributes["event_type"] == "1"
+    assert after.attributes["event_type"] == "secret_knock"
 
 
 async def test_fresh_event_at_reconnect_still_fires(hass, hub_entry_builder, events):
@@ -1338,7 +1450,7 @@ async def test_fresh_event_at_reconnect_still_fires(hass, hub_entry_builder, eve
         await hass.async_block_till_done()
 
     after = hass.states.get(eid)
-    assert after.attributes["event_type"] == "1"
+    assert after.attributes["event_type"] == "secret_knock"
     assert after.state != first_fired_at
     assert dt_util.parse_datetime(after.state) > dt_util.parse_datetime(first_fired_at)
 
@@ -1857,7 +1969,7 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
 
     for hub in (hub_a, hub_b):
         assert await async_migrate_entry(hass, hub) is True
-        assert hub.minor_version == 4
+        assert hub.minor_version == 5
         overrides = hub.data[CONF_USER_MAPPINGS]
         # Each hub got its own normalized copy: payload bare on/off -> string keys.
         assert overrides["battery_low"]["payload"] == {"on": "0", "off": "1"}
@@ -1865,10 +1977,10 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
     # The legacy file is left on disk (never deleted by the migration).
     assert os.path.exists(mappings_path)
 
-    # A second migrate call is a no-op: already at minor 4, mappings unchanged.
+    # A second migrate call is a no-op: already at minor 5, mappings unchanged.
     snapshot = dict(hub_a.data[CONF_USER_MAPPINGS])
     assert await async_migrate_entry(hass, hub_a) is True
-    assert hub_a.minor_version == 4
+    assert hub_a.minor_version == 5
     assert hub_a.data[CONF_USER_MAPPINGS] == snapshot
 
 
@@ -1893,7 +2005,7 @@ async def test_migration_seeds_empty_mappings_when_file_missing(
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 4
+    assert entry.minor_version == 5
     assert entry.data[CONF_USER_MAPPINGS] == {}
 
 
@@ -1955,7 +2067,7 @@ async def test_migration_disables_existing_last_seen_sensors(
     ).entity_id
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 4
+    assert entry.minor_version == 5
 
     # The enabled Last-seen sensor is now disabled by the integration.
     assert (
@@ -1969,9 +2081,9 @@ async def test_migration_disables_existing_last_seen_sensors(
         ent_reg.async_get(already_disabled).disabled_by is er.RegistryEntryDisabler.USER
     )
 
-    # A second migrate call is a no-op: already at minor 4.
+    # A second migrate call is a no-op: already at minor 5.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 4
+    assert entry.minor_version == 5
 
 
 # --------------------------------------------------------------------------- #
@@ -2011,12 +2123,12 @@ async def test_migration_drops_legacy_default_timeout(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 4
+    assert entry.minor_version == 5
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
-    # A second migrate call is a no-op: already at minor 4.
+    # A second migrate call is a no-op: already at minor 5.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 4
+    assert entry.minor_version == 5
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2035,7 +2147,7 @@ async def test_migration_keeps_deliberate_timeout(hass, configured):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 4
+    assert entry.minor_version == 5
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == configured
 
 
@@ -2047,12 +2159,12 @@ async def test_migration_timeout_no_option_just_bumps_version(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 4
+    assert entry.minor_version == 5
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
-async def test_migration_timeout_minor2_through_to_4(hass):
-    """An entry at minor 2 walks minor<3 then minor<4 in one call, ending at 4."""
+async def test_migration_timeout_minor2_through_to_5(hass):
+    """An entry at minor 2 walks each minor bump in one call, ending at 5."""
     from custom_components.rtl_433 import async_migrate_entry
 
     entry = _timeout_hub(
@@ -2062,8 +2174,58 @@ async def test_migration_timeout_minor2_through_to_4(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 4
+    assert entry.minor_version == 5
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 4
+    assert entry.minor_version == 5
+
+
+# --------------------------------------------------------------------------- #
+# minor_version 4 -> 5 rewrites persisted doorbell event_types to mapped types.#
+# --------------------------------------------------------------------------- #
+async def test_migration_rewrites_persisted_doorbell_event_types(hass):
+    """The minor 4 -> 5 migration maps raw doorbell ``event_types`` and is idempotent.
+
+    A v2/minor-4 hub persisting the doorbell ``secret_knock`` ``event_types`` as
+    the raw ``["0", "1"]`` is rewritten to the standardized
+    ``["ring", "secret_knock"]`` and the minor_version bumps to 5. Re-running the
+    migration leaves the value unchanged (idempotent) and the version at 5.
+    """
+    from custom_components.rtl_433 import async_migrate_entry
+
+    device_key = "Honeywell-Doorbell-7"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="rtl_433 (rtl433.local)",
+        version=2,
+        minor_version=4,
+        unique_id="hub:rtl433.local:8433",
+        data={
+            CONF_HOST: "rtl433.local",
+            CONF_PORT: 8433,
+            CONF_PATH: "/ws",
+            CONF_DEVICES: {
+                device_key: {
+                    CONF_MODEL: "Honeywell-Doorbell",
+                    DEVICE_FIELDS: ["secret_knock"],
+                    DEVICE_EVENT_TYPES: {"secret_knock": ["0", "1"]},
+                }
+            },
+        },
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 5
+    persisted = entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]
+    assert persisted["secret_knock"] == ["ring", "secret_knock"]
+
+    # Re-running is a no-op: already-mapped values pass through unchanged.
+    snapshot = persisted["secret_knock"]
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 5
+    assert (
+        entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]["secret_knock"]
+        == snapshot
+    )
