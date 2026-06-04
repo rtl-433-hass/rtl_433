@@ -42,6 +42,9 @@ ENTRY_TYPE_DEVICE: Final = "device"
 CONF_HOST: Final = "host"
 CONF_PORT: Final = "port"
 CONF_PATH: Final = "path"
+# Free-text "new stable radio unique_id" the user supplies when re-pointing a hub
+# at a replacement radio (reconfigure / discovery-replace / unreachable repair).
+CONF_RADIO_ID: Final = "radio_id"
 # Per-hub toggle for surfacing newly observed devices via discovery flow.
 CONF_DISCOVERY_ENABLED: Final = "discovery_enabled"
 # Per-hub toggle: let Home Assistant manage (adopt + enforce) the SDR settings.

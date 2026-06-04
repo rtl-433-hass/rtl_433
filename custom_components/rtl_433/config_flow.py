@@ -29,7 +29,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
@@ -38,12 +38,14 @@ from homeassistant.helpers.selector import (
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
 from .const import (
+    CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
     CONF_HOST,
     CONF_INITIAL_FREQUENCY,
     CONF_MANAGE_SETTINGS,
     CONF_PATH,
     CONF_PORT,
+    CONF_RADIO_ID,
     DEFAULT_INITIAL_FREQUENCY,
     DEFAULT_MANAGE_SETTINGS,
     DEFAULT_PATH,
@@ -60,6 +62,41 @@ CONF_SECURE = "secure"
 def _hub_unique_id(host: str, port: int) -> str:
     """Return the unique_id for a hub entry (one per host:port)."""
     return f"hub:{host}:{port}"
+
+
+async def async_rebind_hub(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    new_unique_id: str,
+    conn_updates: dict[str, Any],
+    title: str | None = None,
+) -> str:
+    """Re-point a hub entry at a new stable radio unique_id, in place.
+
+    Preserves entry_id (so all nested devices/entities/history survive). When a
+    *different* entry already owns ``new_unique_id``: if that entry has a
+    populated devices map it is a real hub -> return ``"already_configured"`` and
+    change nothing; if it is an empty orphan (e.g. a duplicate auto-created by
+    discovery on a new host:port) it is removed and the rebind proceeds.
+    Returns ``"ok"`` on success.
+    """
+    for other in hass.config_entries.async_entries(DOMAIN):
+        if other.entry_id == entry.entry_id:
+            continue
+        if other.unique_id == new_unique_id:
+            if other.data.get(CONF_DEVICES):
+                return "already_configured"
+            await hass.config_entries.async_remove(other.entry_id)
+            break
+    updates: dict[str, Any] = {
+        "unique_id": new_unique_id,
+        "data": {**entry.data, **conn_updates},
+    }
+    if title is not None:
+        updates["title"] = title
+    hass.config_entries.async_update_entry(entry, **updates)
+    await hass.config_entries.async_reload(entry.entry_id)
+    return "ok"
 
 
 # Optional initial center-frequency field shared by both add flows. Presented in
@@ -171,7 +208,13 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
         ``manage_settings`` (that toggle is owned by the options flow).
         """
         data = entry.data
-        return vol.Schema(
+        fields: dict[Any, Any] = {}
+        uid = entry.unique_id or ""
+        # Only discovered/adopted entries carry a stable radio id worth rebinding;
+        # legacy hub:host:port entries rebind via host:port alone.
+        if uid and not uid.startswith("hub:"):
+            fields[vol.Optional(CONF_RADIO_ID, default=uid)] = str
+        fields.update(
             {
                 vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
                 vol.Required(CONF_PORT, default=data.get(CONF_PORT, DEFAULT_PORT)): int,
@@ -179,6 +222,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_SECURE, default=data.get(CONF_SECURE, False)): bool,
             }
         )
+        return vol.Schema(fields)
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -232,16 +276,27 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                             CONF_SECURE: secure,
                         },
                     )
-                # Discovered/adopted entry: preserve its stable radio unique_id.
+                # Discovered/adopted entry: allow re-pointing at a new stable radio id.
+                conn = {
+                    CONF_HOST: host,
+                    CONF_PORT: port,
+                    CONF_PATH: path,
+                    CONF_SECURE: secure,
+                }
+                new_uid = (user_input.get(CONF_RADIO_ID) or "").strip() or (
+                    entry.unique_id or ""
+                )
+                if new_uid and new_uid != entry.unique_id:
+                    status = await async_rebind_hub(
+                        self.hass, entry, new_uid, conn, title=f"rtl_433 ({host})"
+                    )
+                    if status == "already_configured":
+                        return self.async_abort(reason="already_configured")
+                    return self.async_abort(reason="reconfigure_successful")
                 return self.async_update_reload_and_abort(
                     entry,
                     title=f"rtl_433 ({host})",
-                    data_updates={
-                        CONF_HOST: host,
-                        CONF_PORT: port,
-                        CONF_PATH: path,
-                        CONF_SECURE: secure,
-                    },
+                    data_updates=conn,
                 )
 
         return self.async_show_form(
