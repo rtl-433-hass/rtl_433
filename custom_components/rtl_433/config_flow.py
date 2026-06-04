@@ -34,6 +34,9 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
 )
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
@@ -358,6 +361,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
         self._discovery = {
+            "unique_id": radio_uid,
             CONF_HOST: host,
             CONF_PORT: port,
             CONF_PATH: path,
@@ -365,6 +369,9 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             "addon": addon,
         }
         self.context["title_placeholders"] = {"name": f"{addon} ({host}:{port})"}
+        # Offer a guided replace when other hubs already exist; else add as new.
+        if self._async_current_entries():
+            return await self.async_step_hassio_replace()
         return await self.async_step_hassio_confirm()
 
     async def async_step_hassio_confirm(
@@ -435,6 +442,67 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="hassio_confirm",
             data_schema=confirm_schema,
+            description_placeholders=placeholders,
+        )
+
+    async def async_step_hassio_replace(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Offer to rebind an existing hub to a newly discovered radio.
+
+        Shown when discovery sees an unknown radio id while hubs already exist (the
+        likely "replacement landed on a new host:port" case). The user explicitly
+        chooses to replace a specific hub or to add the radio as new; we never
+        auto-rebind silently.
+        """
+        assert self._discovery is not None
+        disc = self._discovery
+        entries = self._async_current_entries()
+        options = [
+            SelectOptionDict(value=e.entry_id, label=e.title or e.entry_id)
+            for e in entries
+        ]
+        options.append(SelectOptionDict(value="__new__", label="It's a new radio"))
+        placeholders = {
+            "addon": disc["addon"],
+            "host": disc[CONF_HOST],
+            "port": str(disc[CONF_PORT]),
+        }
+
+        if user_input is not None:
+            choice = user_input["replaces"]
+            if choice == "__new__":
+                return await self.async_step_hassio_confirm()
+            entry = self.hass.config_entries.async_get_entry(choice)
+            if entry is None:
+                return await self.async_step_hassio_confirm()
+            # The discovered radio id reached this step only because
+            # ``_abort_if_unique_id_configured`` did not abort, so no entry owns
+            # it — the rebind can never collide here and always succeeds.
+            await async_rebind_hub(
+                self.hass,
+                entry,
+                disc["unique_id"],
+                {
+                    CONF_HOST: disc[CONF_HOST],
+                    CONF_PORT: disc[CONF_PORT],
+                    CONF_PATH: disc[CONF_PATH],
+                    CONF_SECURE: disc[CONF_SECURE],
+                },
+                title=f"rtl_433 ({disc[CONF_HOST]})",
+            )
+            return self.async_abort(reason="rebind_successful")
+
+        schema = vol.Schema(
+            {
+                vol.Required("replaces", default="__new__"): SelectSelector(
+                    SelectSelectorConfig(options=options)
+                )
+            }
+        )
+        return self.async_show_form(
+            step_id="hassio_replace",
+            data_schema=schema,
             description_placeholders=placeholders,
         )
 

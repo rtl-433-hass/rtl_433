@@ -23,6 +23,8 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
+import voluptuous as vol
+
 from homeassistant.components.repairs import ConfirmRepairFlow, RepairsFlow
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -30,8 +32,19 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_track_time_interval
 
-from .const import DOMAIN, LOGGER, signal_hub_update
-from .coordinator import Rtl433Coordinator
+from .config_flow import CONF_SECURE, async_rebind_hub
+from .const import (
+    CONF_HOST,
+    CONF_PATH,
+    CONF_PORT,
+    CONF_RADIO_ID,
+    DEFAULT_PATH,
+    DEFAULT_PORT,
+    DOMAIN,
+    LOGGER,
+    signal_hub_update,
+)
+from .coordinator import CannotConnect, Rtl433Coordinator
 
 # How often reachability is evaluated. Aligned to be responsive without being
 # chatty; the issue only flips on a sustained state change.
@@ -241,6 +254,81 @@ def async_track_hub_reachability(
     )
 
 
+class HubRadioReplaceRepairFlow(RepairsFlow):
+    """Fix flow for an unreachable hub: re-point it at a replacement radio.
+
+    The dead radio is exactly what raised this issue, so this is the natural
+    recovery surface. Leaving the fields unchanged simply revalidates and clears
+    the card; entering a new radio id re-points the hub (preserving entry_id, so
+    devices/entities/history survive) via the shared rebind helper.
+    """
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        self._entry = entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
+        return await self.async_step_confirm()
+
+    async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> Any:
+        entry = self._entry
+        data = entry.data
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_RADIO_ID, default=entry.unique_id or ""): str,
+                vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
+                vol.Required(CONF_PORT, default=data.get(CONF_PORT, DEFAULT_PORT)): int,
+                vol.Required(CONF_PATH, default=data.get(CONF_PATH, DEFAULT_PATH)): str,
+                vol.Optional(CONF_SECURE, default=data.get(CONF_SECURE, False)): bool,
+            }
+        )
+        if user_input is not None:
+            host = user_input[CONF_HOST]
+            port = user_input[CONF_PORT]
+            path = user_input[CONF_PATH]
+            secure = user_input[CONF_SECURE]
+            try:
+                await Rtl433Coordinator.validate_connection(
+                    self.hass, host, port, path, secure=secure
+                )
+            except CannotConnect:
+                return self.async_show_form(
+                    step_id="confirm",
+                    data_schema=schema,
+                    errors={"base": "cannot_connect"},
+                    description_placeholders={"title": entry.title},
+                )
+            new_uid = (user_input.get(CONF_RADIO_ID) or "").strip() or (
+                entry.unique_id or ""
+            )
+            status = await async_rebind_hub(
+                self.hass,
+                entry,
+                new_uid,
+                {
+                    CONF_HOST: host,
+                    CONF_PORT: port,
+                    CONF_PATH: path,
+                    CONF_SECURE: secure,
+                },
+                title=f"rtl_433 ({host})",
+            )
+            if status == "already_configured":
+                return self.async_show_form(
+                    step_id="confirm",
+                    data_schema=schema,
+                    errors={"base": "id_in_use"},
+                    description_placeholders={"title": entry.title},
+                )
+            async_clear_hub_unreachable(self.hass, entry)
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="confirm",
+            data_schema=schema,
+            description_placeholders={"title": entry.title},
+        )
+
+
 async def async_create_fix_flow(
     hass: HomeAssistant,
     issue_id: str,
@@ -248,12 +336,17 @@ async def async_create_fix_flow(
 ) -> RepairsFlow:
     """Return the repair flow for an issue.
 
-    Every issue this integration raises is informational/actionable by fixing
-    the underlying condition (e.g. bringing the rtl_433 server back online), so
-    a simple confirm-and-dismiss flow is the right surface. The issue also
-    self-clears on reconnect, so the confirm dialog mainly lets a user dismiss a
-    stale card.
+    The ``server_unreachable`` issue gets an actionable rebind flow (the dead
+    radio is what raised it, so this is the natural recovery surface). Every
+    other issue is informational/dismissible, so a simple confirm-and-dismiss
+    flow is the right surface; those issues also self-clear, so the confirm
+    dialog mainly lets a user dismiss a stale card.
     """
+    if issue_id.startswith(ISSUE_UNREACHABLE):
+        entry_id = issue_id[len(ISSUE_UNREACHABLE) + 1 :]
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is not None:
+            return HubRadioReplaceRepairFlow(entry)
     return ConfirmRepairFlow()
 
 
