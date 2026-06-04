@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.13.0...v0.14.0) (2026-06-04)
+
+
+### Features
+
+* standardize doorbell events on DoorbellEventType.RING ([#61](https://github.com/rtl-433-hass/rtl_433/issues/61)) ([ffe9a96](https://github.com/rtl-433-hass/rtl_433/commit/ffe9a96c44258616ab6c8de93f0b08cd92eb1721))
+
 ## [0.13.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.12.0...v0.13.0) (2026-06-04)
 
 
