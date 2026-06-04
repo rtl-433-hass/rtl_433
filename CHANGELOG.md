@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.12.0...v0.13.0) (2026-06-04)
+
+
+### Features
+
+* advise on low sample rate for high-band single-frequency receivers ([7dcb40e](https://github.com/rtl-433-hass/rtl_433/commit/7dcb40e4f0df8397b3558852f422e7299f134978))
+* offer radio rebind at discovery and from the unreachable repair ([3ea1b58](https://github.com/rtl-433-hass/rtl_433/commit/3ea1b5873bdd5e91839abbfd6b95a4bffbc66841))
+* rebind a hub to a replacement radio via reconfigure ([bcc1ee8](https://github.com/rtl-433-hass/rtl_433/commit/bcc1ee8331216db436a9d5b32f0d247f9f745071))
+
+
+### Documentation
+
+* note radio rebind paths in AGENTS.md config-flow inventory ([911c810](https://github.com/rtl-433-hass/rtl_433/commit/911c810e5a4b43e1f6bf9e4c9dee20c3fab341ab))
+
 ## [0.12.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.11.1...v0.12.0) (2026-06-03)
 
 
