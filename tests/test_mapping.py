@@ -101,6 +101,14 @@ def test_event_fields_resolve_to_event_platform(library):
         # The object_suffix is the field key for all three shipped examples.
         assert descriptor.object_suffix == field_key, field_key
 
+    # The doorbell ``secret_knock`` descriptor maps its raw values to the
+    # standardized Home Assistant doorbell types so the entity advertises
+    # ``ring`` (and stays compliant with the doorbell standard). The plain
+    # ``button`` field carries no map (its values stringify verbatim).
+    secret_knock = lookup("secret_knock", registry=registry)
+    assert secret_knock.event_map == {"0": "ring", "1": "secret_knock"}
+    assert lookup("button", registry=registry).event_map is None
+
 
 def test_event_fields_not_in_skip_set(library):
     """None of the event field keys is excluded by the skip-key set."""

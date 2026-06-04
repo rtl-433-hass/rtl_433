@@ -69,6 +69,16 @@ _MOTION_OBJECT_SUFFIX = "motion"
 # sweep below disables any already-created instances on existing installs.
 _LAST_SEEN_OBJECT_SUFFIX = "last_seen"
 
+# The doorbell ``event`` entity (Honeywell ActivLink ``secret_knock`` field) used
+# to fire the stringified raw value (``"0"``/``"1"``) as its ``event_type`` and
+# auto-populated ``event_types`` from those raw values. It now fires the
+# standardized Home Assistant doorbell types — ``"ring"`` for a regular press and
+# ``"secret_knock"`` for a secret knock. The persisted ``DEVICE_EVENT_TYPES`` dict
+# is keyed by field_key, so the doorbell slot is found under this key, and any
+# already-persisted raw values are rewritten with the map below.
+_DOORBELL_FIELD_KEY = "secret_knock"
+_DOORBELL_EVENT_MAP = {"0": "ring", "1": "secret_knock"}
+
 
 def _cleanup_phantom_unknown_device(
     hass: HomeAssistant, entry: ConfigEntry, device_registry: dr.DeviceRegistry
@@ -155,6 +165,63 @@ def _migrate_motion_event_to_binary_sensor(
 
     if removed_any:
         repairs.async_raise_motion_moved(hass)
+
+
+def _migrate_doorbell_event_types(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Rewrite persisted doorbell ``event_types`` from raw values to the mapped types.
+
+    The doorbell ``event`` entity historically fired (and persisted) the
+    stringified raw value of its field — ``"0"`` for a regular press and ``"1"``
+    for a secret knock. It now fires the standardized Home Assistant doorbell
+    types ``"ring"`` and ``"secret_knock"``, so any already-persisted raw
+    ``DEVICE_EVENT_TYPES`` entries for the doorbell field must be rewritten to
+    match, otherwise device-trigger subtypes would still reference the stale
+    numeric values.
+
+    For every device record carrying the doorbell field (``_DOORBELL_FIELD_KEY``)
+    in its persisted ``DEVICE_EVENT_TYPES`` dict, the stored list is rewritten as
+    ``sorted({_DOORBELL_EVENT_MAP.get(v, v) for v in old})``: known raw values are
+    mapped, anything else (including values already equal to ``"ring"`` /
+    ``"secret_knock"``) passes through unchanged, and the result is sorted to
+    match ``async_upsert_event_types``' stored-sorted convention. The record and
+    its inner event-types dict are deep-copied before mutation so the original
+    ``entry.data`` is never mutated in place.
+
+    Unlike :func:`_migrate_motion_event_to_binary_sensor`, this migration removes
+    **no** entity and raises **no** repairs issue: the doorbell entity's
+    ``unique_id`` / ``object_suffix`` are unchanged — only the persisted
+    ``event_type`` strings change — so the entity is preserved as-is.
+
+    Idempotent: the map only rewrites the recognized raw values ``"0"``/``"1"``
+    and leaves already-mapped or unknown values untouched, so a second run
+    produces ``new == old`` for every record and writes nothing. The devices-map
+    write only occurs when at least one record actually changed.
+    """
+    devices = entry.data.get(CONF_DEVICES, {})
+    new_devices: dict = {}
+    changed = False
+    for device_key, record in devices.items():
+        if not isinstance(record, dict) or _DOORBELL_FIELD_KEY not in record.get(
+            DEVICE_EVENT_TYPES, {}
+        ):
+            new_devices[device_key] = record
+            continue
+        old = record[DEVICE_EVENT_TYPES][_DOORBELL_FIELD_KEY]
+        new = sorted({_DOORBELL_EVENT_MAP.get(v, v) for v in old})
+        if new == old:
+            new_devices[device_key] = record
+            continue
+        new_record = dict(record)
+        new_event_types = dict(record[DEVICE_EVENT_TYPES])
+        new_event_types[_DOORBELL_FIELD_KEY] = new
+        new_record[DEVICE_EVENT_TYPES] = new_event_types
+        new_devices[device_key] = new_record
+        changed = True
+
+    if changed:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_DEVICES: new_devices}
+        )
 
 
 def _disable_existing_last_seen_sensors(
@@ -316,9 +383,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     modified or deleted). Version 2 minor 3 disables any already-created
     "Last seen" sensors, which now ship disabled-by-default. Version 2 minor 4
     drops a hub availability timeout still pinned to the legacy global default
-    (600s) so the new device-class defaults apply. Entries created at the current
-    minor version skip these steps; new hubs added after the upgrade start with
-    no mappings and their "Last seen" sensors already disabled.
+    (600s) so the new device-class defaults apply. Version 2 minor 5 rewrites any
+    already-persisted doorbell ``event_types`` from the raw ``"0"``/``"1"`` strings
+    to the standardized ``"ring"``/``"secret_knock"`` types. Entries created at the
+    current minor version skip these steps; new hubs added after the upgrade start
+    with no mappings and their "Last seen" sensors already disabled.
     """
     if entry.version > 2:
         # Downgrade from a future schema is unsupported.
@@ -383,5 +452,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(
             entry, options=new_options, version=2, minor_version=4
         )
+
+    if (entry.minor_version or 1) < 5:
+        # The doorbell event entity now fires the standardized Home Assistant
+        # doorbell types instead of the raw ``"0"``/``"1"`` strings. Rewrite any
+        # already-persisted raw doorbell ``event_types`` to the mapped values so
+        # stored device-trigger subtypes stay consistent. Idempotent and removes
+        # no entity (the doorbell unique_id/object_suffix are unchanged).
+        _migrate_doorbell_event_types(hass, entry)
+        hass.config_entries.async_update_entry(entry, version=2, minor_version=5)
 
     return True

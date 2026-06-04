@@ -15,11 +15,17 @@ button:
   name: Button
   object_suffix: button
 
-# Doorbell press emitted by the Honeywell ActivLink wireless doorbell decoder
-# (`secret_knock` = 1 when the doorbell is pressed 3x rapidly). A real
-# momentary doorbell-press field, mapped here as the doorbell case.
+# Doorbell press emitted by the Honeywell ActivLink wireless doorbell decoder.
+# `secret_knock` is emitted on EVERY press: `0` is a regular single press and
+# `1` is a "secret knock" (the button pressed 3x rapidly). `event_map` maps
+# these raw values onto the Home Assistant doorbell standard -- a regular press
+# fires `DoorbellEventType.RING` (`ring`) and a secret knock fires the custom
+# `secret_knock` type -- so the entity advertises `ring` and stays compliant.
 secret_knock:
   platform: event
   device_class: doorbell
   name: Doorbell
   object_suffix: secret_knock
+  event_map:
+    "0": ring
+    "1": secret_knock

@@ -7,18 +7,27 @@ every device's observed mapped fields whose descriptor ``platform == "event"``,
 adds new devices/fields at runtime, and keeps the hub's devices map current.
 
 Each :class:`Rtl433Event` fires a Home Assistant event once per genuine
-transmission, with the stringified field value as the ``event_type`` and no
-extra attributes. It auto-populates ``event_types`` from observed values,
-persists them, dedupes the coordinator watchdog's re-dispatch by object
-identity, stays always available, and does not replay the coordinator's last
-event on construction.
+transmission, with the field value resolved to an ``event_type`` and no extra
+attributes. By default the ``event_type`` is the stringified field value; when
+the descriptor declares an ``event_map`` the raw value is mapped to a named
+type instead (e.g. a doorbell's ``0``/``1`` map to ``ring``/``secret_knock``).
+It seeds ``event_types`` from the declared map values, auto-populates further
+observed values, persists them, dedupes the coordinator watchdog's re-dispatch
+by object identity, stays always available, and does not replay the
+coordinator's last event on construction. A doorbell-class entity always
+advertises ``DoorbellEventType.RING`` to satisfy Home Assistant's doorbell
+standard.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.event import EventEntity
+from homeassistant.components.event import (
+    DoorbellEventType,
+    EventDeviceClass,
+    EventEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -39,12 +48,15 @@ PLATFORM = "event"
 class Rtl433Event(Rtl433Entity, EventEntity):
     """A momentary event field of an rtl_433 device (e.g. a remote button).
 
-    Fires once per genuine transmission with ``str(value)`` as the event type.
-    Diverges from the base entity in four places: it overrides
-    ``_handle_dispatch`` (suppress replays, dedupe by object identity, then fire),
-    ``available`` (always True), ``_async_restore_state`` (no-op; HA's
-    ``EventEntity`` restores the last displayed event), and seeds
-    ``_attr_event_types`` / ``_attr_device_class`` in ``__init__``.
+    Fires once per genuine transmission. The event type is ``str(value)`` unless
+    the descriptor declares an ``event_map``, in which case the raw value is
+    mapped to a named type (unmapped values still pass through as ``str(value)``).
+    Diverges from the base entity in five places: it overrides
+    ``_handle_dispatch`` (suppress replays, dedupe by object identity, then fire
+    the resolved type), ``available`` (always True), ``_async_restore_state``
+    (no-op; HA's ``EventEntity`` restores the last displayed event),
+    ``async_added_to_hass`` (also persists the declared ``event_map`` types), and
+    seeds ``_attr_event_types`` / ``_attr_device_class`` in ``__init__``.
     """
 
     def __init__(
@@ -60,20 +72,57 @@ class Rtl433Event(Rtl433Entity, EventEntity):
         # ``EventEntity.device_class`` accepts the plain string from the
         # descriptor (an ``EventDeviceClass`` member value or ``None``).
         self._attr_device_class = descriptor.device_class
-        # Seed ``event_types`` with a COPY of the persisted list so in-place
-        # growth never mutates the persisted dict. HA's ``@final``
-        # ``capability_attributes`` reads ``event_types`` and raises if unset, so
-        # this must be set in ``__init__`` (an empty list is valid). Do NOT seed
-        # from ``coordinator.devices`` — replaying on construction would fire a
-        # stale event before the entity is added to hass.
+        # Seed ``event_types`` from the descriptor's declared ``event_map`` types
+        # (declared first, stable order) unioned with the persisted list. HA's
+        # ``@final`` ``capability_attributes`` reads ``event_types`` and raises if
+        # unset, so this must be set in ``__init__`` (an empty list is valid). Do
+        # NOT seed from ``coordinator.devices`` — replaying on construction would
+        # fire a stale event before the entity is added to hass.
         persisted = (
             coordinator.entry.data.get(CONF_DEVICES, {})
             .get(device_key, {})
             .get(DEVICE_EVENT_TYPES, {})
             .get(descriptor.field_key, [])
         )
-        self._attr_event_types = list(persisted)
+        # De-duplicate the declared map values while preserving insertion order
+        # (``dict.fromkeys`` keeps first-seen order), then append any persisted
+        # types not already declared. This is a fresh list, so in-place growth in
+        # ``_handle_dispatch`` never mutates the persisted dict.
+        declared = list(dict.fromkeys((descriptor.event_map or {}).values()))
+        seed = declared + [t for t in persisted if t not in declared]
+        # A doorbell-class entity must advertise ``DoorbellEventType.RING`` or HA
+        # logs a deprecation warning (and the entity stops working in 2027.4);
+        # guarantee it is present even if no map supplied one.
+        if (
+            descriptor.device_class == EventDeviceClass.DOORBELL
+            and DoorbellEventType.RING not in seed
+        ):
+            seed.insert(0, DoorbellEventType.RING)
+        self._attr_event_types = seed
         self._last_fired_event: NormalizedEvent | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to updates and persist the declared ``event_map`` types.
+
+        Persisting the declared types on add (rather than only on first observed
+        press) means ``device_trigger``'s persisted-preferred lookup lists the
+        mapped subtypes (e.g. ``ring`` / ``secret_knock``) across restarts even
+        before any press. ``async_upsert_event_types`` is idempotent (it only
+        writes when the stored set grows), so re-adding is a no-op.
+        """
+        await super().async_added_to_hass()
+
+        declared = list(dict.fromkeys((self._descriptor.event_map or {}).values()))
+        if declared:
+            self.hass.async_create_task(
+                async_upsert_event_types(
+                    self.hass,
+                    self._coordinator.entry,
+                    self._device_key,
+                    self._descriptor.field_key,
+                    declared,
+                )
+            )
 
     @callback
     def _handle_dispatch(self, event: NormalizedEvent) -> None:
@@ -122,7 +171,13 @@ class Rtl433Event(Rtl433Entity, EventEntity):
             return
         if field_key in event.fields:
             self._last_fired_event = event
-            event_type = str(event.fields[field_key])
+            # Resolve the event type: a declared ``event_map`` maps the raw value
+            # to a named type (e.g. doorbell ``0``/``1`` -> ``ring``/
+            # ``secret_knock``); unmapped values and the no-map button path fall
+            # back to the stringified raw value unchanged.
+            raw = event.fields[field_key]
+            event_map = self._descriptor.event_map
+            event_type = event_map.get(str(raw), str(raw)) if event_map else str(raw)
             # Append a newly-seen type BEFORE firing (HA validates against the
             # current list) and schedule persistence (callback-safe).
             if event_type not in self._attr_event_types:
