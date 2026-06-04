@@ -30,14 +30,20 @@ Coverage targets:
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rtl_433.calibration import COMMODITY_UNITS
-from custom_components.rtl_433.config_flow import CONF_SECURE, _hub_unique_id
+from custom_components.rtl_433.config_flow import (
+    CONF_SECURE,
+    _hub_unique_id,
+    async_rebind_hub,
+)
 from custom_components.rtl_433.const import (
     CALIBRATION_COMMODITY,
     CALIBRATION_SCALE,
@@ -73,6 +79,7 @@ from custom_components.rtl_433.options_flow import CONF_DEVICE
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 VALIDATE = "custom_components.rtl_433.config_flow.Rtl433Coordinator.validate_connection"
 
@@ -2636,3 +2643,131 @@ async def test_pr34_mappings_form_prefilled_with_current(hass, hub_entry_builder
     )
     assert result["type"] is FlowResultType.FORM
     assert _schema_default(result, CONF_USER_MAPPINGS) == current
+
+
+# ---------------------------------------------------------------------------
+# async_rebind_hub: additive-only property — nested ids are byte-identical.
+# ---------------------------------------------------------------------------
+
+
+async def test_rebind_preserves_nested_device_and_entity_unique_ids(hass):
+    """Rebinding a hub's radio unique_id must not touch any nested id.
+
+    The additive-only guarantee: device/entity unique_ids and device_keys are
+    scoped by the hub ``entry_id`` (never the radio id), so re-pointing the entry
+    at a new radio unique_id leaves the registry byte-identical. This asserts the
+    full snapshot of nested-device identifiers and entity unique_ids is unchanged.
+    """
+    entry_id = "rebindhubentry01"
+    device_key = "Acurite-606TX-42"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="rtl_433 (old.local)",
+        unique_id="radio-old",
+        entry_id=entry_id,
+        data={
+            CONF_HOST: "old.local",
+            CONF_PORT: 8433,
+            CONF_PATH: "/ws",
+            CONF_SECURE: False,
+            CONF_MANAGE_SETTINGS: False,
+            CONF_DEVICES: {
+                device_key: {
+                    CONF_MODEL: "Acurite-606TX",
+                    DEVICE_FIELDS: ["temperature_C"],
+                }
+            },
+        },
+        version=2,
+    )
+    entry.add_to_hass(hass)
+
+    # Seed a nested device + entity exactly as the platforms would: the device is
+    # identified by ``{entry_id}:{device_key}`` and the entity unique_id by
+    # ``{entry_id}:{device_key}:{object_suffix}`` — both entry_id-scoped.
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+    device = dev_reg.async_get_or_create(
+        config_entry_id=entry_id,
+        identifiers={(DOMAIN, f"{entry_id}:{device_key}")},
+    )
+    entity = ent_reg.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{entry_id}:{device_key}:temperature",
+        config_entry=entry,
+        device_id=device.id,
+    )
+
+    devices_before = deepcopy(entry.data[CONF_DEVICES])
+    device_identifiers_before = set(device.identifiers)
+    entity_unique_id_before = entity.unique_id
+
+    # Re-point the entry at a brand-new radio unique_id (the rebind under test).
+    with patch.object(hass.config_entries, "async_reload"):
+        status = await async_rebind_hub(
+            hass,
+            entry,
+            "radio-new",
+            {CONF_HOST: "new.local", CONF_PORT: 9000},
+            title="rtl_433 (new.local)",
+        )
+        await hass.async_block_till_done()
+
+    assert status == "ok"
+    # The entry itself moved to the new radio id + connection target.
+    assert entry.unique_id == "radio-new"
+    assert entry.entry_id == entry_id
+    assert entry.data[CONF_HOST] == "new.local"
+    assert entry.data[CONF_PORT] == 9000
+
+    # The nested registry rows are byte-identical: device identifiers, entity
+    # unique_id, and the persisted device_key scheme all survive untouched.
+    device_after = dev_reg.async_get(device.id)
+    entity_after = ent_reg.async_get(entity.entity_id)
+    assert device_after is not None
+    assert entity_after is not None
+    assert set(device_after.identifiers) == device_identifiers_before
+    assert entity_after.unique_id == entity_unique_id_before
+    assert entry.data[CONF_DEVICES] == devices_before
+    assert device_key in entry.data[CONF_DEVICES]
+
+
+async def test_rebind_hub_sets_title_only_when_provided(hass):
+    """``title`` is applied when given and left untouched when ``None``.
+
+    Two mutants live on the ``if title is not None`` guard and its body: flipping
+    the guard, or forcing the stored title to ``None``. Both are caught by
+    asserting the title changes only in the explicit-title call.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="original-title",
+        unique_id="radio-old",
+        data={
+            CONF_HOST: "old.local",
+            CONF_PORT: 8433,
+            CONF_PATH: "/ws",
+            CONF_SECURE: False,
+            CONF_MANAGE_SETTINGS: False,
+        },
+        version=2,
+    )
+    entry.add_to_hass(hass)
+
+    # No title -> the existing title is preserved (guard must skip the body).
+    with patch.object(hass.config_entries, "async_reload"):
+        status = await async_rebind_hub(
+            hass, entry, "radio-mid", {CONF_HOST: "mid.local"}
+        )
+        await hass.async_block_till_done()
+    assert status == "ok"
+    assert entry.title == "original-title"
+
+    # Explicit title -> applied verbatim (body must run with the real value).
+    with patch.object(hass.config_entries, "async_reload"):
+        await async_rebind_hub(
+            hass, entry, "radio-new", {CONF_HOST: "new.local"}, title="brand-new-title"
+        )
+        await hass.async_block_till_done()
+    assert entry.title == "brand-new-title"
