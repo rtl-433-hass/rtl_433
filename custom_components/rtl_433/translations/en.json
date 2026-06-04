@@ -31,18 +31,30 @@
       },
       "reconfigure": {
         "title": "Reconfigure rtl_433 hub",
-        "description": "Update this hub's connection target. Nested devices and their history are preserved.",
+        "description": "Update this hub's connection target, or re-point it at a replacement radio. Nested devices and their history are preserved.",
         "data": {
+          "radio_id": "New radio ID (unique_id)",
           "host": "Host",
           "port": "Port",
           "path": "WebSocket path",
           "secure": "Secure (use wss://)"
         },
         "data_description": {
+          "radio_id": "The replacement radio's stable ID, shown in the add-on log/status as its unique_id. Leave unchanged to only edit the connection below.",
           "host": "Hostname or IP address of the rtl_433 server.",
           "port": "TCP port of the rtl_433 HTTP server (default 8433).",
           "path": "WebSocket endpoint path on the server (default /ws).",
           "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy)."
+        }
+      },
+      "hassio_replace": {
+        "title": "Replace a radio?",
+        "description": "A new radio published by the {addon} add-on at `{host}:{port}` was discovered. If it replaces a radio on an existing hub, choose that hub to keep its devices and history. Otherwise add it as a new radio.",
+        "data": {
+          "replaces": "This radio replaces"
+        },
+        "data_description": {
+          "replaces": "Pick the existing hub whose radio you swapped, or \"It's a new radio\" to add it separately."
         }
       },
       "hassio_confirm": {
@@ -63,10 +75,12 @@
     "abort": {
       "already_configured": "This rtl_433 server is already configured.",
       "reconfigure_successful": "Connection settings updated.",
+      "rebind_successful": "Radio replaced. Your devices and history are preserved.",
       "invalid_discovery_info": "The discovery message was missing required information."
     },
     "error": {
-      "cannot_connect": "Failed to connect. Check the host, port, and path, and that the rtl_433 server is reachable."
+      "cannot_connect": "Failed to connect. Check the host, port, and path, and that the rtl_433 server is reachable.",
+      "id_in_use": "That radio ID is already used by another configured hub."
     }
   },
   "options": {
@@ -158,7 +172,21 @@
         "step": {
           "confirm": {
             "title": "rtl_433 server unreachable",
-            "description": "Home Assistant cannot reach the configured rtl_433 server. Check that it is running with `-F http` and that the host, port, and path are correct and reachable. The integration keeps retrying, and this notification clears automatically once the connection is restored. Confirm to dismiss this card."
+            "description": "Home Assistant cannot reach the configured rtl_433 server. If you replaced the radio, enter the replacement's ID (its unique_id from the add-on log/status) and connection details below to re-point this hub — your devices and history are preserved. If the server is just temporarily down, leave the fields unchanged and submit to retry; the card also clears automatically once the connection is restored.",
+            "data": {
+              "radio_id": "New radio ID (unique_id)",
+              "host": "Host",
+              "port": "Port",
+              "path": "WebSocket path",
+              "secure": "Secure (use wss://)"
+            },
+            "data_description": {
+              "radio_id": "The replacement radio's stable ID. Leave unchanged to keep the current radio and simply retry.",
+              "host": "Hostname or IP address of the rtl_433 server.",
+              "port": "TCP port of the rtl_433 HTTP server (default 8433).",
+              "path": "WebSocket endpoint path on the server (default /ws).",
+              "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy)."
+            }
           }
         }
       }

@@ -34,6 +34,7 @@ from custom_components.rtl_433.const import (
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    CONF_RADIO_ID,
     DEFAULT_INITIAL_FREQUENCY,
     DEFAULT_MANAGE_SETTINGS,
     DEVICE_CALIBRATION,
@@ -61,6 +62,14 @@ def _schema_default(result, key: str):
             default = getattr(marker, "default", None)
             return default() if callable(default) else default
     return None
+
+
+def _schema_keys(result) -> set[str]:
+    """Return the set of field key names present in a form result's schema."""
+    keys: set[str] = set()
+    for marker in result["data_schema"].schema:
+        keys.add(marker.schema if hasattr(marker, "schema") else str(marker))
+    return keys
 
 
 async def test_user_step_success_creates_hub(hass):
@@ -670,19 +679,27 @@ def _disc(host="core-rtl433", port=8433, uid="serial:0123"):
     )
 
 
-def _radio_entry(host="core-rtl433", port=8433, uid="serial:0123"):
-    """Build a discovered-style hub entry keyed by a stable radio unique_id."""
+def _radio_entry(host="core-rtl433", port=8433, uid="serial:0123", devices=None):
+    """Build a discovered-style hub entry keyed by a stable radio unique_id.
+
+    ``devices`` (when given) seeds ``data["devices"]`` so collision/orphan and
+    rebind-preservation scenarios can assert the nested-device map survives (or
+    that an empty-devices entry counts as an orphan).
+    """
+    data = {
+        CONF_HOST: host,
+        CONF_PORT: port,
+        CONF_PATH: "/ws",
+        "secure": False,
+        CONF_MANAGE_SETTINGS: False,
+    }
+    if devices is not None:
+        data[CONF_DEVICES] = devices
     return MockConfigEntry(
         domain=DOMAIN,
         title=f"rtl_433 ({host})",
         unique_id=uid,
-        data={
-            CONF_HOST: host,
-            CONF_PORT: port,
-            CONF_PATH: "/ws",
-            "secure": False,
-            CONF_MANAGE_SETTINGS: False,
-        },
+        data=data,
         version=2,
     )
 
@@ -851,21 +868,43 @@ async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
     assert adopted.data[CONF_DISCOVERY_ENABLED] is True
 
 
-async def test_hassio_discovery_distinct_port_is_treated_as_new_radio(hass):
-    """A different host:port (with a new id) is a new radio, not an adoption."""
+async def test_hassio_discovery_distinct_port_can_become_new_radio(hass):
+    """With a hub present, an unknown radio offers replace; '__new__' adds it new.
+
+    When a hub already exists, discovery of an unknown radio on a distinct
+    host:port routes to the guided ``hassio_replace`` step (the "replacement
+    landed on a new host:port" case). Choosing ``__new__`` preserves the original
+    behavior — the distinct-port unknown radio still becomes its own new entry.
+    """
     entry = _radio_entry(host="core-rtl433", port=8433, uid="serial:0123")
     entry.add_to_hass(hass)
 
-    # Same host, different port, different stable id -> no host:port match.
+    # Same host, different port, different stable id -> no host:port match, but a
+    # hub already exists, so the flow offers the replace choice first.
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": SOURCE_HASSIO},
         data=_disc(port=9999, uid="serial:NEW"),
     )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "hassio_replace"
 
+    # Choosing "__new__" advances to the confirm step (a genuinely new radio)...
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"replaces": "__new__"}
+    )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "hassio_confirm"
-    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+    # ...and creates a second, distinct entry keyed by the new radio id.
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == "serial:NEW"
+    entries = hass.config_entries.async_entries(DOMAIN)
+    assert {e.unique_id for e in entries} == {"serial:0123", "serial:NEW"}
 
 
 async def test_hassio_discovery_updates_changed_port_in_place(hass):
@@ -956,6 +995,211 @@ async def test_reconfigure_preserves_stable_radio_unique_id(hass):
     assert entry.data[CONF_PORT] == 9000
     assert entry.data[CONF_PATH] == "/socket"
     assert entry.data["secure"] is True
+
+
+async def test_reconfigure_rebinds_to_new_radio_id_preserving_entry(hass):
+    """Reconfiguring a discovered entry to a new radio_id rebinds it in place.
+
+    The unique_id moves to the supplied radio_id, the host/port are updated, and
+    the entry_id + the seeded ``data["devices"]`` map survive (the additive-only
+    rebind preserves nested device/entity history).
+    """
+    devices = {
+        "Acurite-606TX-42": {
+            CONF_MODEL: "Acurite-606TX",
+            DEVICE_FIELDS: ["temperature_C"],
+        }
+    }
+    entry = _radio_entry(host="old.local", port=8433, uid="radio-old", devices=devices)
+    entry.add_to_hass(hass)
+    original_entry_id = entry.entry_id
+    devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["step_id"] == "reconfigure"
+
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_RADIO_ID: "radio-new",
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+
+    # Rebound to the new stable id, in place (same entry_id), devices preserved.
+    assert entry.unique_id == "radio-new"
+    assert entry.entry_id == original_entry_id
+    assert entry.data[CONF_DEVICES] == devices_snapshot
+    assert entry.data[CONF_HOST] == "new.local"
+    assert entry.data[CONF_PORT] == 9000
+    # Exactly one entry remains (no orphan/clone created).
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_reconfigure_rebind_collision_with_populated_entry_aborts(hass):
+    """Rebinding onto a populated entry's id aborts already_configured, no change."""
+    entry = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    other = _radio_entry(
+        host="other.local",
+        port=8433,
+        uid="radio-new",
+        devices={"Foo-1": {CONF_MODEL: "Foo", DEVICE_FIELDS: ["temperature_C"]}},
+    )
+    entry.add_to_hass(hass)
+    other.add_to_hass(hass)
+
+    entry_data_snapshot = deepcopy(dict(entry.data))
+    other_data_snapshot = deepcopy(dict(other.data))
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["step_id"] == "reconfigure"
+
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_RADIO_ID: "radio-new",
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+    # Nothing changed: both entries still present with their original ids + data.
+    assert entry.unique_id == "radio-old"
+    assert dict(entry.data) == entry_data_snapshot
+    assert other.unique_id == "radio-new"
+    assert dict(other.data) == other_data_snapshot
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 2
+
+
+async def test_reconfigure_rebind_collision_with_empty_orphan_succeeds(hass):
+    """Rebinding onto an empty-orphan entry deletes the orphan and rebinds."""
+    devices = {"Foo-1": {CONF_MODEL: "Foo", DEVICE_FIELDS: ["temperature_C"]}}
+    entry = _radio_entry(host="old.local", port=8433, uid="radio-old", devices=devices)
+    # Orphan owns "radio-new" but has no devices (an auto-created duplicate).
+    orphan = _radio_entry(host="other.local", port=8433, uid="radio-new")
+    entry.add_to_hass(hass)
+    orphan.add_to_hass(hass)
+    orphan_id = orphan.entry_id
+    devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["step_id"] == "reconfigure"
+
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_RADIO_ID: "radio-new",
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+
+    # Orphan removed; the reconfigured entry took over "radio-new" with devices.
+    assert hass.config_entries.async_get_entry(orphan_id) is None
+    assert entry.unique_id == "radio-new"
+    assert entry.data[CONF_DEVICES] == devices_snapshot
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_hassio_replace_rebinds_chosen_hub(hass):
+    """Discovery of an unknown radio while a hub exists rebinds the chosen hub.
+
+    The replace step lists the existing hub; submitting its entry_id rebinds that
+    hub onto the discovered radio id and connection target, in place.
+    """
+    devices = {"Foo-1": {CONF_MODEL: "Foo", DEVICE_FIELDS: ["temperature_C"]}}
+    hub = _radio_entry(host="old.local", port=8433, uid="radio-old", devices=devices)
+    hub.add_to_hass(hass)
+    hub_id = hub.entry_id
+    devices_snapshot = deepcopy(hub.data[CONF_DEVICES])
+
+    # An unknown radio on a distinct host:port -> the replace step is shown.
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="new.local", port=9000, uid="radio-new"),
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "hassio_replace"
+
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"replaces": hub_id}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "rebind_successful"
+
+    # The same hub entry was rebound onto the new radio + connection target.
+    rebound = hass.config_entries.async_get_entry(hub_id)
+    assert rebound is not None
+    assert rebound.unique_id == "radio-new"
+    assert rebound.data[CONF_HOST] == "new.local"
+    assert rebound.data[CONF_PORT] == 9000
+    assert rebound.data[CONF_DEVICES] == devices_snapshot
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_legacy_hub_reconfigure_rebinds_via_host_port(hass, hub_entry_builder):
+    """A legacy hub: entry still rebinds its unique_id via host:port on reconfigure."""
+    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry.add_to_hass(hass)
+    assert entry.unique_id == "hub:old.local:8433"
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["step_id"] == "reconfigure"
+    # No radio_id field is offered for a legacy hub: entry.
+    assert CONF_RADIO_ID not in _schema_keys(result)
+
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.unique_id == "hub:new.local:9000"
 
 
 async def test_hassio_confirm_cannot_connect_reshows_form(hass):
@@ -1086,3 +1330,172 @@ async def test_hassio_confirm_persists_toggles_and_frequency(hass):
     assert entry.data[CONF_MANAGE_SETTINGS] is True
     assert entry.data[CONF_DISCOVERY_ENABLED] is False
     assert entry.data[CONF_INITIAL_FREQUENCY] == 915.0
+
+
+# --------------------------------------------------------------------------- #
+# Mutation coverage: rebind form contents, titles, and identity branches.      #
+# --------------------------------------------------------------------------- #
+def _select_options(result, key: str) -> list[tuple[str, str]]:
+    """Return [(value, label), ...] for a SelectSelector field in a form schema."""
+    for marker, validator in result["data_schema"].schema.items():
+        if marker == key:
+            return [(opt["value"], opt["label"]) for opt in validator.config["options"]]
+    raise AssertionError(f"no select field {key!r} in schema")
+
+
+async def test_hassio_replace_form_lists_hubs_and_new_option(hass):
+    """The replace form offers each existing hub (id->title) plus an 'add new' choice."""
+    hub = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    hub.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="new.local", port=9000, uid="radio-new"),
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "hassio_replace"
+    # Placeholders describe the *newly discovered* radio (addon/host/port as str).
+    assert result["description_placeholders"] == {
+        "addon": "rtl_433",
+        "host": "new.local",
+        "port": "9000",
+    }
+    # Options: the existing hub keyed by entry_id->title, then the new-radio choice.
+    options = _select_options(result, "replaces")
+    assert (hub.entry_id, "rtl_433 (old.local)") in options
+    assert ("__new__", "It's a new radio") in options
+    # The form defaults to "add as new" so a careless submit never rebinds a hub.
+    assert _schema_default(result, "replaces") == "__new__"
+
+
+async def test_hassio_replace_rebind_sets_title_to_new_host(hass):
+    """Rebinding via the replace step retitles the hub to the new host."""
+    hub = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    hub.add_to_hass(hass)
+    hub_id = hub.entry_id
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="new.local", port=9000, uid="radio-new"),
+    )
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"replaces": hub_id}
+        )
+        await hass.async_block_till_done()
+
+    rebound = hass.config_entries.async_get_entry(hub_id)
+    assert rebound.unique_id == "radio-new"
+    assert rebound.title == "rtl_433 (new.local)"
+
+
+async def test_reconfigure_connection_only_keeps_id_and_updates_title(hass):
+    """An empty radio_id reconfigure updates the connection + title, keeps the id."""
+    devices = {"Foo-1": {CONF_MODEL: "Foo", DEVICE_FIELDS: ["temperature_C"]}}
+    entry = _radio_entry(
+        host="old.local", port=8433, uid="serial:0123", devices=devices
+    )
+    entry.add_to_hass(hass)
+    devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["step_id"] == "reconfigure"
+
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_RADIO_ID: "",  # explicitly cleared -> connection-only update
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    # Stable id untouched (no rebind), connection + title updated, devices kept.
+    assert entry.unique_id == "serial:0123"
+    assert entry.title == "rtl_433 (new.local)"
+    assert entry.data[CONF_HOST] == "new.local"
+    assert entry.data[CONF_PORT] == 9000
+    assert entry.data[CONF_DEVICES] == devices_snapshot
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_reconfigure_rebind_strips_whitespace_and_sets_title(hass):
+    """A padded radio_id is stripped before rebinding; the title follows the host."""
+    entry = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_RADIO_ID: "  radio-new  ",
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.unique_id == "radio-new"
+    assert entry.title == "rtl_433 (new.local)"
+
+
+async def test_reconfigure_empty_unique_id_uses_legacy_hub_scheme(hass):
+    """An entry with no unique_id reconfigures via the legacy hub:host:port scheme."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="rtl_433 (old.local)",
+        unique_id=None,
+        data={
+            CONF_HOST: "old.local",
+            CONF_PORT: 8433,
+            CONF_PATH: "/ws",
+            "secure": False,
+            CONF_MANAGE_SETTINGS: False,
+        },
+        version=2,
+    )
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["step_id"] == "reconfigure"
+    # No stable radio id -> no radio_id field offered.
+    assert CONF_RADIO_ID not in _schema_keys(result)
+
+    with (
+        patch(VALIDATE, return_value=True),
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_HOST: "new.local",
+                CONF_PORT: 9000,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.unique_id == "hub:new.local:9000"
