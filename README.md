@@ -338,8 +338,11 @@ By default a new hub adopts and manages the receiver's SDR settings. With
 **controls** (under the hub device, in the config-entity category):
 
 - **Center frequency** (number, MHz) — shown only when the receiver uses a
-  **single** frequency (see the hopping note below). You can also set it once at
-  setup via the **Initial frequency** field.
+  **single** frequency (see the hopping note below). This control is the way to
+  set or change the frequency **at any time**: editing it sends the retune
+  immediately and Home Assistant re-applies it on every reconnect. The
+  **Initial frequency** setup field is only a convenience that pre-seeds this
+  value once on a brand-new hub.
 - **Sample rate** (number, Hz)
 - **Frequency correction** (number, ppm)
 - **Gain** (number, dB) paired with an **Auto gain** switch — with Auto gain
@@ -359,6 +362,11 @@ What "managed" means:
   priority over the adopted frequency, so the receiver tunes to the frequency you
   chose rather than the server's current one. After that the **Center frequency**
   control owns the value and your later changes are preserved.
+  - The **Initial frequency** seed only fires for a hub that stored it at setup.
+    A hub added **before** the field existed (or one where you left it at the
+    default) has nothing to seed, so it simply adopts the server's current
+    frequency — set yours with the **Center frequency** control. You do **not**
+    need to remove and re-add the hub.
 - **Home Assistant becomes the authority.** Once a hub is managed, change these
   settings **in Home Assistant**, not in the rtl_433 config file — Home
   Assistant re-applies its stored values on the next reconnect and will override
@@ -387,6 +395,12 @@ and want Home Assistant to pick up those values, do this dance:
   set in the rtl_433 config; the API has no command for it.
 - **Multi-stage gain strings** are not supported by the single gain control —
   manage those through the rtl_433 config (or turn the toggle off).
+- **Sample rate is independent of frequency.** rtl_433 does not widen the sample
+  rate when it is retuned, so moving a single-frequency receiver into the upper
+  ISM bands (≥ 800 MHz) while it is still at the default 250 kHz raises a
+  dismissible advisory suggesting a wider **Sample rate** (e.g. 1024000 Hz). Many
+  devices decode fine at 250 kHz, so it is only a hint — dismiss it if your setup
+  works.
 
 **Turning management off** removes all the controls, stops Home Assistant from
 sending any commands, and clears its stored desired state; the six read-only

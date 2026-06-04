@@ -125,3 +125,75 @@ async def test_reachability_raises_after_grace_and_clears_on_reconnect(
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     unsub()
+
+
+# --------------------------------------------------------------------------- #
+# Low-sample-rate advisory                                                    #
+# --------------------------------------------------------------------------- #
+def test_sample_rate_looks_low_predicate():
+    """The band heuristic flags only a single high-band freq at a low rate."""
+    looks_low = repairs._sample_rate_looks_low
+    # 915 MHz at the 250k default -> flagged.
+    assert looks_low({"center_frequency": 915_000_000, "samp_rate": 250_000})
+    # Same band but already widened -> not flagged.
+    assert not looks_low({"center_frequency": 915_000_000, "samp_rate": 1_024_000})
+    # Low band (433.92 MHz) at 250k -> not flagged.
+    assert not looks_low({"center_frequency": 433_920_000, "samp_rate": 250_000})
+    # High band but hopping (multiple frequencies) -> never flagged.
+    assert not looks_low(
+        {
+            "center_frequency": 915_000_000,
+            "samp_rate": 250_000,
+            "frequencies": [433_920_000, 915_000_000],
+        }
+    )
+    # Missing / non-numeric values -> not flagged (defensive).
+    assert not looks_low({"samp_rate": 250_000})
+    assert not looks_low({"center_frequency": 915_000_000})
+    assert not looks_low({"center_frequency": True, "samp_rate": 250_000})
+
+
+async def test_sample_rate_advisory_edge_triggered(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """The advisory raises on entering the flagged state and clears on leaving."""
+    from custom_components.rtl_433.const import signal_hub_update
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._sample_rate_issue_id(entry)
+
+    # Wire the tracker with meta already in the good (low-band) state.
+    coordinator.meta = {"center_frequency": 433_920_000, "samp_rate": 250_000}
+    unsub = repairs.async_track_sample_rate(hass, entry, coordinator)
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+
+    # Retune into the high band at the default rate -> advisory raised.
+    coordinator.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    issue = issue_reg.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.translation_placeholders["frequency"] == "915"
+
+    # A user dismissing it while still on a low rate must not re-raise it.
+    repairs.async_clear_sample_rate_low(hass, entry)
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+
+    # Raising the sample rate, then dropping back, re-triggers the edge.
+    coordinator.meta = {"center_frequency": 915_000_000, "samp_rate": 1_024_000}
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    coordinator.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
+
+    unsub()
