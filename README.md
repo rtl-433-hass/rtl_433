@@ -407,6 +407,27 @@ sending any commands, and clears its stored desired state; the six read-only
 SDR/meta diagnostic [Hub entities](#hub-entities) sensors come back. The
 receiver's settings are left untouched.
 
+## Replacing a radio
+
+If your RTL-SDR dongle dies, you can swap in a replacement without losing any of
+your decoded devices, their history, or your automations — the hub config entry
+is **re-pointed at the new radio in place**.
+
+1. Remove the dead dongle and plug in the replacement (any USB port).
+2. In the **rtl_433 add-on**, stamp the replacement with a fresh serial if needed
+   (`force_randomize_serial` / `randomize_default_serial`), restart it, and note
+   the new radio's **ID (`unique_id`)** and **`host:port`** from the add-on
+   log/status.
+3. In **Home Assistant**, either:
+   - open the **"rtl_433 server unreachable"** repair card — it appears once the
+     old radio stops responding — and enter the replacement's radio ID and
+     connection details to re-point the hub; **or**
+   - go to the rtl_433 hub → **Reconfigure** and enter the new **radio ID** (plus
+     host/port if they changed). If discovery already created a duplicate hub for
+     the new radio, the reconfigure adopts its identity and removes the duplicate.
+4. All decoded sensors, their history, and your automations are preserved,
+   because the hub keeps the same internal entry.
+
 ## Device library and user overrides
 
 Device support is a set of themed YAML files (the **device library**) that map
