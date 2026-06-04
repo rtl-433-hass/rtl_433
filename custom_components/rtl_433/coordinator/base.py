@@ -892,6 +892,13 @@ class Rtl433Coordinator:
         so a reconnect replay cannot disturb the connect loop or the event
         stream. The gain pair shares one ``gain`` command, so it is composed from
         the combined desired values and emitted exactly once.
+
+        After the replay, reconcile ``self.meta`` from the server (mirroring the
+        single-field :meth:`_enforce_field` read-back) so the hub's "actual" SDR
+        sensors — and the controls that fall back to meta — reflect the values
+        just applied instead of the pre-enforce snapshot taken on connect. The
+        emit inside ``_refresh_meta`` also repaints the controls after the
+        first-connect seed changed their desired value.
         """
         gain_managed = bool(self._managed & {KEY_GAIN_DB, KEY_GAIN_AUTO})
         for key in sorted(self._managed):
@@ -908,6 +915,12 @@ class Rtl433Coordinator:
                 bool(self._desired.get(KEY_GAIN_AUTO, False)),
             )
             await self._send_cmd("gain", arg=arg)
+        # Reconcile meta from the server so the actual-value sensors converge now
+        # rather than waiting for the next refresh tick; swallows its own errors.
+        # Skip when nothing is managed (the connect-time refresh already ran and
+        # there were no setter sends to reconcile).
+        if self._managed:
+            await self._refresh_meta()
 
     # ------------------------------------------------------------------ #
     # Public read API for the control entities                           #

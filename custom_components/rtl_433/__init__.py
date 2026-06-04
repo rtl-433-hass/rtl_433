@@ -234,6 +234,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(
         repairs.async_track_hub_reachability(hass, entry, coordinator)
     )
+    # Advise when a single high-band frequency is left at the default sample rate.
+    entry.async_on_unload(repairs.async_track_sample_rate(hass, entry, coordinator))
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 

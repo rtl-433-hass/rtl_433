@@ -19,7 +19,7 @@ repos:
     rev: v2.3.0
     hooks:
       - id: codespell
-        args: ["--ignore-words-list=hass,keep-alives", "--quiet-level=2"]
+        args: ["--ignore-words-list=hass,keep-alives,retuned", "--quiet-level=2"]
         types_or: [python, markdown, rst]
         exclude_types: [csv, json, html]
         files: ^(custom_components/|tests/|scripts/|README\.md|CONTRIBUTING\.md|AGENTS\.md)

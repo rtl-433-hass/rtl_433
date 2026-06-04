@@ -384,6 +384,55 @@ def test_enforcement_replays_all_managed_on_each_connect(
         assert gain_count == 1
 
 
+def test_enforce_all_reconciles_meta_and_emits(hass, coordinator, aioclient_mock):
+    """After replaying the managed fields, ``_enforce_all`` re-reads meta + emits.
+
+    Regression: a first-connect seed sent ``center_frequency`` but never refreshed
+    ``self.meta``, so the hub's actual-frequency sensor kept showing the stale
+    pre-enforce value until the next 60s tick. The post-replay read-back now
+    converges it immediately (and the emit repaints the controls).
+    """
+    # The server reports the newly-applied 915 MHz on the post-enforce read-back.
+    aioclient_mock.get(
+        _CMD_URL,
+        params={"cmd": "get_meta"},
+        json={"result": {"center_frequency": 915000000, "samp_rate": 250000}},
+    )
+    aioclient_mock.get(_CMD_URL, params={"cmd": "get_gain"}, json={"result": "32.8"})
+    aioclient_mock.get(_CMD_URL, params={"cmd": "get_ppm_error"}, json={"result": 2})
+    aioclient_mock.get(
+        _CMD_URL, params={"cmd": "center_frequency"}, json={"result": "Ok"}
+    )
+    coordinator.connected = True
+    coordinator.meta = {"center_frequency": 433920000}  # stale connect-time snapshot
+    coordinator._desired = {"center_frequency": 915.0}
+    coordinator._managed = {"center_frequency"}
+
+    with patch(DISPATCH) as dispatch:
+        _run(hass, coordinator._enforce_all())
+
+    # The setter was sent in Hz and meta converged to the server's new value.
+    by_cmd = {q["cmd"]: q for q in _setter_queries(aioclient_mock)}
+    assert by_cmd["center_frequency"] == {"cmd": "center_frequency", "val": "915000000"}
+    assert coordinator.meta["center_frequency"] == 915000000
+    # A hub update was emitted so the sensor/controls repaint without waiting.
+    assert dispatch.called
+
+
+def test_enforce_all_no_managed_skips_meta_reconcile(hass, coordinator, aioclient_mock):
+    """With nothing managed there is no read-back (the connect refresh already ran)."""
+    aioclient_mock.get(_CMD_URL, params={"cmd": "get_meta"}, json={"result": {}})
+    coordinator.connected = True
+    coordinator._desired = {}
+    coordinator._managed = set()
+
+    with patch(DISPATCH):
+        _run(hass, coordinator._enforce_all())
+
+    # No /cmd of any kind was issued (no setters, no read-back getters).
+    assert _queries(aioclient_mock) == []
+
+
 # --------------------------------------------------------------------------- #
 # 4. Store persistence across reload / recreate.                              #
 # --------------------------------------------------------------------------- #
