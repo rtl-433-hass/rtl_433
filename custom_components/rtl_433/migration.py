@@ -431,8 +431,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(entry, version=2, minor_version=3)
 
     if (entry.minor_version or 1) < 4:
-        # The availability timeout grew device-class-aware defaults (a longer
-        # window for event-driven door/motion sensors, the periodic default for
+        # The availability timeout grew device-class-aware defaults (never-expire
+        # for event-driven door/motion/button sensors, the periodic default for
         # the rest). Entries that persisted the old global default (600s) as an
         # explicit hub option would mask those per-class defaults, so drop that
         # exact value and let the class default apply. A hub timeout the user

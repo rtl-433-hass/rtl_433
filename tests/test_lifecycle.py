@@ -1248,8 +1248,11 @@ async def test_event_always_available_and_no_double_fire_on_watchdog(
             device_key: {
                 CONF_MODEL: "Acurite-606TX",
                 # A measurement field (temperature) plus the event field, so the
-                # device has a sibling that *can* time out.
+                # device has a sibling that *can* time out. The ``button`` field
+                # makes the device event-driven (never-expire) by default, so pin
+                # an explicit finite override to exercise the watchdog stale path.
                 DEVICE_FIELDS: ["temperature_C", "button"],
+                DEVICE_TIMEOUT_OVERRIDE: 600,
             }
         },
     )

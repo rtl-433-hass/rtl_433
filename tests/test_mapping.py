@@ -15,6 +15,7 @@ import yaml
 
 from custom_components.rtl_433.mapping import (
     apply_transform,
+    event_driven_field_keys,
     load_library,
     lookup,
     merge_overrides,
@@ -147,6 +148,80 @@ def test_existing_fields_keep_original_platform(library):
     # A representative sensor and binary_sensor field keep their platform.
     assert lookup("temperature_C", registry=registry).platform == "sensor"
     assert lookup("tamper", registry=registry).platform == "binary_sensor"
+
+
+def test_event_driven_flag_parsed_from_library(library):
+    """The ``event_driven`` flag is parsed onto the relevant binary descriptors."""
+    registry, _ = library
+
+    # Event-driven state fields carry the flag; diagnostic bits do not.
+    assert lookup("motion", registry=registry).event_driven is True
+    assert lookup("contact_open", registry=registry).event_driven is True
+    assert lookup("closed", registry=registry).event_driven is True
+    assert lookup("tamper", registry=registry).event_driven is False
+    assert lookup("temperature_C", registry=registry).event_driven is False
+
+
+def test_event_driven_field_keys_derivation(library):
+    """The derived set covers event-platform + flagged fields, excludes diagnostics."""
+    registry, _ = library
+
+    keys = event_driven_field_keys(registry)
+
+    # platform: event fields auto-qualify (no flag needed).
+    assert {"button", "secret_knock"} <= keys
+    # event_driven: true binary_sensors are included.
+    assert {"motion", "contact_open", "reed_open", "closed", "alarm"} <= keys
+    # Diagnostic bits and periodic measurements are excluded.
+    assert keys.isdisjoint({"tamper", "battery_ok", "temperature_C", "humidity"})
+
+
+def test_event_driven_field_keys_includes_model_scoped(library):
+    """Model-scoped event-driven descriptors are picked up alongside the flat set."""
+    registry, skip_keys = library
+
+    merged, _ = merge_overrides(
+        registry,
+        skip_keys,
+        {
+            "models": {
+                "Acme-9000": {
+                    "blip": {
+                        "platform": "binary_sensor",
+                        "device_class": "motion",
+                        "name": "Blip",
+                        "object_suffix": "blip",
+                        "payload": {"on": "1", "off": "0"},
+                        "event_driven": True,
+                    }
+                }
+            }
+        },
+    )
+
+    assert "blip" in event_driven_field_keys(merged)
+
+
+def test_invalid_event_driven_value_is_ignored():
+    """A non-bool ``event_driven`` is dropped, defaulting the field to periodic."""
+    registry, _ = load_library()
+    merged, _ = merge_overrides(
+        registry,
+        set(),
+        {
+            "wobble": {
+                "platform": "binary_sensor",
+                "device_class": "motion",
+                "name": "Wobble",
+                "object_suffix": "wobble",
+                "payload": {"on": "1", "off": "0"},
+                "event_driven": "yes-please",  # not a bool -> ignored
+            }
+        },
+    )
+
+    assert lookup("wobble", registry=merged).event_driven is False
+    assert "wobble" not in event_driven_field_keys(merged)
 
 
 def test_sensor_transform_pipeline(library):

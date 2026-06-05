@@ -78,6 +78,7 @@ temperature_C:
 | `entity_category`     | no       | `diagnostic` \| `config` \| `null` | Categorizes the entity in the HA UI. Diagnostic fields (battery, signal, tamper) use `diagnostic`. |
 | `enabled_by_default`  | no       | bool            | Set `false` to register the entity disabled (the user can enable it). Defaults to true. |
 | `icon`                | no       | string          | Optional `mdi:` icon override. |
+| `event_driven`        | no       | bool            | Marks a `binary_sensor` field as a state field that transmits **only on a change** (door/contact/motion), so the device has no periodic check-in. Defaults to false. Drives availability — see [Availability classification](#availability-classification). `platform: event` fields are always event-driven and do not need this flag. |
 
 `null` is written explicitly (YAML `null`) rather than omitted for the three
 "required (nullable)" attributes, so every entry is uniform and the loader never
@@ -167,6 +168,29 @@ clear it): the sensor comes back off/unknown until the next detection.
 *Motion clear delay (seconds)* field, shown only for motion-bearing devices.
 Leave it blank to use the 90 s default. The override is resolved at runtime
 (per-device value, else the descriptor default).
+
+### Availability classification
+
+A device is marked *unavailable* when it falls silent past its availability
+timeout. RF devices signal presence only by transmitting, so the timeout is
+resolved per device: a per-device override, then an explicit hub default, then a
+**device-class default** derived from the device's latest payload.
+
+The class default has two outcomes:
+
+- **Event-driven** → never-expire (the device, and all its entities including
+  battery, stay available once seen). These devices transmit *only on a state
+  change* — a door opening, motion, a button press — so any finite silence
+  timeout would eventually misfire and wrongly hide a healthy device. A field is
+  event-driven when it uses `platform: event` **or** sets `event_driven: true`
+  (e.g. `motion`, `contact_open`, `reed_open`, `closed`, `alarm`). The set is
+  derived from the active library (shipped descriptors plus user mappings).
+- **Periodic** → a finite default (10 min). Everything else — temperature,
+  humidity, power, etc. — which reports on a regular cadence.
+
+A lone diagnostic bit (`tamper`, `battery_ok`) is **not** event-driven, so a
+periodic sensor that merely carries one still expires and can flag offline. An
+explicit per-device or hub timeout always overrides the class default.
 
 ### Event entities
 

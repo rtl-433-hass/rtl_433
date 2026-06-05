@@ -62,6 +62,7 @@ from .hub_settings import (
     _hub_secure,
 )
 from .library import _async_load_library, _merge_entry_library
+from .mapping import event_driven_field_keys
 from .migration import (
     _cleanup_phantom_unknown_device,
     _migrate_motion_event_to_binary_sensor,
@@ -86,6 +87,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry_registry,
         entry_skip_keys,
     )
+    # Field keys whose presence marks a device as event-driven (never-expire
+    # availability). Derived from this entry's merged library so the
+    # classification follows the shipped library plus any user mappings; a reload
+    # after an options/user-mapping change re-runs setup and refreshes the set.
+    entry_event_driven_keys = event_driven_field_keys(entry_registry)
 
     def effective_timeout_resolver(device_key: str) -> int | None:
         """Resolve a device's *explicit* effective timeout, or ``None``.
@@ -186,6 +192,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         availability_timeout=_hub_availability_timeout(entry),
         initial_center_frequency=entry.data.get(CONF_INITIAL_FREQUENCY),
         skip_keys=entry_skip_keys,
+        event_driven_keys=entry_event_driven_keys,
     )
 
     @callback

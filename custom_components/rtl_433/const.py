@@ -166,22 +166,6 @@ LEGACY_DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
 # explicitly per device or, as an explicit hub default, for every non-overridden
 # device.
 AVAILABILITY_TIMEOUT_NEVER: Final = 0
-# Default availability window (seconds) for *event-driven* devices — those whose
-# rtl_433 payload carries an open/close/motion binary-sensor key (see
-# ``EVENT_DRIVEN_DEVICE_CLASS_KEYS``). Such devices transmit only on a state
-# change (a door opening, motion detected), so they can be silent for long
-# stretches while still online; a longer 2h default avoids spurious
-# unavailability. Used only when neither a per-device override nor an explicit
-# hub default is set.
-DEFAULT_EVENT_DEVICE_TIMEOUT: Final = 7200
-# rtl_433 payload keys that mark a device as event-driven (open/close/motion
-# classes). Presence of any one of these in a device's latest payload selects
-# ``DEFAULT_EVENT_DEVICE_TIMEOUT`` as the device-class default. A subset of
-# ``BINARY_DEVICE_CLASS_KEYS`` — ``tamper``/``battery_ok`` are excluded since
-# those alone do not make a device event-driven.
-EVENT_DRIVEN_DEVICE_CLASS_KEYS: Final[frozenset[str]] = frozenset(
-    {"motion", "occupancy", "contact", "opened", "door", "window"}
-)
 # Default seconds after which a motion/event binary_sensor auto-clears to "off"
 # when no explicit clear signal arrives. Overridable per device.
 DEFAULT_MOTION_CLEAR_DELAY: Final = 90
@@ -190,23 +174,30 @@ DEFAULT_MOTION_CLEAR_DELAY: Final = 90
 DEFAULT_MANAGE_SETTINGS: Final = True
 
 
-def class_default_timeout(payload: dict[str, Any] | None) -> int:
+def class_default_timeout(
+    payload: dict[str, Any] | None,
+    event_driven_keys: frozenset[str],
+) -> int:
     """Return the device-class default availability timeout for a payload.
 
     Pure classifier (no I/O, no HA deps) used as the third tier of the
     availability-timeout resolution order: when neither a per-device override nor
     an explicit hub default is set, a device's *class default* is chosen from its
     latest rtl_433 payload. If the payload is a mapping carrying any
-    :data:`EVENT_DRIVEN_DEVICE_CLASS_KEYS` key (an open/close/motion device, which
-    transmits only on a state change) it gets the longer
-    :data:`DEFAULT_EVENT_DEVICE_TIMEOUT`; everything else (periodic reporters)
-    gets :data:`DEFAULT_AVAILABILITY_TIMEOUT`. A missing/non-dict payload (device
-    not yet seen) falls back to the periodic default.
+    ``event_driven_keys`` key — an open/close/motion/button/doorbell device,
+    which transmits only on a state change and so has no periodic check-in — it
+    gets :data:`AVAILABILITY_TIMEOUT_NEVER` (never marked unavailable once seen,
+    since any finite silence timeout would eventually misfire). Everything else
+    (periodic reporters) gets :data:`DEFAULT_AVAILABILITY_TIMEOUT`. A
+    missing/non-dict payload (device not yet seen) falls back to the periodic
+    default.
+
+    ``event_driven_keys`` is derived from the active device library via
+    :func:`mapping.event_driven_field_keys`, so the classification stays in sync
+    with the shipped library and any per-hub user mappings.
     """
-    if isinstance(payload, dict) and not EVENT_DRIVEN_DEVICE_CLASS_KEYS.isdisjoint(
-        payload
-    ):
-        return DEFAULT_EVENT_DEVICE_TIMEOUT
+    if isinstance(payload, dict) and not event_driven_keys.isdisjoint(payload):
+        return AVAILABILITY_TIMEOUT_NEVER
     return DEFAULT_AVAILABILITY_TIMEOUT
 
 
