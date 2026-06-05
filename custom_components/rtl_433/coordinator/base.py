@@ -55,9 +55,11 @@ from homeassistant.util import dt as dt_util
 
 from ..const import (
     AVAILABILITY_TIMEOUT_NEVER,
+    CONF_DEVICES,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_PATH,
     DEFAULT_PORT,
+    DEVICE_FIELDS,
     LOGGER,
     SDR_STORE_VERSION,
     class_default_timeout,
@@ -1128,6 +1130,29 @@ class Rtl433Coordinator:
         normalized = self.devices.get(device_key)
         payload = normalized.fields if normalized is not None else None
         return class_default_timeout(payload, self.event_driven_keys)
+
+    def is_event_driven_device(self, device_key: str) -> bool:
+        """Whether the device's known fields mark it event-driven (no check-in).
+
+        True when any of the device's field keys is in ``self.event_driven_keys``
+        (open/close/motion/button/doorbell — transmits only on a state change, so
+        availability never expires and conveys no freshness). Considers both the
+        restart-safe adopted fields (``entry.data[CONF_DEVICES][key][fields]``)
+        and the latest live payload, so a device silent since startup is still
+        classified from its adopted fields. Used to enable the per-device
+        "Last seen" sensor by default for these devices (their only freshness
+        signal once availability stops expiring).
+        """
+        if not self.event_driven_keys:
+            return False
+        keys: set[str] = set()
+        device_cfg = self.entry.data.get(CONF_DEVICES, {}).get(device_key)
+        if device_cfg:
+            keys.update(device_cfg.get(DEVICE_FIELDS, []) or [])
+        normalized = self.devices.get(device_key)
+        if normalized is not None:
+            keys.update(normalized.fields)
+        return not self.event_driven_keys.isdisjoint(keys)
 
     def _effective_timeout(self, device_key: str) -> int:
         """Resolve the effective timeout for a device.

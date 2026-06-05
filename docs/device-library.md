@@ -192,6 +192,11 @@ A lone diagnostic bit (`tamper`, `battery_ok`) is **not** event-driven, so a
 periodic sensor that merely carries one still expires and can flag offline. An
 explicit per-device or hub timeout always overrides the class default.
 
+Because an event-driven device's availability no longer signals freshness, its
+per-device **Last seen** timestamp sensor is enabled by default (it ships
+disabled for periodic devices). It stays available once seen, so "no signal for
+N minutes" automations keep working.
+
 ### Event entities
 
 `platform: event` is for **momentary, fire-and-forget** RF fields — a remote
