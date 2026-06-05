@@ -108,6 +108,12 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
     real event when one exists, restored otherwise, and updated on dispatch.
     Stays available once it has a value even after the device falls silent, so
     "last_seen older than X" staleness automations keep working.
+
+    Ships disabled-by-default (a diagnostic timestamp is redundant for periodic
+    devices, where ``available`` already conveys freshness) **except** for
+    event-driven devices: those never expire, so their availability no longer
+    signals freshness and this timestamp becomes the only such signal — so it is
+    enabled by default for them.
     """
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -123,6 +129,12 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
         super().__init__(
             coordinator, hub_entry_id, device_key, model, LAST_SEEN_DESCRIPTOR
         )
+        # Enable by default for event-driven devices (no reliable check-in), for
+        # which availability never expires and this timestamp is the only
+        # freshness signal. Periodic devices keep LAST_SEEN_DESCRIPTOR's
+        # disabled-by-default.
+        if coordinator.is_event_driven_device(device_key):
+            self._attr_entity_registry_enabled_default = True
         # Seed only when a *real* event has been seen this session; the presence
         # of a devices-map entry distinguishes a true timestamp from the base's
         # startup baseline (which never sets coordinator.devices).

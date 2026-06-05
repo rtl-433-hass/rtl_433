@@ -230,8 +230,12 @@ a silence-based availability model: if no event for a device arrives within its
   to `unavailable` once the (restored) silence window elapses without a fresh
   event.
 - **Last seen** — every device also gets a diagnostic `timestamp` sensor named
-  **Last seen** (disabled by default — enable it from the device page when you
-  want it) that reports when the device was last heard from. Unlike the
+  **Last seen** that reports when the device was last heard from. It is
+  **enabled by default for event-driven devices** (door/window contacts,
+  motion/PIR, buttons, doorbells) — they never expire, so their availability no
+  longer signals freshness and this timestamp is the only such signal. For
+  periodic devices it ships **disabled by default** (their `available` already
+  conveys freshness); enable it from the device page when you want it. Unlike the
   measurement sensors — which become `unavailable` after the availability
   timeout elapses with no transmission — the Last seen sensor **stays
   available** and keeps showing the last-heard time, so you can build "no signal

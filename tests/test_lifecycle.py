@@ -1972,7 +1972,7 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
 
     for hub in (hub_a, hub_b):
         assert await async_migrate_entry(hass, hub) is True
-        assert hub.minor_version == 5
+        assert hub.minor_version == 6
         overrides = hub.data[CONF_USER_MAPPINGS]
         # Each hub got its own normalized copy: payload bare on/off -> string keys.
         assert overrides["battery_low"]["payload"] == {"on": "0", "off": "1"}
@@ -1983,7 +1983,7 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
     # A second migrate call is a no-op: already at minor 5, mappings unchanged.
     snapshot = dict(hub_a.data[CONF_USER_MAPPINGS])
     assert await async_migrate_entry(hass, hub_a) is True
-    assert hub_a.minor_version == 5
+    assert hub_a.minor_version == 6
     assert hub_a.data[CONF_USER_MAPPINGS] == snapshot
 
 
@@ -2008,7 +2008,7 @@ async def test_migration_seeds_empty_mappings_when_file_missing(
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
     assert entry.data[CONF_USER_MAPPINGS] == {}
 
 
@@ -2023,7 +2023,7 @@ async def test_migration_disables_existing_last_seen_sensors(
     A pre-existing, user-enabled Last-seen sensor is disabled by the integration;
     a non-Last-seen sensor is untouched; a Last-seen sensor the user had already
     disabled (e.g. manually) keeps its existing disabler. The minor_version bumps
-    to 3 and a second migrate call is a no-op.
+    to the current value and a second migrate call is a no-op.
     """
     from custom_components.rtl_433 import async_migrate_entry
     from custom_components.rtl_433.const import CONF_USER_MAPPINGS
@@ -2070,7 +2070,7 @@ async def test_migration_disables_existing_last_seen_sensors(
     ).entity_id
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
 
     # The enabled Last-seen sensor is now disabled by the integration.
     assert (
@@ -2086,7 +2086,7 @@ async def test_migration_disables_existing_last_seen_sensors(
 
     # A second migrate call is a no-op: already at minor 5.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
 
 
 # --------------------------------------------------------------------------- #
@@ -2126,12 +2126,12 @@ async def test_migration_drops_legacy_default_timeout(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
     # A second migrate call is a no-op: already at minor 5.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2150,7 +2150,7 @@ async def test_migration_keeps_deliberate_timeout(hass, configured):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == configured
 
 
@@ -2162,7 +2162,7 @@ async def test_migration_timeout_no_option_just_bumps_version(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2177,11 +2177,11 @@ async def test_migration_timeout_minor2_through_to_5(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
 
 
 # --------------------------------------------------------------------------- #
@@ -2192,8 +2192,8 @@ async def test_migration_rewrites_persisted_doorbell_event_types(hass):
 
     A v2/minor-4 hub persisting the doorbell ``secret_knock`` ``event_types`` as
     the raw ``["0", "1"]`` is rewritten to the standardized
-    ``["ring", "secret_knock"]`` and the minor_version bumps to 5. Re-running the
-    migration leaves the value unchanged (idempotent) and the version at 5.
+    ``["ring", "secret_knock"]`` and the minor_version bumps to the current value.
+    Re-running the migration leaves the value unchanged (idempotent).
     """
     from custom_components.rtl_433 import async_migrate_entry
 
@@ -2220,15 +2220,85 @@ async def test_migration_rewrites_persisted_doorbell_event_types(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
     persisted = entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]
     assert persisted["secret_knock"] == ["ring", "secret_knock"]
 
     # Re-running is a no-op: already-mapped values pass through unchanged.
     snapshot = persisted["secret_knock"]
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 5
+    assert entry.minor_version == 6
     assert (
         entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]["secret_knock"]
         == snapshot
     )
+
+
+# --------------------------------------------------------------------------- #
+# minor_version 5 -> 6 re-enables Last-seen for event-driven devices.          #
+# --------------------------------------------------------------------------- #
+async def test_migration_reenables_last_seen_for_event_driven_devices(hass):
+    """The minor 5 -> 6 migration re-enables Last-seen for event-driven devices.
+
+    An integration-disabled Last-seen on an event-driven device (motion) is
+    re-enabled; a periodic device (temperature) keeps its integration-disabled
+    Last-seen; a user-disabled one is left untouched. minor_version bumps to 6
+    and a second migrate call is a no-op.
+    """
+    from custom_components.rtl_433 import async_migrate_entry
+
+    motion_key = "GS-kw9c-5"
+    temp_key = "Acurite-606TX-42"
+    user_key = "PIR-2-9"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="rtl_433 (rtl433.local)",
+        version=2,
+        minor_version=5,
+        unique_id="hub:rtl433.local:8433",
+        data={
+            CONF_HOST: "rtl433.local",
+            CONF_PORT: 8433,
+            CONF_PATH: "/ws",
+            CONF_DEVICES: {
+                motion_key: {CONF_MODEL: "GS-kw9c", DEVICE_FIELDS: ["motion"]},
+                temp_key: {
+                    CONF_MODEL: "Acurite-606TX",
+                    DEVICE_FIELDS: ["temperature_C"],
+                },
+                user_key: {CONF_MODEL: "PIR-2", DEVICE_FIELDS: ["motion"]},
+            },
+        },
+    )
+    entry.add_to_hass(hass)
+
+    ent_reg = er.async_get(hass)
+
+    def _register_last_seen(device_key, disabled_by):
+        return ent_reg.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}:{device_key}:last_seen",
+            config_entry=entry,
+            disabled_by=disabled_by,
+        ).entity_id
+
+    motion_ls = _register_last_seen(motion_key, er.RegistryEntryDisabler.INTEGRATION)
+    temp_ls = _register_last_seen(temp_key, er.RegistryEntryDisabler.INTEGRATION)
+    user_ls = _register_last_seen(user_key, er.RegistryEntryDisabler.USER)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 6
+
+    # Event-driven + integration-disabled -> re-enabled.
+    assert ent_reg.async_get(motion_ls).disabled_by is None
+    # Periodic -> left integration-disabled.
+    assert (
+        ent_reg.async_get(temp_ls).disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    )
+    # User-disabled event-driven -> untouched.
+    assert ent_reg.async_get(user_ls).disabled_by is er.RegistryEntryDisabler.USER
+
+    # Idempotent: a second run leaves the re-enabled sensor enabled.
+    assert await async_migrate_entry(hass, entry) is True
+    assert ent_reg.async_get(motion_ls).disabled_by is None

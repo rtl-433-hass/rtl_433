@@ -129,9 +129,14 @@ base `async_added_to_hass` baseline:
   It is built from a small synthetic `FieldDescriptor` (`LAST_SEEN_DESCRIPTOR`:
   sentinel `field_key="__last_seen__"` that no rtl_433 event can carry,
   `object_suffix="last_seen"`, `device_class=timestamp`, diagnostic,
-  `enabled_by_default=True`) and added via the **`per_device_factory` hook** of
-  `async_setup_hub_platform` (`async_setup_entry` passes
-  `per_device_factory=Rtl433LastSeenSensor`). The `binary_sensor` platform
+  descriptor `enabled_by_default=False`) and added via the **`per_device_factory`
+  hook** of `async_setup_hub_platform` (`async_setup_entry` passes
+  `per_device_factory=Rtl433LastSeenSensor`). It is **disabled by default for
+  periodic devices** but the sensor flips `_attr_entity_registry_enabled_default`
+  to `True` for **event-driven devices** (`coordinator.is_event_driven_device`),
+  since those never expire and the timestamp is their only freshness signal; a
+  one-time minor-6 migration re-enables already-created instances the integration
+  disabled. The `binary_sensor` platform
   passes **no** factory, so it creates none. The factory runs exactly once per
   `device_key` across both the initial devices-map build and the new-device
   handler (`_build_extra` / `extra_created`), and is passed as a callable so

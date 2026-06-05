@@ -44,7 +44,12 @@ from .const import (
     LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
     LOGGER,
 )
-from .mapping import USER_OVERRIDE_FILENAME, normalize_overrides
+from .library import _async_load_library, _merge_entry_library
+from .mapping import (
+    USER_OVERRIDE_FILENAME,
+    event_driven_field_keys,
+    normalize_overrides,
+)
 
 # The 0.1.0 per-device config entries stored the set of observed mapped field
 # keys under this literal options key. It is intentionally *not* exported from
@@ -252,6 +257,47 @@ def _disable_existing_last_seen_sensors(
         )
 
 
+async def _enable_last_seen_for_event_driven_devices(
+    hass: HomeAssistant, entry: ConfigEntry, entity_registry: er.EntityRegistry
+) -> None:
+    """Re-enable already-created "Last seen" sensors for event-driven devices.
+
+    Event-driven devices (open/close/motion/button/doorbell) now never expire,
+    so their availability no longer signals freshness and the "Last seen"
+    timestamp becomes their only such signal — it now ships enabled-by-default
+    for them. ``entity_registry_enabled_default`` only affects entities at
+    *creation*, so this one-time sweep re-enables the already-created instances
+    the integration previously disabled (minor 3) for the devices the merged
+    library classifies event-driven. Sensors a user disabled
+    (``disabled_by != INTEGRATION``) are left untouched.
+
+    Resolves the event-driven field keys from this hub's merged library (shipped
+    descriptors plus user mappings) and matches each device's adopted
+    ``DEVICE_FIELDS`` against them — the same classification setup uses, but
+    without a coordinator (migration runs first).
+    """
+    devices = entry.data.get(CONF_DEVICES, {})
+    if not devices:
+        return
+    shipped_registry, shipped_skip_keys = await _async_load_library(hass)
+    registry, _ = _merge_entry_library(hass, entry, shipped_registry, shipped_skip_keys)
+    event_driven_keys = event_driven_field_keys(registry)
+    if not event_driven_keys:
+        return
+
+    for device_key, device_cfg in devices.items():
+        fields = set(device_cfg.get(DEVICE_FIELDS, []) or [])
+        if event_driven_keys.isdisjoint(fields):
+            continue
+        unique_id = f"{entry.entry_id}:{device_key}:{_LAST_SEEN_OBJECT_SUFFIX}"
+        entity_id = entity_registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+        if entity_id is None:
+            continue
+        ent = entity_registry.async_get(entity_id)
+        if ent is not None and ent.disabled_by is er.RegistryEntryDisabler.INTEGRATION:
+            entity_registry.async_update_entity(entity_id, disabled_by=None)
+
+
 def _read_legacy_overrides(path: str) -> dict:
     """Read + normalize the legacy ``rtl_433_mappings.yaml`` file (sync, executor).
 
@@ -387,7 +433,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     already-persisted doorbell ``event_types`` from the raw ``"0"``/``"1"`` strings
     to the standardized ``"ring"``/``"secret_knock"`` types. Entries created at the
     current minor version skip these steps; new hubs added after the upgrade start
-    with no mappings and their "Last seen" sensors already disabled.
+    with no mappings and their "Last seen" sensors already disabled. Version 2
+    minor 6 re-enables the "Last seen" sensor for event-driven devices (which now
+    never expire, making it their only freshness signal) — only instances the
+    integration disabled, not ones the user disabled.
     """
     if entry.version > 2:
         # Downgrade from a future schema is unsupported.
@@ -461,5 +510,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # no entity (the doorbell unique_id/object_suffix are unchanged).
         _migrate_doorbell_event_types(hass, entry)
         hass.config_entries.async_update_entry(entry, version=2, minor_version=5)
+
+    if (entry.minor_version or 1) < 6:
+        # Event-driven devices now never expire, so their "Last seen" sensor
+        # ships enabled-by-default (their only freshness signal). Re-enable the
+        # already-created instances the integration disabled at minor 3 for those
+        # devices, leaving user-disabled ones alone.
+        await _enable_last_seen_for_event_driven_devices(
+            hass, entry, er.async_get(hass)
+        )
+        hass.config_entries.async_update_entry(entry, version=2, minor_version=6)
 
     return True

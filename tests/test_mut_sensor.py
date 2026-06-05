@@ -1427,6 +1427,42 @@ async def test_per_device_sensor_and_last_seen_created_on_setup(
     assert last_seen_eid is not None
 
 
+async def test_last_seen_enabled_by_default_for_event_driven_device(
+    hass, hub_entry_builder
+):
+    """Last-seen ships enabled for event-driven devices, disabled for periodic.
+
+    An event-driven device (motion) never expires, so its Last-seen timestamp is
+    its only freshness signal and ships enabled-by-default; a periodic device
+    (temperature) keeps the disabled-by-default of LAST_SEEN_DESCRIPTOR.
+    """
+    motion_key = "GS-kw9c-5"
+    temp_key = "Acurite-606TX-42"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            motion_key: {CONF_MODEL: "GS-kw9c", DEVICE_FIELDS: ["motion"]},
+            temp_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]},
+        },
+    )
+    ent_reg = er.async_get(hass)
+
+    motion_ls = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{motion_key}:last_seen"
+    )
+    temp_ls = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{temp_key}:last_seen"
+    )
+    assert motion_ls is not None and temp_ls is not None
+
+    # Event-driven (motion): enabled by default. Periodic (temp): disabled.
+    assert ent_reg.async_get(motion_ls).disabled_by is None
+    assert (
+        ent_reg.async_get(temp_ls).disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    )
+
+
 async def test_hub_sensor_gain_auto_in_unmanaged_mode(hass, hub_entry_builder):
     """Gain sensor shows 'auto' when gain is empty string."""
     hub = await _setup_hub(
