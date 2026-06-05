@@ -205,16 +205,19 @@ a silence-based availability model: if no event for a device arrives within its
   class** (see below). If you set it explicitly, your value becomes the default
   for every device on the hub that has no per-device override.
 - **Device-class-aware defaults** — when no explicit timeout applies, the
-  integration picks the default from the device's class: event-driven
-  binary-sensor classes (door, window, opening/contact, motion) default to
-  **7200 seconds (2 hours)** to ride out their long quiet periods, while periodic
-  sensors keep **600 seconds (10 minutes)**. This applies **automatically**,
-  including to existing installs that never customized the hub timeout; any
-  explicit per-device or hub value you have set is always preserved.
+  integration picks the default from the device's class: **event-driven** devices
+  (door, window, opening/contact, motion, plus buttons/doorbells) **never expire**
+  — once seen they stay available, since they only transmit on an event and have
+  no reliable check-in, so any finite timeout would eventually flap them (and
+  their battery and other entities) to `unavailable`. **Periodic** sensors keep
+  **600 seconds (10 minutes)**. This applies **automatically**, including to
+  existing installs that never customized the hub timeout; any explicit per-device
+  or hub value you have set is always preserved.
 - **Never expire** — set the timeout to `0` (as the hub default or a per-device
-  override) and the device is **never** marked `unavailable`. Recommended for
-  heartbeat-less generic door/PIR sensors and for TPMS that go silent while the
-  vehicle is parked.
+  override) and the device is **never** marked `unavailable`. This is the
+  automatic class default for event-driven devices; set it explicitly to extend
+  the same behavior to a periodic device (e.g. a slow reporter you do not want
+  flagged), or per-hub for everything.
 - **Per-device override** — set through the hub options flow (**Device
   settings**): pick a device and give it an optional timeout (including `0`) that
   overrides the hub default for that one device. Leave it empty to clear the

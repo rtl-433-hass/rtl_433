@@ -185,6 +185,8 @@ class Rtl433Coordinator:
 
     Injectable attributes (wired by the integration setup in ``__init__.py``):
         ``skip_keys``: ``set[str]`` of keys excluded from measurement fields.
+        ``event_driven_keys``: ``frozenset[str]`` of rtl_433 field keys that mark
+            a device as event-driven (never-expire availability default).
         ``discovery_enabled``: ``bool`` per-hub new-device discovery toggle.
         ``manage_settings``: ``bool`` per-hub toggle for adopting + enforcing the
             managed SDR settings. When ``True`` the coordinator adopts the
@@ -233,6 +235,7 @@ class Rtl433Coordinator:
         availability_timeout: int = DEFAULT_AVAILABILITY_TIMEOUT,
         initial_center_frequency: float | None = None,
         skip_keys: set[str] | frozenset[str] | None = None,
+        event_driven_keys: frozenset[str] | None = None,
     ) -> None:
         """Initialize the coordinator with connection params and runtime state."""
         self.hass = hass
@@ -262,6 +265,13 @@ class Rtl433Coordinator:
         # library skip-keys (``_skip_keys.yaml``) do not list ``time``, so add it
         # here so ``normalize`` always drops it regardless of the injected set.
         self.skip_keys.add("time")
+        # rtl_433 field keys whose presence marks a device as event-driven (no
+        # periodic check-in -> never-expire availability). Derived from the
+        # entry's device library by the setup layer (``event_driven_field_keys``)
+        # and passed in; an empty set means "classify everything as periodic".
+        self.event_driven_keys: frozenset[str] = (
+            event_driven_keys if event_driven_keys is not None else frozenset()
+        )
 
         # --- Injectable hooks (wired by the integration setup) ----------------
         self.new_device_callback: Callable[[str, str, bool], None] | None = None
@@ -1110,13 +1120,14 @@ class Rtl433Coordinator:
         The classifier reads the device's last normalized measurement fields
         (``self.devices[device_key].fields`` — the rtl_433 payload with identity
         and skip-keys removed; the event-driven open/close/motion keys are
-        measurement fields and survive there). An event-driven device gets the
-        longer event default, everything else the periodic default. A device not
-        yet seen falls back to the periodic default.
+        measurement fields and survive there) against ``self.event_driven_keys``
+        (derived from the entry's device library). An event-driven device gets
+        the never-expire default; everything else the periodic default. A device
+        not yet seen falls back to the periodic default.
         """
         normalized = self.devices.get(device_key)
         payload = normalized.fields if normalized is not None else None
-        return class_default_timeout(payload)
+        return class_default_timeout(payload, self.event_driven_keys)
 
     def _effective_timeout(self, device_key: str) -> int:
         """Resolve the effective timeout for a device.

@@ -131,3 +131,4 @@ motion:
   payload: { on: "1" }
   clear_delay: 90
   object_suffix: motion
+  event_driven: true

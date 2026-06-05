@@ -83,6 +83,7 @@ class FieldDescriptor:
     enabled_by_default: bool = True
     icon: str | None = None
     clear_delay: int | None = None
+    event_driven: bool = False
 
 
 # Attribute names the descriptor accepts from a YAML entry (everything except
@@ -158,6 +159,14 @@ def _descriptor_from_entry(field_key: str, entry: dict[str, Any]) -> FieldDescri
                 "Ignoring invalid 'clear_delay' %r on field %r", raw, field_key
             )
             known.pop("clear_delay")
+
+    if "event_driven" in known and not isinstance(known["event_driven"], bool):
+        LOGGER.debug(
+            "Ignoring invalid 'event_driven' %r on field %r",
+            known["event_driven"],
+            field_key,
+        )
+        known.pop("event_driven")
 
     return FieldDescriptor(field_key=field_key, **known)
 
@@ -525,6 +534,33 @@ def should_skip(field_key: str, skip_keys: set[str] | None = None) -> bool:
     if skip_keys is None:
         _, skip_keys = _default_library()
     return field_key in skip_keys
+
+
+def event_driven_field_keys(registry: Registry | None = None) -> frozenset[str]:
+    """Return the rtl_433 field keys that mark a device as *event-driven*.
+
+    A field is event-driven when its descriptor either uses ``platform: event``
+    (momentary transmissions — buttons, doorbells) or sets ``event_driven: true``
+    (state fields that transmit only on a change — door/contact/motion). Such
+    devices have no periodic check-in, so a silence-based timeout would
+    eventually misfire; the coordinator maps this set onto the never-expire
+    availability default (see :func:`const.class_default_timeout`).
+
+    The set is derived from the *active* registry — both the global ``flat``
+    table and every model-scoped overlay — so it stays in sync with the shipped
+    library and any per-hub user mappings. ``registry`` defaults to the cached
+    shipped library.
+    """
+    if registry is None:
+        registry, _ = _default_library()
+
+    def _is_event_driven(descriptor: FieldDescriptor) -> bool:
+        return descriptor.platform == "event" or descriptor.event_driven
+
+    keys = {key for key, desc in registry.flat.items() if _is_event_driven(desc)}
+    for scoped in registry.models.values():
+        keys.update(key for key, desc in scoped.items() if _is_event_driven(desc))
+    return frozenset(keys)
 
 
 def lookup(

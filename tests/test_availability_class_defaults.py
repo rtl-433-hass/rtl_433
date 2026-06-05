@@ -7,9 +7,16 @@ These exercise the three-tier resolution order wired in production:
 * the device-class default (:func:`class_default_timeout`) from the device's
   latest cached payload when neither explicit tier is set.
 
+Event-driven devices (open/close/motion/button/doorbell) have no periodic
+check-in, so their class default is :data:`AVAILABILITY_TIMEOUT_NEVER` (never
+marked unavailable once seen); periodic reporters keep the finite
+:data:`DEFAULT_AVAILABILITY_TIMEOUT`. The event-driven field keys are derived
+from the active device library (:func:`event_driven_field_keys`), so the tests
+feed real library keys (``motion``, ``contact_open``, ``button`` …).
+
 The integration-first tests run the real :func:`async_setup_entry` so the actual
-``effective_timeout_resolver`` closure is wired onto the coordinator (rather than
-stubbing a resolver), then drive behaviour through the public
+``effective_timeout_resolver`` closure and library-derived event-driven key set
+are wired onto the coordinator, then drive behaviour through the public
 ``coordinator._effective_timeout`` / ``_async_watchdog`` / ``entity.available``.
 Time travel uses ``freeze_time`` like the existing watchdog tests.
 """
@@ -29,17 +36,20 @@ from custom_components.rtl_433.const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_MODEL,
     DEFAULT_AVAILABILITY_TIMEOUT,
-    DEFAULT_EVENT_DEVICE_TIMEOUT,
     DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     class_default_timeout,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
-from custom_components.rtl_433.mapping import FieldDescriptor
+from custom_components.rtl_433.mapping import FieldDescriptor, event_driven_field_keys
 from custom_components.rtl_433.sensor import Rtl433Sensor
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
+
+# Event-driven field keys derived from the shipped library (no user mappings) —
+# the same set the production coordinator computes at setup.
+SHIPPED_EVENT_DRIVEN_KEYS = event_driven_field_keys()
 
 
 @pytest.fixture(autouse=True)
@@ -78,17 +88,32 @@ async def _setup(hass, hub: MockConfigEntry) -> Rtl433Coordinator:
 @pytest.mark.parametrize(
     ("payload", "expected"),
     [
-        ({"motion": 1}, DEFAULT_EVENT_DEVICE_TIMEOUT),
-        ({"contact": 0, "battery_ok": 1}, DEFAULT_EVENT_DEVICE_TIMEOUT),
-        ({"door": 1}, DEFAULT_EVENT_DEVICE_TIMEOUT),
+        # Event-driven library keys -> never-expire.
+        ({"motion": 1}, AVAILABILITY_TIMEOUT_NEVER),
+        ({"contact_open": 0, "battery_ok": 1}, AVAILABILITY_TIMEOUT_NEVER),
+        ({"closed": 1}, AVAILABILITY_TIMEOUT_NEVER),
+        ({"reed_open": 1}, AVAILABILITY_TIMEOUT_NEVER),
+        # platform: event fields (button/doorbell) -> never-expire.
+        ({"button": "A"}, AVAILABILITY_TIMEOUT_NEVER),
+        ({"secret_knock": "0"}, AVAILABILITY_TIMEOUT_NEVER),
+        # Periodic reporters and diagnostic-only payloads -> finite default.
         ({"temperature_C": 21.5, "humidity": 50}, DEFAULT_AVAILABILITY_TIMEOUT),
+        # A lone tamper/battery bit must NOT make a device never-expire.
+        ({"tamper": 1, "battery_ok": 1}, DEFAULT_AVAILABILITY_TIMEOUT),
         ({}, DEFAULT_AVAILABILITY_TIMEOUT),
         (None, DEFAULT_AVAILABILITY_TIMEOUT),
     ],
 )
 def test_class_default_timeout_classifier(payload, expected):
-    """Event-driven payloads get 7200; periodic / empty / missing get 600."""
-    assert class_default_timeout(payload) == expected
+    """Event-driven payloads never-expire; periodic / empty / missing get 600."""
+    assert class_default_timeout(payload, SHIPPED_EVENT_DRIVEN_KEYS) == expected
+
+
+def test_class_default_timeout_empty_keyset_is_periodic():
+    """With no event-driven keys known, even a motion payload is periodic."""
+    assert class_default_timeout({"motion": 1}, frozenset()) == (
+        DEFAULT_AVAILABILITY_TIMEOUT
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -172,12 +197,14 @@ async def test_never_expire_via_explicit_hub_default(hass, hub_entry_builder):
 # ---------------------------------------------------------------------------
 
 
-async def test_class_default_event_driven_device(hass, hub_entry_builder):
-    """An event-driven payload resolves to 7200: silent at 1h, gone past 2h.
+async def test_class_default_event_driven_device_never_expires(hass, hub_entry_builder):
+    """An event-driven (motion) payload resolves to never-expire.
 
     No per-device override and no explicit hub default, so the device-class
-    default applies. Under the old flat 600s default this device would have been
-    wrongly unavailable at 700s.
+    default applies. A motion device has no periodic check-in, so once seen it
+    stays available indefinitely — the watchdog never flips it, even after days
+    of silence (under the old flat 600s default it would have been wrongly
+    unavailable at 700s).
     """
     device_key = "GS-kw9c-7"
     # availability_timeout=None -> CONF_AVAILABILITY_TIMEOUT is NOT in the entry,
@@ -187,7 +214,7 @@ async def test_class_default_event_driven_device(hass, hub_entry_builder):
         devices={
             device_key: {
                 CONF_MODEL: "GS-kw9c",
-                DEVICE_FIELDS: ["contact"],
+                DEVICE_FIELDS: ["motion"],
             }
         },
     )
@@ -196,23 +223,52 @@ async def test_class_default_event_driven_device(hass, hub_entry_builder):
 
     start = dt_util.utcnow()
     with freeze_time(start):
-        # An open/close payload -> event-driven class.
-        _feed(coordinator, {"model": "GS-kw9c", "id": 7, "contact": 0})
+        # A motion payload -> event-driven class.
+        _feed(coordinator, {"model": "GS-kw9c", "id": 7, "motion": 1})
         await hass.async_block_till_done()
 
-    assert coordinator._effective_timeout(device_key) == DEFAULT_EVENT_DEVICE_TIMEOUT
+    assert coordinator._effective_timeout(device_key) == AVAILABILITY_TIMEOUT_NEVER
 
-    # 700s of silence (> old 600s default but < 7200s) -> still available.
-    with freeze_time(start + timedelta(seconds=700)):
+    # Past the old 7200s event default and far beyond -> still available.
+    for offset in (timedelta(seconds=7201), timedelta(days=30)):
+        with freeze_time(start + offset):
+            await coordinator._async_watchdog(dt_util.utcnow())
+            await hass.async_block_till_done()
+            assert coordinator.available[device_key] is True
+
+
+async def test_class_default_event_device_never_expires(hass, hub_entry_builder):
+    """A ``platform: event`` device (doorbell button) also never-expires.
+
+    The doorbell ``secret_knock`` field maps to ``platform: event``, which the
+    classifier treats as event-driven without needing the ``event_driven`` flag.
+    """
+    device_key = "Honeywell-ActivLink-9"
+    hub = hub_entry_builder(
+        availability_timeout=None,
+        devices={
+            device_key: {
+                CONF_MODEL: "Honeywell-ActivLink",
+                DEVICE_FIELDS: ["secret_knock"],
+            }
+        },
+    )
+    coordinator = await _setup(hass, hub)
+
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _feed(
+            coordinator,
+            {"model": "Honeywell-ActivLink", "id": 9, "secret_knock": 0},
+        )
+        await hass.async_block_till_done()
+
+    assert coordinator._effective_timeout(device_key) == AVAILABILITY_TIMEOUT_NEVER
+
+    with freeze_time(start + timedelta(days=7)):
         await coordinator._async_watchdog(dt_util.utcnow())
         await hass.async_block_till_done()
         assert coordinator.available[device_key] is True
-
-    # Past 7200s -> watchdog flips it unavailable.
-    with freeze_time(start + timedelta(seconds=7201)):
-        await coordinator._async_watchdog(dt_util.utcnow())
-        await hass.async_block_till_done()
-        assert coordinator.available[device_key] is False
 
 
 async def test_class_default_periodic_device(hass, hub_entry_builder):
@@ -247,6 +303,42 @@ async def test_class_default_periodic_device(hass, hub_entry_builder):
         assert coordinator.available[device_key] is False
 
 
+async def test_class_default_diagnostic_only_device_still_expires(
+    hass, hub_entry_builder
+):
+    """A device reporting only a tamper/battery bit stays periodic (600s).
+
+    Guards the invariant that a lone diagnostic field does NOT flip a device to
+    never-expire — only a genuine event-driven state/event field does.
+    """
+    device_key = "Acurite-606TX-43"
+    hub = hub_entry_builder(
+        availability_timeout=None,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+    coordinator = await _setup(hass, hub)
+
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _feed(
+            coordinator,
+            {"model": "Acurite-606TX", "id": 43, "tamper": 1, "battery_ok": 1},
+        )
+        await hass.async_block_till_done()
+
+    assert coordinator._effective_timeout(device_key) == DEFAULT_AVAILABILITY_TIMEOUT
+
+    with freeze_time(start + timedelta(seconds=601)):
+        await coordinator._async_watchdog(dt_util.utcnow())
+        await hass.async_block_till_done()
+        assert coordinator.available[device_key] is False
+
+
 # ---------------------------------------------------------------------------
 # Resolution precedence
 # ---------------------------------------------------------------------------
@@ -255,8 +347,8 @@ async def test_class_default_periodic_device(hass, hub_entry_builder):
 async def test_precedence_override_beats_hub_and_class(hass, hub_entry_builder):
     """A per-device override wins over both the explicit hub default and class.
 
-    The device is event-driven (class default would be 7200) and the hub sets an
-    explicit 300, but the per-device override of 120 must win.
+    The device is event-driven (class default would be never-expire) and the hub
+    sets an explicit 300, but the per-device override of 120 must win.
     """
     device_key = "GS-kw9c-7"
     hub = hub_entry_builder(
@@ -264,7 +356,7 @@ async def test_precedence_override_beats_hub_and_class(hass, hub_entry_builder):
         devices={
             device_key: {
                 CONF_MODEL: "GS-kw9c",
-                DEVICE_FIELDS: ["contact"],
+                DEVICE_FIELDS: ["motion"],
                 DEVICE_TIMEOUT_OVERRIDE: 120,
             }
         },
@@ -273,12 +365,12 @@ async def test_precedence_override_beats_hub_and_class(hass, hub_entry_builder):
 
     start = dt_util.utcnow()
     with freeze_time(start):
-        _feed(coordinator, {"model": "GS-kw9c", "id": 7, "contact": 1})
+        _feed(coordinator, {"model": "GS-kw9c", "id": 7, "motion": 1})
         await hass.async_block_till_done()
 
     assert coordinator._effective_timeout(device_key) == 120
 
-    # 121s of silence exceeds the 120s override (but not 300 or 7200).
+    # 121s of silence exceeds the 120s override (class default would never flip).
     with freeze_time(start + timedelta(seconds=121)):
         await coordinator._async_watchdog(dt_util.utcnow())
         await hass.async_block_till_done()
@@ -288,7 +380,8 @@ async def test_precedence_override_beats_hub_and_class(hass, hub_entry_builder):
 async def test_precedence_explicit_hub_number_beats_class(hass, hub_entry_builder):
     """An explicit hub number wins over the class default for an event device.
 
-    Hub=300 -> the event-driven device uses 300, not the 7200 class default.
+    Hub=300 -> the event-driven device uses 300, not the never-expire class
+    default.
     """
     device_key = "GS-kw9c-7"
     hub = hub_entry_builder(
@@ -296,7 +389,7 @@ async def test_precedence_explicit_hub_number_beats_class(hass, hub_entry_builde
         devices={
             device_key: {
                 CONF_MODEL: "GS-kw9c",
-                DEVICE_FIELDS: ["contact"],
+                DEVICE_FIELDS: ["motion"],
             }
         },
     )
@@ -304,12 +397,12 @@ async def test_precedence_explicit_hub_number_beats_class(hass, hub_entry_builde
 
     start = dt_util.utcnow()
     with freeze_time(start):
-        _feed(coordinator, {"model": "GS-kw9c", "id": 7, "contact": 0})
+        _feed(coordinator, {"model": "GS-kw9c", "id": 7, "motion": 1})
         await hass.async_block_till_done()
 
     assert coordinator._effective_timeout(device_key) == 300
 
-    # 301s -> unavailable (would still be available under the 7200 class default).
+    # 301s -> unavailable (would still be available under never-expire class).
     with freeze_time(start + timedelta(seconds=301)):
         await coordinator._async_watchdog(dt_util.utcnow())
         await hass.async_block_till_done()
