@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.14.0...v0.15.0) (2026-06-05)
+
+
+### Features
+
+* enable Last seen by default for event-driven devices ([0063599](https://github.com/rtl-433-hass/rtl_433/commit/0063599759ffd728d5d63a0876ee717adcb9c18d))
+* never-expire availability for event-driven devices ([27a5b95](https://github.com/rtl-433-hass/rtl_433/commit/27a5b959c1b1530f373a63d9aea68b510dbff3b3))
+
 ## [0.14.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.13.0...v0.14.0) (2026-06-04)
 
 
