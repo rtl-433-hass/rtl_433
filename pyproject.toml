@@ -103,11 +103,11 @@ line-ending = "lf"
 docstring-code-format = true
 
 [tool.mutmut]
-# Mutation testing config (mutmut 3.x). mutmut copies paths_to_mutate plus the
+# Mutation testing config (mutmut 3.x). mutmut copies source_paths plus the
 # auto-included tests/ + pyproject.toml into a mutants/ working copy and runs the
 # pytest suite there, forking once per mutant. The whole package must be in scope
 # so intra-package imports resolve inside mutants/.
-paths_to_mutate = ["custom_components/rtl_433/"]
-tests_dir = ["tests/"]
+source_paths = ["custom_components/rtl_433/"]
+pytest_add_cli_args_test_selection = ["tests/"]
 # custom_components/ has no __init__.py (namespace package); copy it only if present.
 also_copy = ["custom_components/__init__.py"]
