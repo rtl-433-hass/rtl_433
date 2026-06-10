@@ -228,7 +228,74 @@ async def test_create_fix_flow_routes_by_issue_id(
     sample_rate = await repairs.async_create_fix_flow(
         hass, repairs._sample_rate_issue_id(entry), None
     )
-    assert isinstance(sample_rate, ConfirmRepairFlow)
+    assert isinstance(sample_rate, repairs.SampleRateApplyRepairFlow)
+
+    # An unknown issue id still falls back to the plain dismiss flow.
+    other = await repairs.async_create_fix_flow(hass, "some_other_issue", None)
+    assert isinstance(other, ConfirmRepairFlow)
+
+
+async def test_sample_rate_fix_flow_applies_rate_and_clears_issue(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """Confirming the advisory writes 1.024 MS/s and clears the card.
+
+    The coordinator is offline so no socket is touched; ``set_sdr`` still
+    persists the desired value, which is exactly the restart-surviving intent we
+    want, and the issue is cleared on confirm.
+    """
+    from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
+
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator.connected = False
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    repairs.async_raise_sample_rate_low(
+        hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+    )
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._sample_rate_issue_id(entry)
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
+
+    flow = repairs.SampleRateApplyRepairFlow(entry)
+    flow.hass = hass
+
+    init = await flow.async_step_init()
+    assert init["type"] == FlowResultType.FORM
+    assert init["step_id"] == "confirm"
+    assert init["description_placeholders"]["suggested"] == "1024000"
+
+    result = await flow.async_step_confirm({})
+    await hass.async_block_till_done()
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+
+    # The desired sample rate is now the rtl_433 default, and the card is gone.
+    assert coordinator.get_desired(KEY_SAMPLE_RATE) == 1_024_000
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_sample_rate_fix_flow_dismisses_when_coordinator_absent(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """With no loaded coordinator, confirming just clears the card (no crash)."""
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+
+    repairs.async_raise_sample_rate_low(
+        hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+    )
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._sample_rate_issue_id(entry)
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
+
+    flow = repairs.SampleRateApplyRepairFlow(entry)
+    flow.hass = hass
+    await flow.async_step_init()
+    result = await flow.async_step_confirm({})
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
 
 async def test_rebind_fix_flow_repoints_hub_and_clears_issue(
