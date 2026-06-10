@@ -29,23 +29,15 @@ import json
 from pathlib import Path
 import sys
 
-import mutmut
-from mutmut.__main__ import (
-    SourceFileMutationData,
-    ensure_config_loaded,
-    walk_source_files,
-)
+from mutmut.__main__ import SourceFileMutationData, walk_mutatable_files
 
 DEFAULT_OUT = Path(__file__).with_name("mutation_timings.json")
 
 
 def collect_timings() -> dict[str, float]:
     """Sum each mutable file's actual per-mutant test durations, in seconds."""
-    ensure_config_loaded()
     timings: dict[str, float] = {}
-    for path in walk_source_files():
-        if mutmut.config.should_ignore_for_mutation(path):
-            continue
+    for path in walk_mutatable_files():
         meta = Path("mutants") / (str(path) + ".meta")
         if not meta.exists():
             continue

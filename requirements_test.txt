@@ -24,4 +24,4 @@ pytest-homeassistant-custom-component==0.13.337
 # and forks once per mutant, running the pytest suite with coverage-based test
 # selection. Configured under [tool.mutmut] in pyproject.toml; the CI mutation
 # workflow and scripts/mutation_ratchet.py depend on it.
-mutmut==3.5.0
+mutmut==3.6.0

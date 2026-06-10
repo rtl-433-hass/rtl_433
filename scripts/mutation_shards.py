@@ -46,8 +46,7 @@ import json
 from pathlib import Path
 import sys
 
-import mutmut
-from mutmut.__main__ import ensure_config_loaded, walk_source_files
+from mutmut.__main__ import walk_mutatable_files
 
 PKG = "custom_components/rtl_433"
 PKG_DOTTED = "custom_components.rtl_433"
@@ -63,12 +62,7 @@ FALLBACK_SECONDS_PER_MUTANT = 1.0
 
 def mutable_modules() -> list[str]:
     """Enumerate mutable source modules exactly as mutmut would, as repo paths."""
-    ensure_config_loaded()
-    return [
-        str(path)
-        for path in walk_source_files()
-        if not mutmut.config.should_ignore_for_mutation(path)
-    ]
+    return [str(path) for path in walk_mutatable_files()]
 
 
 def load_counts(baseline: Path = DEFAULT_BASELINE) -> dict[str, int]:

@@ -23,12 +23,10 @@ import json
 from pathlib import Path
 import sys
 
-import mutmut
 from mutmut.__main__ import (
     SourceFileMutationData,
-    ensure_config_loaded,
     status_by_exit_code,
-    walk_source_files,
+    walk_mutatable_files,
 )
 
 # Map mutmut status strings onto the buckets the ratchet understands. A mutation
@@ -61,11 +59,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     only = {str(Path(p)) for p in args.paths} if args.paths else None
 
-    ensure_config_loaded()
     files: dict[str, dict] = {}
-    for path in walk_source_files():
-        if mutmut.config.should_ignore_for_mutation(path):
-            continue
+    for path in walk_mutatable_files():
         if only is not None and str(path) not in only:
             continue
         meta = Path("mutants") / (str(path) + ".meta")
