@@ -13,17 +13,24 @@ entity of an rtl_433 device (button / motion / doorbell), it offers:
 * one optional **subtyped** trigger per persisted ``event_type``
   ("<entity> triggered: <code>") that fires only for that specific value.
 
-**Firing is split by necessity.** ``Rtl433Event`` writes a fresh timestamp state
+**Both triggers use one custom ``async_track_state_change_event`` listener**
+(``_async_attach_event_trigger``). ``Rtl433Event`` writes a fresh timestamp state
 on every genuine transmission (``event.py``; core ``EventEntity._trigger_event``),
-so the base trigger simply delegates to the core ``state`` trigger (match_all),
-which fires once per transmission. The subtyped trigger **cannot** reuse the
-core state trigger's ``attribute``/``to`` filter: that filter early-returns when
-``old_value == new_value`` (``homeassistant/components/homeassistant/triggers/
-state.py``), so two consecutive presses of the same button would fire only once.
-Because a subtyped trigger must fire on *every* matching press (repeats
-included), the subtyped path uses a direct ``async_track_state_change_event``
-listener with **no** same-value dedupe, replicating the core trigger's
-``device``-platform payload + context by hand.
+so a state change *is* a transmission. The listener fires with **no**
+``old == new`` dedupe, so two consecutive presses of the same button each fire —
+the reason neither trigger can reuse the core ``state`` trigger's
+``attribute``/``to`` filter, which early-returns when ``old_value == new_value``
+(``homeassistant/components/homeassistant/triggers/state.py``). The base trigger
+fires on every transmission; a subtyped trigger fires only when the new state's
+``event_type`` equals its ``subtype``.
+
+**Neither fires on the entity's restore at startup.** Across a restart HA's
+``EventEntity`` restores its last ``event_type`` + timestamp (for display), which
+surfaces as a ``state_changed`` with ``old_state is None`` carrying the old
+``event_type`` — and a raw listener would re-deliver that stale event (e.g. a
+doorbell "ring" from days ago) on **every** HA restart. A momentary event never
+legitimately fires on the entity's first appearance in the state machine, so the
+listener ignores a ``None`` ``old_state`` (the restore / initial add).
 """
 
 from __future__ import annotations
@@ -35,7 +42,6 @@ from homeassistant.components.device_automation import (
     async_get_entity_registry_entry_or_raise,
 )
 from homeassistant.components.event.const import ATTR_EVENT_TYPE, ATTR_EVENT_TYPES
-from homeassistant.components.homeassistant.triggers import state as state_trigger
 from homeassistant.const import (
     CONF_DEVICE_ID,
     CONF_DOMAIN,
@@ -184,56 +190,43 @@ async def async_attach_trigger(
 ) -> CALLBACK_TYPE:
     """Attach the configured device trigger to the automation engine.
 
-    The base trigger (no ``subtype``) delegates to the core ``state`` trigger
-    (match_all). A subtyped trigger uses a custom state-change listener so that
-    every matching transmission fires, repeats included.
+    Both the base trigger (no ``subtype``) and a subtyped trigger use the same
+    custom state-change listener; ``subtype`` (``None`` for the base) decides
+    whether the ``event_type`` filter applies.
     """
-    subtype = config.get(CONF_SUBTYPE)
-    if subtype is None:
-        return await _async_attach_base_trigger(hass, config, action, trigger_info)
-    return await _async_attach_subtype_trigger(
-        hass, config, action, trigger_info, subtype
+    return await _async_attach_event_trigger(
+        hass, config, action, trigger_info, config.get(CONF_SUBTYPE)
     )
 
 
-async def _async_attach_base_trigger(
+async def _async_attach_event_trigger(
     hass: HomeAssistant,
     config: ConfigType,
     action: TriggerActionType,
     trigger_info: TriggerInfo,
+    subtype: str | None,
 ) -> CALLBACK_TYPE:
-    """Delegate the base trigger to the core ``state`` trigger (match_all).
+    """Attach a custom state-change listener that fires once per transmission.
 
-    ``Rtl433Event`` writes a new timestamp state on every genuine transmission,
-    so a match_all state trigger fires exactly once per transmission. Mirrors
-    ``sensor/device_trigger.py`` (swapping ``numeric_state`` for ``state``); the
-    core trigger emits the ``device``-platform payload + context for us via
-    ``platform_type="device"``.
-    """
-    state_config = {
-        CONF_PLATFORM: "state",
-        CONF_ENTITY_ID: config[CONF_ENTITY_ID],
-    }
-    state_config = await state_trigger.async_validate_trigger_config(hass, state_config)
-    return await state_trigger.async_attach_trigger(
-        hass, state_config, action, trigger_info, platform_type="device"
-    )
+    Shared by the base trigger (``subtype is None`` — fires on every
+    transmission) and a subtyped trigger (fires only when the new state's
+    ``event_type`` equals ``subtype``). Two behaviours both paths need:
 
+    * **No ``old == new`` dedupe** — every matching transmission fires, so two
+      consecutive same-value presses each fire. This is the reason neither path
+      can reuse the core ``state`` trigger's ``attribute``/``to`` filter, which
+      early-returns on ``old_value == new_value``.
+    * **Ignore the entity's restore at startup** — ``Rtl433Event`` (via HA's
+      ``EventEntity``) restores its last ``event_type`` + timestamp across a
+      restart for display, surfacing as a ``state_changed`` with
+      ``old_state is None``. A momentary event never legitimately fires on the
+      entity's first appearance in the state machine (a genuine transmission
+      always transitions from a pre-existing state), so a ``None`` ``old_state``
+      is the restore / initial add and must not re-deliver the stale event (the
+      "doorbell re-fires on every HA restart" bug).
 
-async def _async_attach_subtype_trigger(
-    hass: HomeAssistant,
-    config: ConfigType,
-    action: TriggerActionType,
-    trigger_info: TriggerInfo,
-    subtype: str,
-) -> CALLBACK_TYPE:
-    """Attach a custom state-change listener filtered to one ``event_type``.
-
-    Fires on **every** transmission whose ``event_type`` attribute equals
-    ``subtype`` — with no ``old == new`` dedupe, so consecutive same-value
-    presses each fire (the reason this path can't reuse the core state
-    trigger's ``attribute``/``to`` filter). The trigger payload + context match
-    what the core state trigger produces for a ``device``-platform trigger.
+    The trigger payload + context match what the core state trigger produces for
+    a ``device``-platform trigger.
     """
     entity_id = async_get_entity_registry_entry_or_raise(
         hass, config[CONF_ENTITY_ID]
@@ -244,12 +237,23 @@ async def _async_attach_subtype_trigger(
 
     @callback
     def _listener(event: Event[EventStateChangedData]) -> None:
-        """Fire the action when the new state carries the matching event_type."""
+        """Fire the action for a genuine transmission (not the startup restore)."""
+        old_state = event.data["old_state"]
         new_state = event.data["new_state"]
-        # No ``old == new`` dedupe: every matching transmission fires (the whole
-        # reason for this custom listener vs. the core state trigger).
-        if new_state is None or new_state.attributes.get(ATTR_EVENT_TYPE) != subtype:
+        # ``old_state is None`` is the entity's restore / initial add, not a
+        # transmission: suppress it so a restored event_type does not re-fire on
+        # every HA restart. ``new_state is None`` is the entity being removed.
+        if old_state is None or new_state is None:
             return
+        # Subtyped trigger: only the matching ``event_type`` fires. No
+        # ``old == new`` dedupe, so consecutive same-value presses each fire.
+        if subtype is not None and new_state.attributes.get(ATTR_EVENT_TYPE) != subtype:
+            return
+        description = (
+            f"event {subtype} on {entity_id}"
+            if subtype is not None
+            else f"event on {entity_id}"
+        )
         hass.async_run_hass_job(
             job,
             {
@@ -257,7 +261,7 @@ async def _async_attach_subtype_trigger(
                     **trigger_data,
                     "platform": "device",
                     "entity_id": entity_id,
-                    "description": f"event {subtype} on {entity_id}",
+                    "description": description,
                 }
             },
             new_state.context,

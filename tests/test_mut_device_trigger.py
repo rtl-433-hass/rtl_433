@@ -274,6 +274,47 @@ class TestEventTypesForEntryPersisted:
         # Exact list from persisted data
         assert result == ["A", "B"]
 
+    async def test_persisted_wins_over_a_distinct_capability_fallback(
+        self, hass, hub_entry_builder
+    ):
+        """Persisted data must be returned over a DIFFERENT live capability.
+
+        The other persisted-path tests assert the persisted list, but the live
+        ``event_types`` capability is seeded from that same persisted list — so a
+        mutant that breaks the persisted lookup falls back to an *identical*
+        capability and still returns the right answer (it survives). Forcing the
+        capability fallback to a distinct value makes every persisted-lookup break
+        observable: correct code returns the persisted ``['A','B']``, while any
+        broken ``.get()`` in the chain (key/default/`None` mutants), a nulled
+        ``unique_id``, an ``and``->``or`` guard flip, or ``persisted = None`` falls
+        through to the mocked ``['X','Y']`` and fails the assertion.
+        """
+        hub = await _setup_hub(
+            hass,
+            hub_entry_builder,
+            devices={
+                DEVICE_KEY: {
+                    CONF_MODEL: MODEL,
+                    DEVICE_FIELDS: ["button"],
+                    DEVICE_EVENT_TYPES: {"button": ["A", "B"]},
+                }
+            },
+        )
+        ent_reg = er.async_get(hass)
+        entity_id = ent_reg.async_get_entity_id(
+            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+        )
+        entry = ent_reg.async_get(entity_id)
+        assert entry is not None
+
+        with patch(
+            "custom_components.rtl_433.device_trigger.get_capability",
+            return_value=["X", "Y"],
+        ):
+            result = dt._event_types_for_entry(hass, entry)
+        # Persisted wins; a broken persisted lookup would return the mocked ['X','Y'].
+        assert result == ["A", "B"]
+
     async def test_unique_id_none_falls_through_to_capability(
         self, hass, hub_entry_builder
     ):

@@ -207,6 +207,62 @@ async def test_subtype_trigger_fires_on_every_matching_press_incl_repeat(
 
 
 # --------------------------------------------------------------------------- #
+# Neither trigger re-fires on the entity's restore at HA restart.              #
+# --------------------------------------------------------------------------- #
+async def test_triggers_do_not_fire_on_restore_at_startup(hass, hub_entry_builder):
+    """The restored last event (``old_state is None``) must not re-fire triggers.
+
+    Across a restart HA's ``EventEntity`` restores its last ``event_type`` +
+    timestamp for display, which surfaces as a ``state_changed`` with
+    ``old_state is None`` carrying the old ``event_type``. Without the listener's
+    restore guard this re-delivered a stale event (e.g. a doorbell "ring" from
+    days ago) on every HA restart. Both the base and the subtyped trigger must
+    ignore it — yet a genuine press afterwards still fires.
+    """
+    hub = await _setup_button_hub(hass, hub_entry_builder)
+    device_id = _resolve_device_id(hass, hub.entry_id)
+    coordinator = _coordinator(hass, hub)
+
+    ent_reg = er.async_get(hass)
+    entity_id = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+    )
+
+    triggers = await async_get_triggers(hass, device_id)
+    base = next(t for t in triggers if t[CONF_TYPE] == TRIGGER_TYPE_TRIGGERED)
+    subtype_a = next(
+        t
+        for t in triggers
+        if t[CONF_TYPE] == TRIGGER_TYPE_TRIGGERED_SUBTYPE and t[CONF_SUBTYPE] == "A"
+    )
+    base_calls, remove_base = await _attach(hass, base)
+    sub_calls, remove_sub = await _attach(hass, subtype_a)
+
+    # Model the restore: drop the entity's current state, then re-set it with the
+    # restored event_type so the resulting state_changed carries ``old_state is
+    # None`` — exactly what EventEntity's restore produces on startup.
+    hass.states.async_remove(entity_id)
+    await hass.async_block_till_done()
+    hass.states.async_set(
+        entity_id,
+        dt_util.utcnow().isoformat(),
+        {"event_type": "A", "event_types": ["A", "B"]},
+    )
+    await hass.async_block_till_done()
+
+    assert base_calls == []
+    assert sub_calls == []
+
+    # A genuine press afterwards still fires both (old_state is now non-None).
+    await _feed_presses(hass, coordinator, ["A"])
+    assert len(base_calls) == 1
+    assert len(sub_calls) == 1
+
+    remove_base()
+    remove_sub()
+
+
+# --------------------------------------------------------------------------- #
 # Subtyped trigger stays silent for a non-matching event_type.                 #
 # --------------------------------------------------------------------------- #
 async def test_subtype_trigger_silent_for_non_matching_type(hass, hub_entry_builder):

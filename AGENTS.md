@@ -251,17 +251,26 @@ UI-pickable **device triggers**. Contracts that must survive refactors:
   is sourced from the **persisted** `entry.data[CONF_DEVICES][key][DEVICE_EVENT_TYPES][field]`
   (restart-surviving), falling back to the loaded entity's live `event_types`
   capability attribute when nothing is persisted yet.
-- **Split firing mechanism.** The base trigger **delegates to the core `state`
-  trigger** (match_all): `Rtl433Event` writes a fresh timestamp state on every
-  genuine transmission, so a match_all state trigger fires exactly once per
-  transmission, and the core trigger emits the `device`-platform payload +
-  context for us. The subtyped trigger **cannot** reuse the core state trigger's
-  `attribute`/`to` filter, because that filter early-returns when
-  `old_value == new_value` (`triggers/state.py:158`), so two consecutive presses
-  of the same button would fire only once. Since a subtyped trigger must fire on
-  **every** matching transmission (repeats included), it uses a custom
-  `async_track_state_change_event` listener with **no** same-value dedupe,
-  replicating the core trigger's `device`-platform payload + context by hand.
+- **Unified firing mechanism** (`_async_attach_event_trigger`). Both the base and
+  the subtyped trigger use **one** custom `async_track_state_change_event`
+  listener; `subtype` (`None` for the base) decides whether the `event_type`
+  filter applies. `Rtl433Event` writes a fresh timestamp state on every genuine
+  transmission, so a state change **is** a transmission and the listener fires
+  with **no** `old == new` dedupe — two consecutive same-value presses each fire.
+  (This is why neither path can reuse the core `state` trigger's `attribute`/`to`
+  filter, which early-returns on `old_value == new_value`, `triggers/state.py`.)
+  The listener replicates the core trigger's `device`-platform payload + context
+  by hand.
+- **No re-fire on the restore at startup.** The listener **ignores a `None`
+  `old_state`**. Across a restart HA's `EventEntity` restores its last
+  `event_type` + timestamp (for display), surfacing as a `state_changed` with
+  `old_state is None` carrying the old `event_type`; a raw listener would
+  re-deliver that stale event (e.g. a days-old doorbell `ring`) on **every** HA
+  restart. A momentary event never legitimately fires on the entity's first
+  appearance in the state machine, so the `None`-`old_state` restore/initial-add
+  is suppressed. (The base trigger previously delegated to the core `state`
+  trigger, which fires on a match_all `None`→state transition — the same
+  re-fire-on-restart bug, now closed for both paths.)
 
 ## WebSocket frames & hub observability
 
@@ -279,10 +288,16 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
 - **Replay/stale suppression** (`_process_event`, `_parse_event_time`). On every
   (re)connect the server replays up to its last 100 events, so the coordinator
   reads the raw `time` **before `normalize()`** (which drops it) and classifies
-  each frame via **two signals**: a **high-water mark** of the max event `time`
-  ever parsed (a frame at or below it is an **already-seen replay**) plus the
-  event **age vs `REPLAY_STALE_THRESHOLD`** (30 s — an unseen-but-old frame is a
-  **stale gap event** that occurred while HA was disconnected). Either outcome
+  each frame via **three signals**: a **high-water mark** of the max event `time`
+  ever parsed (a frame at or below it is an **already-seen replay**); the event
+  **age vs `REPLAY_STALE_THRESHOLD`** (30 s — an unseen-but-old frame is a
+  **stale gap event** that occurred while HA was disconnected); and a
+  **pre-connection backlog gate** (`event_time < _connection_time -
+  DISCOVERY_BACKLOG_GRACE` — the same gate the device-registration step below
+  uses). The backlog gate is what closes the **HA-restart re-delivery** case: on
+  a fresh process the high-water mark is unset, so a doorbell pressed *seconds*
+  before the restart is recent enough to pass the age test, yet it predates the
+  reconnect and so must not re-fire. Any of the three outcomes
   **seeds sensor values** but must **NOT** fire `event` entities or refresh
   `last_seen` / `available`, so a genuinely-offline device is not resurrected by
   the replay. A suppressed `event` transmission logs **once at

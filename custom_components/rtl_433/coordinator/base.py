@@ -1009,6 +1009,21 @@ class Rtl433Coordinator:
         # Read the raw ``time`` independently of ``normalize`` (which drops it)
         # and classify the frame into live / already-seen replay / stale gap.
         event_time = self._parse_event_time(event.get("time"))
+        # A frame timestamped before this connection began is part of the
+        # server's reconnect-replay backlog (it occurred while HA was
+        # disconnected), so it must never be treated as a live transmission --
+        # even when it is recent enough to pass the staleness test below. This is
+        # the HA-restart re-delivery case: after a restart the high-water mark is
+        # unset, so without this gate a doorbell pressed shortly before the
+        # restart re-fires on reconnect. Reuses the same connection gate (and skew
+        # grace) the device auto-registration below trusts. ``_connection_time is
+        # None`` (disconnected, or a direct unit-test feed) and an unparsable
+        # ``time`` both leave this False, so a genuine live frame is never dropped.
+        is_backlog = (
+            self._connection_time is not None
+            and event_time is not None
+            and event_time < self._connection_time - DISCOVERY_BACKLOG_GRACE
+        )
         if event_time is None:
             # No usable timestamp -> treat as live ("never drop a real one").
             is_replay = False
@@ -1022,6 +1037,13 @@ class Rtl433Coordinator:
             # Newer than the mark (HA never saw it) but old -> a stale gap event
             # that occurred while disconnected. Advance the mark so it is not
             # reconsidered, but do not treat it as live.
+            is_replay = True
+            self._event_high_water = event_time
+        elif is_backlog:
+            # Newer than the mark and recent, but timestamped before this
+            # connection -> a replayed backlog frame, not a live transmission.
+            # Suppress it (so a restart does not re-fire events) while advancing
+            # the mark so it is not reconsidered.
             is_replay = True
             self._event_high_water = event_time
         else:
@@ -1051,19 +1073,16 @@ class Rtl433Coordinator:
             self.last_seen[key] = now
             self.available[key] = True
 
-        # Gate auto-registration to post-connection messages: a frame timestamped
-        # before ``_connection_time - DISCOVERY_BACKLOG_GRACE`` belongs to the
-        # server's pre-connection backlog (replayed on connect) and must seed
-        # runtime state above without creating a device. A frame with no parseable
-        # ``time`` is treated as post-connection ("never drop a real one"), as is
-        # any frame once disconnected (``_connection_time is None``). Registration
-        # keys off ``self._discovered`` rather than ``is_new`` so a device first
-        # seen in the backlog still registers on its first true live event.
-        is_post_connection = (
-            self._connection_time is None
-            or event_time is None
-            or event_time >= self._connection_time - DISCOVERY_BACKLOG_GRACE
-        )
+        # Gate auto-registration to post-connection messages: a pre-connection
+        # backlog frame (``is_backlog`` above) belongs to the server's replay
+        # (replayed on connect) and must seed runtime state above without creating
+        # a device. A frame with no parseable ``time`` is treated as
+        # post-connection ("never drop a real one"), as is any frame once
+        # disconnected (``_connection_time is None``) -- both leave ``is_backlog``
+        # False. Registration keys off ``self._discovered`` rather than ``is_new``
+        # so a device first seen in the backlog still registers on its first true
+        # live event.
+        is_post_connection = not is_backlog
         # The new-device callback still fires for a replay-discovered device so
         # its entities exist and can seed; its availability stays governed by
         # liveness (it reads unavailable until a live frame arrives). The
@@ -1116,19 +1135,43 @@ class Rtl433Coordinator:
     # ------------------------------------------------------------------ #
     # Availability watchdog                                              #
     # ------------------------------------------------------------------ #
-    def _class_default_timeout(self, device_key: str) -> int:
-        """Return the device-class default timeout from the latest payload.
+    def _known_field_keys(self, device_key: str) -> set[str]:
+        """Restart-safe set of a device's measurement field keys.
 
-        The classifier reads the device's last normalized measurement fields
-        (``self.devices[device_key].fields`` — the rtl_433 payload with identity
-        and skip-keys removed; the event-driven open/close/motion keys are
-        measurement fields and survive there) against ``self.event_driven_keys``
-        (derived from the entry's device library). An event-driven device gets
-        the never-expire default; everything else the periodic default. A device
-        not yet seen falls back to the periodic default.
+        Unions the persisted adopted fields
+        (``entry.data[CONF_DEVICES][key][fields]`` — survives a restart) with the
+        latest live payload's fields (``self.devices[key].fields`` — the rtl_433
+        payload with identity and skip-keys removed), so a device that has been
+        silent since startup is still classified from what it reported before.
+        Shared by the availability class-default and the event-driven check so the
+        two can never diverge: reading only the live payload was the bug that left
+        an event device silent since a restart on the periodic class default and
+        let its battery (and other) sensors expire to unavailable.
         """
+        keys: set[str] = set()
+        device_cfg = self.entry.data.get(CONF_DEVICES, {}).get(device_key)
+        if device_cfg:
+            keys.update(device_cfg.get(DEVICE_FIELDS, []) or [])
         normalized = self.devices.get(device_key)
-        payload = normalized.fields if normalized is not None else None
+        if normalized is not None:
+            keys.update(normalized.fields)
+        return keys
+
+    def _class_default_timeout(self, device_key: str) -> int:
+        """Return the device-class default timeout for a device.
+
+        Classifies event-driven vs periodic from the device's restart-safe field
+        set (:meth:`_known_field_keys` — adopted fields unioned with the latest
+        live payload) against ``self.event_driven_keys`` (derived from the entry's
+        device library). An event-driven device (open/close/motion/button/
+        doorbell — no periodic check-in) gets the never-expire default; everything
+        else, including a device with no known fields at all, gets the periodic
+        default. Reading the adopted fields — not only the live payload — is what
+        keeps an event device that has been silent since a restart on never-expire
+        rather than wrongly expiring its battery and other sensors at the periodic
+        timeout.
+        """
+        payload = dict.fromkeys(self._known_field_keys(device_key))
         return class_default_timeout(payload, self.event_driven_keys)
 
     def is_event_driven_device(self, device_key: str) -> bool:
@@ -1137,22 +1180,16 @@ class Rtl433Coordinator:
         True when any of the device's field keys is in ``self.event_driven_keys``
         (open/close/motion/button/doorbell — transmits only on a state change, so
         availability never expires and conveys no freshness). Considers both the
-        restart-safe adopted fields (``entry.data[CONF_DEVICES][key][fields]``)
-        and the latest live payload, so a device silent since startup is still
+        restart-safe adopted fields and the latest live payload (via
+        :meth:`_known_field_keys`), so a device silent since startup is still
         classified from its adopted fields. Used to enable the per-device
         "Last seen" sensor by default for these devices (their only freshness
-        signal once availability stops expiring).
+        signal once availability stops expiring) and to resolve the never-expire
+        availability class default.
         """
         if not self.event_driven_keys:
             return False
-        keys: set[str] = set()
-        device_cfg = self.entry.data.get(CONF_DEVICES, {}).get(device_key)
-        if device_cfg:
-            keys.update(device_cfg.get(DEVICE_FIELDS, []) or [])
-        normalized = self.devices.get(device_key)
-        if normalized is not None:
-            keys.update(normalized.fields)
-        return not self.event_driven_keys.isdisjoint(keys)
+        return not self.event_driven_keys.isdisjoint(self._known_field_keys(device_key))
 
     def _effective_timeout(self, device_key: str) -> int:
         """Resolve the effective timeout for a device.

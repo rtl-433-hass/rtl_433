@@ -271,6 +271,50 @@ async def test_class_default_event_device_never_expires(hass, hub_entry_builder)
         assert coordinator.available[device_key] is True
 
 
+async def test_event_device_silent_since_restart_never_expires(hass, hub_entry_builder):
+    """An event device silent since a restart classifies from its adopted fields.
+
+    The restart regression: after a restart the coordinator's live payload cache
+    (``self.devices``) is empty until the device next transmits, which for an
+    event-driven device (door/window contact, motion, doorbell) may be hours or
+    never. The class-default classifier must still resolve never-expire from the
+    device's *persisted* adopted fields, so the device — and its battery and other
+    sensors — does NOT go unavailable at the periodic timeout while silent. Before
+    the fix the classifier read only the live payload and wrongly returned 600s.
+    """
+    device_key = "GS-kw9c-7"
+    hub = hub_entry_builder(
+        availability_timeout=None,
+        devices={
+            device_key: {
+                CONF_MODEL: "GS-kw9c",
+                # A motion + battery contact sensor adopted before the restart.
+                DEVICE_FIELDS: ["motion", "battery_ok"],
+            }
+        },
+    )
+    coordinator = await _setup(hass, hub)
+
+    # Simulate "silent since restart": the device was adopted (it is in the
+    # devices map) but has not transmitted this session, so there is no live
+    # payload cached for it.
+    assert device_key not in coordinator.devices
+
+    # Classified never-expire purely from the adopted fields.
+    assert coordinator._effective_timeout(device_key) == AVAILABILITY_TIMEOUT_NEVER
+
+    # The entity baselines last_seen to "now" on add; far past the periodic 600s
+    # the watchdog must still leave it available (battery sensor stays online).
+    start = dt_util.utcnow()
+    coordinator.last_seen[device_key] = start
+    coordinator.available[device_key] = True
+    for offset in (timedelta(seconds=601), timedelta(days=7)):
+        with freeze_time(start + offset):
+            await coordinator._async_watchdog(dt_util.utcnow())
+            await hass.async_block_till_done()
+            assert coordinator.available[device_key] is True
+
+
 async def test_class_default_periodic_device(hass, hub_entry_builder):
     """A periodic payload resolves to 600 and goes unavailable past 600s."""
     device_key = "Acurite-606TX-42"
