@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.15.0...v0.16.0) (2026-06-10)
+
+
+### Features
+
+* apply rtl_433's 1.024 MS/s default from the low-sample-rate repair ([fbfbc7b](https://github.com/rtl-433-hass/rtl_433/commit/fbfbc7bbec7bf045fc5524d37944331339dac99d)), closes [#69](https://github.com/rtl-433-hass/rtl_433/issues/69)
+
+
+### Bug Fixes
+
+* stop event devices re-firing on restart and going unavailable ([#75](https://github.com/rtl-433-hass/rtl_433/issues/75)) ([b874179](https://github.com/rtl-433-hass/rtl_433/commit/b87417963b3c333435ec1e77fe394a8725e5a3e7))
+
 ## [0.15.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.14.0...v0.15.0) (2026-06-05)
 
 
