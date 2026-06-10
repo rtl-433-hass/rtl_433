@@ -703,6 +703,31 @@ def test_no_double_fire_on_blip_replay(hass, coordinator):
     assert _dispatched_replay_flags(dispatch) == [True]
 
 
+def test_recent_backlog_event_on_restart_is_suppressed(hass, coordinator):
+    """A recent doorbell press replayed on connect (cold start) does not re-fire.
+
+    The HA-restart re-delivery case: after a restart the high-water mark is unset
+    and the server replays its buffer, so a doorbell pressed only seconds before
+    the restart is *recent* (well inside ``REPLAY_STALE_THRESHOLD``) yet predates
+    the new connection. The connection-time backlog gate must classify it as a
+    replay (``is_replay=True``) so the event entity does not re-fire it — without
+    the gate the age test alone would have treated it as a live transmission.
+    """
+    # Connected at 10:00:10; a press at 10:00:00 is recent (age 11s < 30s) but a
+    # clear 10s before the connection (outside the 5s skew grace), so it is
+    # replayed backlog and must be suppressed.
+    coordinator._connection_time = dt_util.parse_datetime("2026-05-25T10:00:10+00:00")
+    assert timedelta(seconds=11) < REPLAY_STALE_THRESHOLD
+    with freeze_time("2026-05-25T10:00:11+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:00Z"))
+    assert _dispatched_replay_flags(dispatch) == [True]
+
+    # A genuine live press AFTER the connection still fires (never suppressed).
+    with freeze_time("2026-05-25T10:00:15+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:15Z"))
+    assert _dispatched_replay_flags(dispatch) == [False]
+
+
 def test_fresh_event_at_reconnect_and_steady_repeat_are_live(hass, coordinator):
     """A fresh post-reconnect event and a steady-state repeat both classify live.
 
