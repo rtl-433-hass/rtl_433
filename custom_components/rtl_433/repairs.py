@@ -5,10 +5,12 @@ actionable* problems, not speculative ones). Two hub-scoped issues live here:
 
 - **server unreachable** — raised when a hub's WebSocket coordinator has been
   unable to stay connected, cleared automatically the moment it comes back.
-- **sample rate low for band** — a dismissible advisory raised when a *single*
-  high-band frequency (>= 800 MHz) is left at the bare default sample rate; many
-  devices still decode fine there, so it is advisory only and edge-triggered so a
-  dismissed card is not re-raised while the condition persists.
+- **sample rate low for band** — an advisory raised when a *single* high-band
+  frequency (>= 800 MHz) is left at the bare default sample rate. Its fix flow
+  applies rtl_433's own 1.024 MS/s default on confirm (persisted via
+  ``set_sdr`` so it survives a restart even when the hub is offline); many
+  devices still decode fine at the low rate, so it is optional and edge-triggered
+  so a dismissed card is not re-raised while the condition persists.
 
 The coordinator package is intentionally left untouched (it owns no HA-repairs
 knowledge). Instead :func:`async_track_hub_reachability` polls the coordinator's
@@ -45,6 +47,7 @@ from .const import (
     signal_hub_update,
 )
 from .coordinator import CannotConnect, Rtl433Coordinator
+from .sdr_settings import KEY_SAMPLE_RATE
 
 # How often reachability is evaluated. Aligned to be responsive without being
 # chatty; the issue only flips on a sustained state change.
@@ -329,6 +332,45 @@ class HubRadioReplaceRepairFlow(RepairsFlow):
         )
 
 
+class SampleRateApplyRepairFlow(RepairsFlow):
+    """Fix flow for the low-sample-rate advisory: apply 1.024 MS/s on confirm.
+
+    The advisory's whole point is that the receiver is left at the bare default
+    rate, so the natural fix is to widen it to the rtl_433 default of
+    1.024 MS/s. Confirming writes that through :meth:`Rtl433Coordinator.set_sdr`,
+    which persists the desired value (so the intent survives a restart even if
+    the hub is currently offline) and enforces it live when connected, then
+    clears the card. If the coordinator is no longer loaded we degrade to a
+    plain dismiss (the same outcome a confirm-only card would have had).
+    """
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        self._entry = entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
+        return await self.async_step_confirm()
+
+    async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> Any:
+        entry = self._entry
+        if user_input is not None:
+            coordinator: Rtl433Coordinator | None = self.hass.data.get(DOMAIN, {}).get(
+                entry.entry_id
+            )
+            if coordinator is not None:
+                await coordinator.set_sdr(KEY_SAMPLE_RATE, _SUGGESTED_SAMPLE_RATE_HZ)
+            async_clear_sample_rate_low(self.hass, entry)
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="confirm",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "title": entry.title,
+                "suggested": str(_SUGGESTED_SAMPLE_RATE_HZ),
+            },
+        )
+
+
 async def async_create_fix_flow(
     hass: HomeAssistant,
     issue_id: str,
@@ -337,7 +379,9 @@ async def async_create_fix_flow(
     """Return the repair flow for an issue.
 
     The ``server_unreachable`` issue gets an actionable rebind flow (the dead
-    radio is what raised it, so this is the natural recovery surface). Every
+    radio is what raised it, so this is the natural recovery surface). The
+    ``sample_rate_low_for_band`` advisory gets a flow that *applies* the
+    recommended 1.024 MS/s rate on confirm rather than merely dismissing. Every
     other issue is informational/dismissible, so a simple confirm-and-dismiss
     flow is the right surface; those issues also self-clear, so the confirm
     dialog mainly lets a user dismiss a stale card.
@@ -347,6 +391,11 @@ async def async_create_fix_flow(
         entry = hass.config_entries.async_get_entry(entry_id)
         if entry is not None:
             return HubRadioReplaceRepairFlow(entry)
+    if issue_id.startswith(ISSUE_SAMPLE_RATE_LOW):
+        entry_id = issue_id[len(ISSUE_SAMPLE_RATE_LOW) + 1 :]
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is not None:
+            return SampleRateApplyRepairFlow(entry)
     return ConfirmRepairFlow()
 
 

@@ -197,7 +197,7 @@
         "step": {
           "confirm": {
             "title": "Sample rate may be too low",
-            "description": "The receiver on {title} is tuned to {frequency} MHz but is sampling at only {sample_rate} Hz. rtl_433 does not widen the sample rate automatically when it is retuned, so devices in the upper ISM bands may decode poorly at the default rate. If you see missing or unreliable decodes, raise the **Sample rate** control (for example to {suggested} Hz). Many devices still decode fine at the current rate, so this is only a suggestion — confirm to dismiss this card."
+            "description": "The receiver on {title} is tuned to a high-band frequency but is still sampling at the bare default rate. rtl_433 does not widen the sample rate automatically when it is retuned, so devices in the upper ISM bands may decode poorly. Confirm to set the **Sample rate** to {suggested} Hz — the 1.024 MS/s rate rtl_433 itself uses by default. Many devices still decode fine at the current rate, so this is optional; ignore this card to leave the rate unchanged."
           }
         }
       }
