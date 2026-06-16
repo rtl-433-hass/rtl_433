@@ -147,6 +147,21 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                 return entry
         return None
 
+    @staticmethod
+    def _safe_to_adopt(entry: ConfigEntry) -> bool:
+        """Whether a host:port-matched entry may be re-keyed onto a stable id.
+
+        Safe only for a placeholder ``hub:host:port`` entry (a manual add awaiting
+        its stable radio id) or an empty orphan. An entry already bound to a
+        *different* stable radio id and carrying real devices is a separate radio
+        that happens to share this host:port -- re-keying it would corrupt that
+        radio's identity, so the discovery falls through and treats the
+        advertisement as a new radio instead.
+        """
+        return (entry.unique_id or "").startswith("hub:") or not entry.data.get(
+            CONF_DEVICES
+        )
+
     # ------------------------------------------------------------------ #
     # Hub user flow                                                      #
     # ------------------------------------------------------------------ #
@@ -335,7 +350,28 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Adopt/migrate a pre-existing entry on the same server onto the stable id.
         existing = self._find_entry_by_host_port(host, port)
-        if existing is not None and existing.unique_id != radio_uid:
+        if (
+            existing is not None
+            and existing.unique_id != radio_uid
+            and self._safe_to_adopt(existing)
+        ):
+            # Never create a duplicate unique_id: if another entry already owns
+            # this radio id, leave it untouched when it is a real (populated) hub
+            # or drop it when it is an empty orphan, before re-keying. Mirrors the
+            # collision handling in ``async_rebind_hub``.
+            collision = next(
+                (
+                    other
+                    for other in self._async_current_entries()
+                    if other.entry_id != existing.entry_id
+                    and other.unique_id == radio_uid
+                ),
+                None,
+            )
+            if collision is not None:
+                if collision.data.get(CONF_DEVICES):
+                    return self.async_abort(reason="already_configured")
+                await self.hass.config_entries.async_remove(collision.entry_id)
             self.hass.config_entries.async_update_entry(
                 existing,
                 unique_id=radio_uid,
