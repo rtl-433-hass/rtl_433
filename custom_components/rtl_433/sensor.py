@@ -21,7 +21,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfFrequency
+from homeassistant.const import MATCH_ALL, UnitOfFrequency
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -320,6 +320,18 @@ class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # These diagnostic sensors expose live config/stats detail as state
+    # attributes: ``decoded_events`` carries the server's per-protocol ``stats``
+    # array -- one entry per enabled rtl_433 decoder (potentially hundreds), which
+    # alone overflows the recorder's 16 KiB attribute limit -- and
+    # ``center_frequency`` carries the ``frequencies``/``hop_times`` lists that
+    # grow with the hop set. None of it is time-series worth persisting, so keep
+    # every hub sensor's attributes out of the recorder: the live state still
+    # shows them, but they are never written to the database (avoiding the
+    # "State attributes ... exceed maximum size" warning and the DB churn it
+    # warns about). MATCH_ALL future-proofs any later hub sensor that adds a
+    # large attribute.
+    _unrecorded_attributes = frozenset({MATCH_ALL})
 
     def __init__(
         self,
