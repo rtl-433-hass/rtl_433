@@ -868,6 +868,65 @@ async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
     assert adopted.data[CONF_DISCOVERY_ENABLED] is True
 
 
+async def test_hassio_discovery_does_not_rekey_populated_different_radio(hass):
+    """A populated entry bound to another radio id on the same host:port is not re-keyed.
+
+    Two radios sharing one host:port: discovery for a new stable id must NOT
+    silently overwrite the existing radio's identity. It falls through to the
+    guided replace step, leaving the existing entry's unique_id and devices
+    intact.
+    """
+    existing = _radio_entry(uid="serial:AAA", devices={"Acurite-606TX-1": {}})
+    existing.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=_disc(uid="serial:BBB")
+    )
+    # Routed to the guided replace step, NOT a silent adopt/abort.
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "hassio_replace"
+
+    # The existing radio's identity and devices are untouched.
+    entries = hass.config_entries.async_entries(DOMAIN)
+    assert len(entries) == 1
+    assert entries[0].unique_id == "serial:AAA"
+    assert entries[0].data[CONF_DEVICES] == {"Acurite-606TX-1": {}}
+
+
+async def test_hassio_discovery_adopt_aborts_on_unique_id_collision(
+    hass, hub_entry_builder
+):
+    """Adopting onto a stable id already owned by a populated entry creates no duplicate.
+
+    A placeholder manual entry matches the discovered host:port, but another
+    populated entry already owns the radio's stable id (on a different host:port).
+    The adopt must abort without re-keying, so no two entries share a unique_id.
+    """
+    placeholder = hub_entry_builder(host="core-rtl433", port=8433)
+    placeholder.add_to_hass(hass)
+    assert placeholder.unique_id == "hub:core-rtl433:8433"
+
+    owner = _radio_entry(
+        host="other-host", port=8433, uid="serial:0123", devices={"Acurite-606TX-1": {}}
+    )
+    owner.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="core-rtl433", port=8433, uid="serial:0123"),
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+    # Placeholder NOT re-keyed (would collide); owner untouched; no duplicates.
+    entries = hass.config_entries.async_entries(DOMAIN)
+    assert sorted(e.unique_id for e in entries) == [
+        "hub:core-rtl433:8433",
+        "serial:0123",
+    ]
+
+
 async def test_hassio_discovery_distinct_port_can_become_new_radio(hass):
     """With a hub present, an unknown radio offers replace; '__new__' adds it new.
 
