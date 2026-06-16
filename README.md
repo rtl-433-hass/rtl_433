@@ -307,6 +307,56 @@ If your rtl_433 does not report level data, these four sensors simply never
 appear — nothing else is affected, so the integration works the same on older
 setups.
 
+## Debug logging
+
+If a device fires a duplicate, spurious, or late event — or an automation
+triggers more often than the physical device transmits — turn on DEBUG logging
+for the integration. It emits a compact trace for every event frame so you can
+see exactly what the integration received and what it did with it.
+
+Add this to your Home Assistant `configuration.yaml` and restart (or call the
+`logger.set_level` service for a live change):
+
+```yaml
+logger:
+  logs:
+    custom_components.rtl_433: debug
+```
+
+Every decoded event frame logs one **ingestion** line, followed (for event
+entities) by a **fired** or a suppression line:
+
+| Log line | Meaning |
+| --- | --- |
+| `rtl_433 RX <device> fields=... time=... -> LIVE` | A genuine live transmission. Refreshes availability; event entities fire. (`LIVE (no-timestamp)` is a frame with no parseable `time`, also treated as live.) |
+| `... -> REPLAY (event_time<=high_water)` | An already-seen frame from the server's reconnect replay. Seeds sensor values only; does **not** re-fire events or refresh availability. |
+| `... -> STALE-GAP (age>threshold)` | A frame that occurred while Home Assistant was disconnected and is older than the staleness threshold. Suppressed (no fire). |
+| `... -> BACKLOG (pre-connection)` | A replayed frame timestamped before this connection began. Suppressed (no fire). |
+| `rtl_433 fired <type> for <device> field=<f> value=<v>` | An event entity fired this event type for a live transmission. |
+| `rtl_433 skipped watchdog re-paint for <device> (no re-fire)` | The availability watchdog re-painted a cached event; it was deduped and did **not** fire. |
+| `rtl_433 suppressed replayed/stale ...` (INFO) | A real-but-stale event that *would* have fired was suppressed (logged at INFO so you see the late event). |
+
+Example of one live doorbell press:
+
+```
+rtl_433 RX Acme-Doorbell/42 fields={'button': 1} time=2026-06-15T20:00:01 -> LIVE (event_time>high_water)
+rtl_433 fired ring for Acme-Doorbell/42 field=button value=1
+```
+
+Use the trace to attribute a duplicate or spurious event to its source:
+
+- **Two `LIVE` ingestion lines for one physical press** → the duplicate is
+  coming from **rtl_433** (a bad decode or a device that transmits the same
+  press twice). The integration is faithfully reporting two distinct
+  transmissions.
+- **`REPLAY` / `BACKLOG` (or `STALE-GAP`) on startup or reconnect, with no
+  `fired` line** → the **integration correctly suppressed** a queued duplicate
+  from the server's replay; no event fired, so this is working as intended.
+- **A single `LIVE` line and a single `fired` line, but the automation runs
+  multiple times** → the duplication is in your **automation** (e.g. multiple
+  triggers, or a trigger that matches more than you expect), not in the
+  integration or rtl_433.
+
 ## Hub entities
 
 Besides the per-device sensors, each hub exposes its own **diagnostic entities**

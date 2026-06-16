@@ -1027,18 +1027,21 @@ class Rtl433Coordinator:
         if event_time is None:
             # No usable timestamp -> treat as live ("never drop a real one").
             is_replay = False
+            verdict = "LIVE (no-timestamp)"
         elif (
             self._event_high_water is not None and event_time <= self._event_high_water
         ):
             # At or below the high-water mark -> an already-seen replay (catches
             # the re-sent buffer tail on a brief blip; never re-fires).
             is_replay = True
+            verdict = "REPLAY (event_time<=high_water)"
         elif now - event_time > REPLAY_STALE_THRESHOLD:
             # Newer than the mark (HA never saw it) but old -> a stale gap event
             # that occurred while disconnected. Advance the mark so it is not
             # reconsidered, but do not treat it as live.
             is_replay = True
             self._event_high_water = event_time
+            verdict = "STALE-GAP (age>threshold)"
         elif is_backlog:
             # Newer than the mark and recent, but timestamped before this
             # connection -> a replayed backlog frame, not a live transmission.
@@ -1046,10 +1049,12 @@ class Rtl433Coordinator:
             # the mark so it is not reconsidered.
             is_replay = True
             self._event_high_water = event_time
+            verdict = "BACKLOG (pre-connection)"
         else:
             # Newer than the mark and recent -> a genuine live transmission.
             is_replay = False
             self._event_high_water = event_time
+            verdict = "LIVE (event_time>high_water)"
 
         # Carry the classification on the event object (the dispatch carrier), so
         # every ``_handle_dispatch`` sees a consistent flag with no signature
@@ -1057,6 +1062,18 @@ class Rtl433Coordinator:
         normalized = dataclasses.replace(
             normalized, is_replay=is_replay, event_time=event_time
         )
+
+        # Compact ingestion/classification trace for every event frame reaching
+        # this point -- emitted upstream of the registration / discovery gate so
+        # unregistered, disabled, and discovery-off devices are still logged.
+        LOGGER.debug(
+            "rtl_433 RX %s fields=%s time=%s -> %s",
+            key,
+            normalized.fields,
+            event_time.isoformat() if event_time is not None else "none",
+            verdict,
+        )
+
         self.devices[key] = normalized
 
         # Track observed field keys for diagnostics (surfaced as unmatched keys).
