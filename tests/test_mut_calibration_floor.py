@@ -141,6 +141,48 @@ class TestNormCalibrationScaleExceptFallback:
 
 
 # ---------------------------------------------------------------------------
+# normalize_calibration — non-positive scale falls back to 1.0
+# ---------------------------------------------------------------------------
+
+
+class TestNormCalibrationScaleNonPositive:
+    """A zero or negative scale is rejected (would zero/reverse the meter)."""
+
+    def test_zero_scale_falls_back_to_1(self):
+        """Scale 0 falls back to 1.0 so the meter is not permanently zeroed."""
+        raw = {
+            CALIBRATION_COMMODITY: COMMODITY_ENERGY,
+            CALIBRATION_UNIT: UnitOfEnergy.KILO_WATT_HOUR,
+            CALIBRATION_SCALE: 0,
+        }
+        result = normalize_calibration(raw)
+        assert result is not None
+        assert result[CALIBRATION_SCALE] == pytest.approx(1.0)
+
+    def test_negative_scale_falls_back_to_1(self):
+        """A negative scale (e.g. from edited data) falls back to 1.0."""
+        raw = {
+            CALIBRATION_COMMODITY: COMMODITY_GAS,
+            CALIBRATION_UNIT: UnitOfVolume.CUBIC_METERS,
+            CALIBRATION_SCALE: -2.5,
+        }
+        result = normalize_calibration(raw)
+        assert result is not None
+        assert result[CALIBRATION_SCALE] == pytest.approx(1.0)
+
+    def test_small_positive_scale_is_preserved(self):
+        """A legitimate small positive scale is kept (guard rejects only <= 0)."""
+        raw = {
+            CALIBRATION_COMMODITY: COMMODITY_WATER,
+            CALIBRATION_UNIT: UnitOfVolume.LITERS,
+            CALIBRATION_SCALE: 0.001,
+        }
+        result = normalize_calibration(raw)
+        assert result is not None
+        assert result[CALIBRATION_SCALE] == pytest.approx(0.001)
+
+
+# ---------------------------------------------------------------------------
 # normalize_calibration — unit validation rejects an unknown unit
 # mutmut_9, mutmut_11
 # ---------------------------------------------------------------------------

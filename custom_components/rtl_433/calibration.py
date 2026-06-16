@@ -82,8 +82,10 @@ def normalize_calibration(raw: Any) -> dict[str, Any] | None:
     Treats a missing record, a non-mapping, a ``commodity`` of ``none`` /
     unknown, or a missing/invalid unit-for-commodity as "no calibration"
     (returns ``None``) so callers can use a simple truthiness test. The scale
-    defaults to ``1.0`` and is coerced to ``float`` (a bad value falls back to
-    ``1.0`` rather than raising).
+    defaults to ``1.0`` and is coerced to ``float``; a bad value, or a
+    non-positive one, falls back to ``1.0`` rather than raising — a scale of
+    ``0`` would zero the meter and a negative would make the ``total_increasing``
+    counter run backwards, neither of which is a valid calibration.
     """
     if not isinstance(raw, dict):
         return None
@@ -96,6 +98,8 @@ def normalize_calibration(raw: Any) -> dict[str, Any] | None:
     try:
         scale = float(raw.get(CALIBRATION_SCALE, 1.0))
     except TypeError, ValueError:
+        scale = 1.0
+    if scale <= 0:
         scale = 1.0
     return {
         CALIBRATION_COMMODITY: commodity,
