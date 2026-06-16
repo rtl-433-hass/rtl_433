@@ -253,6 +253,31 @@ class TestDescriptorFromEntry:
         assert desc.field_key == "humidity"
         assert desc.platform == "sensor"
 
+    def test_absent_name_builds_descriptor_with_none_name(self):
+        """An entry without a ``name`` key still builds (name defaults to None).
+
+        Covers the ``known.setdefault("name", None)`` path so the descriptor can
+        be auto-named by HA from its device_class.
+        """
+        from custom_components.rtl_433.mapping import _descriptor_from_entry
+
+        desc = _descriptor_from_entry(
+            "temperature_C",
+            {"platform": "sensor", "object_suffix": "T"},
+        )
+        assert desc.name is None
+        assert desc.object_suffix == "T"
+
+    def test_explicit_null_name_builds_descriptor_with_none_name(self):
+        """An explicit ``name: null`` (key present, value None) yields name=None."""
+        from custom_components.rtl_433.mapping import _descriptor_from_entry
+
+        desc = _descriptor_from_entry(
+            "temperature_C",
+            {"platform": "sensor", "name": None, "object_suffix": "T"},
+        )
+        assert desc.name is None
+
     def test_non_dict_entry_raises_type_error(self):
         from custom_components.rtl_433.mapping import _descriptor_from_entry
 
@@ -2239,13 +2264,23 @@ class TestValidateEntryViaModule:
         assert problems == []
 
     def test_missing_each_required_attr_reported(self):
-        """Each of platform/name/object_suffix missing yields its own problem."""
+        """Each of platform/object_suffix missing yields its own problem.
+
+        ``name`` is optional (omit it to auto-name from device_class), so a
+        missing name is NOT reported.
+        """
         problems = mp._validate_entry("f", {})
         assert problems == [
             "f: missing required 'platform'",
-            "f: missing required 'name'",
             "f: missing required 'object_suffix'",
         ]
+
+    def test_missing_name_is_not_a_problem(self):
+        """A valid entry without a name is accepted (auto-naming from device_class)."""
+        problems = mp._validate_entry(
+            "humidity", {"platform": "sensor", "object_suffix": "H"}
+        )
+        assert problems == []
 
     def test_missing_required_message_uses_field_key_and_attr(self):
         """mutmut_21 replaces the message with None; pin exact string content."""
@@ -2332,7 +2367,6 @@ class TestValidateUserMappingsViaModule:
         problems = mp.validate_user_mappings({"bad": {}})
         assert problems == [
             "bad: missing required 'platform'",
-            "bad: missing required 'name'",
             "bad: missing required 'object_suffix'",
         ]
 
@@ -2367,7 +2401,6 @@ class TestValidateUserMappingsViaModule:
         problems = mp.validate_user_mappings({"models": {"Acme": {"temp": {}}}})
         assert problems == [
             "models.Acme.temp: missing required 'platform'",
-            "models.Acme.temp: missing required 'name'",
             "models.Acme.temp: missing required 'object_suffix'",
         ]
 

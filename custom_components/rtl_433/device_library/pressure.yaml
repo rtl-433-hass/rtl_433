@@ -8,7 +8,7 @@ pressure_hPa:
   device_class: pressure
   unit_of_measurement: hPa
   state_class: measurement
-  name: Pressure
+  name: null
   value_transform: { float: true }
   object_suffix: P
 
@@ -17,6 +17,6 @@ pressure_kPa:
   device_class: pressure
   unit_of_measurement: kPa
   state_class: measurement
-  name: Pressure
+  name: null
   value_transform: { float: true }
   object_suffix: P

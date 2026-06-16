@@ -504,10 +504,16 @@ temperature_C:
   device_class: temperature   # HA device class, or null
   unit_of_measurement: "°C"   # unit, or null
   state_class: measurement    # measurement | total | total_increasing | null
-  name: Temperature           # entity name
+  name: null                  # optional; null/omit => HA names it from device_class
   value_transform: { round: 1 }  # numeric transform (sensors)
   object_suffix: T            # short, STABLE unique-id token
 ```
+
+`name` is **optional**: omit it (or set `null`) to let HA derive a translated
+name from `device_class` — the convention for fields whose name would just
+repeat the device class. Set an explicit name only when it adds information the
+device class doesn't (e.g. "Battery mV", "Gust speed"). The two truly required
+attributes are `platform` and `object_suffix`.
 
 `binary_sensor` entries use `payload: { on: "<raw>", off: "<raw>" }` instead of
 `value_transform`. `event` entries (in `events.yaml`) use neither — the value is

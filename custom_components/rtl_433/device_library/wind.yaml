@@ -12,7 +12,7 @@ wind_speed_km_h:
   device_class: wind_speed
   unit_of_measurement: km/h
   state_class: measurement
-  name: Wind Speed
+  name: null
   value_transform: { float: true }
   object_suffix: WS
 
@@ -21,7 +21,7 @@ wind_avg_km_h:
   device_class: wind_speed
   unit_of_measurement: km/h
   state_class: measurement
-  name: Wind Speed
+  name: null
   value_transform: { float: true }
   object_suffix: WS
 
@@ -30,7 +30,7 @@ wind_avg_mi_h:
   device_class: wind_speed
   unit_of_measurement: mph
   state_class: measurement
-  name: Wind Speed
+  name: null
   value_transform: { float: true }
   object_suffix: WS
 
@@ -40,7 +40,7 @@ wind_avg_m_s:
   device_class: wind_speed
   unit_of_measurement: km/h
   state_class: measurement
-  name: Wind Average
+  name: null
   value_transform: { scale: 3.6, round: 2 }
   object_suffix: WS
 
@@ -50,7 +50,7 @@ wind_speed_m_s:
   device_class: wind_speed
   unit_of_measurement: km/h
   state_class: measurement
-  name: Wind Speed
+  name: null
   value_transform: { scale: 3.6 }
   object_suffix: WS
 
@@ -59,7 +59,7 @@ gust_speed_km_h:
   device_class: wind_speed
   unit_of_measurement: km/h
   state_class: measurement
-  name: Gust Speed
+  name: Gust speed
   value_transform: { float: true }
   object_suffix: GS
 
@@ -68,7 +68,7 @@ wind_max_km_h:
   device_class: wind_speed
   unit_of_measurement: km/h
   state_class: measurement
-  name: Wind max speed
+  name: Gust speed
   value_transform: { float: true }
   object_suffix: GS
 
@@ -78,7 +78,7 @@ wind_max_m_s:
   device_class: wind_speed
   unit_of_measurement: km/h
   state_class: measurement
-  name: Wind max
+  name: Gust speed
   value_transform: { scale: 3.6, round: 2 }
   object_suffix: GS
 
@@ -88,7 +88,7 @@ gust_speed_m_s:
   device_class: wind_speed
   unit_of_measurement: km/h
   state_class: measurement
-  name: Gust Speed
+  name: Gust speed
   value_transform: { scale: 3.6 }
   object_suffix: GS
 
@@ -97,6 +97,6 @@ wind_dir_deg:
   device_class: null
   unit_of_measurement: "°"
   state_class: measurement
-  name: Wind Direction
+  name: Wind direction
   value_transform: { float: true }
   object_suffix: WD

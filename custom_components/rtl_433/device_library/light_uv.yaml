@@ -8,7 +8,7 @@ light_lux:
   device_class: illuminance
   unit_of_measurement: lx
   state_class: measurement
-  name: Outside Luminance
+  name: Outside luminance
   value_transform: { int: true }
   object_suffix: lux
 
@@ -17,7 +17,7 @@ lux:
   device_class: illuminance
   unit_of_measurement: lx
   state_class: measurement
-  name: Outside Luminance
+  name: Outside luminance
   value_transform: { int: true }
   object_suffix: lux
 
@@ -26,7 +26,7 @@ uv:
   device_class: null
   unit_of_measurement: UV
   state_class: measurement
-  name: UV Value
+  name: UV value
   value_transform: { round: 1 }
   object_suffix: uv
 
@@ -35,6 +35,6 @@ uvi:
   device_class: null
   unit_of_measurement: UV Index
   state_class: measurement
-  name: UV Index
+  name: UV index
   value_transform: { round: 1 }
   object_suffix: uvi

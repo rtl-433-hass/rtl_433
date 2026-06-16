@@ -8,7 +8,7 @@ power_W:
   device_class: power
   unit_of_measurement: W
   state_class: measurement
-  name: Power
+  name: null
   value_transform: { float: true }
   object_suffix: watts
 
@@ -17,7 +17,7 @@ energy_kWh:
   device_class: energy
   unit_of_measurement: kWh
   state_class: total_increasing
-  name: Energy
+  name: null
   value_transform: { float: true }
   object_suffix: kwh
 
@@ -26,7 +26,7 @@ current_A:
   device_class: current
   unit_of_measurement: A
   state_class: measurement
-  name: Current
+  name: null
   value_transform: { float: true }
   object_suffix: A
 
@@ -35,7 +35,7 @@ voltage_V:
   device_class: voltage
   unit_of_measurement: V
   state_class: measurement
-  name: Voltage
+  name: null
   value_transform: { float: true }
   object_suffix: V
 
@@ -67,7 +67,7 @@ consumption_data:
   device_class: null
   unit_of_measurement: null
   state_class: total_increasing
-  name: SCM Consumption Value
+  name: SCM consumption value
   value_transform: { int: true }
   object_suffix: consumption
 
@@ -76,7 +76,7 @@ consumption:
   device_class: null
   unit_of_measurement: null
   state_class: total_increasing
-  name: SCMplus Consumption Value
+  name: SCMplus consumption value
   value_transform: { int: true }
   object_suffix: consumption
 
@@ -86,7 +86,7 @@ ext_power:
   device_class: power
   unit_of_measurement: null
   state_class: null
-  name: External Power
+  name: External power
   payload: { on: "1", off: "0" }
   entity_category: diagnostic
   object_suffix: extpwr
