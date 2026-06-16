@@ -70,7 +70,7 @@ class FieldDescriptor:
 
     field_key: str
     platform: str
-    name: str
+    name: str | None
     object_suffix: str
     device_class: str | None = None
     unit_of_measurement: str | None = None
@@ -97,8 +97,10 @@ _DESCRIPTOR_ATTRS = frozenset(
 # ``device_library/*.yaml``.
 _SUPPORTED_PLATFORMS = frozenset({"sensor", "binary_sensor", "event"})
 
-# Entry attributes a user mapping must supply for a valid descriptor.
-_REQUIRED_ENTRY_ATTRS = ("platform", "name", "object_suffix")
+# Entry attributes a user mapping must supply for a valid descriptor. ``name`` is
+# optional: omit it (or set it to null) to let Home Assistant derive the entity
+# name from ``device_class``.
+_REQUIRED_ENTRY_ATTRS = ("platform", "object_suffix")
 
 
 @dataclass(frozen=True)
@@ -122,9 +124,11 @@ def _descriptor_from_entry(field_key: str, entry: dict[str, Any]) -> FieldDescri
     """Build a :class:`FieldDescriptor` from one YAML mapping entry.
 
     Unknown attributes are ignored (with a debug log) so a newer library file
-    that adds keys does not break an older loader. ``platform``, ``name`` and
-    ``object_suffix`` are required; a ``KeyError``/``TypeError`` here is caught
-    by the per-file handler in :func:`_load_descriptor_file`.
+    that adds keys does not break an older loader. ``platform`` and
+    ``object_suffix`` are required; ``name`` is optional (a missing or null
+    ``name`` becomes ``None``, so HA derives the entity name from
+    ``device_class``). A ``KeyError``/``TypeError`` here is caught by the
+    per-file handler in :func:`_load_descriptor_file`.
     """
     if not isinstance(entry, dict):
         raise TypeError(
@@ -132,6 +136,9 @@ def _descriptor_from_entry(field_key: str, entry: dict[str, Any]) -> FieldDescri
         )
 
     known = {k: v for k, v in entry.items() if k in _DESCRIPTOR_ATTRS}
+    # ``name`` has no dataclass default, so always supply it; absent or null
+    # both mean "let HA auto-name from device_class".
+    known.setdefault("name", None)
     unknown = set(entry) - _DESCRIPTOR_ATTRS
     if unknown:
         LOGGER.debug(
@@ -422,9 +429,10 @@ def _validate_entry(field_key: str, entry: Any) -> list[str]:
 
     Mirrors what :func:`_descriptor_from_entry` will accept so the
     "validator accepts => merge keeps it" invariant holds: the entry must be a
-    mapping, must supply the required ``platform``/``name``/``object_suffix``
-    attributes, and any ``platform`` it does supply must be supported. Unknown
-    extra attributes are tolerated (the descriptor builder ignores them). Each
+    mapping, must supply the required ``platform``/``object_suffix`` attributes
+    (``name`` is optional), and any ``platform`` it does supply must be
+    supported. Unknown extra attributes are tolerated (the descriptor builder
+    ignores them). Each
     returned problem is prefixed with ``<field_key>: `` so the caller can present
     it without further context.
     """

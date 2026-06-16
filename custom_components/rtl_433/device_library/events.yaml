@@ -12,7 +12,7 @@
 button:
   platform: event
   device_class: button
-  name: Button
+  name: null
   object_suffix: button
 
 # Doorbell press emitted by the Honeywell ActivLink wireless doorbell decoder.
@@ -24,7 +24,7 @@ button:
 secret_knock:
   platform: event
   device_class: doorbell
-  name: Doorbell
+  name: null
   object_suffix: secret_knock
   event_map:
     "0": ring

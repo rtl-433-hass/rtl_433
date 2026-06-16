@@ -56,6 +56,27 @@ def test_lookup_resolves_representative_descriptors(library):
     assert lookup("totally_unknown_field", registry=registry) is None
 
 
+def test_device_class_fields_have_no_explicit_name(library):
+    """Fields whose name is just the device class ship with ``name=None``.
+
+    A null/omitted ``name`` lets Home Assistant derive (and translate) the
+    entity name from ``device_class``. Fields whose label differs from the
+    device class keep an explicit name.
+    """
+    registry, _ = library
+
+    # Auto-named: name omitted so HA names them from device_class.
+    for field_key in ("temperature_C", "humidity", "power_W", "wind_avg_m_s"):
+        assert lookup(field_key, registry=registry).name is None, field_key
+
+    # Explicit name retained where it carries more than the device class.
+    assert lookup("ad_raw", registry=registry).name == "AD raw"
+    assert lookup("rssi", registry=registry).name == "RSSI"
+    # The gust variants are unified to one label regardless of source field.
+    for field_key in ("gust_speed_km_h", "wind_max_km_h", "wind_max_m_s"):
+        assert lookup(field_key, registry=registry).name == "Gust speed", field_key
+
+
 def test_wh51_soil_ad_and_boost_resolve_as_diagnostics(library):
     """The WH51 `ad_raw` and `boost` fields map to integer diagnostic sensors."""
     registry, _ = library

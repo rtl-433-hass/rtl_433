@@ -327,16 +327,43 @@ async def test_entity_name_from_descriptor(hass, hub_entry_builder):
         devices={
             device_key: {
                 CONF_MODEL: "EnergyMeter-2000",
+                DEVICE_FIELDS: ["battery_mV"],
+            }
+        },
+    )
+    ent_reg = er.async_get(hass)
+    uid = f"{hub.entry_id}:{device_key}:mV"
+    entry = ent_reg.async_get(ent_reg.async_get_entity_id("sensor", DOMAIN, uid))
+    assert entry is not None
+    # "Battery mV" is the explicit name for battery_mV in the library
+    assert entry.original_name == "Battery mV"
+
+
+async def test_entity_name_none_derives_from_device_class(hass, hub_entry_builder):
+    """A field with no descriptor name is auto-named by HA from its device_class.
+
+    ``power_W`` ships with ``name: null``; because the entity leaves ``_attr_name``
+    unset, HA derives the (translatable) name "Power" from ``device_class`` and
+    the entity_id keeps its ``_power`` suffix.
+    """
+    device_key = "EnergyMeter-2000-1234"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "EnergyMeter-2000",
                 DEVICE_FIELDS: ["power_W"],
             }
         },
     )
     ent_reg = er.async_get(hass)
     uid = f"{hub.entry_id}:{device_key}:watts"
-    entry = ent_reg.async_get(ent_reg.async_get_entity_id("sensor", DOMAIN, uid))
+    entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
+    entry = ent_reg.async_get(entity_id)
     assert entry is not None
-    # "Power" is the name for power_W in the library
     assert entry.original_name == "Power"
+    assert entity_id.endswith("_power")
 
 
 async def test_entity_has_entity_name_true(hass, hub_entry_builder):

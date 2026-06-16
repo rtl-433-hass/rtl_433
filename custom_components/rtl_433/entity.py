@@ -162,8 +162,12 @@ class Rtl433Entity(RestoreEntity):
         self._attr_unique_id = f"{hub_entry_id}:{device_key}:{descriptor.object_suffix}"
 
         # Per-field entity metadata common to both platforms. ``_attr_name`` is a
-        # device-relative name because ``_attr_has_entity_name`` is set.
-        self._attr_name = descriptor.name
+        # device-relative name because ``_attr_has_entity_name`` is set. A
+        # descriptor with no name is left UNSET (not None) so HA derives the
+        # name from ``device_class`` — setting ``_attr_name = None`` explicitly
+        # would instead produce a nameless entity.
+        if descriptor.name is not None:
+            self._attr_name = descriptor.name
         self._attr_entity_category = _resolve_entity_category(
             descriptor.entity_category
         )

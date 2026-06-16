@@ -8,7 +8,7 @@ rain_mm:
   device_class: precipitation
   unit_of_measurement: mm
   state_class: total_increasing
-  name: Rain Total
+  name: Rain total
   value_transform: { round: 2 }
   object_suffix: RT
 
@@ -17,7 +17,7 @@ rain_in:
   device_class: precipitation
   unit_of_measurement: in
   state_class: total_increasing
-  name: Rain Total
+  name: Rain total
   value_transform: { round: 2 }
   object_suffix: RT
 
@@ -26,7 +26,7 @@ rain_rate_mm_h:
   device_class: precipitation_intensity
   unit_of_measurement: mm/h
   state_class: measurement
-  name: Rain Rate
+  name: Rain rate
   value_transform: { float: true }
   object_suffix: RR
 
@@ -35,6 +35,6 @@ rain_rate_in_h:
   device_class: precipitation_intensity
   unit_of_measurement: in/h
   state_class: measurement
-  name: Rain Rate
+  name: Rain rate
   value_transform: { round: 2 }
   object_suffix: RR

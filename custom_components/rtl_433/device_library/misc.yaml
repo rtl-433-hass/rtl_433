@@ -13,7 +13,7 @@ battery_ok:
   device_class: battery
   unit_of_measurement: "%"
   state_class: measurement
-  name: Battery
+  name: null
   value_transform: { scale: 99, offset: 1, round: 0 }
   entity_category: diagnostic
   object_suffix: B
@@ -24,7 +24,7 @@ time:
   device_class: timestamp
   unit_of_measurement: null
   state_class: null
-  name: Timestamp
+  name: null
   entity_category: diagnostic
   enabled_by_default: false
   icon: "mdi:clock-in"
@@ -40,7 +40,7 @@ freq:
   device_class: frequency
   unit_of_measurement: MHz
   state_class: measurement
-  name: Frequency
+  name: null
   value_transform: { round: 4 }
   entity_category: diagnostic
   enabled_by_default: false
@@ -85,7 +85,7 @@ storm_dist_km:
   device_class: null
   unit_of_measurement: km
   state_class: measurement
-  name: Lightning Distance
+  name: Lightning distance
   value_transform: { int: true }
   object_suffix: stdist
 
@@ -94,7 +94,7 @@ storm_dist:
   device_class: null
   unit_of_measurement: mi
   state_class: measurement
-  name: Lightning Distance
+  name: Lightning distance
   value_transform: { int: true }
   object_suffix: stdist
 
@@ -103,7 +103,7 @@ strike_distance:
   device_class: null
   unit_of_measurement: mi
   state_class: measurement
-  name: Lightning Distance
+  name: Lightning distance
   value_transform: { int: true }
   object_suffix: stdist
 
@@ -112,7 +112,7 @@ strike_count:
   device_class: null
   unit_of_measurement: null
   state_class: total_increasing
-  name: Lightning Strike Count
+  name: Lightning strike count
   value_transform: { int: true }
   object_suffix: strcnt
 

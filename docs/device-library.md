@@ -55,7 +55,7 @@ temperature_C:
   device_class: temperature
   unit_of_measurement: "°C"
   state_class: measurement
-  name: Temperature
+  name: null                  # HA names it "Temperature" from device_class
   value_transform: { round: 1 }
   object_suffix: T
 ```
@@ -68,7 +68,7 @@ temperature_C:
 | `device_class`        | yes (nullable) | string \| `null` | Home Assistant device class (e.g. `temperature`, `humidity`, `safety`). Use `null` when the field has no appropriate device class. For `event` entries it is an [`EventDeviceClass`](https://www.home-assistant.io/integrations/event/#device-class) (`button`, `doorbell`). |
 | `unit_of_measurement` | yes (nullable) | string \| `null` | Unit shown by the entity. `null` for unitless or binary fields. |
 | `state_class`         | yes (nullable) | `measurement` \| `total` \| `total_increasing` \| `null` | Long-term-statistics class. `null` for binary fields and non-numeric sensors. |
-| `name`                | yes      | string          | Human-readable entity name (suffixed to the device name by HA). |
+| `name`                | no       | string \| `null` | Human-readable entity name (suffixed to the device name by HA). **Omit it (or set `null`) to let Home Assistant derive a translated name from `device_class`** — preferred when the name would just repeat the device class (e.g. a `temperature` field named "Temperature"). Only set an explicit name when it adds information the device class doesn't (e.g. "Battery mV", "Gust speed"). |
 | `object_suffix`       | yes      | string          | Short, stable token appended to the device key to form the entity's unique id. **Must be stable** — changing it orphans existing entities. |
 | `value_transform`     | no       | mapping         | Declarative numeric transform applied before the value is stored. See [Value transforms](#value-transforms). Omit for binary fields. |
 | `payload`             | no       | `{ on: <raw>, off: <raw> }` | For `binary_sensor` only: maps the raw rtl_433 value to the HA on/off state. See [Binary payloads](#binary-payloads). |

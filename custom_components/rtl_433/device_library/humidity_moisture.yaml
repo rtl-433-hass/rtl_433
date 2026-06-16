@@ -8,7 +8,7 @@ humidity:
   device_class: humidity
   unit_of_measurement: "%"
   state_class: measurement
-  name: Humidity
+  name: null
   value_transform: { float: true }
   object_suffix: H
 
@@ -35,7 +35,7 @@ moisture:
   device_class: moisture
   unit_of_measurement: "%"
   state_class: measurement
-  name: Moisture
+  name: null
   value_transform: { float: true }
   object_suffix: M
 
@@ -45,7 +45,7 @@ detect_wet:
   device_class: moisture
   unit_of_measurement: null
   state_class: null
-  name: Water Sensor
+  name: Water sensor
   payload: { on: "1", off: "0" }
   force_update: true
   object_suffix: moisture
@@ -74,7 +74,7 @@ ad_raw:
   device_class: null
   unit_of_measurement: null
   state_class: measurement
-  name: AD Raw
+  name: AD raw
   value_transform: { int: true }
   entity_category: diagnostic
   object_suffix: ad_raw
@@ -87,7 +87,7 @@ boost:
   device_class: null
   unit_of_measurement: null
   state_class: measurement
-  name: Transmission Boost
+  name: Transmission boost
   value_transform: { int: true }
   entity_category: diagnostic
   object_suffix: boost
