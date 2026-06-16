@@ -14,8 +14,7 @@ four concerns the platforms would otherwise duplicate:
 * **Availability** — computed from the coordinator's ``last_seen`` timestamp
   versus the effective per-device timeout. On startup the entity baselines a
   missing ``last_seen`` to "now" so a restored state shows until the timeout
-  elapses ("restore then time out", Clarification #10) rather than immediately
-  reading unavailable.
+  elapses ("restore then time out") rather than immediately reading unavailable.
 * **State restoration** — via :class:`RestoreEntity`; the field-specific
   subclasses pull the last state in their own ``async_added_to_hass``.
 
@@ -112,7 +111,7 @@ def _apply_calibration(
 ) -> FieldDescriptor:
     """Overlay a per-device calibration onto a consumption field descriptor.
 
-    Precedence #1: the calibration's commodity device_class, convertible base
+    Highest precedence: the calibration's commodity device_class, convertible base
     unit, ``state_class: total_increasing`` and value scale replace the library
     descriptor's, making a unitless counter Energy-dashboard-eligible. The base
     ``consumption``/``consumption_data`` descriptors carry
@@ -158,7 +157,7 @@ class Rtl433Entity(RestoreEntity):
         self._descriptor = descriptor
 
         # Instance-scoped unique_id: scoping by the parent hub entry id means two
-        # hubs observing the same model+id never collide (Success Criteria #1).
+        # hubs observing the same model+id never collide.
         self._attr_unique_id = f"{hub_entry_id}:{device_key}:{descriptor.object_suffix}"
 
         # Per-field entity metadata common to both platforms. ``_attr_name`` is a
@@ -219,7 +218,7 @@ class Rtl433Entity(RestoreEntity):
         """Restore last state, baseline last-seen, and subscribe to updates."""
         await super().async_added_to_hass()
 
-        # "Restore then time out" (Clarification #10): if the coordinator has no
+        # "Restore then time out": if the coordinator has no
         # last-seen for this device yet (fresh start, device silent so far),
         # baseline it to now so the restored state shows until the timeout
         # elapses instead of reading unavailable immediately. A real event
@@ -517,7 +516,7 @@ async def async_setup_hub_platform(
             descriptor = _descriptor_for(field_key, model)
             if descriptor is None:
                 continue
-            # Precedence #1: overlay a per-device calibration onto the device's
+            # Highest precedence: overlay a per-device calibration onto the device's
             # known consumption field(s), overriding the library descriptor.
             if calibration is not None and field_key in CONSUMPTION_FIELD_KEYS:
                 descriptor = _apply_calibration(descriptor, calibration)
@@ -585,7 +584,7 @@ async def async_setup_hub_platform(
 
         Drops the dedup cache and tears down the per-device field listener so a
         later event (with discovery on) recreates the device cleanly rather than
-        being skipped as "already created" (Clarification #4).
+        being skipped as "already created".
         """
         created.pop(device_key, None)
         extra_created.discard(device_key)

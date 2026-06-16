@@ -10,7 +10,7 @@ total_increasing``, and a scale on the raw counter.
 This module owns the small, pure mappings shared by the options flow (which
 constrains the base-unit selector per commodity and pre-fills the commodity from
 decoded ``MeterType`` / ``ert_type`` hints) and the entity build (which overlays
-the calibration onto the looked-up consumption descriptor — precedence #1).
+the calibration onto the looked-up consumption descriptor — highest precedence).
 
 The integration intentionally owns **no** unit-conversion logic: supplying a
 real device_class + a convertible base unit + ``total_increasing`` is sufficient

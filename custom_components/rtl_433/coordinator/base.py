@@ -310,7 +310,7 @@ class Rtl433Coordinator:
         # device is removed (async_remove_config_entry_device) each is called with
         # the device_key so the platforms can drop their per-device dedup cache and
         # field listeners; without this the device could not re-appear on a later
-        # event while discovery is on (Clarification #4).
+        # event while discovery is on.
         self.device_removers: list[Callable[[str], None]] = []
 
         # --- Runtime state, all scoped to this config entry ------------------
@@ -348,7 +348,7 @@ class Rtl433Coordinator:
         self._discovered: set[str] = set()
 
         # --- Hub-scoped runtime state (rendered by the hub entities) ---------
-        # Latest meta/SDR configuration (assembled from the HTTP getters in Task 2)
+        # Latest meta/SDR configuration (assembled from the HTTP getters)
         # and the latest server-stats payload. Populated over HTTP, not the socket.
         self.meta: dict[str, Any] = {}
         self.stats: dict[str, Any] = {}
@@ -578,7 +578,7 @@ class Rtl433Coordinator:
         self._classify_frame(event)
 
     def _classify_frame(self, event: dict[str, Any]) -> None:
-        """Route a parsed frame by shape (Plan: Frame Classification)."""
+        """Route a parsed frame by shape (event vs shutdown vs ignored)."""
         is_event = event.get("model") is not None or any(
             event.get(key) is not None for key in _EVENT_IDENTITY_KEYS
         )
@@ -587,7 +587,7 @@ class Rtl433Coordinator:
         elif "shutdown" in event:
             self._handle_shutdown()
         # All other non-event frames (meta / state / result / error) are ignored:
-        # #2/#3 are sourced over HTTP (Task 2), so nothing else needs handling here.
+        # meta and stats are sourced over HTTP, so nothing else needs handling here.
 
     def _handle_shutdown(self) -> None:
         """Handle a ``{"shutdown": ...}`` frame: flip connectivity off."""
@@ -1031,9 +1031,9 @@ class Rtl433Coordinator:
         """Normalize an event, classify it (live vs replay), and dispatch.
 
         Replays and stale gap events seed sensor values but must NOT re-fire
-        ``event`` entities or refresh ``last_seen`` / ``available`` (see the
-        plan's two-signal classification): the high-water mark catches an
-        already-seen frame and the event age catches an unseen-but-old gap event.
+        ``event`` entities or refresh ``last_seen`` / ``available``. Two signals
+        classify them: the high-water mark catches an already-seen frame and the
+        event age catches an unseen-but-old gap event.
         """
         normalized = normalize(event, self.skip_keys)
         key = normalized.device_key

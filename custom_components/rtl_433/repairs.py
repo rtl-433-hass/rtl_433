@@ -1,6 +1,6 @@
 """Repairs surface for the rtl_433 integration.
 
-Scope is deliberately tight (per the plan, repairs cover only *genuinely
+Scope is deliberately tight: repairs cover only *genuinely
 actionable* problems, not speculative ones). Two hub-scoped issues live here:
 
 - **server unreachable** — raised when a hub's WebSocket coordinator has been

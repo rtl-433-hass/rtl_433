@@ -213,7 +213,7 @@ class Rtl433Event(Rtl433Entity, EventEntity):
                         [event_type],
                     )
                 )
-            self._trigger_event(event_type)  # no attributes (YAGNI)
+            self._trigger_event(event_type)  # the type is the whole payload
         self.async_write_ha_state()
 
     @property

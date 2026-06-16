@@ -1,8 +1,8 @@
 """Constants for the rtl_433 integration.
 
 This module is the single source of truth for keys and defaults shared across
-the coordinator, config/options flow, entity platforms, and tests. Later tasks
-(5/6/7/8/9/10) import from here, so names are intended to be stable.
+the coordinator, config/options flow, entity platforms, and tests. Other
+modules import from here, so names are intended to be stable.
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ from homeassistant.const import Platform
 # Integration domain. Must match the "domain" key in manifest.json.
 DOMAIN: Final = "rtl_433"
 
-# Module-level logger; later modules use ``from .const import LOGGER``.
+# Module-level logger; other modules use ``from .const import LOGGER``.
 LOGGER: Final[logging.Logger] = logging.getLogger(__package__)
 
-# Platforms forwarded for each per-device config entry.
+# Platforms forwarded once on the hub config entry.
 PLATFORMS: Final[list[Platform]] = [
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
@@ -29,10 +29,10 @@ PLATFORMS: Final[list[Platform]] = [
 ]
 
 # --- Config-entry "type" discriminator -------------------------------------
-# A single value in entry.data tells the integration whether a config entry is
-# the per-instance hub (owns the WebSocket connection) or a per-device entry
-# (owns one physical device's entities). The integration setup branches on this in
-# async_setup_entry.
+# Legacy/migration only. Older (0.1.0) installs created a per-device config
+# entry per device; the current model is a single hub entry with nested
+# devices, so setup no longer branches on this. ``migration.py`` still reads
+# ENTRY_TYPE_DEVICE to re-home those legacy per-device entries onto the hub.
 CONF_ENTRY_TYPE: Final = "entry_type"
 ENTRY_TYPE_HUB: Final = "hub"
 ENTRY_TYPE_DEVICE: Final = "device"

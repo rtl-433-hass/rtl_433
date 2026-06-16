@@ -1,7 +1,7 @@
 # Identity / diagnostic / transport keys that must NOT produce entities.
 #
 # The first block is a verbatim port of the upstream `SKIP_KEYS` list from
-# `rtl_433_mqtt_hass.py`. The loader (Task 5) reads `skip_keys` as a flat list
+# `rtl_433_mqtt_hass.py`. The loader reads `skip_keys` as a flat list
 # and excludes any field whose name appears here before attempting a mapping
 # lookup.
 #

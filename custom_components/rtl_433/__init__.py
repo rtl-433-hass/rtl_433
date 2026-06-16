@@ -340,7 +340,7 @@ async def async_remove_config_entry_device(
     config entry. For a nested device, drops it from the hub's devices map and
     evicts its ``device_key`` from the coordinator's runtime state (so a
     re-transmitting device is treated as new and can re-appear while discovery is
-    on, Clarification #4).
+    on).
     """
     if (DOMAIN, config_entry.entry_id) in device_entry.identifiers:
         return False
@@ -369,7 +369,7 @@ async def async_remove_config_entry_device(
             coordinator.forget_device(device_key)
             # Drop the entity platforms' per-device dedup cache and field
             # listeners so the device re-appears cleanly if it transmits again
-            # while discovery is on (Clarification #4).
+            # while discovery is on.
             for remover in list(coordinator.device_removers):
                 remover(device_key)
 

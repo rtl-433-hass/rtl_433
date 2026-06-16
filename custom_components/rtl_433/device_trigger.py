@@ -210,23 +210,10 @@ async def _async_attach_event_trigger(
 
     Shared by the base trigger (``subtype is None`` — fires on every
     transmission) and a subtyped trigger (fires only when the new state's
-    ``event_type`` equals ``subtype``). Two behaviours both paths need:
-
-    * **No ``old == new`` dedupe** — every matching transmission fires, so two
-      consecutive same-value presses each fire. This is the reason neither path
-      can reuse the core ``state`` trigger's ``attribute``/``to`` filter, which
-      early-returns on ``old_value == new_value``.
-    * **Ignore the entity's restore at startup** — ``Rtl433Event`` (via HA's
-      ``EventEntity``) restores its last ``event_type`` + timestamp across a
-      restart for display, surfacing as a ``state_changed`` with
-      ``old_state is None``. A momentary event never legitimately fires on the
-      entity's first appearance in the state machine (a genuine transmission
-      always transitions from a pre-existing state), so a ``None`` ``old_state``
-      is the restore / initial add and must not re-deliver the stale event (the
-      "doorbell re-fires on every HA restart" bug).
-
-    The trigger payload + context match what the core state trigger produces for
-    a ``device``-platform trigger.
+    ``event_type`` equals ``subtype``). The listener has no ``old == new``
+    dedupe and ignores the entity's startup restore (``old_state is None``); see
+    the module docstring for the rationale. The trigger payload + context match
+    what the core state trigger produces for a ``device``-platform trigger.
     """
     entity_id = async_get_entity_registry_entry_or_raise(
         hass, config[CONF_ENTITY_ID]
