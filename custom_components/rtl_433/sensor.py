@@ -219,6 +219,13 @@ class HubSensorDesc:
     ``value`` extracts the native value from the coordinator; ``attrs`` (when
     set) extracts extra-state attributes. Both read live coordinator state so
     the entity always reflects the latest HTTP-sourced hub data.
+
+    ``folded_when_managing`` marks a sensor whose concept is folded into a managed
+    control (number/select/switch) in managed mode; its diagnostic sensor is then
+    suppressed so each concept has exactly one entity. Center frequency is
+    intentionally NOT folded
+    (its actual can diverge from the desired value under hopping), and the
+    server-stats sensors are never folded.
     """
 
     suffix: str
@@ -228,6 +235,7 @@ class HubSensorDesc:
     native_unit: str | None = None
     state_class: SensorStateClass | None = None
     attrs: Callable[[Rtl433Coordinator], dict[str, Any] | None] | None = None
+    folded_when_managing: bool = False
 
 
 HUB_SENSORS: tuple[HubSensorDesc, ...] = (
@@ -248,23 +256,27 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
         name="Sample rate",
         value=lambda c: _meta(c, "samp_rate"),
         native_unit="Hz",
+        folded_when_managing=True,
     ),
     HubSensorDesc(
         suffix="conversion_mode",
         name="Conversion mode",
         value=lambda c: _meta(c, "conversion_mode"),
+        folded_when_managing=True,
     ),
     HubSensorDesc(
         suffix="hop_interval",
         name="Hop interval",
         value=lambda c: _meta(c, "hop_interval"),
         native_unit="s",
+        folded_when_managing=True,
     ),
-    HubSensorDesc(suffix="gain", name="Gain", value=_gain),
+    HubSensorDesc(suffix="gain", name="Gain", value=_gain, folded_when_managing=True),
     HubSensorDesc(
         suffix="ppm_error",
         name="Frequency correction",
         value=lambda c: _meta(c, "ppm_error"),
+        folded_when_managing=True,
     ),
     # --- Server statistics (from coordinator.stats) ----------------------- #
     HubSensorDesc(
@@ -299,15 +311,6 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
         # decoders are toggled), not a running total -> MEASUREMENT.
         state_class=SensorStateClass.MEASUREMENT,
     ),
-)
-
-
-# SDR sensors whose concept is folded into a managed control (number/select/switch); their
-# diagnostic sensor is suppressed so each concept has exactly one entity. Center
-# frequency is intentionally NOT folded (its actual can diverge from the desired
-# value under hopping), and the server-stats sensors are never folded.
-_FOLDED_HUB_SENSOR_SUFFIXES = frozenset(
-    {"sample_rate", "ppm_error", "gain", "conversion_mode", "hop_interval"}
 )
 
 
@@ -381,7 +384,7 @@ async def async_setup_entry(
     async_add_entities(
         Rtl433HubSensor(coordinator, entry.entry_id, desc)
         for desc in HUB_SENSORS
-        if not (managed and desc.suffix in _FOLDED_HUB_SENSOR_SUFFIXES)
+        if not (managed and desc.folded_when_managing)
     )
     await async_setup_hub_platform(
         hass,
