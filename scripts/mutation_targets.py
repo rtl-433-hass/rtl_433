@@ -84,12 +84,35 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
         "switch.py",
         "sdr_settings.py",
     ],
+    # The ``mapping`` package: its test files exercise the whole package, and the
+    # package root (``mapping/__init__.py``) is unreachable via the naming
+    # convention (there is no ``mapping.py``), so map all three explicitly.
+    "tests/test_mapping.py": [
+        "mapping/__init__.py",
+        "mapping/_loader.py",
+        "mapping/_model.py",
+        "mapping/_overrides.py",
+        "mapping/_transform.py",
+    ],
+    "tests/test_mut_mapping.py": [
+        "mapping/__init__.py",
+        "mapping/_loader.py",
+        "mapping/_model.py",
+        "mapping/_overrides.py",
+        "mapping/_transform.py",
+    ],
+    "tests/test_mut_mapping_floor.py": [
+        "mapping/__init__.py",
+        "mapping/_loader.py",
+        "mapping/_model.py",
+        "mapping/_overrides.py",
+        "mapping/_transform.py",
+    ],
     # Mutation-floor test files: their ``_floor`` suffix does not auto-resolve to
     # a source module via the naming convention, so each is mapped explicitly.
     "tests/test_mut_calibration_floor.py": ["calibration.py"],
     "tests/test_mut_coordinator_base_floor.py": ["coordinator/base.py"],
     "tests/test_mut_library_floor.py": ["library.py"],
-    "tests/test_mut_mapping_floor.py": ["mapping.py"],
     "tests/test_mut_migration_floor.py": ["migration.py"],
     "tests/test_mut_repairs_floor.py": ["repairs.py"],
     "tests/test_mut_sdr_settings_floor.py": ["sdr_settings.py"],
