@@ -25,10 +25,25 @@
       "score": 1.0,
       "total": 9
     },
+    "custom_components/rtl_433/coordinator/_events.py": {
+      "killed": 204,
+      "score": 0.857143,
+      "total": 238
+    },
+    "custom_components/rtl_433/coordinator/_sdr.py": {
+      "killed": 152,
+      "score": 0.955975,
+      "total": 159
+    },
+    "custom_components/rtl_433/coordinator/_watchdog.py": {
+      "killed": 106,
+      "score": 0.938053,
+      "total": 113
+    },
     "custom_components/rtl_433/coordinator/base.py": {
-      "killed": 702,
-      "score": 0.849879,
-      "total": 826
+      "killed": 391,
+      "score": 0.788306,
+      "total": 496
     },
     "custom_components/rtl_433/device_trigger.py": {
       "killed": 94,
