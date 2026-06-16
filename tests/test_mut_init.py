@@ -901,10 +901,9 @@ async def test_new_device_callback_notifies_for_new_device(
     mock_notify.assert_called_once()
     kwargs = mock_notify.call_args.kwargs
     assert "EnergyMeter-2000-1234" in kwargs["notification_id"]
-    # Message names model and device key
+    # Message names the device (the raw device key is only in the notification_id)
     message = mock_notify.call_args.args[1]
     assert "EnergyMeter-2000" in message
-    assert "EnergyMeter-2000-1234" in message
 
 
 async def test_new_device_callback_no_notification_for_known_device(

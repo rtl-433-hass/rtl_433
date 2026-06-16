@@ -141,7 +141,7 @@ class Rtl433Event(Rtl433Entity, EventEntity):
           case: it must NOT fire, append to ``event_types``, or persist — but it
           still writes state (which only re-reads ``available``, always ``True``
           for events). A suppressed transmission that *would* have fired is logged
-          once at INFO so the user sees the real-but-stale event.
+          at DEBUG (it happens routinely on every reconnect).
         """
         field_key = self._descriptor.field_key
         if event.is_repaint:
@@ -166,9 +166,9 @@ class Rtl433Event(Rtl433Entity, EventEntity):
                     if event_time is not None
                     else "unknown"
                 )
-                LOGGER.info(
-                    "rtl_433 suppressed replayed/stale %s '%s' for %s "
-                    "(model %s, event time %s, age %s)",
+                LOGGER.debug(
+                    "rtl_433 ignored an old/duplicate %s reading '%s' for %s "
+                    "(model %s, reading time %s, age %s)",
                     field_key,
                     str(value),
                     self._device_key,

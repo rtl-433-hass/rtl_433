@@ -4,8 +4,8 @@ The coordinator-side ingestion/classification trace lives in
 ``tests/test_coordinator.py``; this file locks the *event entity* side of the
 trace contract: a live press logs ``rtl_433 fired ...``, the watchdog
 availability re-paint (``is_repaint``) logs ``skipped watchdog re-paint`` and
-never fires, and a suppressed replay still logs the pre-existing
-``suppressed replayed/stale`` INFO line.
+never fires, and a suppressed replay logs the ``ignored an old/duplicate``
+DEBUG line.
 
 The entity is exercised directly: ``_handle_dispatch`` is the callback the
 dispatcher invokes, so we construct a minimal ``Rtl433Event`` and call it with
@@ -132,9 +132,9 @@ def test_watchdog_re_paint_without_prior_fire_does_not_fire(event_entity, caplog
     assert not [m for m in caplog.messages if m.startswith("rtl_433 fired ")]
 
 
-def test_suppressed_replay_logs_existing_info_line(event_entity, caplog):
-    """A replay frame logs the pre-existing INFO line and never fires."""
-    caplog.set_level(logging.INFO, logger=_TRACE_LOGGER)
+def test_suppressed_replay_logs_debug_line(event_entity, caplog):
+    """A replay frame logs the suppression DEBUG line and never fires."""
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
     replay = NormalizedEvent(
         device_key=_DEVICE_KEY,
         model="Honeywell-Doorbell",
@@ -149,7 +149,7 @@ def test_suppressed_replay_logs_existing_info_line(event_entity, caplog):
 
     trigger.assert_not_called()
     suppressed = [
-        m for m in caplog.messages if m.startswith("rtl_433 suppressed replayed/stale")
+        m for m in caplog.messages if m.startswith("rtl_433 ignored an old/duplicate")
     ]
     assert len(suppressed) == 1
     assert _DEVICE_KEY in suppressed[0]

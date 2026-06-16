@@ -56,7 +56,7 @@ def _merge_entry_library(
     except Exception:  # noqa: BLE001 - never let a bad override crash setup
         LOGGER.warning(
             "Failed to merge user mappings for hub %s; using shipped library",
-            entry.entry_id,
+            entry.title,
             exc_info=True,
         )
         return (

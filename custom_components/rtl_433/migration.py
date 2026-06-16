@@ -493,10 +493,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ):
             del new_options[CONF_AVAILABILITY_TIMEOUT]
             LOGGER.info(
-                "Dropped the legacy %ss hub availability timeout from rtl_433 "
-                "entry %s; device-class defaults now apply",
+                "Removed the old %ss availability timeout from hub %s; "
+                "per-device-type defaults now apply",
                 LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
-                entry.entry_id,
+                entry.title,
             )
         hass.config_entries.async_update_entry(
             entry, options=new_options, version=2, minor_version=4

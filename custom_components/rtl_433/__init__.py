@@ -160,9 +160,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             name = model or device_key
             persistent_notification.async_create(
                 hass,
-                f"A new device '{name}' (key {device_key}) was added under hub "
-                f"'{entry.title}'.",
-                title="rtl_433: new device discovered",
+                f"A new device '{name}' was discovered on hub '{entry.title}'.",
+                title="rtl_433: New device discovered",
                 notification_id=(f"{DOMAIN}_new_device_{entry.entry_id}_{device_key}"),
             )
 
@@ -308,7 +307,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     coordinator.availability_timeout = _hub_availability_timeout(entry)
     LOGGER.debug(
         "rtl_433 hub %s options updated (discovery=%s, timeout=%ss)",
-        entry.entry_id,
+        entry.title,
         coordinator.discovery_enabled,
         coordinator.availability_timeout,
     )

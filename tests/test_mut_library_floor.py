@@ -54,10 +54,13 @@ def _make_registry(
     return Registry(flat=flat, models=models)
 
 
-def _make_entry(entry_id: str = "test-hub-entry-id", user_mappings=None):
+def _make_entry(
+    entry_id: str = "test-hub-entry-id", user_mappings=None, title: str = "Test hub"
+):
     """Build a minimal mock ConfigEntry."""
     entry = MagicMock()
     entry.entry_id = entry_id
+    entry.title = title
     data = {}
     if user_mappings is not None:
         data[CONF_USER_MAPPINGS] = user_mappings
@@ -334,9 +337,9 @@ def test_fallback_warning_message_template_not_none():
     assert isinstance(msg_template, str)
 
 
-def test_fallback_warning_passes_entry_id_as_second_arg():
-    """The entry_id is passed as the second positional arg to LOGGER.warning."""
-    entry_id = "my-unique-hub-id"
+def test_fallback_warning_passes_hub_title_as_second_arg():
+    """The hub title is passed as the second positional arg to LOGGER.warning."""
+    title = "My unique hub"
     with (
         patch("custom_components.rtl_433.library.LOGGER") as mock_logger,
         patch(
@@ -346,16 +349,16 @@ def test_fallback_warning_passes_entry_id_as_second_arg():
     ):
         hass = MagicMock()
         shipped_registry = _make_registry()
-        entry = _make_entry(entry_id=entry_id)
+        entry = _make_entry(title=title)
         _merge_entry_library(hass, entry, shipped_registry, set())
 
     positional_args = mock_logger.warning.call_args[0]
-    # positional_args[0] = message template, [1] = entry_id
-    assert positional_args[1] == entry_id
+    # positional_args[0] = message template, [1] = hub title
+    assert positional_args[1] == title
 
 
-def test_fallback_warning_entry_id_not_none():
-    """The entry_id arg passed to LOGGER.warning is not None."""
+def test_fallback_warning_hub_title_not_none():
+    """The hub-title arg passed to LOGGER.warning is not None."""
     with (
         patch("custom_components.rtl_433.library.LOGGER") as mock_logger,
         patch(
@@ -365,7 +368,7 @@ def test_fallback_warning_entry_id_not_none():
     ):
         hass = MagicMock()
         shipped_registry = _make_registry()
-        entry = _make_entry(entry_id="real-id")
+        entry = _make_entry(title="Real hub")
         _merge_entry_library(hass, entry, shipped_registry, set())
 
     positional_args = mock_logger.warning.call_args[0]

@@ -635,8 +635,8 @@ class Rtl433Coordinator:
                     if command not in self._malformed_cmds:
                         self._malformed_cmds.add(command)
                         LOGGER.error(
-                            "rtl_433 getter %s at %s returned malformed JSON; "
-                            "the corresponding hub sensors will not update: %s",
+                            "rtl_433 server returned invalid data for '%s' (at %s); "
+                            "the related hub sensors will not update: %s",
                             command,
                             url,
                             err,
@@ -1165,7 +1165,9 @@ class Rtl433Coordinator:
             try:
                 self.new_device_callback(key, normalized.model, is_replay)
             except Exception:  # noqa: BLE001 - a bad hook must not kill the loop
-                LOGGER.exception("rtl_433 new_device_callback failed for %s", key)
+                LOGGER.exception(
+                    "rtl_433 failed to register a newly discovered device (%s)", key
+                )
             else:
                 LOGGER.debug(
                     "rtl_433 discovered new device %s (model %s, via_replay=%s)",
@@ -1292,7 +1294,9 @@ class Rtl433Coordinator:
                 resolved = self.effective_timeout_resolver(device_key)
             except Exception:  # noqa: BLE001 - fall back to the class default
                 LOGGER.exception(
-                    "rtl_433 effective_timeout_resolver failed for %s", device_key
+                    "rtl_433 failed to determine the availability timeout for %s; "
+                    "using the default",
+                    device_key,
                 )
             else:
                 if resolved is not None:

@@ -1382,13 +1382,13 @@ def _doorbell_press(events, event_time: str) -> dict:
 async def test_gap_event_is_suppressed_and_logged(
     hass, hub_entry_builder, events, caplog
 ):
-    """A stale gap event after reconnect does NOT fire and is logged at INFO.
+    """A stale gap event after reconnect does NOT fire and is logged at DEBUG.
 
     Feed a live press (advances the mark, fires once), then — as a reconnect would
     — feed a frame whose ``time`` is newer than the mark but older than
     ``REPLAY_STALE_THRESHOLD`` (a transmission missed during the disconnect). The
     event entity must NOT fire (its last-fire state/timestamp are unchanged) yet
-    the suppression is recorded at INFO so the user sees the real-but-stale press.
+    the suppression is recorded at DEBUG.
     """
     hub, coordinator, eid = await _doorbell_hub(hass, hub_entry_builder)
 
@@ -1404,7 +1404,7 @@ async def test_gap_event_is_suppressed_and_logged(
     # Reconnect: a gap event at 10:01:00 arrives at 10:05:00 -> 240s old -> stale.
     with (
         freeze_time("2026-05-25T10:05:00+00:00"),
-        caplog.at_level(logging.INFO, logger="custom_components.rtl_433"),
+        caplog.at_level(logging.DEBUG, logger="custom_components.rtl_433"),
     ):
         _feed(coordinator, _doorbell_press(events, "2026-05-25T10:01:00Z"))
         await hass.async_block_till_done()
@@ -1413,9 +1413,10 @@ async def test_gap_event_is_suppressed_and_logged(
     after = hass.states.get(eid)
     assert after.state == fired_at
     assert after.attributes["event_type"] == "secret_knock"
-    # The suppression was logged at INFO (mentions the suppressed transmission).
+    # The suppression was logged at DEBUG (mentions the ignored transmission).
     assert any(
-        "suppressed" in r.message and r.levelno == logging.INFO for r in caplog.records
+        "ignored an old/duplicate" in r.message and r.levelno == logging.DEBUG
+        for r in caplog.records
     )
 
 
@@ -1508,7 +1509,7 @@ async def test_sensor_seeds_from_replay_but_event_does_not_fire(
     # Stale frame (frame time far behind now) -> replay: seeds sensor, no fire.
     with (
         freeze_time("2026-05-25T10:30:00+00:00"),
-        caplog.at_level(logging.INFO, logger="custom_components.rtl_433"),
+        caplog.at_level(logging.DEBUG, logger="custom_components.rtl_433"),
     ):
         _feed(
             coordinator,
@@ -1532,9 +1533,10 @@ async def test_sensor_seeds_from_replay_but_event_does_not_fire(
     # Liveness was NOT refreshed by the replay: last_seen unchanged from the
     # setup baseline (the replay must not stamp it to the frame/now time).
     assert coordinator.last_seen[device_key] == baseline_seen
-    # The suppressed event-field transmission was logged at INFO.
+    # The ignored event-field transmission was logged at DEBUG.
     assert any(
-        "suppressed" in r.message and r.levelno == logging.INFO for r in caplog.records
+        "ignored an old/duplicate" in r.message and r.levelno == logging.DEBUG
+        for r in caplog.records
     )
 
 
@@ -1661,8 +1663,8 @@ async def test_new_device_notifies_once_with_stable_id_and_message(
     The device is absent from the persisted ``entry.data[CONF_DEVICES]`` map, so
     the first sighting is genuinely new: ``async_create`` is called once with the
     stable ``{DOMAIN}_new_device_{entry_id}_{device_key}`` id and a message naming
-    the model, the device key, and the hub. A second sighting in the same session
-    (now persisted) does NOT notify again.
+    the device and the hub. A second sighting in the same session (now persisted)
+    does NOT notify again.
     """
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
@@ -1679,10 +1681,10 @@ async def test_new_device_notifies_once_with_stable_id_and_message(
         assert notify.call_args.kwargs["notification_id"] == _notify_id(
             hub.entry_id, device_key
         )
-        # The message names the model, the device key, and the hub title.
+        # The message names the device and the hub title (the raw device key is
+        # only in the notification_id).
         message = notify.call_args.args[1]
         assert "EnergyMeter-2000" in message
-        assert device_key in message
         assert hub.title in message
 
         # Second sighting of the now-adopted device: no second notification.
