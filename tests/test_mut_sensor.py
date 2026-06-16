@@ -14,7 +14,8 @@ cover every class and every branch in the module:
   valid dict -> correct key.
 * ``HUB_SENSORS`` tuple – exact count, exact name/suffix/device_class/native_unit/
   state_class for every descriptor.
-* ``_FOLDED_HUB_SENSOR_SUFFIXES`` – exact membership (both present and absent).
+* ``HubSensorDesc.folded_when_managing`` – exact flag per descriptor (both
+  folded and not).
 * ``Rtl433Sensor``: device_class / state_class / unit / force_update from the
   descriptor; native_value seeding from the coordinator's last event on init;
   _apply_value calls apply_transform; _async_restore_state branches (live value
@@ -56,7 +57,6 @@ from custom_components.rtl_433.const import (
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.sensor import (
-    _FOLDED_HUB_SENSOR_SUFFIXES,
     _LAST_SEEN_FIELD,
     _NON_RESTORABLE,
     HUB_SENSORS,
@@ -410,43 +410,47 @@ class TestHubSensorsDescriptors:
 
 
 # ---------------------------------------------------------------------------
-# 4. _FOLDED_HUB_SENSOR_SUFFIXES membership
+# 4. HubSensorDesc.folded_when_managing flag
 # ---------------------------------------------------------------------------
 
 
 class TestFoldedHubSensorSuffixes:
+    @staticmethod
+    def _folded():
+        return {d.suffix for d in HUB_SENSORS if d.folded_when_managing}
+
     def test_sample_rate_is_folded(self):
-        assert "sample_rate" in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "sample_rate" in self._folded()
 
     def test_ppm_error_is_folded(self):
-        assert "ppm_error" in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "ppm_error" in self._folded()
 
     def test_gain_is_folded(self):
-        assert "gain" in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "gain" in self._folded()
 
     def test_conversion_mode_is_folded(self):
-        assert "conversion_mode" in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "conversion_mode" in self._folded()
 
     def test_hop_interval_is_folded(self):
-        assert "hop_interval" in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "hop_interval" in self._folded()
 
     def test_center_frequency_not_folded(self):
-        assert "center_frequency" not in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "center_frequency" not in self._folded()
 
     def test_decoded_events_not_folded(self):
-        assert "decoded_events" not in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "decoded_events" not in self._folded()
 
     def test_ook_frames_not_folded(self):
-        assert "ook_frames" not in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "ook_frames" not in self._folded()
 
     def test_fsk_frames_not_folded(self):
-        assert "fsk_frames" not in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "fsk_frames" not in self._folded()
 
     def test_enabled_decoders_not_folded(self):
-        assert "enabled_decoders" not in _FOLDED_HUB_SENSOR_SUFFIXES
+        assert "enabled_decoders" not in self._folded()
 
     def test_exact_size(self):
-        assert len(_FOLDED_HUB_SENSOR_SUFFIXES) == 5
+        assert len(self._folded()) == 5
 
 
 # ---------------------------------------------------------------------------
