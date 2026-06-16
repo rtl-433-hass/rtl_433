@@ -279,6 +279,13 @@ class Rtl433Coordinator:
         self.new_device_callback: Callable[[str, str, bool], None] | None = None
         self.effective_timeout_resolver: Callable[[str], int | None] | None = None
         self.effective_clear_delay_resolver: Callable[[str], int] | None = None
+        # Field keys that resolve to a library descriptor (the merged registry's
+        # global ``flat`` table). Used only to flag observed fields with no
+        # mapping at DEBUG (a bad decode often shows up as an unexpected field).
+        # Empty until wired by the integration setup in ``__init__.py``; while
+        # empty the unmapped-field trace is skipped so a failed library load
+        # cannot flag every field.
+        self.known_field_keys: frozenset[str] = frozenset()
         # Called (no args) when the SDR device identity (``dev_info``/``dev_query``)
         # is first learned or changes on a (re)connect, so the setup layer can
         # refresh the hub device-registry entry's model/manufacturer/serial.
@@ -313,6 +320,11 @@ class Rtl433Coordinator:
         self.seen_fields: set[str] = set()
         self.device_fields: dict[str, set[str]] = {}
         self.connected = False
+        # First-seen DEBUG dedupe caches: unmapped field keys already logged per
+        # device, and the last availability timeout logged per device (so the
+        # watchdog only logs a device's timeout when it first resolves or changes).
+        self._logged_unmapped: dict[str, set[str]] = {}
+        self._logged_timeouts: dict[str, int] = {}
 
         # High-water mark of the maximum event ``time`` (UTC) ever parsed, used
         # to classify each frame against the reconnect replay (see
@@ -470,6 +482,20 @@ class Rtl433Coordinator:
                     backoff = _BACKOFF_MIN  # reset after a successful connect
                     self._emit_hub_update()
                     LOGGER.debug("rtl_433 connected to %s", self.ws_url)
+                    # Anchor the replay classification: every frame's verdict in
+                    # ``_process_event`` is judged against these two values, so log
+                    # them once per connect to make a lone REPLAY/BACKLOG line
+                    # interpretable.
+                    LOGGER.debug(
+                        "rtl_433 connection anchor for %s: connected_at=%s "
+                        "replay_high_water=%s (frames at/below high-water, or "
+                        "before connected_at, are suppressed as replays)",
+                        self.ws_url,
+                        self._connection_time.isoformat(),
+                        self._event_high_water.isoformat()
+                        if self._event_high_water is not None
+                        else "none",
+                    )
                     # Seed SDR/meta config and stats over HTTP (never the socket).
                     # Each getter swallows its own failures, so a hidden ``/cmd``
                     # (e.g. behind a proxy) cannot break the connection.
@@ -506,6 +532,14 @@ class Rtl433Coordinator:
             if self._stop_event.is_set():
                 break
 
+            # A reconnect makes the server replay its recent backlog, so a flaky
+            # link is a common source of the REPLAY/BACKLOG bursts users chase;
+            # surface the retry cadence to explain them.
+            LOGGER.debug(
+                "rtl_433 disconnected from %s; reconnecting in %.0fs",
+                self.ws_url,
+                backoff,
+            )
             # Wait for the backoff window or an early stop, then retry.
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stop_event.wait(), timeout=backoff)
@@ -1082,6 +1116,21 @@ class Rtl433Coordinator:
         self.seen_fields |= field_keys
         self.device_fields.setdefault(key, set()).update(field_keys)
 
+        # Flag fields with no library descriptor at DEBUG, once per (device, key):
+        # a bad decode often surfaces as an unexpected field that maps to no
+        # entity. Skipped entirely when ``known_field_keys`` is empty (library not
+        # wired / failed to load) so it cannot flag every field.
+        if self.known_field_keys:
+            already = self._logged_unmapped.setdefault(key, set())
+            fresh = field_keys - self.known_field_keys - already
+            if fresh:
+                already |= fresh
+                LOGGER.debug(
+                    "rtl_433 %s reported unmapped field(s) %s (no entity)",
+                    key,
+                    sorted(fresh),
+                )
+
         # Only a live frame refreshes liveness; replays / stale gap events leave
         # ``last_seen`` / ``available`` alone so a genuinely-offline device is not
         # resurrected by the reconnect replay.
@@ -1117,6 +1166,13 @@ class Rtl433Coordinator:
                 self.new_device_callback(key, normalized.model, is_replay)
             except Exception:  # noqa: BLE001 - a bad hook must not kill the loop
                 LOGGER.exception("rtl_433 new_device_callback failed for %s", key)
+            else:
+                LOGGER.debug(
+                    "rtl_433 discovered new device %s (model %s, via_replay=%s)",
+                    key,
+                    normalized.model,
+                    is_replay,
+                )
 
         self._dispatch(key, normalized)
 
@@ -1208,14 +1264,16 @@ class Rtl433Coordinator:
             return False
         return not self.event_driven_keys.isdisjoint(self._known_field_keys(device_key))
 
-    def _effective_timeout(self, device_key: str) -> int:
-        """Resolve the effective timeout for a device.
+    def _resolve_timeout(self, device_key: str) -> tuple[int, str]:
+        """Resolve the effective timeout and the tier that produced it.
 
         Resolution order: per-device override → explicit hub default → device-class
         default (from the latest payload) → ``DEFAULT_AVAILABILITY_TIMEOUT``. The
         resolver returns a concrete int for the two explicit tiers (including
         ``0`` = never-expire) or ``None`` when neither is set, in which case the
-        device-class default applies.
+        device-class default applies. The second element is a short, DEBUG-only
+        label of which tier won (the resolver collapses override and hub default
+        into one ``int`` so they cannot be told apart here).
         """
         if self.effective_timeout_resolver is not None:
             try:
@@ -1226,15 +1284,37 @@ class Rtl433Coordinator:
                 )
             else:
                 if resolved is not None:
-                    return resolved
-                return self._class_default_timeout(device_key)
-        return self.availability_timeout
+                    return resolved, "override-or-hub"
+                return self._class_default_timeout(device_key), "class-default"
+        return self.availability_timeout, "hub-default"
+
+    def _effective_timeout(self, device_key: str) -> int:
+        """Resolve the effective timeout for a device (see :meth:`_resolve_timeout`)."""
+        return self._resolve_timeout(device_key)[0]
+
+    def _log_timeout_change(self, device_key: str, timeout: int, source: str) -> None:
+        """Log a device's resolved availability timeout once, then on each change.
+
+        Answers "why did / didn't this device expire": event-driven devices
+        (doorbells, contacts) resolve to never-expire, which is otherwise opaque.
+        """
+        if self._logged_timeouts.get(device_key) == timeout:
+            return
+        self._logged_timeouts[device_key] = timeout
+        shown = "never" if timeout == AVAILABILITY_TIMEOUT_NEVER else f"{timeout}s"
+        LOGGER.debug(
+            "rtl_433 %s availability timeout=%s (source=%s)",
+            device_key,
+            shown,
+            source,
+        )
 
     async def _async_watchdog(self, _now: datetime) -> None:
         """Mark devices unavailable when their last-seen exceeds the timeout."""
         now = dt_util.utcnow()
         for device_key, seen in list(self.last_seen.items()):
-            timeout = self._effective_timeout(device_key)
+            timeout, source = self._resolve_timeout(device_key)
+            self._log_timeout_change(device_key, timeout, source)
             if timeout == AVAILABILITY_TIMEOUT_NEVER:
                 # Never-expire: a device seen at least once is never flipped to
                 # unavailable due to silence. (The back-online path on a live

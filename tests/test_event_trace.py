@@ -122,3 +122,69 @@ def test_suppressed_replay_logs_existing_info_line(event_entity, caplog):
     ]
     assert len(suppressed) == 1
     assert _DEVICE_KEY in suppressed[0]
+
+
+def _registered_lines(caplog) -> list[str]:
+    """Return the ``rtl_433 <key> registered new event_type ...`` DEBUG lines."""
+    return [m for m in caplog.messages if "registered new event_type" in m]
+
+
+def test_new_event_type_logs_registration_once(event_entity, caplog):
+    """The first press of an unseen event_type logs the registration line once.
+
+    ``secret_knock`` (the mapped value ``1``) is pre-seeded into
+    ``_attr_event_types`` in ``__init__``, so it is NOT "new". An unmapped raw
+    value falls back to its stringified form, which IS a fresh type on first
+    sight: it logs the registration line; the same type a second time does not.
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    assert "secret_knock" in event_entity._attr_event_types
+    assert "2" not in event_entity._attr_event_types
+
+    with (
+        patch.object(event_entity, "_trigger_event"),
+        patch.object(event_entity, "async_write_ha_state"),
+        patch.object(event_entity, "hass") as hass_mock,
+    ):
+        hass_mock.async_create_task = lambda coro: coro.close()
+        event_entity._handle_dispatch(_live(value=2))  # fresh fallback type "2"
+        caplog.clear()
+        event_entity._handle_dispatch(_live(value=2))  # same type: no re-log
+
+    assert "2" in event_entity._attr_event_types
+    assert _registered_lines(caplog) == []  # second press did not re-log
+
+
+def test_new_event_type_registration_carries_key_and_type(event_entity, caplog):
+    """The registration line includes the device key and the new event_type."""
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    with (
+        patch.object(event_entity, "_trigger_event"),
+        patch.object(event_entity, "async_write_ha_state"),
+        patch.object(event_entity, "hass") as hass_mock,
+    ):
+        hass_mock.async_create_task = lambda coro: coro.close()
+        event_entity._handle_dispatch(_live(value=2))
+
+    lines = _registered_lines(caplog)
+    assert len(lines) == 1
+    assert _DEVICE_KEY in lines[0]
+    assert "registered new event_type 2" in lines[0]
+
+
+def test_mapped_preseeded_event_type_does_not_register(event_entity, caplog):
+    """A press of the pre-seeded mapped type logs no registration line.
+
+    ``secret_knock`` is already in ``_attr_event_types`` from ``__init__``, so the
+    first live press of value ``1`` fires but does NOT log a "registered new
+    event_type" line.
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    with (
+        patch.object(event_entity, "_trigger_event") as trigger,
+        patch.object(event_entity, "async_write_ha_state"),
+    ):
+        event_entity._handle_dispatch(_live(value=1))
+
+    trigger.assert_called_once_with("secret_knock")
+    assert _registered_lines(caplog) == []

@@ -333,8 +333,20 @@ entities) by a **fired** or a suppression line:
 | `... -> STALE-GAP (age>threshold)` | A frame that occurred while Home Assistant was disconnected and is older than the staleness threshold. Suppressed (no fire). |
 | `... -> BACKLOG (pre-connection)` | A replayed frame timestamped before this connection began. Suppressed (no fire). |
 | `rtl_433 fired <type> for <device> field=<f> value=<v>` | An event entity fired this event type for a live transmission. |
+| `rtl_433 <device> registered new event_type <type>` | An event subtype (e.g. doorbell `secret_knock`) was seen and persisted for the first time — useful when a `device_trigger` subtype is missing. |
 | `rtl_433 skipped watchdog re-paint for <device> (no re-fire)` | The availability watchdog re-painted a cached event; it was deduped and did **not** fire. |
 | `rtl_433 suppressed replayed/stale ...` (INFO) | A real-but-stale event that *would* have fired was suppressed (logged at INFO so you see the late event). |
+| `rtl_433 discovered new device <device> (model <m>, via_replay=<bool>)` | A device was registered for the first time. `via_replay=True` means it first appeared in a reconnect replay rather than a live frame. |
+| `rtl_433 <device> reported unmapped field(s) [...] (no entity)` | The device sent a field with no library descriptor (no entity created). A bad decode often surfaces here. Logged once per device/field. |
+| `rtl_433 <device> availability timeout=<N>s\|never (source=<tier>)` | The resolved availability timeout and which tier set it (`override-or-hub` / `class-default` / `hub-default`). Logged on first resolution and on change. `never` = event-driven device that never expires. |
+
+These connection-lifecycle lines explain *why* a burst of `REPLAY`/`BACKLOG`
+frames appeared — a flaky link reconnects and the server replays its backlog:
+
+| Log line | Meaning |
+| --- | --- |
+| `rtl_433 connection anchor for <url>: connected_at=... replay_high_water=...` | The two values every frame's verdict is judged against, logged once per connect. A `BACKLOG` line means the frame predates `connected_at`; a `REPLAY` line means it is at/below `replay_high_water`. |
+| `rtl_433 disconnected from <url>; reconnecting in <N>s` | The link dropped; the next reconnect triggers a server replay. Frequent occurrences explain recurring replay bursts. |
 
 Example of one live doorbell press:
 

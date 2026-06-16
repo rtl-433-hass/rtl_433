@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import json
+import logging
 from unittest.mock import patch
 
 from freezegun import freeze_time
@@ -529,3 +530,109 @@ async def test_no_cached_payload_falls_back_to_periodic_default(
     # And the watchdog handles it without raising.
     await coordinator._async_watchdog(dt_util.utcnow())
     await hass.async_block_till_done()
+
+
+# ---------------------------------------------------------------------------
+# Resolved-timeout DEBUG trace (logged once, then on change)
+# ---------------------------------------------------------------------------
+
+_TRACE_LOGGER = "custom_components.rtl_433"
+
+
+def _timeout_lines(caplog) -> list[str]:
+    """Return the ``rtl_433 <key> availability timeout=...`` DEBUG lines."""
+    return [m for m in caplog.messages if "availability timeout=" in m]
+
+
+async def test_watchdog_logs_finite_timeout_once(hass, hub_entry_builder, caplog):
+    """A periodic reporter logs ``timeout=<N>s`` once; an unchanged tick is silent.
+
+    The explicit hub default (600s) resolves via the ``hub-default`` tier and is
+    logged on the first watchdog resolution, then suppressed while unchanged.
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    device_key = "Acurite-606TX-42"
+    hub = hub_entry_builder(availability_timeout=600)
+    coordinator = await _setup(hass, hub)
+
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _feed(coordinator, {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4})
+        await hass.async_block_till_done()
+        await coordinator._async_watchdog(dt_util.utcnow())
+        await hass.async_block_till_done()
+
+    lines = _timeout_lines(caplog)
+    assert len(lines) == 1
+    assert device_key in lines[0]
+    assert "timeout=600s" in lines[0]
+    # The real setup wires an ``effective_timeout_resolver``; an explicit hub
+    # default of 600 resolves through it as the ``override-or-hub`` tier.
+    assert "source=override-or-hub" in lines[0]
+
+    # A second tick with the same resolved timeout must NOT re-log.
+    caplog.clear()
+    with freeze_time(start):
+        await coordinator._async_watchdog(dt_util.utcnow())
+        await hass.async_block_till_done()
+    assert _timeout_lines(caplog) == []
+
+
+async def test_watchdog_logs_never_timeout_for_event_device(
+    hass, hub_entry_builder, caplog
+):
+    """An event-driven device logs ``timeout=never`` (source=class-default).
+
+    A motion device resolves to never-expire via the class default; the opaque
+    "never marked unavailable" verdict is surfaced once.
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    device_key = "GS-kw9c-7"
+    hub = hub_entry_builder(
+        availability_timeout=None,
+        devices={
+            device_key: {
+                CONF_MODEL: "GS-kw9c",
+                DEVICE_FIELDS: ["motion"],
+            }
+        },
+    )
+    assert CONF_AVAILABILITY_TIMEOUT not in hub.data
+    coordinator = await _setup(hass, hub)
+
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _feed(coordinator, {"model": "GS-kw9c", "id": 7, "motion": 1})
+        await hass.async_block_till_done()
+        await coordinator._async_watchdog(dt_util.utcnow())
+        await hass.async_block_till_done()
+
+    lines = _timeout_lines(caplog)
+    assert len(lines) == 1
+    assert device_key in lines[0]
+    assert "timeout=never" in lines[0]
+    assert "source=class-default" in lines[0]
+
+
+def test_log_timeout_change_relogs_on_change(hass, hub_entry_builder, caplog):
+    """Calling ``_log_timeout_change`` directly logs once, then only on change.
+
+    A heavy watchdog setup is unnecessary to lock the dedupe-and-relog contract:
+    the same timeout is suppressed, a changed timeout re-logs (with its source).
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    key = "Acurite-606TX-42"
+
+    coordinator._log_timeout_change(key, 600, "hub-default")
+    coordinator._log_timeout_change(key, 600, "hub-default")  # unchanged: silent
+    coordinator._log_timeout_change(key, 300, "override-or-hub")  # changed: re-log
+
+    lines = _timeout_lines(caplog)
+    assert len(lines) == 2
+    assert "timeout=600s" in lines[0]
+    assert "source=hub-default" in lines[0]
+    assert "timeout=300s" in lines[1]
+    assert "source=override-or-hub" in lines[1]
