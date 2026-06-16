@@ -59,12 +59,14 @@ from .const import (
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DOMAIN,
+    MANUFACTURER,
     signal_device_update,
     signal_hub_update,
     signal_new_device,
 )
 from .mapping import FieldDescriptor, Registry, lookup
 from .normalizer import _safe_token
+from .sdr_settings import SDR_SETTINGS
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
@@ -179,7 +181,7 @@ class Rtl433Entity(RestoreEntity):
             identifiers={(DOMAIN, f"{hub_entry_id}:{device_key}")},
             name=device_name,
             model=model or None,
-            manufacturer="rtl_433",
+            manufacturer=MANUFACTURER,
             via_device=(DOMAIN, hub_entry_id),
         )
 
@@ -356,6 +358,31 @@ class Rtl433HubControl(Rtl433HubEntity):
         the server's frequency configuration changes. Defaults to available.
         """
         return self._setting.available(self._coordinator.meta)
+
+
+async def async_setup_hub_controls(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+    platform: str,
+    control_cls: Callable[[Rtl433Coordinator, str, SdrSetting], Rtl433HubControl],
+) -> None:
+    """Register the hub's managed controls for one control platform.
+
+    Shared by the ``number`` / ``select`` / ``switch`` platforms, which differ
+    only in their entity class. When the hub's ``manage_settings`` toggle is off
+    it creates **no** entities and returns immediately; when management is on it
+    statically registers one ``control_cls`` per :data:`SDR_SETTINGS` entry whose
+    ``platform`` matches and whose capability gate is satisfied.
+    """
+    coordinator: Rtl433Coordinator = hass.data[DOMAIN][entry.entry_id]
+    if not coordinator.manage_settings:
+        return
+    async_add_entities(
+        control_cls(coordinator, entry.entry_id, setting)
+        for setting in SDR_SETTINGS
+        if setting.platform == platform and setting.capability(coordinator.meta)
+    )
 
 
 # --------------------------------------------------------------------------- #

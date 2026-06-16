@@ -23,6 +23,8 @@ from typing import Any, Final
 # always the prefix when present; ``id`` / ``channel`` / ``subtype`` are appended
 # only when present, so the same physical device always yields the same key.
 IDENTITY_KEYS: Final[tuple[str, ...]] = ("model", "id", "channel", "subtype")
+# Precomputed set form for the per-event hot path (see ``normalize``).
+_IDENTITY_KEYS_SET: Final[frozenset[str]] = frozenset(IDENTITY_KEYS)
 
 # Minimal default skip-set used when the caller injects nothing. The real
 # skip-keys come from the mapping library at runtime; this fallback
@@ -149,7 +151,7 @@ def normalize(
         ik: event[ik] for ik in IDENTITY_KEYS if event.get(ik) is not None
     }
 
-    excluded = set(IDENTITY_KEYS) | set(skip_keys)
+    excluded = _IDENTITY_KEYS_SET.union(skip_keys)
     fields = {k: v for k, v in event.items() if k not in excluded}
 
     return NormalizedEvent(

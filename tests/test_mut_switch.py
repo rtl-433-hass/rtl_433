@@ -290,7 +290,7 @@ async def test_setup_entry_capability_called_with_coordinator_meta(
     hub.add_to_hass(hass)
 
     with patch(
-        "custom_components.rtl_433.switch.SDR_SETTINGS", tuple(patched_settings)
+        "custom_components.rtl_433.entity.SDR_SETTINGS", tuple(patched_settings)
     ):
         assert await hass.config_entries.async_setup(hub.entry_id)
         await hass.async_block_till_done()
@@ -336,7 +336,7 @@ async def test_setup_entry_capability_receives_coordinator_meta_object(
     hub.add_to_hass(hass)
 
     with patch(
-        "custom_components.rtl_433.switch.SDR_SETTINGS", tuple(patched_settings)
+        "custom_components.rtl_433.entity.SDR_SETTINGS", tuple(patched_settings)
     ):
         assert await hass.config_entries.async_setup(hub.entry_id)
         await hass.async_block_till_done()
