@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.16.0...v0.17.0) (2026-06-16)
+
+
+### Features
+
+* **logging:** add DEBUG end-to-end event trace ([c6a3243](https://github.com/rtl-433-hass/rtl_433/commit/c6a32438da3d7f382b3de4012d8463cd1a2b8f59))
+* **logging:** add lifecycle, discovery, availability & decoder DEBUG traces ([07f9bd2](https://github.com/rtl-433-hass/rtl_433/commit/07f9bd22ffc2c5718934eb14c76925e5cc438575))
+
+
+### Bug Fixes
+
+* exclude hub sensor attributes from the recorder ([5ed31a2](https://github.com/rtl-433-hass/rtl_433/commit/5ed31a24d21c17af6aa526c61178aa5d916b24fe))
+
 ## [0.16.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.15.0...v0.16.0) (2026-06-10)
 
 
