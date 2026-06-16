@@ -7,9 +7,27 @@ availability watchdog, and fan events out via Home Assistant's dispatcher keyed
 by device. It is a *push* coordinator (events arrive over the socket) rather
 than a polling ``DataUpdateCoordinator``, so it is a plain class.
 
-Decoupling: this module imports nothing from ``mapping.py``, ``config_flow.py``,
-or ``entity.py``. To stay file-disjoint and cycle-free it accepts the pieces it
-needs as injectable attributes:
+The coordinator is one class, ``Rtl433Coordinator``, assembled here from three
+policy mixins so each concern lives in its own file and ``__init__`` stays the
+single place every runtime attribute is declared:
+
+- ``_sdr.py`` (:class:`._sdr._SdrSettingsMixin`) — the managed-SDR desired-state
+  Store, write path, adoption, and reconnect enforcement.
+- ``_events.py`` (:class:`._events._EventProcessingMixin`) — event normalization
+  and replay classification.
+- ``_watchdog.py`` (:class:`._watchdog._AvailabilityMixin`) — effective-timeout
+  resolution and the silence-based availability watchdog.
+
+The division of labour is **base owns I/O and state; the mixins own policy**:
+this module holds every side-effecting call (the WebSocket connect/reconnect
+loop, the HTTP ``/cmd`` transport, the Home Assistant dispatcher fan-out) plus
+``__init__``, while the mixins decide *what* to send, dispatch, or expire and
+delegate the actual I/O back to the methods defined here (``_send_cmd``,
+``_refresh_meta``, ``_dispatch``).
+
+Decoupling: the coordinator imports nothing from ``mapping.py``,
+``config_flow.py``, or ``entity.py``. To stay file-disjoint and cycle-free it
+accepts the pieces it needs as injectable attributes:
 
 - ``skip_keys`` — the set of event keys to drop from measurement fields. Defaults
   to a minimal identity set; the integration setup injects the library skip-keys.
@@ -50,93 +68,37 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..const import (
-    AVAILABILITY_TIMEOUT_NEVER,
-    CONF_DEVICES,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_PATH,
     DEFAULT_PORT,
-    DEVICE_FIELDS,
     LOGGER,
     SDR_STORE_VERSION,
-    class_default_timeout,
     sdr_store_key,
     signal_device_update,
     signal_hub_update,
 )
-from ..normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent, normalize
-from ..sdr_settings import (
-    KEY_CENTER_FREQUENCY,
-    KEY_GAIN_AUTO,
-    KEY_GAIN_DB,
-    SDR_SETTINGS,
-    SDR_SETTINGS_BY_KEY,
-    gain_command_arg,
+from ..normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent
+from ._events import (
+    DISCOVERY_BACKLOG_GRACE as DISCOVERY_BACKLOG_GRACE,  # re-export for tests
+    REPLAY_STALE_THRESHOLD as REPLAY_STALE_THRESHOLD,  # re-export for tests
+    _EventProcessingMixin,
 )
-
-
-class _SdrStore(Store[dict[str, Any]]):
-    """Per-hub desired-state Store with a Hz->MHz center-frequency migration.
-
-    Version 1 persisted ``values["center_frequency"]`` in Hz; version 2 stores it
-    in MHz (matching the control entity and the setup field). ``async_load``
-    invokes this migrator when the on-disk version is older than
-    :data:`SDR_STORE_VERSION`, so an existing managed hub's frequency converts
-    transparently on the next load.
-    """
-
-    async def _async_migrate_func(
-        self,
-        old_major_version: int,
-        old_minor_version: int,
-        old_data: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Convert a version-1 payload's center frequency from Hz to MHz."""
-        if old_major_version < 2:
-            values = old_data.get("values")
-            if isinstance(values, dict):
-                hz = values.get(KEY_CENTER_FREQUENCY)
-                if isinstance(hz, (int, float)):
-                    values[KEY_CENTER_FREQUENCY] = float(hz) / 1_000_000
-        return old_data
-
+from ._sdr import _SdrSettingsMixin, _SdrStore
+from ._watchdog import _WATCHDOG_INTERVAL, _AvailabilityMixin
 
 # Backoff bounds for the reconnect loop (seconds). Starts at 1s, doubles on
 # each consecutive failure, capped at 60s so the loop never spins hot.
 _BACKOFF_MIN = 1.0
 _BACKOFF_MAX = 60.0
 
-# How often the availability watchdog evaluates last-seen vs effective timeout.
-_WATCHDOG_INTERVAL = timedelta(seconds=30)
-
-# Age boundary that separates a genuinely-fresh "live" event from a stale "gap"
-# event in the reconnect replay. On every (re)connect the server replays up to
-# its last 100 events; a frame whose ``time`` is newer than the high-water mark
-# but older than this threshold occurred while Home Assistant was disconnected
-# (a gap event) and must NOT re-fire automations or refresh liveness. Sized
-# generously enough to absorb modest rtl_433-vs-HA clock skew + transmission
-# latency (so a real live event is never misjudged stale — "never drop a real
-# one") while staying shorter than a typical HA-restart outage (so restart gap
-# events are suppressed). Assumes the server and HA clocks are roughly NTP-synced.
-REPLAY_STALE_THRESHOLD = timedelta(seconds=30)
-
-# Skew grace for the post-connection device-registration gate. A previously
-# unknown device auto-registers only once a frame timestamped at or after
-# ``_connection_time - DISCOVERY_BACKLOG_GRACE`` is seen; older frames are the
-# server's pre-connection backlog and seed runtime state without registering.
-# The grace absorbs modest rtl_433-vs-HA clock skew + transmission latency and
-# assumes the server and HA clocks are roughly NTP-synced (a frame with no
-# parseable ``time`` is treated as live, preserving "never drop a real one").
-DISCOVERY_BACKLOG_GRACE = timedelta(seconds=5)
-
 # Timeout (seconds) for the short-lived connection attempt used by the config
 # flow's reachability check.
 _VALIDATE_TIMEOUT = 10.0
 
-# Timeout (seconds) for each one-shot ``/cmd`` getter HTTP request.
+# Timeout (seconds) for each one-shot ``/cmd`` getter/setter HTTP request.
 _GETTER_TIMEOUT = 10.0
 
 # How often ``get_meta`` + ``get_stats`` are re-fetched over HTTP while
@@ -176,10 +138,12 @@ def _build_cmd_url(host: str, port: int, *, secure: bool = False) -> str:
     return f"{scheme}://{host}:{port}/cmd"
 
 
-class Rtl433Coordinator:
+class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityMixin):
     """Owns the WebSocket connection and runtime state for one rtl_433 hub.
 
     All state is scoped to a single config entry, so multiple hubs coexist.
+    Behavior is grouped into the mixins listed in the module docstring; every
+    runtime attribute those mixins read is declared in :meth:`__init__` below.
 
     Public API:
         ``async_start()`` / ``async_stop()`` — lifecycle.
@@ -380,7 +344,7 @@ class Rtl433Coordinator:
         # re-applies after the user later changes the frequency via the control.
         self._initial_freq_seeded: bool = False
         self._cmd_lock = asyncio.Lock()
-        self._store: Store[dict[str, Any]] = _SdrStore(
+        self._store: _SdrStore = _SdrStore(
             hass, SDR_STORE_VERSION, sdr_store_key(entry.entry_id)
         )
 
@@ -600,8 +564,50 @@ class Rtl433Coordinator:
         """Notify hub entities that connectivity / meta / stats changed."""
         async_dispatcher_send(self.hass, signal_hub_update(self.entry.entry_id))
 
+    def _dispatch(
+        self,
+        device_key: str,
+        normalized: NormalizedEvent,
+        *,
+        is_replay: bool | None = None,
+        is_repaint: bool = False,
+    ) -> None:
+        """Fan a normalized event out to the device's entities.
+
+        Called by ``_process_event`` (:class:`._events._EventProcessingMixin`) and
+        the availability watchdog (:class:`._watchdog._AvailabilityMixin`); it is
+        the single device-update dispatcher seam.
+
+        The replay flag travels on the ``NormalizedEvent`` itself, so the normal
+        ``_process_event`` path passes ``is_replay=None`` (the default) to honor
+        whatever flag the classification stamped on the object. An explicit
+        ``is_replay`` overrides it: the watchdog re-dispatch of a *cached* event
+        passes ``is_replay=False`` so its unavailable re-paint is never suppressed
+        as a replay even when the cached object happened to be a replay frame.
+
+        ``is_repaint=True`` (watchdog re-paint only) additionally marks the frame
+        as an availability re-paint of the *cached* last event rather than a new
+        transmission, so ``Rtl433Event`` skips (re-)firing regardless of the cached
+        value or object identity -- the identity dedupe alone is unreliable here
+        because a replay-seeded cache leaves the event entity's anchor unset after
+        a restart (and the ``is_replay`` rewrite below mints a fresh object).
+        """
+        if (is_replay is not None and normalized.is_replay != is_replay) or (
+            is_repaint and not normalized.is_repaint
+        ):
+            normalized = dataclasses.replace(
+                normalized,
+                is_replay=normalized.is_replay if is_replay is None else is_replay,
+                is_repaint=is_repaint or normalized.is_repaint,
+            )
+        async_dispatcher_send(
+            self.hass,
+            signal_device_update(self.entry.entry_id, device_key),
+            normalized,
+        )
+
     # ------------------------------------------------------------------ #
-    # HTTP ``/cmd`` getters (SDR/meta config + server stats)             #
+    # HTTP ``/cmd`` transport (SDR/meta config + server stats)           #
     # ------------------------------------------------------------------ #
     async def _fetch_cmd(self, command: str) -> Any | None:
         """GET one ``/cmd`` getter; return parsed JSON or None on any failure.
@@ -662,6 +668,38 @@ class Rtl433Coordinator:
         if isinstance(payload, dict) and "result" in payload:
             return payload["result"]
         return payload
+
+    async def _send_cmd(
+        self, command: str, *, val: int | None = None, arg: str | None = None
+    ) -> bool:
+        """Issue one setter ``/cmd`` over HTTP; return ``True`` on success.
+
+        Mirrors :meth:`_fetch_cmd` (shared session, server-root URL, never the WS
+        ``path``) but adds the ``val``/``arg`` query params and serializes the
+        send under ``_cmd_lock`` so a user write and a reconnect replay can never
+        interleave. ``val`` is stringified as an integer; ``arg`` is sent
+        verbatim — including the empty string, which is the gain "auto" sentinel
+        (so the gain command must always pass ``arg``, never omit it). Any
+        HTTP/parse error is caught, logged at debug, and returns ``False``.
+        Commands go only over ``/cmd`` — never the streaming WebSocket.
+        """
+        session = async_get_clientsession(self.hass)
+        url = _build_cmd_url(self.host, self.port, secure=self.secure)
+        params: dict[str, str] = {"cmd": command}
+        if val is not None:
+            params["val"] = str(int(val))
+        if arg is not None:
+            params["arg"] = arg
+        async with self._cmd_lock:
+            try:
+                async with session.get(
+                    url, params=params, timeout=_GETTER_TIMEOUT
+                ) as resp:
+                    resp.raise_for_status()
+                return True
+            except Exception as err:  # noqa: BLE001 - never kill the loop
+                LOGGER.debug("rtl_433 /cmd %s failed at %s: %s", command, url, err)
+                return False
 
     async def _refresh_meta(self) -> None:
         """Fetch ``get_meta`` + ``get_gain`` + ``get_ppm_error`` into ``self.meta``."""
@@ -750,622 +788,6 @@ class Rtl433Coordinator:
         if self.connected:
             await self._refresh_meta()
             await self._refresh_stats()
-
-    # ------------------------------------------------------------------ #
-    # Managed SDR settings: desired-state Store, write path, adoption,    #
-    # and reconnect enforcement.                                          #
-    # ------------------------------------------------------------------ #
-    async def async_load_desired_state(self) -> None:
-        """Load the persisted desired state, or wipe it when management is off.
-
-        Called from :meth:`async_start` before the connect loop is created. When
-        ``manage_settings`` is ``False`` the Store is removed so a later re-enable
-        re-adopts the server's then-current settings from scratch; otherwise the
-        ``{"values": ..., "managed": [...]}`` payload is loaded into
-        ``self._desired`` / ``self._managed``.
-        """
-        if not self.manage_settings:
-            await self._store.async_remove()  # re-enable will re-adopt
-            self._desired, self._managed = {}, set()
-            self._initial_freq_seeded = False
-            return
-        data = await self._store.async_load() or {}
-        self._desired = dict(data.get("values", {}))
-        self._managed = set(data.get("managed", []))
-        # Absent in stores written before this flag existed -> treat as not yet
-        # seeded; the seed only applies when an ``initial_center_frequency`` is
-        # configured, so a legacy store without one is unaffected.
-        self._initial_freq_seeded = bool(data.get("initial_freq_seeded", False))
-
-    async def _persist_desired(self) -> None:
-        """Persist the desired-state map + managed-set to the per-hub Store."""
-        await self._store.async_save(
-            {
-                "values": self._desired,
-                "managed": sorted(self._managed),
-                "initial_freq_seeded": self._initial_freq_seeded,
-            }
-        )
-
-    async def _send_cmd(
-        self, command: str, *, val: int | None = None, arg: str | None = None
-    ) -> bool:
-        """Issue one setter ``/cmd`` over HTTP; return ``True`` on success.
-
-        Mirrors :meth:`_fetch_cmd` (shared session, server-root URL, never the WS
-        ``path``) but adds the ``val``/``arg`` query params and serializes the
-        send under ``_cmd_lock`` so a user write and a reconnect replay can never
-        interleave. ``val`` is stringified as an integer; ``arg`` is sent
-        verbatim — including the empty string, which is the gain "auto" sentinel
-        (so the gain command must always pass ``arg``, never omit it). Any
-        HTTP/parse error is caught, logged at debug, and returns ``False``.
-        Commands go only over ``/cmd`` — never the streaming WebSocket.
-        """
-        session = async_get_clientsession(self.hass)
-        url = _build_cmd_url(self.host, self.port, secure=self.secure)
-        params: dict[str, str] = {"cmd": command}
-        if val is not None:
-            params["val"] = str(int(val))
-        if arg is not None:
-            params["arg"] = arg
-        async with self._cmd_lock:
-            try:
-                async with session.get(
-                    url, params=params, timeout=_GETTER_TIMEOUT
-                ) as resp:
-                    resp.raise_for_status()
-                return True
-            except Exception as err:  # noqa: BLE001 - never kill the loop
-                LOGGER.debug("rtl_433 /cmd %s failed at %s: %s", command, url, err)
-                return False
-
-    def _gain_command_arg(self) -> str | None:
-        """Compose the ``gain`` ``/cmd`` arg from the combined desired gain state.
-
-        Gain is two desired keys (``gain`` dB + ``gain_auto`` bool) that resolve
-        to one ``gain`` command; both the per-field build (:meth:`_command_args`)
-        and connect-time enforcement (:meth:`_enforce_all`) compose it the same
-        way, so the composition lives here.
-        """
-        return gain_command_arg(
-            self._desired.get(KEY_GAIN_DB),
-            bool(self._desired.get(KEY_GAIN_AUTO, False)),
-        )
-
-    def _command_args(self, key: str) -> tuple[str, int | None, str | None] | None:
-        """Build the ``(command, val, arg)`` to send for one managed field.
-
-        Returns ``None`` when the field has no desired value to send. Gain is two
-        desired keys (``gain`` dB + ``gain_auto`` bool) but one ``gain`` command,
-        so its ``arg`` is composed from the *combined* desired state via
-        :func:`gain_command_arg`; both gain keys resolve to the same command and
-        the caller is responsible for emitting it only once.
-        """
-        if key in (KEY_GAIN_DB, KEY_GAIN_AUTO):
-            return ("gain", None, self._gain_command_arg())
-        setting = SDR_SETTINGS_BY_KEY.get(key)
-        if setting is None or key not in self._desired:
-            return None
-        sent = setting.to_command(self._desired[key])
-        if setting.arg_kind == "val":
-            return (setting.command, int(sent), None)
-        return (setting.command, None, str(sent))
-
-    async def set_sdr(self, field: str, value: Any) -> None:
-        """Write a desired SDR value: persist it, then enforce it if connected.
-
-        Updates ``self._desired[field]``, marks the field managed, and persists
-        the Store first so the intent survives a restart even if the live send
-        fails. If connected, the mapped setter command is issued (under the lock)
-        and ``self.meta`` is reconciled via a best-effort ``_refresh_meta``; a
-        ``/cmd`` failure is swallowed and **leaves the desired value intact**.
-        """
-        self._desired[field] = value
-        self._managed.add(field)
-        await self._persist_desired()
-        if self.connected:
-            await self._enforce_field(field)
-
-    async def _enforce_field(self, field: str) -> None:
-        """Send one managed field's command, then read it back (best effort)."""
-        args = self._command_args(field)
-        if args is None:
-            return
-        command, val, arg = args
-        await self._send_cmd(command, val=val, arg=arg)
-        # Reconcile self.meta from the server; swallow its own failures.
-        await self._refresh_meta()
-
-    async def _seed_desired_on_first_connect(self) -> None:
-        """Establish the desired state on the first managed connect.
-
-        Two independent one-time steps, both safe to call on every connect:
-
-        - Adopt the server's current settings while ``_desired`` is empty (the
-          very first connect). Once adopted+persisted, later connects skip this.
-        - Apply the setup-time ``initial_center_frequency`` exactly once, gated on
-          a persisted ``_initial_freq_seeded`` flag rather than on ``_desired``
-          being empty. This makes the user's explicit choice win over the adopted
-          (and hop-mode-skipped) value even when the Store already holds desired
-          state, and never re-applies after the user later changes the frequency
-          via the control.
-        """
-        if not self._desired:
-            await self._adopt_from_server()
-        if self.initial_center_frequency is not None and not self._initial_freq_seeded:
-            self._desired[KEY_CENTER_FREQUENCY] = self.initial_center_frequency
-            self._managed.add(KEY_CENTER_FREQUENCY)
-            self._initial_freq_seeded = True
-            await self._persist_desired()
-
-    async def _adopt_from_server(self) -> None:
-        """Seed the desired state from the server's current ``self.meta``.
-
-        Runs once (when ``_desired`` is empty) on first connect. If the getters
-        produced nothing (``self.meta`` empty / ``/cmd`` hidden behind a proxy)
-        we adopt nothing and leave the Store empty — the reachability repair on
-        the getter path already surfaces that; we never raise here. Guard: skip
-        ``center_frequency`` while the server is in hop mode
-        (``len(frequencies) > 1``) so HA does not pin a single frequency. The
-        gain pair is seeded explicitly: ``gain_auto`` from ``gain == ""`` and the
-        ``gain`` dB value parsed from the gain string when not auto.
-        """
-        meta = self.meta
-        if not meta:  # /cmd unreachable -> adopt nothing
-            return
-        hopping = len(meta.get("frequencies", []) or []) > 1
-        for setting in SDR_SETTINGS:
-            if setting.key in (KEY_GAIN_DB, KEY_GAIN_AUTO):
-                continue  # handled as a pair below
-            if setting.key == "center_frequency" and hopping:
-                continue
-            current = setting.read(meta)
-            if current is None:
-                continue
-            self._desired[setting.key] = current
-            self._managed.add(setting.key)
-
-        # Gain pair: only adopt when the server reported a gain string at all.
-        if "gain" in meta:
-            gain = meta["gain"]
-            auto = gain == ""
-            self._desired[KEY_GAIN_AUTO] = auto
-            self._managed.add(KEY_GAIN_AUTO)
-            if not auto:
-                try:
-                    self._desired[KEY_GAIN_DB] = float(gain)
-                    self._managed.add(KEY_GAIN_DB)
-                except TypeError, ValueError:
-                    pass
-
-        await self._persist_desired()
-
-    async def _enforce_all(self) -> None:
-        """Replay every managed field's setter command (gain emitted once).
-
-        Best-effort: each send swallows its own ``/cmd`` errors and never raises,
-        so a reconnect replay cannot disturb the connect loop or the event
-        stream. The gain pair shares one ``gain`` command, so it is composed from
-        the combined desired values and emitted exactly once.
-
-        After the replay, reconcile ``self.meta`` from the server (mirroring the
-        single-field :meth:`_enforce_field` read-back) so the hub's "actual" SDR
-        sensors — and the controls that fall back to meta — reflect the values
-        just applied instead of the pre-enforce snapshot taken on connect. The
-        emit inside ``_refresh_meta`` also repaints the controls after the
-        first-connect seed changed their desired value.
-        """
-        gain_managed = bool(self._managed & {KEY_GAIN_DB, KEY_GAIN_AUTO})
-        for key in sorted(self._managed):
-            if key in (KEY_GAIN_DB, KEY_GAIN_AUTO):
-                continue  # emitted once below
-            args = self._command_args(key)
-            if args is None:
-                continue
-            command, val, arg = args
-            await self._send_cmd(command, val=val, arg=arg)
-        if gain_managed:
-            await self._send_cmd("gain", arg=self._gain_command_arg())
-        # Reconcile meta from the server so the actual-value sensors converge now
-        # rather than waiting for the next refresh tick; swallows its own errors.
-        # Skip when nothing is managed (the connect-time refresh already ran and
-        # there were no setter sends to reconcile).
-        if self._managed:
-            await self._refresh_meta()
-
-    # ------------------------------------------------------------------ #
-    # Public read API for the control entities                           #
-    # ------------------------------------------------------------------ #
-    def get_desired(self, field: str) -> Any:
-        """Return the current desired value for a field (``None`` if unset)."""
-        return self._desired.get(field)
-
-    def is_managed(self, field: str) -> bool:
-        """Return whether Home Assistant is actively managing a field."""
-        return field in self._managed
-
-    async def clear_desired_state(self) -> None:
-        """Drop all desired state and remove the Store (management turned off)."""
-        self._desired, self._managed = {}, set()
-        self._initial_freq_seeded = False
-        await self._store.async_remove()
-
-    # ------------------------------------------------------------------ #
-    # Event handling                                                     #
-    # ------------------------------------------------------------------ #
-    @staticmethod
-    def _parse_event_time(raw: Any) -> datetime | None:
-        """Parse an rtl_433 ``time`` value to a comparable UTC instant, or ``None``.
-
-        rtl_433 stamps ``time`` either as a local ``"YYYY-MM-DD HH:MM:SS"`` string
-        (optionally with fractional seconds) or as ISO-8601 with an offset / ``Z``,
-        depending on server config. This reduces both to a single UTC basis so the
-        replay classification can compare them: local-naive values are interpreted
-        in HA's configured time zone (the NTP-sync assumption documented on
-        :data:`REPLAY_STALE_THRESHOLD`), offset-aware values are converted as-is.
-
-        A missing, blank, or unparsable value yields ``None`` ("no usable
-        timestamp" — the frame is then treated as live). Never raises into the
-        frame loop.
-        """
-        if not isinstance(raw, str):
-            return None
-        text = raw.strip()
-        if not text:
-            return None
-        try:
-            parsed = dt_util.parse_datetime(text)
-            if parsed is None:
-                # ``parse_datetime`` rejects the space-separated local form
-                # without an offset; parse it explicitly as a naive datetime.
-                for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
-                    try:
-                        parsed = datetime.strptime(text, fmt)  # noqa: DTZ007 - local
-                        break
-                    except ValueError:
-                        continue
-            if parsed is None:
-                return None
-            # ``as_utc`` treats a naive datetime as DEFAULT_TIME_ZONE and leaves an
-            # aware one alone, so both forms reduce to a single comparable basis.
-            return dt_util.as_utc(parsed)
-        except ValueError, TypeError, OverflowError:
-            return None
-
-    def _process_event(self, event: dict[str, Any]) -> None:
-        """Normalize an event, classify it (live vs replay), and dispatch.
-
-        Replays and stale gap events seed sensor values but must NOT re-fire
-        ``event`` entities or refresh ``last_seen`` / ``available``. Two signals
-        classify them: the high-water mark catches an already-seen frame and the
-        event age catches an unseen-but-old gap event.
-        """
-        normalized = normalize(event, self.skip_keys)
-        key = normalized.device_key
-
-        now = dt_util.utcnow()
-
-        # Read the raw ``time`` independently of ``normalize`` (which drops it)
-        # and classify the frame into live / already-seen replay / stale gap.
-        event_time = self._parse_event_time(event.get("time"))
-        # A frame timestamped before this connection began is part of the
-        # server's reconnect-replay backlog (it occurred while HA was
-        # disconnected), so it must never be treated as a live transmission --
-        # even when it is recent enough to pass the staleness test below. This is
-        # the HA-restart re-delivery case: after a restart the high-water mark is
-        # unset, so without this gate a doorbell pressed shortly before the
-        # restart re-fires on reconnect. Reuses the same connection gate (and skew
-        # grace) the device auto-registration below trusts. ``_connection_time is
-        # None`` (disconnected, or a direct unit-test feed) and an unparsable
-        # ``time`` both leave this False, so a genuine live frame is never dropped.
-        is_backlog = (
-            self._connection_time is not None
-            and event_time is not None
-            and event_time < self._connection_time - DISCOVERY_BACKLOG_GRACE
-        )
-        if event_time is None:
-            # No usable timestamp -> treat as live ("never drop a real one").
-            is_replay = False
-            verdict = "LIVE (no-timestamp)"
-        elif (
-            self._event_high_water is not None and event_time <= self._event_high_water
-        ):
-            # At or below the high-water mark -> an already-seen replay (catches
-            # the re-sent buffer tail on a brief blip; never re-fires).
-            is_replay = True
-            verdict = "REPLAY (event_time<=high_water)"
-        elif now - event_time > REPLAY_STALE_THRESHOLD:
-            # Newer than the mark (HA never saw it) but old -> a stale gap event
-            # that occurred while disconnected. Advance the mark so it is not
-            # reconsidered, but do not treat it as live.
-            is_replay = True
-            self._event_high_water = event_time
-            verdict = "STALE-GAP (age>threshold)"
-        elif is_backlog:
-            # Newer than the mark and recent, but timestamped before this
-            # connection -> a replayed backlog frame, not a live transmission.
-            # Suppress it (so a restart does not re-fire events) while advancing
-            # the mark so it is not reconsidered.
-            is_replay = True
-            self._event_high_water = event_time
-            verdict = "BACKLOG (pre-connection)"
-        else:
-            # Newer than the mark and recent -> a genuine live transmission.
-            # Clamp the high-water advance to ``now``: a frame stamped in the
-            # future (server clock ahead of HA, or a one-off glitched timestamp)
-            # must not push the mark past wall-clock time, or every subsequent
-            # correctly-stamped live frame would fall at-or-below it and be
-            # wrongly suppressed as a replay -- stalling availability and
-            # silencing event entities until wall-clock caught up. The frame
-            # still fires as live; only the mark is bounded.
-            is_replay = False
-            self._event_high_water = min(event_time, now)
-            verdict = "LIVE (event_time>high_water)"
-
-        # Carry the classification on the event object (the dispatch carrier), so
-        # every ``_handle_dispatch`` sees a consistent flag with no signature
-        # churn and the event platform can log a suppressed transmission's age.
-        normalized = dataclasses.replace(
-            normalized, is_replay=is_replay, event_time=event_time
-        )
-
-        # Compact ingestion/classification trace for every event frame reaching
-        # this point -- emitted upstream of the registration / discovery gate so
-        # unregistered, disabled, and discovery-off devices are still logged.
-        LOGGER.debug(
-            "rtl_433 RX %s fields=%s time=%s -> %s",
-            key,
-            normalized.fields,
-            event_time.isoformat() if event_time is not None else "none",
-            verdict,
-        )
-
-        self.devices[key] = normalized
-
-        # Track observed field keys for diagnostics (surfaced as unmatched keys).
-        # Done for every outcome so a replay-discovered device's sensors can seed.
-        field_keys = set(normalized.fields)
-        self.seen_fields |= field_keys
-        self.device_fields.setdefault(key, set()).update(field_keys)
-
-        # Flag fields with no library descriptor at DEBUG, once per (device, key):
-        # a bad decode often surfaces as an unexpected field that maps to no
-        # entity. Skipped entirely when ``known_field_keys`` is empty (library not
-        # wired / failed to load) so it cannot flag every field.
-        if self.known_field_keys:
-            already = self._logged_unmapped.setdefault(key, set())
-            fresh = field_keys - self.known_field_keys - already
-            if fresh:
-                already |= fresh
-                LOGGER.debug(
-                    "rtl_433 %s reported unmapped field(s) %s (no entity)",
-                    key,
-                    sorted(fresh),
-                )
-
-        # Only a live frame refreshes liveness; replays / stale gap events leave
-        # ``last_seen`` / ``available`` alone so a genuinely-offline device is not
-        # resurrected by the reconnect replay.
-        was_available = self.available.get(key)
-        if not is_replay:
-            self.last_seen[key] = now
-            self.available[key] = True
-
-        # Gate auto-registration to post-connection messages: a pre-connection
-        # backlog frame (``is_backlog`` above) belongs to the server's replay
-        # (replayed on connect) and must seed runtime state above without creating
-        # a device. A frame with no parseable ``time`` is treated as
-        # post-connection ("never drop a real one"), as is any frame once
-        # disconnected (``_connection_time is None``) -- both leave ``is_backlog``
-        # False. Registration keys off ``self._discovered`` rather than ``is_new``
-        # so a device first seen in the backlog still registers on its first true
-        # live event.
-        is_post_connection = not is_backlog
-        # The new-device callback still fires for a replay-discovered device so
-        # its entities exist and can seed; its availability stays governed by
-        # liveness (it reads unavailable until a live frame arrives). The
-        # ``is_replay`` flag lets the callback wire up the device without raising
-        # a "new device" notification for a reconnect re-broadcast (a replay is
-        # never a genuine first-time live discovery).
-        if (
-            key not in self._discovered
-            and is_post_connection
-            and self.discovery_enabled
-            and self.new_device_callback is not None
-        ):
-            self._discovered.add(key)
-            try:
-                self.new_device_callback(key, normalized.model, is_replay)
-            except Exception:  # noqa: BLE001 - a bad hook must not kill the loop
-                LOGGER.exception(
-                    "rtl_433 failed to register a newly discovered device (%s)", key
-                )
-            else:
-                LOGGER.debug(
-                    "rtl_433 discovered new device %s (model %s, via_replay=%s)",
-                    key,
-                    normalized.model,
-                    is_replay,
-                )
-
-        self._dispatch(key, normalized)
-
-        if not is_replay and was_available is False:
-            LOGGER.debug("rtl_433 device %s back online", key)
-
-    def _dispatch(
-        self,
-        device_key: str,
-        normalized: NormalizedEvent,
-        *,
-        is_replay: bool | None = None,
-        is_repaint: bool = False,
-    ) -> None:
-        """Fan a normalized event out to the device's entities.
-
-        The replay flag travels on the ``NormalizedEvent`` itself, so the normal
-        ``_process_event`` path passes ``is_replay=None`` (the default) to honor
-        whatever flag the classification stamped on the object. An explicit
-        ``is_replay`` overrides it: the watchdog re-dispatch of a *cached* event
-        passes ``is_replay=False`` so its unavailable re-paint is never suppressed
-        as a replay even when the cached object happened to be a replay frame.
-
-        ``is_repaint=True`` (watchdog re-paint only) additionally marks the frame
-        as an availability re-paint of the *cached* last event rather than a new
-        transmission, so ``Rtl433Event`` skips (re-)firing regardless of the cached
-        value or object identity -- the identity dedupe alone is unreliable here
-        because a replay-seeded cache leaves the event entity's anchor unset after
-        a restart (and the ``is_replay`` rewrite below mints a fresh object).
-        """
-        if (is_replay is not None and normalized.is_replay != is_replay) or (
-            is_repaint and not normalized.is_repaint
-        ):
-            normalized = dataclasses.replace(
-                normalized,
-                is_replay=normalized.is_replay if is_replay is None else is_replay,
-                is_repaint=is_repaint or normalized.is_repaint,
-            )
-        async_dispatcher_send(
-            self.hass,
-            signal_device_update(self.entry.entry_id, device_key),
-            normalized,
-        )
-
-    # ------------------------------------------------------------------ #
-    # Availability watchdog                                              #
-    # ------------------------------------------------------------------ #
-    def _known_field_keys(self, device_key: str) -> set[str]:
-        """Restart-safe set of a device's measurement field keys.
-
-        Unions the persisted adopted fields
-        (``entry.data[CONF_DEVICES][key][fields]`` — survives a restart) with the
-        latest live payload's fields (``self.devices[key].fields`` — the rtl_433
-        payload with identity and skip-keys removed), so a device that has been
-        silent since startup is still classified from what it reported before.
-        Shared by the availability class-default and the event-driven check so the
-        two can never diverge: reading only the live payload was the bug that left
-        an event device silent since a restart on the periodic class default and
-        let its battery (and other) sensors expire to unavailable.
-        """
-        keys: set[str] = set()
-        device_cfg = self.entry.data.get(CONF_DEVICES, {}).get(device_key)
-        if device_cfg:
-            keys.update(device_cfg.get(DEVICE_FIELDS, []) or [])
-        normalized = self.devices.get(device_key)
-        if normalized is not None:
-            keys.update(normalized.fields)
-        return keys
-
-    def _class_default_timeout(self, device_key: str) -> int:
-        """Return the device-class default timeout for a device.
-
-        Classifies event-driven vs periodic from the device's restart-safe field
-        set (:meth:`_known_field_keys` — adopted fields unioned with the latest
-        live payload) against ``self.event_driven_keys`` (derived from the entry's
-        device library). An event-driven device (open/close/motion/button/
-        doorbell — no periodic check-in) gets the never-expire default; everything
-        else, including a device with no known fields at all, gets the periodic
-        default. Reading the adopted fields — not only the live payload — is what
-        keeps an event device that has been silent since a restart on never-expire
-        rather than wrongly expiring its battery and other sensors at the periodic
-        timeout.
-        """
-        payload = dict.fromkeys(self._known_field_keys(device_key))
-        return class_default_timeout(payload, self.event_driven_keys)
-
-    def is_event_driven_device(self, device_key: str) -> bool:
-        """Whether the device's known fields mark it event-driven (no check-in).
-
-        True when any of the device's field keys is in ``self.event_driven_keys``
-        (open/close/motion/button/doorbell — transmits only on a state change, so
-        availability never expires and conveys no freshness). Considers both the
-        restart-safe adopted fields and the latest live payload (via
-        :meth:`_known_field_keys`), so a device silent since startup is still
-        classified from its adopted fields. Used to enable the per-device
-        "Last seen" sensor by default for these devices (their only freshness
-        signal once availability stops expiring) and to resolve the never-expire
-        availability class default.
-        """
-        if not self.event_driven_keys:
-            return False
-        return not self.event_driven_keys.isdisjoint(self._known_field_keys(device_key))
-
-    def _resolve_timeout(self, device_key: str) -> tuple[int, str]:
-        """Resolve the effective timeout and the tier that produced it.
-
-        Resolution order: per-device override → explicit hub default → device-class
-        default (from the latest payload) → ``DEFAULT_AVAILABILITY_TIMEOUT``. The
-        resolver returns a concrete int for the two explicit tiers (including
-        ``0`` = never-expire) or ``None`` when neither is set, in which case the
-        device-class default applies. The second element is a short, DEBUG-only
-        label of which tier won (the resolver collapses override and hub default
-        into one ``int`` so they cannot be told apart here).
-        """
-        if self.effective_timeout_resolver is not None:
-            try:
-                resolved = self.effective_timeout_resolver(device_key)
-            except Exception:  # noqa: BLE001 - fall back to the class default
-                LOGGER.exception(
-                    "rtl_433 failed to determine the availability timeout for %s; "
-                    "using the default",
-                    device_key,
-                )
-            else:
-                if resolved is not None:
-                    return resolved, "override-or-hub"
-                return self._class_default_timeout(device_key), "class-default"
-        return self.availability_timeout, "hub-default"
-
-    def _effective_timeout(self, device_key: str) -> int:
-        """Resolve the effective timeout for a device (see :meth:`_resolve_timeout`)."""
-        return self._resolve_timeout(device_key)[0]
-
-    def _log_timeout_change(self, device_key: str, timeout: int, source: str) -> None:
-        """Log a device's resolved availability timeout once, then on each change.
-
-        Answers "why did / didn't this device expire": event-driven devices
-        (doorbells, contacts) resolve to never-expire, which is otherwise opaque.
-        """
-        if self._logged_timeouts.get(device_key) == timeout:
-            return
-        self._logged_timeouts[device_key] = timeout
-        shown = "never" if timeout == AVAILABILITY_TIMEOUT_NEVER else f"{timeout}s"
-        LOGGER.debug(
-            "rtl_433 %s availability timeout=%s (source=%s)",
-            device_key,
-            shown,
-            source,
-        )
-
-    async def _async_watchdog(self, _now: datetime) -> None:
-        """Mark devices unavailable when their last-seen exceeds the timeout."""
-        now = dt_util.utcnow()
-        for device_key, seen in list(self.last_seen.items()):
-            timeout, source = self._resolve_timeout(device_key)
-            self._log_timeout_change(device_key, timeout, source)
-            if timeout == AVAILABILITY_TIMEOUT_NEVER:
-                # Never-expire: a device seen at least once is never flipped to
-                # unavailable due to silence. (The back-online path on a live
-                # event still applies.)
-                continue
-            stale = (now - seen) > timedelta(seconds=timeout)
-            currently = self.available.get(device_key, True)
-            if stale and currently:
-                self.available[device_key] = False
-                LOGGER.debug(
-                    "rtl_433 device %s went unavailable (no event for %ss)",
-                    device_key,
-                    timeout,
-                )
-                normalized = self.devices.get(device_key)
-                if normalized is not None:
-                    # A watchdog re-paint of the cached event is not a replay (so
-                    # measurement entities re-read availability), but it is also not
-                    # a transmission: ``is_repaint`` tells ``Rtl433Event`` not to
-                    # (re-)fire the stale cached value as a fresh event.
-                    self._dispatch(
-                        device_key, normalized, is_replay=False, is_repaint=True
-                    )
 
     # ------------------------------------------------------------------ #
     # Config-flow connectivity check                                     #
