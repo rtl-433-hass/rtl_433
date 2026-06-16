@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.18.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.17.0...v0.18.0) (2026-06-16)
+
+
+### Features
+
+* **logging:** simplify user-facing log and notification wording ([b79cfad](https://github.com/rtl-433-hass/rtl_433/commit/b79cfadd5870474e515786e35dc42158760fe397))
+
+
+### Bug Fixes
+
+* **calibration:** reject non-positive calibration scale ([06baec9](https://github.com/rtl-433-hass/rtl_433/commit/06baec98b18a39df11bd65c1d609e05f7ee8b94d))
+* **config_flow:** guard discovery adopt against identity corruption ([a73609e](https://github.com/rtl-433-hass/rtl_433/commit/a73609e4e2e017f9cb869bed49b8215776ab0110))
+* **coordinator:** clamp replay high-water mark to now ([d5f2e14](https://github.com/rtl-433-hass/rtl_433/commit/d5f2e1452cb5480bec67a00c4b016fddc7a855a7))
+* **event:** stop watchdog availability re-paint from firing phantom events ([d58c6b2](https://github.com/rtl-433-hass/rtl_433/commit/d58c6b28c5346e002200da3a9ec01c98e4a0a7bd))
+* **library:** sentence-case entity names and auto-name device-class fields ([67f542d](https://github.com/rtl-433-hass/rtl_433/commit/67f542d640d5c8c3a5ab3127442478232e298456))
+
+
+### Documentation
+
+* **comments:** drop planning-doc references and trim duplicated rationale ([5e3c2e3](https://github.com/rtl-433-hass/rtl_433/commit/5e3c2e39d404f79af7a8479e1e9d1346fabe2143))
+
 ## [0.17.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.16.0...v0.17.0) (2026-06-16)
 
 
