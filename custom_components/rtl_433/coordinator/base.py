@@ -1185,6 +1185,7 @@ class Rtl433Coordinator:
         normalized: NormalizedEvent,
         *,
         is_replay: bool | None = None,
+        is_repaint: bool = False,
     ) -> None:
         """Fan a normalized event out to the device's entities.
 
@@ -1194,11 +1195,22 @@ class Rtl433Coordinator:
         ``is_replay`` overrides it: the watchdog re-dispatch of a *cached* event
         passes ``is_replay=False`` so its unavailable re-paint is never suppressed
         as a replay even when the cached object happened to be a replay frame.
-        Identity is preserved when no rebuild is needed, so the event entity's
-        object-identity dedupe of the watchdog re-paint still holds.
+
+        ``is_repaint=True`` (watchdog re-paint only) additionally marks the frame
+        as an availability re-paint of the *cached* last event rather than a new
+        transmission, so ``Rtl433Event`` skips (re-)firing regardless of the cached
+        value or object identity -- the identity dedupe alone is unreliable here
+        because a replay-seeded cache leaves the event entity's anchor unset after
+        a restart (and the ``is_replay`` rewrite below mints a fresh object).
         """
-        if is_replay is not None and normalized.is_replay != is_replay:
-            normalized = dataclasses.replace(normalized, is_replay=is_replay)
+        if (is_replay is not None and normalized.is_replay != is_replay) or (
+            is_repaint and not normalized.is_repaint
+        ):
+            normalized = dataclasses.replace(
+                normalized,
+                is_replay=normalized.is_replay if is_replay is None else is_replay,
+                is_repaint=is_repaint or normalized.is_repaint,
+            )
         async_dispatcher_send(
             self.hass,
             signal_device_update(self.entry.entry_id, device_key),
@@ -1331,9 +1343,13 @@ class Rtl433Coordinator:
                 )
                 normalized = self.devices.get(device_key)
                 if normalized is not None:
-                    # A watchdog re-paint of the cached event is not a replay; it
-                    # must not be suppressed or the unavailable-repaint breaks.
-                    self._dispatch(device_key, normalized, is_replay=False)
+                    # A watchdog re-paint of the cached event is not a replay (so
+                    # measurement entities re-read availability), but it is also not
+                    # a transmission: ``is_repaint`` tells ``Rtl433Event`` not to
+                    # (re-)fire the stale cached value as a fresh event.
+                    self._dispatch(
+                        device_key, normalized, is_replay=False, is_repaint=True
+                    )
 
     # ------------------------------------------------------------------ #
     # Config-flow connectivity check                                     #
