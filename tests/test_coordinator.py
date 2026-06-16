@@ -757,6 +757,32 @@ def test_fresh_event_at_reconnect_and_steady_repeat_are_live(hass, coordinator):
     assert _dispatched_replay_flags(dispatch) == [False]
 
 
+def test_future_timestamp_does_not_poison_high_water(hass, coordinator):
+    """A future-stamped frame must not suppress later correctly-stamped events.
+
+    A glitched / clock-skewed frame timestamped ahead of ``now`` still fires as
+    live, but the high-water mark is clamped to ``now`` rather than advanced to
+    the future instant. Otherwise every subsequent correctly-stamped live frame
+    would fall at-or-below the future mark and be wrongly dropped as a replay --
+    stalling availability and silencing event entities until wall-clock caught
+    up.
+    """
+    # A frame stamped ~1 hour in the future (server clock glitch) is still live...
+    with freeze_time("2026-05-25T10:00:00+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T11:00:00Z"))
+    assert _dispatched_replay_flags(dispatch) == [False]
+    # ...but the mark is clamped to ``now``, not pushed out to the future stamp.
+    assert coordinator._event_high_water == dt_util.parse_datetime(
+        "2026-05-25T10:00:00+00:00"
+    )
+
+    # A subsequent correctly-stamped live frame is NOT suppressed as a replay.
+    with freeze_time("2026-05-25T10:00:30+00:00"), patch(DISPATCH) as dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:30Z"))
+    assert _dispatched_replay_flags(dispatch) == [False]
+    assert coordinator.available[_DOORBELL_KEY] is True
+
+
 def test_offline_device_not_resurrected_by_replay(hass, coordinator):
     """Replayed / stale frames do not flip an offline device back to available.
 

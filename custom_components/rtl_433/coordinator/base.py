@@ -1091,8 +1091,15 @@ class Rtl433Coordinator:
             verdict = "BACKLOG (pre-connection)"
         else:
             # Newer than the mark and recent -> a genuine live transmission.
+            # Clamp the high-water advance to ``now``: a frame stamped in the
+            # future (server clock ahead of HA, or a one-off glitched timestamp)
+            # must not push the mark past wall-clock time, or every subsequent
+            # correctly-stamped live frame would fall at-or-below it and be
+            # wrongly suppressed as a replay -- stalling availability and
+            # silencing event entities until wall-clock caught up. The frame
+            # still fires as live; only the mark is bounded.
             is_replay = False
-            self._event_high_water = event_time
+            self._event_high_water = min(event_time, now)
             verdict = "LIVE (event_time>high_water)"
 
         # Carry the classification on the event object (the dispatch carrier), so
