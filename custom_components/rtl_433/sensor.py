@@ -302,7 +302,7 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
 )
 
 
-# SDR sensors whose concept is folded into a Plan 6 control in managed mode; their
+# SDR sensors whose concept is folded into a managed control (number/select/switch); their
 # diagnostic sensor is suppressed so each concept has exactly one entity. Center
 # frequency is intentionally NOT folded (its actual can diverge from the desired
 # value under hopping), and the server-stats sensors are never folded.

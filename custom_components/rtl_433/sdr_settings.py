@@ -1,7 +1,7 @@
 """Declarative settings registry for the managed SDR controls.
 
 This module describes each controllable rtl_433 SDR field *once*: how to read its
-current value out of ``coordinator.meta`` (the Plan 3 ``_refresh_meta`` result),
+current value out of ``coordinator.meta`` (the ``_refresh_meta`` result),
 which ``/cmd`` command sets it (and whether the desired value rides on ``val`` as
 an integer or ``arg`` as a string), the value transform, and the Home Assistant
 platform + entity-description metadata needed to build the entity. The coordinator
@@ -235,7 +235,7 @@ def _read_conversion_mode(meta: dict[str, Any]) -> int | None:
 
 
 def _read_hop_interval(meta: dict[str, Any]) -> Any:
-    # Plan 3's _refresh_meta exposes hop_interval (= hop_times[0]).
+    # _refresh_meta exposes hop_interval (= hop_times[0]).
     return meta.get("hop_interval")
 
 
@@ -381,8 +381,8 @@ SDR_SETTINGS: tuple[SdrSetting, ...] = (
 # Convenience: registry indexed by stable key for O(1) lookup by consumers.
 SDR_SETTINGS_BY_KEY: dict[str, SdrSetting] = {s.key: s for s in SDR_SETTINGS}
 
-# The Home Assistant control platforms this registry can populate. Task 4 wires
-# these into PLATFORMS; the registry only declares which ones it uses.
+# The Home Assistant control platforms this registry can populate (wired into
+# PLATFORMS in const.py); the registry only declares which ones it uses.
 CONTROL_PLATFORMS: tuple[str, ...] = ("number", "select", "switch")
 
 # EntityCategory all managed controls belong to; re-exported so the platforms
