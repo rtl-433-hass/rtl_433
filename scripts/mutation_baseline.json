@@ -75,10 +75,30 @@
       "score": 1.0,
       "total": 37
     },
-    "custom_components/rtl_433/mapping.py": {
-      "killed": 585,
-      "score": 0.936,
-      "total": 625
+    "custom_components/rtl_433/mapping/__init__.py": {
+      "killed": 27,
+      "score": 1.0,
+      "total": 27
+    },
+    "custom_components/rtl_433/mapping/_loader.py": {
+      "killed": 310,
+      "score": 0.906433,
+      "total": 342
+    },
+    "custom_components/rtl_433/mapping/_model.py": {
+      "killed": 18,
+      "score": 0.818182,
+      "total": 22
+    },
+    "custom_components/rtl_433/mapping/_overrides.py": {
+      "killed": 83,
+      "score": 0.988095,
+      "total": 84
+    },
+    "custom_components/rtl_433/mapping/_transform.py": {
+      "killed": 167,
+      "score": 0.954286,
+      "total": 175
     },
     "custom_components/rtl_433/migration.py": {
       "killed": 370,
