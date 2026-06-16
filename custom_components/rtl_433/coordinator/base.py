@@ -819,6 +819,19 @@ class Rtl433Coordinator:
                 LOGGER.debug("rtl_433 /cmd %s failed at %s: %s", command, url, err)
                 return False
 
+    def _gain_command_arg(self) -> str | None:
+        """Compose the ``gain`` ``/cmd`` arg from the combined desired gain state.
+
+        Gain is two desired keys (``gain`` dB + ``gain_auto`` bool) that resolve
+        to one ``gain`` command; both the per-field build (:meth:`_command_args`)
+        and connect-time enforcement (:meth:`_enforce_all`) compose it the same
+        way, so the composition lives here.
+        """
+        return gain_command_arg(
+            self._desired.get(KEY_GAIN_DB),
+            bool(self._desired.get(KEY_GAIN_AUTO, False)),
+        )
+
     def _command_args(self, key: str) -> tuple[str, int | None, str | None] | None:
         """Build the ``(command, val, arg)`` to send for one managed field.
 
@@ -829,11 +842,7 @@ class Rtl433Coordinator:
         the caller is responsible for emitting it only once.
         """
         if key in (KEY_GAIN_DB, KEY_GAIN_AUTO):
-            arg = gain_command_arg(
-                self._desired.get(KEY_GAIN_DB),
-                bool(self._desired.get(KEY_GAIN_AUTO, False)),
-            )
-            return ("gain", None, arg)
+            return ("gain", None, self._gain_command_arg())
         setting = SDR_SETTINGS_BY_KEY.get(key)
         if setting is None or key not in self._desired:
             return None
@@ -956,11 +965,7 @@ class Rtl433Coordinator:
             command, val, arg = args
             await self._send_cmd(command, val=val, arg=arg)
         if gain_managed:
-            arg = gain_command_arg(
-                self._desired.get(KEY_GAIN_DB),
-                bool(self._desired.get(KEY_GAIN_AUTO, False)),
-            )
-            await self._send_cmd("gain", arg=arg)
+            await self._send_cmd("gain", arg=self._gain_command_arg())
         # Reconcile meta from the server so the actual-value sensors converge now
         # rather than waiting for the next refresh tick; swallows its own errors.
         # Skip when nothing is managed (the connect-time refresh already ran and

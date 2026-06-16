@@ -49,6 +49,7 @@ from .const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     LOGGER,
+    MANUFACTURER,
     PLATFORMS,
     signal_new_device,
 )
@@ -172,7 +173,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, entry.entry_id)},
-        manufacturer="rtl_433",
+        manufacturer=MANUFACTURER,
         name=entry.title,
         model="rtl_433 server",
     )

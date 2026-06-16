@@ -446,7 +446,7 @@ def _validate_entry(field_key: str, entry: Any) -> list[str]:
             problems.append(f"{field_key}: missing required {attr!r}")
 
     platform = entry.get("platform")
-    if platform is not None and platform != "" and platform not in _SUPPORTED_PLATFORMS:
+    if platform and platform not in _SUPPORTED_PLATFORMS:
         problems.append(
             f"{field_key}: unknown platform {platform!r} "
             "(expected one of sensor, binary_sensor, event)"

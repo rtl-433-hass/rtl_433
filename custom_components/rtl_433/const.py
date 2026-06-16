@@ -15,6 +15,11 @@ from homeassistant.const import Platform
 # Integration domain. Must match the "domain" key in manifest.json.
 DOMAIN: Final = "rtl_433"
 
+# Generic device-registry manufacturer. The hub entry starts with this and is
+# refined to the SDR's real vendor once the coordinator connects; nested devices
+# keep it (rtl_433 decodes them, the physical vendor is unknown).
+MANUFACTURER: Final = "rtl_433"
+
 # Module-level logger; other modules use ``from .const import LOGGER``.
 LOGGER: Final[logging.Logger] = logging.getLogger(__package__)
 

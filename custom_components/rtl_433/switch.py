@@ -29,9 +29,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
-from .entity import Rtl433HubControl
-from .sdr_settings import SDR_SETTINGS
+from .entity import Rtl433HubControl, async_setup_hub_controls
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
@@ -83,11 +81,6 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Register the hub's managed Switch controls (only when managing)."""
-    coordinator: Rtl433Coordinator = hass.data[DOMAIN][entry.entry_id]
-    if not coordinator.manage_settings:
-        return
-    async_add_entities(
-        Rtl433SwitchControl(coordinator, entry.entry_id, setting)
-        for setting in SDR_SETTINGS
-        if setting.platform == PLATFORM and setting.capability(coordinator.meta)
+    await async_setup_hub_controls(
+        hass, entry, async_add_entities, PLATFORM, Rtl433SwitchControl
     )
