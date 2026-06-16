@@ -225,6 +225,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.hub_info_callback = hub_info_callback
     coordinator.effective_timeout_resolver = effective_timeout_resolver
     coordinator.effective_clear_delay_resolver = effective_clear_delay_resolver
+    # Global descriptor keys from the merged library, so the coordinator can flag
+    # observed fields with no mapping at DEBUG (matches the diagnostics
+    # ``unmatched_field_keys`` semantics, which resolve against the flat table).
+    coordinator.known_field_keys = frozenset(entry_registry.flat)
     # Snapshot the per-device calibration so the update listener can detect a
     # real calibration change (and reload) while ignoring routine devices-map
     # upserts — the same change-vs-snapshot pattern as ``manage_settings``.

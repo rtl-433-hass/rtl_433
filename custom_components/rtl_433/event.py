@@ -192,6 +192,11 @@ class Rtl433Event(Rtl433Entity, EventEntity):
             # Append a newly-seen type BEFORE firing (HA validates against the
             # current list) and schedule persistence (callback-safe).
             if event_type not in self._attr_event_types:
+                LOGGER.debug(
+                    "rtl_433 %s registered new event_type %s",
+                    self._device_key,
+                    event_type,
+                )
                 self._attr_event_types.append(event_type)
                 self.hass.async_create_task(
                     async_upsert_event_types(

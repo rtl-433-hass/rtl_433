@@ -874,3 +874,196 @@ def test_replay_and_backlog_trace_lines_and_no_event_fired(hass, coordinator, ca
     assert "-> BACKLOG" in backlog_lines[0]
     # Classified as a replay -> the event entity must not fire.
     assert _dispatched_replay_flags(backlog_dispatch) == [True]
+
+
+def _discovery_lines(caplog) -> list[str]:
+    """Return the ``rtl_433 discovered new device ...`` DEBUG lines."""
+    return [
+        m for m in caplog.messages if m.startswith("rtl_433 discovered new device ")
+    ]
+
+
+def _unmapped_lines(caplog) -> list[str]:
+    """Return the ``rtl_433 ... reported unmapped field(s) ...`` DEBUG lines."""
+    return [m for m in caplog.messages if "reported unmapped field(s)" in m]
+
+
+def test_discovery_logs_new_device_line(hass, coordinator, caplog):
+    """A live, post-connection first sighting logs the discovery DEBUG line once.
+
+    The line carries the device key, model, and the ``via_replay`` verdict (False
+    for a genuine live first sighting); a second sighting does not re-log it.
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    coordinator.discovery_enabled = True
+    coordinator.new_device_callback = lambda key, model, is_replay: None
+
+    frame = '{"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4}'
+    with patch(DISPATCH):
+        coordinator._handle_text_frame(frame)
+        coordinator._handle_text_frame(frame)  # second sighting: no re-log
+
+    lines = _discovery_lines(caplog)
+    assert len(lines) == 1
+    assert "Acurite-606TX-42" in lines[0]
+    assert "model Acurite-606TX" in lines[0]
+    assert "via_replay=False" in lines[0]
+
+
+def test_discovery_via_replay_flag_is_true_for_replay(hass, coordinator, caplog):
+    """A replay-discovered device logs the discovery line with ``via_replay=True``.
+
+    A device first seen via a post-connection replay (time at/below high-water)
+    still registers so its entities exist, and the line reflects the replay
+    origin.
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    coordinator.discovery_enabled = True
+    coordinator.new_device_callback = lambda key, model, is_replay: None
+
+    # Connect, then a first live frame sets the high-water mark for the device.
+    coordinator._connection_time = dt_util.parse_datetime("2026-05-25T09:59:00+00:00")
+    with freeze_time("2026-05-25T10:00:00+00:00"), patch(DISPATCH):
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:00Z"))
+    caplog.clear()
+
+    # A different device whose only sighting is a replay (time == an earlier,
+    # at/below-high-water moment) is still discovered, flagged via_replay=True.
+    replay_frame = json.dumps(
+        {
+            "model": "Acurite-606TX",
+            "id": 99,
+            "temperature_C": 20.0,
+            "time": "2026-05-25T10:00:00Z",
+        }
+    )
+    with freeze_time("2026-05-25T10:00:02+00:00"), patch(DISPATCH):
+        coordinator._handle_text_frame(replay_frame)
+
+    lines = _discovery_lines(caplog)
+    assert len(lines) == 1
+    assert "Acurite-606TX-99" in lines[0]
+    assert "via_replay=True" in lines[0]
+
+
+def test_unmapped_field_logged_once_per_device_field(hass, coordinator, caplog):
+    """A field with no library descriptor logs once per (device, field).
+
+    Gated on a non-empty ``known_field_keys`` (otherwise the whole library is
+    treated as unloaded and nothing is flagged). A second identical frame must
+    NOT re-log the same unmapped field.
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    coordinator.known_field_keys = frozenset({"temperature_C"})
+
+    frame = '{"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4, "mystery_field": 7}'
+    with patch(DISPATCH):
+        coordinator._handle_text_frame(frame)
+        coordinator._handle_text_frame(frame)  # identical -> no second log
+
+    lines = _unmapped_lines(caplog)
+    assert len(lines) == 1
+    assert "Acurite-606TX-42" in lines[0]
+    assert "mystery_field" in lines[0]
+    assert "(no entity)" in lines[0]
+    # The known field is never reported as unmapped.
+    assert "temperature_C" not in lines[0]
+
+
+def test_unmapped_field_not_logged_when_library_empty(hass, coordinator, caplog):
+    """With an empty ``known_field_keys`` the unmapped-field line is suppressed.
+
+    An empty set means the library is unwired / failed to load, so flagging every
+    field would be noise; the line is skipped entirely.
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    coordinator.known_field_keys = frozenset()
+
+    frame = '{"model": "Acurite-606TX", "id": 42, "mystery_field": 7}'
+    with patch(DISPATCH):
+        coordinator._handle_text_frame(frame)
+
+    assert _unmapped_lines(caplog) == []
+
+
+def _connect_loop_lines(caplog, needle: str) -> list[str]:
+    """Return DEBUG trace lines from the connect loop containing ``needle``."""
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == _TRACE_LOGGER and needle in r.getMessage()
+    ]
+
+
+class _FakeWS:
+    """Minimal async-context-manager + async-iterator standing in for a WS.
+
+    ``_read_frames`` does ``async with session.ws_connect(...) as ws`` then
+    ``async for msg in ws``; this yields no frames and closes immediately, so the
+    connect loop falls through to its reconnect path.
+    """
+
+    async def __aenter__(self) -> _FakeWS:
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+    def __aiter__(self) -> _FakeWS:
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
+
+def test_connect_loop_logs_anchor_and_reconnect(hass, coordinator, caplog):
+    """The connect loop logs the replay anchor on connect and the reconnect delay.
+
+    Drives the real ``_connect_loop`` against a fake socket that yields no frames
+    and closes, forcing one reconnect. ``_stop_event`` is set on the second
+    connect so the loop terminates after logging both lines. The HTTP refresh
+    helpers and the backoff constant are patched out to keep the test fast and
+    isolated from the socket-less session.
+    """
+    import custom_components.rtl_433.coordinator.base as base_mod
+
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    coordinator.manage_settings = False
+
+    connects: list[str] = []
+
+    def fake_ws_connect(url, **kwargs):
+        connects.append(url)
+        if len(connects) >= 2:
+            # Stop after the second connect so the loop is bounded.
+            coordinator._stop_event.set()
+        return _FakeWS()
+
+    session = Mock()
+    session.ws_connect = fake_ws_connect
+
+    with (
+        patch(
+            "custom_components.rtl_433.coordinator.base.async_get_clientsession",
+            return_value=session,
+        ),
+        patch.object(base_mod, "_BACKOFF_MIN", 0.01),
+        patch.object(Rtl433Coordinator, "_refresh_meta", new=_async_noop),
+        patch.object(Rtl433Coordinator, "_refresh_stats", new=_async_noop),
+        patch.object(Rtl433Coordinator, "_refresh_dev_info", new=_async_noop),
+    ):
+        _run(hass, coordinator._connect_loop())
+
+    anchor = _connect_loop_lines(caplog, "connection anchor")
+    reconnect = _connect_loop_lines(caplog, "reconnecting in")
+
+    assert anchor, "expected a connection-anchor line on connect"
+    assert "replay_high_water=" in anchor[0]
+    assert "connected_at=" in anchor[0]
+    assert reconnect, "expected a reconnect-delay line after the socket closed"
+    assert coordinator.ws_url in reconnect[0]
+
+
+async def _async_noop(self, *args, **kwargs) -> None:
+    """No-op stand-in for the coordinator's async HTTP refresh helpers."""
+    return None
