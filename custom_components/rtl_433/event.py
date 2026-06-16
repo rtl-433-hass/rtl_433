@@ -12,11 +12,11 @@ attributes. By default the ``event_type`` is the stringified field value; when
 the descriptor declares an ``event_map`` the raw value is mapped to a named
 type instead (e.g. a doorbell's ``0``/``1`` map to ``ring``/``secret_knock``).
 It seeds ``event_types`` from the declared map values, auto-populates further
-observed values, persists them, dedupes the coordinator watchdog's re-dispatch
-by object identity, stays always available, and does not replay the
-coordinator's last event on construction. A doorbell-class entity always
-advertises ``DoorbellEventType.RING`` to satisfy Home Assistant's doorbell
-standard.
+observed values, persists them, ignores the coordinator watchdog's availability
+re-paint (``is_repaint``) so a stale cached value never re-fires, stays always
+available, and does not replay the coordinator's last event on construction. A
+doorbell-class entity always advertises ``DoorbellEventType.RING`` to satisfy
+Home Assistant's doorbell standard.
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ class Rtl433Event(Rtl433Entity, EventEntity):
     the descriptor declares an ``event_map``, in which case the raw value is
     mapped to a named type (unmapped values still pass through as ``str(value)``).
     Diverges from the base entity in five places: it overrides
-    ``_handle_dispatch`` (suppress replays, dedupe by object identity, then fire
+    ``_handle_dispatch`` (ignore watchdog re-paints, suppress replays, then fire
     the resolved type), ``available`` (always True), ``_async_restore_state``
     (no-op; HA's ``EventEntity`` restores the last displayed event),
     ``async_added_to_hass`` (also persists the declared ``event_map`` types), and
@@ -99,7 +99,6 @@ class Rtl433Event(Rtl433Entity, EventEntity):
         ):
             seed.insert(0, DoorbellEventType.RING)
         self._attr_event_types = seed
-        self._last_fired_event: NormalizedEvent | None = None
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to updates and persist the declared ``event_map`` types.
@@ -128,19 +127,36 @@ class Rtl433Event(Rtl433Entity, EventEntity):
     def _handle_dispatch(self, event: NormalizedEvent) -> None:
         """Fire an HA event once per genuine transmission.
 
-        The coordinator's watchdog re-dispatches the cached last event by the
-        same object reference when a device goes stale; a live transmission is a
-        fresh ``normalize()`` object. So dedupe by object identity (``is``), not
-        value-equality: a genuine repeat of the same value is a distinct object
-        that must fire (a doorbell pressed twice in 30 s fires twice).
+        A genuine repeat of the same value is a distinct live transmission that
+        must fire (a doorbell pressed twice in 30 s fires twice), so firing keys
+        off the frame's classification, not value-equality.
 
-        A replayed / stale frame (``event.is_replay``) is the reconnect-replay
-        case the plan targets: it must NOT fire, append to ``event_types``, or
-        persist — but it still writes state (which only re-reads ``available``,
-        always ``True`` for events). A suppressed transmission that *would* have
-        fired is logged once at INFO so the user sees the real-but-stale event.
+        Two classes of dispatch are *not* transmissions and must never fire:
+
+        * A watchdog availability re-paint (``event.is_repaint``) re-dispatches the
+          device's cached last frame only so measurement entities re-read
+          availability. Its value is stale (e.g. a doorbell's last
+          ``secret_knock=0`` -> ``ring``), so firing it would emit a phantom event.
+        * A replayed / stale frame (``event.is_replay``) is the reconnect-replay
+          case: it must NOT fire, append to ``event_types``, or persist — but it
+          still writes state (which only re-reads ``available``, always ``True``
+          for events). A suppressed transmission that *would* have fired is logged
+          once at INFO so the user sees the real-but-stale event.
         """
         field_key = self._descriptor.field_key
+        if event.is_repaint:
+            # The availability watchdog re-dispatched the device's cached last
+            # frame purely to re-paint availability. The cached value is stale (it
+            # is whatever the device last transmitted, e.g. a doorbell's last
+            # ``secret_knock=0`` -> ``ring``), so firing it would emit a phantom
+            # event. Events are always available, so there is nothing to repaint --
+            # just re-read state and return without firing or persisting.
+            LOGGER.debug(
+                "rtl_433 skipped watchdog re-paint for %s (no re-fire)",
+                self._device_key,
+            )
+            self.async_write_ha_state()
+            return
         if event.is_replay:
             if field_key in event.fields:
                 value = event.fields[field_key]
@@ -164,17 +180,7 @@ class Rtl433Event(Rtl433Entity, EventEntity):
                 )
             self.async_write_ha_state()
             return
-        # Watchdog re-dispatch of the cached last event -> same object -> don't
-        # re-fire; just re-read availability.
-        if event is self._last_fired_event:
-            LOGGER.debug(
-                "rtl_433 skipped watchdog re-paint for %s (no re-fire)",
-                self._device_key,
-            )
-            self.async_write_ha_state()
-            return
         if field_key in event.fields:
-            self._last_fired_event = event
             # Resolve the event type: a declared ``event_map`` maps the raw value
             # to a named type (e.g. doorbell ``0``/``1`` -> ``ring``/
             # ``secret_knock``); unmapped values and the no-map button path fall

@@ -52,6 +52,13 @@ class NormalizedEvent:
             ``None``. Carried alongside ``is_replay`` so the event platform can log
             the suppressed transmission's time/age at INFO; ``None`` when the raw
             ``time`` was missing/blank/unparsable (such a frame is treated live).
+        is_repaint: Whether this is the availability watchdog re-dispatching the
+            device's *cached* last frame purely to re-paint availability (not a new
+            transmission). Measurement entities re-read availability and re-apply
+            the (unchanged) value idempotently, but ``Rtl433Event`` must never
+            (re-)fire from a re-paint -- the cached frame's field value is stale and
+            object-identity dedupe has no anchor after a restart. Stamped by the
+            watchdog via :func:`dataclasses.replace`; never set on a live frame.
     """
 
     device_key: str
@@ -60,6 +67,7 @@ class NormalizedEvent:
     fields: dict[str, Any] = field(default_factory=dict)
     is_replay: bool = False
     event_time: datetime | None = None
+    is_repaint: bool = False
 
 
 def _safe_token(value: Any) -> str:

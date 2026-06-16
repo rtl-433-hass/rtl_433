@@ -247,7 +247,9 @@ def test_watchdog_flips_unavailable_then_recovers(hass, coordinator):
         hass.loop.run_until_complete(coordinator._async_watchdog(dt_util.utcnow()))
     assert coordinator.available[key] is True
 
-    # Past the timeout: watchdog flips to unavailable and re-dispatches.
+    # Past the timeout: watchdog flips to unavailable and re-dispatches the cached
+    # frame as an availability re-paint (``is_repaint=True``, ``is_replay=False``)
+    # so measurement entities re-read availability while ``Rtl433Event`` skips it.
     with (
         freeze_time(start + timedelta(seconds=601)),
         patch(DISPATCH) as dispatch,
@@ -255,6 +257,9 @@ def test_watchdog_flips_unavailable_then_recovers(hass, coordinator):
         hass.loop.run_until_complete(coordinator._async_watchdog(dt_util.utcnow()))
     assert coordinator.available[key] is False
     dispatch.assert_called_once()
+    repaint = dispatch.call_args.args[2]
+    assert repaint.is_repaint is True
+    assert repaint.is_replay is False
 
     # A fresh event brings it back online.
     with freeze_time(start + timedelta(seconds=602)), patch(DISPATCH):

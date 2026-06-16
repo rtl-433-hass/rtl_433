@@ -3,8 +3,9 @@
 The coordinator-side ingestion/classification trace lives in
 ``tests/test_coordinator.py``; this file locks the *event entity* side of the
 trace contract: a live press logs ``rtl_433 fired ...``, the watchdog
-re-dispatch (same object) logs ``skipped watchdog re-paint``, and a suppressed
-replay still logs the pre-existing ``suppressed replayed/stale`` INFO line.
+availability re-paint (``is_repaint``) logs ``skipped watchdog re-paint`` and
+never fires, and a suppressed replay still logs the pre-existing
+``suppressed replayed/stale`` INFO line.
 
 The entity is exercised directly: ``_handle_dispatch`` is the callback the
 dispatcher invokes, so we construct a minimal ``Rtl433Event`` and call it with
@@ -62,6 +63,17 @@ def _live(value: int = 1) -> NormalizedEvent:
     )
 
 
+def _repaint(value: int = 1) -> NormalizedEvent:
+    """A watchdog availability re-paint carrier (cached frame, ``is_repaint``)."""
+    return NormalizedEvent(
+        device_key=_DEVICE_KEY,
+        model="Honeywell-Doorbell",
+        fields={_FIELD_KEY: value},
+        is_replay=False,
+        is_repaint=True,
+    )
+
+
 def test_live_press_logs_fired_line(event_entity, caplog):
     """A live transmission logs the ``rtl_433 fired ...`` DEBUG line and fires."""
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
@@ -79,17 +91,16 @@ def test_live_press_logs_fired_line(event_entity, caplog):
 
 
 def test_watchdog_re_paint_logs_skip_and_does_not_refire(event_entity, caplog):
-    """The watchdog re-dispatch (same object) logs the dedupe line, no re-fire."""
+    """A watchdog re-paint (``is_repaint``) logs the skip line and never re-fires."""
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
-    event = _live()
     with (
         patch.object(event_entity, "_trigger_event") as trigger,
         patch.object(event_entity, "async_write_ha_state"),
     ):
-        event_entity._handle_dispatch(event)  # live -> fires
+        event_entity._handle_dispatch(_live())  # live -> fires
         caplog.clear()
-        # Same object re-dispatched by the watchdog -> deduped by identity.
-        event_entity._handle_dispatch(event)
+        # The watchdog re-dispatches the cached frame marked ``is_repaint``.
+        event_entity._handle_dispatch(_repaint())
 
     # Fired exactly once (the first dispatch); the re-paint did not re-fire.
     trigger.assert_called_once_with("secret_knock")
@@ -98,6 +109,26 @@ def test_watchdog_re_paint_logs_skip_and_does_not_refire(event_entity, caplog):
     ]
     assert len(skipped) == 1
     assert _DEVICE_KEY in skipped[0]
+    assert not [m for m in caplog.messages if m.startswith("rtl_433 fired ")]
+
+
+def test_watchdog_re_paint_without_prior_fire_does_not_fire(event_entity, caplog):
+    """A re-paint of a replay-seeded cache must not fire (the restart-doorbell bug).
+
+    After a restart the entity never fired a live event (the cached frame arrived
+    via a suppressed reconnect replay), so there is no object-identity anchor. The
+    first watchdog re-paint must still not emit a phantom ``ring`` -- firing keys
+    off ``is_repaint``, not whether a live event was seen first.
+    """
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    with (
+        patch.object(event_entity, "_trigger_event") as trigger,
+        patch.object(event_entity, "async_write_ha_state") as write,
+    ):
+        event_entity._handle_dispatch(_repaint())
+
+    trigger.assert_not_called()
+    write.assert_called_once()
     assert not [m for m in caplog.messages if m.startswith("rtl_433 fired ")]
 
 
