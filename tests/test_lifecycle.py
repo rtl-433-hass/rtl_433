@@ -64,6 +64,7 @@ from custom_components.rtl_433.const import (
     signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -339,6 +340,14 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
     assert enabled_state.attributes["state_class"] == "measurement"
     assert events_state.attributes["stats"] == [{"name": "Acurite", "events": 40}]
     assert events_state.attributes["since"] == "2026-05-26T10:00:00"
+
+    # The per-protocol ``stats`` array (one entry per enabled decoder, hundreds
+    # of them) and the ``frequencies``/``hop_times`` lists overflow the recorder's
+    # 16 KiB attribute limit, so every hub sensor opts its attributes out of the
+    # recorder via ``_unrecorded_attributes = {MATCH_ALL}``. The live state still
+    # exposes them (asserted above); only persistence is suppressed.
+    assert MATCH_ALL in events_state.state_info["unrecorded_attributes"]
+    assert MATCH_ALL in cf.state_info["unrecorded_attributes"]
 
     # The surviving hub sensors are diagnostic and live on the hub device.
     dev_reg = dr.async_get(hass)
