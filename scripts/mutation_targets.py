@@ -76,6 +76,7 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
     "tests/test_config_flow.py": ["config_flow.py", "options_flow.py"],
     "tests/test_mut_config_flow.py": ["config_flow.py", "options_flow.py"],
     "tests/test_binary_sensor_motion.py": ["binary_sensor.py", "event.py"],
+    "tests/test_event_trace.py": ["event.py"],
     "tests/test_diagnostics_repairs.py": ["diagnostics.py", "repairs.py"],
     "tests/test_sdr_controls.py": [
         "number.py",

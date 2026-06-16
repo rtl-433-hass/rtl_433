@@ -818,3 +818,59 @@ def test_sensor_seeds_from_replay_without_stamping_last_seen(hass, coordinator):
     # Liveness was NOT refreshed: no last_seen stamp, no availability set True.
     assert key not in coordinator.last_seen
     assert coordinator.available.get(key) is not True
+
+
+# --------------------------------------------------------------------------- #
+# Ingestion / classification DEBUG trace (Plan 22: event-trace logging).       #
+# --------------------------------------------------------------------------- #
+_TRACE_LOGGER = "custom_components.rtl_433"
+
+
+def _ingestion_lines(caplog) -> list[str]:
+    """Return the per-frame ``rtl_433 RX ... -> <verdict>`` ingestion lines."""
+    return [m for m in caplog.messages if m.startswith("rtl_433 RX ")]
+
+
+def test_live_frame_emits_single_ingestion_trace_line(hass, coordinator, caplog):
+    """A live frame logs exactly one ``RX ... -> LIVE`` line with the device key."""
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    with freeze_time("2026-05-25T10:00:00+00:00"), patch(DISPATCH):
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:00Z"))
+
+    lines = _ingestion_lines(caplog)
+    assert len(lines) == 1
+    assert _DOORBELL_KEY in lines[0]
+    assert "-> LIVE" in lines[0]
+
+
+def test_replay_and_backlog_trace_lines_and_no_event_fired(hass, coordinator, caplog):
+    """REPLAY (at/below high-water) and BACKLOG (pre-connection) each trace and
+    classify as a replay (so the event entity never fires)."""
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+
+    # A first live frame sets the high-water mark.
+    with freeze_time("2026-05-25T10:00:00+00:00"), patch(DISPATCH):
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:00Z"))
+
+    # REPLAY: the same frame re-sent on reconnect (time == mark) -> already-seen.
+    caplog.clear()
+    with freeze_time("2026-05-25T10:00:02+00:00"), patch(DISPATCH) as replay_dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T10:00:00Z"))
+    replay_lines = _ingestion_lines(caplog)
+    assert len(replay_lines) == 1
+    assert _DOORBELL_KEY in replay_lines[0]
+    assert "-> REPLAY" in replay_lines[0]
+    # Classified as a replay -> the event entity must not fire.
+    assert _dispatched_replay_flags(replay_dispatch) == [True]
+
+    # BACKLOG: a recent press timestamped before the current connection.
+    coordinator._connection_time = dt_util.parse_datetime("2026-05-25T11:00:10+00:00")
+    caplog.clear()
+    with freeze_time("2026-05-25T11:00:11+00:00"), patch(DISPATCH) as backlog_dispatch:
+        coordinator._handle_text_frame(_doorbell_frame("2026-05-25T11:00:00Z"))
+    backlog_lines = _ingestion_lines(caplog)
+    assert len(backlog_lines) == 1
+    assert _DOORBELL_KEY in backlog_lines[0]
+    assert "-> BACKLOG" in backlog_lines[0]
+    # Classified as a replay -> the event entity must not fire.
+    assert _dispatched_replay_flags(backlog_dispatch) == [True]

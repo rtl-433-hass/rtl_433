@@ -167,6 +167,10 @@ class Rtl433Event(Rtl433Entity, EventEntity):
         # Watchdog re-dispatch of the cached last event -> same object -> don't
         # re-fire; just re-read availability.
         if event is self._last_fired_event:
+            LOGGER.debug(
+                "rtl_433 skipped watchdog re-paint for %s (no re-fire)",
+                self._device_key,
+            )
             self.async_write_ha_state()
             return
         if field_key in event.fields:
@@ -178,6 +182,13 @@ class Rtl433Event(Rtl433Entity, EventEntity):
             raw = event.fields[field_key]
             event_map = self._descriptor.event_map
             event_type = event_map.get(str(raw), str(raw)) if event_map else str(raw)
+            LOGGER.debug(
+                "rtl_433 fired %s for %s field=%s value=%s",
+                event_type,
+                self._device_key,
+                field_key,
+                raw,
+            )
             # Append a newly-seen type BEFORE firing (HA validates against the
             # current list) and schedule persistence (callback-safe).
             if event_type not in self._attr_event_types:
