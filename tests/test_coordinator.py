@@ -398,7 +398,7 @@ def test_refresh_stats_malformed_json_logs_error_once(
     malformed = [
         r
         for r in caplog.records
-        if r.levelname == "ERROR" and "malformed JSON" in r.getMessage()
+        if r.levelname == "ERROR" and "returned invalid data" in r.getMessage()
     ]
     assert len(malformed) == 1
     assert "get_stats" in malformed[0].getMessage()

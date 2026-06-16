@@ -236,7 +236,7 @@ def async_track_hub_reachability(
             if state["disconnected_since"] is not None:
                 LOGGER.debug(
                     "rtl_433 hub %s reachable again; clearing repair issue",
-                    entry.entry_id,
+                    entry.title,
                 )
             state["disconnected_since"] = None
             async_clear_hub_unreachable(hass, entry)

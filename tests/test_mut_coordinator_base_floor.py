@@ -3839,8 +3839,8 @@ class TestNewDeviceCallbackExceptionLog:
         callback_records = [
             r
             for r in caplog.records
-            if "new_device_callback" in r.message
-            or "new_device_callback" in r.getMessage()
+            if "failed to register" in r.message
+            or "failed to register" in r.getMessage()
         ]
         assert len(callback_records) >= 1
         # The device key 'Dev-5' must appear in the message (not None) — kills mutmut_77
