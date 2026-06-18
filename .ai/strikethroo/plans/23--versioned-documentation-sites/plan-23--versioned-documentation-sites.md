@@ -224,9 +224,9 @@ graph TD
 - ✔️ Task 001: Create integration docs site
 - ✔️ Task 003: Prepare add-on repository docs scope
 
-### Phase 2: Integration Publishing
+### ✅ Phase 2: Integration Publishing
 **Parallel Tasks:**
-- Task 002: Add docs publishing workflow (depends on: 001)
+- ✔️ Task 002: Add docs publishing workflow (depends on: 001)
 
 ### Phase 3: Validation and Follow-up Capture
 **Parallel Tasks:**

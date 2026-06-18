@@ -2,7 +2,7 @@
 id: 2
 group: "documentation-publishing"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-06-18
 skills:
   - github-actions
@@ -19,11 +19,11 @@ Add GitHub Actions publishing for the integration documentation site so main pub
 Requires `github-actions` for workflow implementation and `mkdocs` for `mike` deployment behavior.
 
 ## Acceptance Criteria
-- [ ] `.github/workflows/docs.yml` builds the documentation site on relevant pushes/pull requests.
-- [ ] Pushes to `main` publish a `dev` documentation version through `mike`.
-- [ ] Future `vX.Y.Z` tags derive an `X.Y` documentation version, update the `latest` alias, and set `latest` as default.
-- [ ] Workflow uses `contents: write` where publishing is required and fetches full tag history.
-- [ ] No historical documentation backfill task or workflow step is introduced.
+- [x] `.github/workflows/docs.yml` builds the documentation site on relevant pushes/pull requests.
+- [x] Pushes to `main` publish a `dev` documentation version through `mike`.
+- [x] Future `vX.Y.Z` tags derive an `X.Y` documentation version, update the `latest` alias, and set `latest` as default.
+- [x] Workflow uses `contents: write` where publishing is required and fetches full tag history.
+- [x] No historical documentation backfill task or workflow step is introduced.
 
 Use your internal Todo tool to track these and keep on track.
 
@@ -47,3 +47,6 @@ Documentation GitHub Actions workflow and any small supporting scripts or commen
 5. Add a concise generated-output warning if needed so maintainers know not to hand-edit `gh-pages`.
 
 </details>
+
+## Noteworthy Events
+- [2026-06-18] Added a narrow docs workflow with read-only build validation for docs changes and publishing limited to `push` events on `main` or `v*.*.*` tags. The publishing job checks out full history, grants `contents: write`, deploys `main` as `dev`, derives release docs versions such as `0.17` from tags such as `v0.17.0`, updates the `latest` alias, and sets `latest` as the mike default. No historical backfill step was added.
