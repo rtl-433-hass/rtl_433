@@ -242,3 +242,22 @@ Run `/config/hooks/POST_PHASE.md` after every phase. Do not proceed to the next 
 - 2026-06-18: Task 004 validation completed. Integration MkDocs strict build passed, required generated pages and images were inspected, release tag parsing was locally simulated, and out-of-scope backfill/redirect/link-checker/org-root implementation work was not added. Follow-up was initially recorded for the sibling `rtl_433-hass-addons` repository.
 - 2026-06-18: Corrected Task 003 after the sibling `rtl_433-hass-addons` repository was available at `/home/andrew.guest/github.com/rtl-433-hass/rtl_433-hass-addons`. The add-on repository now has minimal MkDocs + `mike` tooling, canonical docs pages, lean Supervisor README entry points, and a docs publishing workflow mirroring the integration docs workflow. The org-root landing page remains follow-up-only and was not implemented.
 - 2026-06-18: Re-ran Task 004 after the add-on docs implementation. Strict MkDocs builds now pass in both the integration and add-on repositories; required source/generated pages, README entry points, docs workflows, and tag-to-version logic were validated in both repositories. The prior add-on blocker is superseded by implemented status. No historical backfill, README-anchor redirects, separate link checker, or org-root landing page implementation was added.
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-06-18
+
+### Results
+Created versioned MkDocs documentation sites for the integration repository and the sibling add-on repository. The integration README and add-on README entry points were trimmed to concise overviews that link to canonical `/latest/` documentation, and both repositories now include GitHub Actions workflows that publish `dev` from `main` and future `vX.Y.Z` tags as `X.Y` versions with the `latest` alias.
+
+### Noteworthy Events
+- The execution started without task files or a blueprint, so tasks and the Execution Blueprint were generated automatically.
+- The optional integration feature branch step skipped branch creation because the integration repo was already on `docs/docs-site`.
+- The add-on repository was initially treated as a follow-up, then final validation found the sibling repository at `/home/andrew.guest/github.com/rtl-433-hass/rtl_433-hass-addons`; the add-on docs site was completed there on branch `docs/docs-site`.
+- Strict MkDocs builds passed in both repositories. Integration tests passed with `1900 passed`. Add-on config validation and BATS tests passed. Pre-commit passed in both repositories after committing automatic final-newline fixes.
+- `DOCS_SITE_PLAN.md` remained an untracked source-plan file in the integration repository and was intentionally left unstaged.
+
+### Necessary follow-ups
+- Create or update the separate organization-root GitHub Pages landing page to link users to the integration and add-on `/latest/` documentation sites.
+- Configure GitHub Pages for each product repository to serve the generated `gh-pages` branch root if that repository setting is not already enabled.
