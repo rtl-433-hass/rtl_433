@@ -70,8 +70,8 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   routine devices-map upserts never reload — mirroring the `manage_settings`
   reload pattern. `device_class`/native unit/`state_class` are construction-time,
   hence the rebuild; recalibration orphans prior long-term statistics (expected).
-  User-facing detail is in the [README](README.md#utility-meter-calibration) and
-  `docs/device-library.md` — keep this contributor-facing.
+  User-facing detail is in `docs/calibration.md` and `docs/device-library.md` —
+  keep this contributor-facing.
 - `Rtl433ConfigFlow` also implements `async_step_reconfigure` (`config_flow.py`)
   to edit a hub's connection params (host/port/path/secure) in place — "same
   server, new address". The nested-device map is preserved because the new params
@@ -354,7 +354,7 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   SDR retune, so without the tick the actual sensor could stay stale until the
   next reconnect.
 - **Verified Data Contracts** (do not invent fields — see
-  [WEBSOCKET_API.md](WEBSOCKET_API.md)):
+  [docs/websocket-api.md](docs/websocket-api.md)):
   - `get_meta` → `center_frequency`, `samp_rate`, `conversion_mode`,
     `frequencies[]`, `hop_times[]`, `duration`, `stats_interval`, `report_*`
     flags (**no `gain`, no `ppm`**).
@@ -381,8 +381,8 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
 Durable contracts for the optional HA-managed SDR controls (`sdr_settings.py`,
 `coordinator/base.py`, `__init__.py`, the `number`/`select`/`switch` platforms).
 End-user docs live in
-[README](README.md#managing-sdr-settings-from-home-assistant) — keep this
-contributor-facing.
+[docs/hub-entities.md](docs/hub-entities.md#managing-sdr-settings-from-home-assistant) —
+keep this contributor-facing.
 
 - **Settings-registry contract** (`sdr_settings.py`, the single source of truth
   for the control set; import-disjoint like `mapping.py`). `SDR_SETTINGS` is the
@@ -413,7 +413,7 @@ contributor-facing.
     `conversion_val_to_label`).
   - `hop_interval` → number, command `hop_interval`, `val` = seconds; read
     `hop_times[0]`.
-  Commands and arg/val kinds follow [WEBSOCKET_API.md](WEBSOCKET_API.md)
+  Commands and arg/val kinds follow [docs/websocket-api.md](docs/websocket-api.md)
   exactly — **do not invent fields**. Number bounds are deliberately wide
   (`NumberMode.BOX`); the server clamps/rejects, HA is not the authority on
   ranges. Each entry carries a **`capability` gate** (`Callable[[meta], bool]`,
