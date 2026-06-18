@@ -1,41 +1,41 @@
 {
   "version": 1,
   "skills": {
-    "task-create-plan": {
-      "source": "e0ipso/ai-task-manager",
+    "st-create-plan": {
+      "source": "e0ipso/strikethroo",
       "sourceType": "github",
-      "skillPath": ".agents/skills/task-create-plan/SKILL.md",
-      "computedHash": "d5f87ede1d58957b498b86a6fd528c4d591daf0840d6c942309fd2580fffefb4"
+      "skillPath": "templates/harness/skills/st-create-plan/SKILL.md",
+      "computedHash": "4a24fe511ce3c165b037e7642042005f9a82179d2a96cf08f9dbb35ea62d3530"
     },
-    "task-execute-blueprint": {
-      "source": "e0ipso/ai-task-manager",
+    "st-execute-blueprint": {
+      "source": "e0ipso/strikethroo",
       "sourceType": "github",
-      "skillPath": ".agents/skills/task-execute-blueprint/SKILL.md",
-      "computedHash": "1ad0659a02c68ab2b8ef0b244b568e9bf5dd381cde7d19546afc455b679c6632"
+      "skillPath": "templates/harness/skills/st-execute-blueprint/SKILL.md",
+      "computedHash": "b138263ac021b5f84241b970418abf26d4b4d0c85bbfd260ca54e70b77d5b5d7"
     },
-    "task-execute-task": {
-      "source": "e0ipso/ai-task-manager",
+    "st-execute-task": {
+      "source": "e0ipso/strikethroo",
       "sourceType": "github",
-      "skillPath": ".agents/skills/task-execute-task/SKILL.md",
-      "computedHash": "188a0dc1437429182c2921bd3d47072db7ce215cf50923032e48e9a9d9f11c0f"
+      "skillPath": "templates/harness/skills/st-execute-task/SKILL.md",
+      "computedHash": "2dedc65171a87d6918d092c03d3743873b67e8e918960462442e89f56720992b"
     },
-    "task-full-workflow": {
-      "source": "e0ipso/ai-task-manager",
+    "st-full-workflow": {
+      "source": "e0ipso/strikethroo",
       "sourceType": "github",
-      "skillPath": ".agents/skills/task-full-workflow/SKILL.md",
-      "computedHash": "f3c0d0a4d88fa5228b9ecb3c41c021b923fb7d8d41332485260a3c03ba70ef3d"
+      "skillPath": "templates/harness/skills/st-full-workflow/SKILL.md",
+      "computedHash": "693bd186cf18427cd884a30076ea2d607b6ceb2c983a087c5d56bc8470207774"
     },
-    "task-generate-tasks": {
-      "source": "e0ipso/ai-task-manager",
+    "st-generate-tasks": {
+      "source": "e0ipso/strikethroo",
       "sourceType": "github",
-      "skillPath": ".agents/skills/task-generate-tasks/SKILL.md",
-      "computedHash": "a23a8db42b302949afe013109e5d27fae2a6a3b165edbc7b716e41d9d5fa836b"
+      "skillPath": "templates/harness/skills/st-generate-tasks/SKILL.md",
+      "computedHash": "74d7a8d0ff140b24ba7745e012fb52438dea6fa460481c0b1e893287d43fe5b6"
     },
-    "task-refine-plan": {
-      "source": "e0ipso/ai-task-manager",
+    "st-refine-plan": {
+      "source": "e0ipso/strikethroo",
       "sourceType": "github",
-      "skillPath": ".agents/skills/task-refine-plan/SKILL.md",
-      "computedHash": "45de1e49a802514809fd59e05fc0247edd4f12ffbc60c19cf98f6dccdab1788b"
+      "skillPath": "templates/harness/skills/st-refine-plan/SKILL.md",
+      "computedHash": "360ea68a453247495704e80b3f966267f8a66dbac2f0866547779cada640c7fa"
     }
   }
 }
