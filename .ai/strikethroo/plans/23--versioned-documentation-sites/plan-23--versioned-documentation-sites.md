@@ -228,9 +228,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 002: Add docs publishing workflow (depends on: 001)
 
-### Phase 3: Validation and Follow-up Capture
+### ✅ Phase 3: Validation and Follow-up Capture
 **Parallel Tasks:**
-- Task 004: Validate docs plan deliverables (depends on: 001, 002, 003)
+- ✔️ Task 004: Validate docs plan deliverables (depends on: 001, 002, 003)
 
 ### Post-phase Actions
 
@@ -239,3 +239,6 @@ Run `/config/hooks/POST_PHASE.md` after every phase. Do not proceed to the next 
 ### Execution Summary
 - Total Phases: 3
 - Total Tasks: 4
+- 2026-06-18: Task 004 validation completed. Integration MkDocs strict build passed, required generated pages and images were inspected, release tag parsing was locally simulated, and out-of-scope backfill/redirect/link-checker/org-root implementation work was not added. Follow-up was initially recorded for the sibling `rtl_433-hass-addons` repository.
+- 2026-06-18: Corrected Task 003 after the sibling `rtl_433-hass-addons` repository was available at `/home/andrew.guest/github.com/rtl-433-hass/rtl_433-hass-addons`. The add-on repository now has minimal MkDocs + `mike` tooling, canonical docs pages, lean Supervisor README entry points, and a docs publishing workflow mirroring the integration docs workflow. The org-root landing page remains follow-up-only and was not implemented.
+- 2026-06-18: Re-ran Task 004 after the add-on docs implementation. Strict MkDocs builds now pass in both the integration and add-on repositories; required source/generated pages, README entry points, docs workflows, and tag-to-version logic were validated in both repositories. The prior add-on blocker is superseded by implemented status. No historical backfill, README-anchor redirects, separate link checker, or org-root landing page implementation was added.
