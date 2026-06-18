@@ -1,0 +1,49 @@
+site_name: rtl_433 for Home Assistant
+site_url: https://rtl-433-hass.github.io/rtl_433/
+repo_url: https://github.com/rtl-433-hass/rtl_433
+repo_name: rtl-433-hass/rtl_433
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: light blue
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue grey
+      accent: light blue
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+extra:
+  version:
+    provider: mike
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Configuration: configuration.md
+  - Discovery: discovery.md
+  - Availability: availability.md
+  - Diagnostics: diagnostics.md
+  - Hub Entities: hub-entities.md
+  - Device Library: device-library.md
+  - Utility-Meter Calibration: calibration.md
+  - WebSocket API: websocket-api.md
+  - Multiple Servers: multiple-servers.md
+  - Screenshots: screenshots.md

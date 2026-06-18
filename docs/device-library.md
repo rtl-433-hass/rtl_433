@@ -73,7 +73,7 @@ temperature_C:
 | `value_transform`     | no       | mapping         | Declarative numeric transform applied before the value is stored. See [Value transforms](#value-transforms). Omit for binary fields. |
 | `payload`             | no       | `{ on: <raw>, off: <raw> }` | For `binary_sensor` only: maps the raw rtl_433 value to the HA on/off state. See [Binary payloads](#binary-payloads). |
 | `event_map`           | no       | `{ <raw-string>: <event-type> }` | For `event` only: maps a stringified raw value to a named `event_type`; mapped types are declared up front in `event_types`. See [Event entities](#event-entities). |
-| `clear_delay`         | no       | int (seconds)   | For `binary_sensor` only: seconds after a detection to **synthesize** an off, for detect-only hardware that sends no off (e.g. motion/PIR). Reschedules on each detection; per-device override via the options flow. See [Motion / occupancy](#motion--occupancy). |
+| `clear_delay`         | no       | int (seconds)   | For `binary_sensor` only: seconds after a detection to **synthesize** an off, for detect-only hardware that sends no off (e.g. motion/PIR). Reschedules on each detection; per-device override via the options flow. See [Motion / occupancy](#motion-occupancy). |
 | `force_update`        | no       | bool            | Mirrors upstream `force_update`; write state even when the value is unchanged. Defaults to false. |
 | `entity_category`     | no       | `diagnostic` \| `config` \| `null` | Categorizes the entity in the HA UI. Diagnostic fields (battery, signal, tamper) use `diagnostic`. |
 | `enabled_by_default`  | no       | bool            | Set `false` to register the entity disabled (the user can enable it). Defaults to true. |
@@ -275,7 +275,7 @@ The shipped `events.yaml` has two examples:
 > **`motion` is not an event entity.** PIR / occupancy decoders emit `motion`
 > on detection but never send an off, so it is modelled as a detect-only
 > `binary_sensor` (device class `occupancy`) with a synthesized off — see
-> [Motion / occupancy](#motion--occupancy). (Earlier versions exposed it as an
+> [Motion / occupancy](#motion-occupancy). (Earlier versions exposed it as an
 > `event`; the entity_id changed `event.*_motion` → `binary_sensor.*_motion`.)
 
 ## Model-scoped mappings (`models:`)
@@ -361,7 +361,7 @@ the model tier before the global tier.)
 > carry a guessed `models:` consumption mapping for any real model — a wrong
 > scale would silently corrupt real Energy data. The example below is purely
 > illustrative; for a real meter use the per-device calibration step in the
-> options flow (see the README) until a model's unit/scale is authoritatively
+> options flow (see [Utility-meter calibration](calibration.md)) until a model's unit/scale is authoritatively
 > known.
 
 ### Worked example (ILLUSTRATIVE — not a real meter mapping)
