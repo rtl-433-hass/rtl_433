@@ -1,50 +1,125 @@
-# Device Mapping Library — Contributor Guide
+# Device Mapping Library
 
 The rtl_433 integration turns the JSON fields emitted by rtl_433 into Home
-Assistant entities using a **data-driven device library**: a set of themed YAML
+Assistant entities using a **data-driven device library**: a set of YAML
 files that map each rtl_433 field name to a Home Assistant entity descriptor.
 
-Adding or correcting support for a device is a small, reviewable YAML change —
-no Python edits, and no integration-logic risk. This guide documents the schema,
-where the files live, the add-a-mapping workflow, how diagnostics tell you what
-is missing, and how the per-installation user override works.
+Use device mappings to add support for fields your rtl_433 hardware already
+reports, without editing the integration code or waiting for a new release. You
+can add mappings from the Home Assistant UI; contributors can also add mappings
+to the shipped library.
 
 > The shipped library is a faithful port of the curated `mappings` table and
-> `SKIP_KEYS` from rtl_433's own `examples/rtl_433_mqtt_hass.py`. The mapping
+> `SKIP_KEYS` from rtl_433's own
+> [`examples/rtl_433_mqtt_hass.py`](https://github.com/merbanan/rtl_433/blob/90621a8cb56c79b766077cadce4dc37bc613c54c/examples/rtl_433_mqtt_hass.py).
+> The mapping
 > *semantics* (device class, unit, state class, value transform, unique-id
 > suffix) are reused; the MQTT transport is discarded.
 
-## Where the files live
+## Adding device mappings
 
+You can extend or correct the shipped library **without editing the integration
+files** directly from the Home Assistant UI:
+
+> **Settings → Devices & Services → rtl_433 → Configure → Device mappings**
+
+The *Device mappings* step opens Home Assistant's built-in YAML editor pre-filled
+with that hub's current mappings. You edit mappings as YAML, using the **same
+schema** as the shipped library: top-level keys are rtl_433 field names, values
+are entry mappings. They may optionally include a `skip_keys:` list to add extra
+skip entries, and an optional [`models:` block](#model-scoped-mappings-models) to
+add or override model-scoped descriptors.
+
+Mappings are stored **per hub** in that hub's config entry — each hub has its own
+independent set. The editor:
+
+- **Blocks invalid YAML syntax** before you can submit.
+- **Validates the mapping schema on save** and rejects bad input with a
+  per-field error naming the offending field and the reason.
+- **Reloads the hub automatically.**
+
+![Device mappings step showing the YAML editor pre-filled with an example mapping](images/05-mapping-overrides.png)
+
+To find fields your device reports that do not yet have entities, download
+diagnostics for the hub from **Settings → Devices & Services → the rtl_433
+integration → ⋮ → Download diagnostics** and inspect `unmatched_field_keys`. Each
+key is either a candidate for a mapping or, if it is genuinely noise/identity
+data, an entry for `skip_keys:`.
+
+> **Comments and formatting are not preserved.** The editor returns parsed YAML,
+> so any comments or hand-formatting in what you paste are dropped once the
+> mappings are stored. The mapping *content* is preserved exactly.
+
+Mappings you add in the UI layer **on top of** the shipped library:
+
+- A field present in both the UI mapping and the shipped library: the **UI mapping
+  wins** (full entry replacement, not a deep merge), so you can correct a unit,
+  device class, or transform.
+- A field present only in the UI mapping: it is **added** as a new mapping.
+- `skip_keys` entries in the UI mapping are **unioned** with the shipped skip
+  list.
+- A `models:` block in the UI mapping is **merged per `(model, field_key)`**: a
+  UI model-scoped entry replaces the shipped one for the same model and field,
+  while other shipped model fields are preserved. Per the
+  [precedence rules](#precedence-specificity-first), a model-scoped entry (from
+  either source) always beats a global one — so a **shipped** `models:` entry
+  outranks a **UI global** entry for a matching model.
+
+Paste a mapping like the following into the *Device mappings* editor. This
+example adds an unmapped field and re-classifies `battery_ok` as a low-battery
+binary problem sensor:
+
+```yaml
+custom_field_C:
+  platform: sensor
+  device_class: temperature
+  unit_of_measurement: "°C"
+  state_class: measurement
+  name: Custom Probe
+  value_transform: { round: 1 }
+  object_suffix: TC
+
+battery_ok:
+  platform: binary_sensor
+  device_class: battery     # HA "battery": on == problem (low)
+  unit_of_measurement: null
+  state_class: null
+  name: Battery
+  payload: { on: "0", off: "1" }   # battery_ok == 0 means low -> problem
+  entity_category: diagnostic
+  object_suffix: B
 ```
-custom_components/rtl_433/device_library/
-├── _skip_keys.yaml         # fields that never become entities
-├── air_quality.yaml        # pm2.5 / pm10 / co2
-├── binary_states.yaml      # contacts, tamper, alarm, door state
-├── events.yaml             # momentary RF: button, doorbell
-├── humidity_moisture.yaml  # humidity, moisture, leak, depth, WH51 soil AD/boost
-├── light_uv.yaml           # illuminance, UV
-├── misc.yaml               # battery %, timestamp, signal, lightning
-├── power_electrical.yaml   # power, energy, current, voltage, consumption
-├── pressure.yaml           # barometric pressure
-├── rain.yaml               # rain total / rate
-├── temperature.yaml        # temperature variants
-└── wind.yaml               # wind speed / gust / direction
+
+`skip_keys:` entries work in the editor exactly as in the shipped library, and so
+do model-scoped mappings — the way to correct a mapping for **one specific device
+model** rather than every device that emits the field. Nest the per-model
+descriptors under a [`models:` block](#model-scoped-mappings-models) keyed by the
+exact rtl_433 `model` string; a model-scoped entry beats any global one for that
+model (see [precedence](#precedence-specificity-first)). For example, to rename
+one model's temperature sensor and round it more finely than the global default,
+leaving every other model untouched:
+
+```yaml
+models:
+  Acurite-Tower: # exact rtl_433 model string
+    temperature_C:
+      platform: sensor
+      device_class: temperature
+      unit_of_measurement: "°C"
+      state_class: measurement
+      name: Outdoor temperature
+      value_transform: { round: 2 }
+      object_suffix: T
 ```
 
-The loader (see `mapping.py`) reads **every** `*.yaml` file in this directory at
-startup, merges all entries into one lookup table keyed by field name, and reads
-`_skip_keys.yaml` separately as the exclusion list. Grouping is purely
-organizational: put a new field in whichever themed file fits its domain, or in
-`misc.yaml` if nothing fits. A user-supplied override file (see
-[User overrides](#user-overrides)) is layered on top of the merged result.
-
-Files whose name starts with `_` (currently only `_skip_keys.yaml`) are treated
-specially by the loader and are not parsed as field-mapping tables.
+Mapping overrides are **global or model-scoped only** — they apply to every device
+of a model, not a single physical unit. To change settings for one specific unit
+(its availability timeout, meter calibration, or motion clear delay), use the
+options flow's *Device settings* step instead.
 
 ## Mapping entry schema
 
-Each themed file is a YAML mapping whose **top-level keys are rtl_433 field
+Each library file is a YAML mapping whose **top-level keys are rtl_433 field
 names** exactly as they appear in the JSON event (e.g. `temperature_C`,
 `wind_avg_km_h`, `battery_ok`). Each value is an entry with the attributes
 below.
@@ -62,23 +137,33 @@ temperature_C:
 
 ### Attributes
 
-| Attribute             | Required | Type            | Meaning |
-|-----------------------|----------|-----------------|---------|
-| `platform`            | yes      | `sensor` \| `binary_sensor` \| `event` | Which Home Assistant platform creates the entity. See [Event entities](#event-entities) for `event`. |
-| `device_class`        | yes (nullable) | string \| `null` | Home Assistant device class (e.g. `temperature`, `humidity`, `safety`). Use `null` when the field has no appropriate device class. For `event` entries it is an [`EventDeviceClass`](https://www.home-assistant.io/integrations/event/#device-class) (`button`, `doorbell`). |
-| `unit_of_measurement` | yes (nullable) | string \| `null` | Unit shown by the entity. `null` for unitless or binary fields. |
-| `state_class`         | yes (nullable) | `measurement` \| `total` \| `total_increasing` \| `null` | Long-term-statistics class. `null` for binary fields and non-numeric sensors. |
-| `name`                | no       | string \| `null` | Human-readable entity name (suffixed to the device name by HA). **Omit it (or set `null`) to let Home Assistant derive a translated name from `device_class`** — preferred when the name would just repeat the device class (e.g. a `temperature` field named "Temperature"). Only set an explicit name when it adds information the device class doesn't (e.g. "Battery mV", "Gust speed"). |
-| `object_suffix`       | yes      | string          | Short, stable token appended to the device key to form the entity's unique id. **Must be stable** — changing it orphans existing entities. |
-| `value_transform`     | no       | mapping         | Declarative numeric transform applied before the value is stored. See [Value transforms](#value-transforms). Omit for binary fields. |
-| `payload`             | no       | `{ on: <raw>, off: <raw> }` | For `binary_sensor` only: maps the raw rtl_433 value to the HA on/off state. See [Binary payloads](#binary-payloads). |
-| `event_map`           | no       | `{ <raw-string>: <event-type> }` | For `event` only: maps a stringified raw value to a named `event_type`; mapped types are declared up front in `event_types`. See [Event entities](#event-entities). |
-| `clear_delay`         | no       | int (seconds)   | For `binary_sensor` only: seconds after a detection to **synthesize** an off, for detect-only hardware that sends no off (e.g. motion/PIR). Reschedules on each detection; per-device override via the options flow. See [Motion / occupancy](#motion-occupancy). |
-| `force_update`        | no       | bool            | Mirrors upstream `force_update`; write state even when the value is unchanged. Defaults to false. |
-| `entity_category`     | no       | `diagnostic` \| `config` \| `null` | Categorizes the entity in the HA UI. Diagnostic fields (battery, signal, tamper) use `diagnostic`. |
-| `enabled_by_default`  | no       | bool            | Set `false` to register the entity disabled (the user can enable it). Defaults to true. |
-| `icon`                | no       | string          | Optional `mdi:` icon override. |
-| `event_driven`        | no       | bool            | Marks a `binary_sensor` field as a state field that transmits **only on a change** (door/contact/motion), so the device has no periodic check-in. Defaults to false. Drives availability — see [Availability classification](#availability-classification). `platform: event` fields are always event-driven and do not need this flag. |
+<table>
+  <thead>
+    <tr>
+      <th style="min-width: 12rem;">Attribute</th>
+      <th>Required</th>
+      <th>Type</th>
+      <th>Meaning</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><code>platform</code></td><td>yes</td><td><code>sensor</code> | <code>binary_sensor</code> | <code>event</code></td><td>Which Home Assistant platform creates the entity. See <a href="#event-entities">Event entities</a> for <code>event</code>.</td></tr>
+    <tr><td><code>device_class</code></td><td>yes (nullable)</td><td>string | <code>null</code></td><td>Home Assistant device class (e.g. <code>temperature</code>, <code>humidity</code>, <code>safety</code>). Use <code>null</code> when the field has no appropriate device class. For <code>event</code> entries it is an <a href="https://www.home-assistant.io/integrations/event/#device-class"><code>EventDeviceClass</code></a> (<code>button</code>, <code>doorbell</code>).</td></tr>
+    <tr><td><code>unit_of_measurement</code></td><td>yes (nullable)</td><td>string | <code>null</code></td><td>Unit shown by the entity. <code>null</code> for unitless or binary fields.</td></tr>
+    <tr><td><code>state_class</code></td><td>yes (nullable)</td><td><code>measurement</code> | <code>total</code> | <code>total_increasing</code> | <code>null</code></td><td>Long-term-statistics class. <code>null</code> for binary fields and non-numeric sensors.</td></tr>
+    <tr><td><code>name</code></td><td>no</td><td>string | <code>null</code></td><td>Human-readable entity name (suffixed to the device name by HA). <strong>Omit it (or set <code>null</code>) to let Home Assistant derive a translated name from <code>device_class</code></strong>. Only set an explicit name when it adds information the device class doesn't.</td></tr>
+    <tr><td><code>object_suffix</code></td><td>yes</td><td>string</td><td>Short, stable token appended to the device key to form the entity's unique id. <strong>Must be stable</strong> — changing it orphans existing entities.</td></tr>
+    <tr><td><code>value_transform</code></td><td>no</td><td>mapping</td><td>Declarative numeric transform applied before the value is stored. See <a href="#value-transforms">Value transforms</a>. Omit for binary fields.</td></tr>
+    <tr><td><code>payload</code></td><td>no</td><td><code>{ on: &lt;raw&gt;, off: &lt;raw&gt; }</code></td><td>For <code>binary_sensor</code> only: maps the raw rtl_433 value to the HA on/off state. See <a href="#binary-payloads">Binary payloads</a>.</td></tr>
+    <tr><td><code>event_map</code></td><td>no</td><td><code>{ &lt;raw-string&gt;: &lt;event-type&gt; }</code></td><td>For <code>event</code> only: maps a stringified raw value to a named <code>event_type</code>; mapped types are declared up front in <code>event_types</code>. See <a href="#event-entities">Event entities</a>.</td></tr>
+    <tr><td><code>clear_delay</code></td><td>no</td><td>int (seconds)</td><td>For <code>binary_sensor</code> only: seconds after a detection to <strong>synthesize</strong> an off, for detect-only hardware that sends no off. Reschedules on each detection; per-device override via the options flow. See <a href="#motion-occupancy">Motion / occupancy</a>.</td></tr>
+    <tr><td><code>force_update</code></td><td>no</td><td>bool</td><td>Mirrors upstream <code>force_update</code>; write state even when the value is unchanged. Defaults to false.</td></tr>
+    <tr><td><code>entity_category</code></td><td>no</td><td><code>diagnostic</code> | <code>config</code> | <code>null</code></td><td>Categorizes the entity in the HA UI. Diagnostic fields (battery, signal, tamper) use <code>diagnostic</code>.</td></tr>
+    <tr><td><code>enabled_by_default</code></td><td>no</td><td>bool</td><td>Set <code>false</code> to register the entity disabled (the user can enable it). Defaults to true.</td></tr>
+    <tr><td><code>icon</code></td><td>no</td><td>string</td><td>Optional <code>mdi:</code> icon override.</td></tr>
+    <tr><td><code>event_driven</code></td><td>no</td><td>bool</td><td>Marks a <code>binary_sensor</code> field as a state field that transmits <strong>only on a change</strong>, so the device has no periodic check-in. Defaults to false. Drives availability — see <a href="#availability-classification">Availability classification</a>. <code>platform: event</code> fields are always event-driven and do not need this flag.</td></tr>
+  </tbody>
+</table>
 
 `null` is written explicitly (YAML `null`) rather than omitted for the three
 "required (nullable)" attributes, so every entry is uniform and the loader never
@@ -135,7 +220,7 @@ emits them.
 > displays on the standard HA battery card. The shipped library preserves that:
 > `battery_ok` is a `sensor` with `device_class: battery`, `unit: "%"`, and
 > `value_transform: { scale: 99, offset: 1, round: 0 }`. If you prefer a
-> low-battery binary problem sensor, that is a candidate for a user override.
+> low-battery binary problem sensor, add a mapping in the Home Assistant UI.
 
 ### Motion / occupancy
 
@@ -191,8 +276,9 @@ The class default has two outcomes:
 - **Periodic** → a finite default (10 min). Everything else — temperature,
   humidity, power, etc. — which reports on a regular cadence.
 
-A lone diagnostic bit (`tamper`, `battery_ok`) is **not** event-driven, so a
-periodic sensor that merely carries one still expires and can flag offline. An
+Diagnostic fields such as `battery_ok` do not decide the class on their own. If a
+device also has an event-driven field, the whole device uses the event-driven
+default, so its battery and other entities stay available between events. An
 explicit per-device or hub timeout always overrides the class default.
 
 Because an event-driven device's availability no longer signals freshness, its
@@ -207,7 +293,7 @@ button, a doorbell press — that have no steady "on" / "off"
 state to track. Each genuine transmission fires **one** Home Assistant
 [event](https://www.home-assistant.io/integrations/event/), and the entity
 stays available between presses (no faked "off"). Event entries live in their
-own themed file, `device_library/events.yaml`:
+own library file, `device_library/events.yaml`:
 
 ```yaml
 button:
@@ -260,23 +346,12 @@ secret_knock:
     "1": secret_knock  # custom type for the 3x-rapid "secret knock"
 ```
 
-`ring` is Home Assistant's standard `DoorbellEventType.RING`. A
-`device_class: doorbell` entity **must** advertise `ring` or HA logs a
-deprecation warning and removes the entity in **HA 2027.4**; the entity
-guarantees `ring` is present even if no map supplies it.
-
 The shipped `events.yaml` has two examples:
 
 | Field | `device_class` | Notes |
 |-------|----------------|-------|
 | `button` | `button` | Remote / key-fob button code; the value is the pressed code, so distinct presses auto-populate several types. |
 | `secret_knock` | `doorbell` | Honeywell ActivLink doorbell press; emitted on every press (`0` regular → `ring`, `1` secret knock → `secret_knock`) via `event_map`. |
-
-> **`motion` is not an event entity.** PIR / occupancy decoders emit `motion`
-> on detection but never send an off, so it is modelled as a detect-only
-> `binary_sensor` (device class `occupancy`) with a synthesized off — see
-> [Motion / occupancy](#motion-occupancy). (Earlier versions exposed it as an
-> `event`; the entity_id changed `event.*_motion` → `binary_sensor.*_motion`.)
 
 ## Model-scoped mappings (`models:`)
 
@@ -317,10 +392,10 @@ models:
       object_suffix: consumption
 ```
 
-The `models:` block is **additive and optional**: every existing themed file
+The `models:` block is **additive and optional**: every existing library file
 parses exactly as before, and the flat top-level keys remain the global default.
-It may appear in any themed file (most naturally `power_electrical.yaml`) and in
-[user overrides](#user-overrides). `models` is a reserved top-level key —
+It may appear in any library file (most naturally `power_electrical.yaml`) and in
+[UI mappings](#adding-device-mappings). `models` is a reserved top-level key —
 the loader intercepts it, so you cannot have a *field* literally named `models`.
 
 ### Lookup resolution order
@@ -338,23 +413,22 @@ global descriptor for that same field.
 
 ### Precedence (specificity-first)
 
-Combined with [user overrides](#user-overrides) and the per-device meter
+Combined with [UI mappings](#adding-device-mappings) and the per-device meter
 calibration (the options-flow *Device settings* step), the full precedence for a
 single field on a single device is, **highest to lowest**:
 
 1. **Per-device calibration** (commodity + base unit + scale, set in the options
    flow) — applies only to the consumption field(s) of the one calibrated device.
-2. **Model-scoped** entry — user-override `models:` entry, else shipped
-   `models:` entry.
-3. **Global** flat entry — user-override flat key, else shipped flat key.
+2. **Model-scoped** entry — UI `models:` entry, else shipped `models:` entry.
+3. **Global** flat entry — UI flat key, else shipped flat key.
 4. Unmapped → no entity.
 
 The rule is **specificity-first**: a model-scoped entry always beats a global one
 *regardless of source*. In particular a **shipped** `models:` entry outranks a
-**user-override global** entry for a matching model. Within each tier the user
-file beats the shipped library. (This falls out naturally from the merge: the
-user override replaces the shipped entry *within* a tier, and the lookup checks
-the model tier before the global tier.)
+**UI global** entry for a matching model. Within each tier the UI mapping beats
+the shipped library. (This falls out naturally from the merge: the UI mapping
+replaces the shipped entry *within* a tier, and the lookup checks the model tier
+before the global tier.)
 
 > **No speculative real-meter mappings ship.** Because a meter's consumption
 > unit/scale is not knowable from the signal, the shipped library does **not**
@@ -363,34 +437,6 @@ the model tier before the global tier.)
 > illustrative; for a real meter use the per-device calibration step in the
 > options flow (see [Utility-meter calibration](calibration.md)) until a model's unit/scale is authoritatively
 > known.
-
-### Worked example (ILLUSTRATIVE — not a real meter mapping)
-
-> ⚠️ **This is a made-up model name and does not match any real device.** Do
-> **not** copy it into a live library expecting it to scale a real meter
-> correctly. It exists only to show the `models:` schema end-to-end; for a real
-> meter, calibrate per device in the options flow instead.
-
-The example below makes a consumption counter Energy-dashboard-eligible for one
-illustrative model by attaching a real `device_class`, a convertible base unit,
-`state_class: total_increasing`, and a `scale`:
-
-```yaml
-models:
-  ACME-NotAReal-Meter-9000:     # ILLUSTRATIVE model string — not a real device
-    consumption_data:
-      platform: sensor
-      device_class: energy           # makes it Energy-dashboard-eligible
-      unit_of_measurement: kWh       # a convertible base unit for `energy`
-      state_class: total_increasing  # required for the Energy dashboard
-      name: Consumption
-      value_transform: { scale: 0.01 }   # raw counter × 0.01 (illustrative)
-      object_suffix: consumption
-```
-
-For any device whose model is *not* `ACME-NotAReal-Meter-9000`, `consumption_data`
-keeps the shipped global descriptor (the unitless `total_increasing` counter), and
-unrelated fields like `temperature_C` are unaffected on every model.
 
 ## The skip-keys file
 
@@ -415,14 +461,51 @@ lookup. Identity keys (`model` + `id`/`channel`/`subtype`) are consumed by the
 event normalizer to derive the device key, which is why they are skipped here
 rather than mapped to entities.
 
-## Add-a-mapping workflow
+## Contributing device mappings
 
-1. **Find the field name.** Watch your rtl_433 stream or check the integration's
-   diagnostics for the exact JSON key (see
-   [Diagnostics feedback loop](#diagnostics-feedback-loop)). rtl_433 field
-   names are case-sensitive and unit-suffixed (`temperature_C`, not
-   `temperature`).
-2. **Pick the themed file** that matches the field's domain, or `misc.yaml`.
+The easiest way to add support for your own installation is to use
+[Adding device mappings](#adding-device-mappings). If you want the mapping to
+ship with the integration for everyone, add it to the repository's device
+library and open a pull request.
+
+### Where the files live
+
+```
+custom_components/rtl_433/device_library/
+├── _skip_keys.yaml         # fields that never become entities
+├── air_quality.yaml        # pm2.5 / pm10 / co2
+├── binary_states.yaml      # contacts, tamper, alarm, door state
+├── events.yaml             # momentary RF: button, doorbell
+├── humidity_moisture.yaml  # humidity, moisture, leak, depth, WH51 soil AD/boost
+├── light_uv.yaml           # illuminance, UV
+├── misc.yaml               # battery %, timestamp, signal, lightning
+├── power_electrical.yaml   # power, energy, current, voltage, consumption
+├── pressure.yaml           # barometric pressure
+├── rain.yaml               # rain total / rate
+├── temperature.yaml        # temperature variants
+└── wind.yaml               # wind speed / gust / direction
+```
+
+The loader reads **every** `*.yaml` file in this directory at startup, merges all
+entries into one lookup table keyed by field name, and reads `_skip_keys.yaml`
+separately as the exclusion list. Grouping is purely organizational: put a new
+field in whichever file fits its domain, or in `misc.yaml` if nothing
+fits. UI mappings from [Adding device mappings](#adding-device-mappings) are
+layered on top of the merged shipped library.
+
+Files whose name starts with `_` (currently only `_skip_keys.yaml`) are treated
+specially by the loader and are not parsed as field-mapping tables.
+
+### Add-a-mapping workflow
+
+1. **Find the field name.** Watch your rtl_433 stream or download diagnostics
+   for the hub from **Settings → Devices & Services → the rtl_433 integration →
+   ⋮ → Download diagnostics**. The diagnostics export lists unmapped fields your
+   hardware has sent in `unmatched_field_keys`. Each key is either a candidate
+   for a mapping or, if it is genuinely noise/identity data, an entry for
+   `_skip_keys.yaml`. rtl_433 field names are case-sensitive and unit-suffixed
+   (`temperature_C`, not `temperature`).
+2. **Pick the file** that matches the field's domain, or `misc.yaml`.
 3. **Add an entry** keyed by the exact field name, filling in the required
    attributes. Copy a similar existing entry as a template.
    - For a numeric reading: choose `platform: sensor`, the closest
@@ -441,131 +524,6 @@ rather than mapped to entities.
    suite) and open a PR with a `feat:` conventional commit.
 
 [hadc]: https://www.home-assistant.io/integrations/sensor/#device-class
-
-## Diagnostics feedback loop
-
-The integration's diagnostics export records, per hub, the **unmatched field
-keys** it has seen — JSON keys that are neither in `_skip_keys.yaml` nor present
-in the mapping library. This is the canonical way to discover what a device
-emits that the library does not yet cover:
-
-1. Download diagnostics for the hub (Settings → Devices & Services → the rtl_433
-   integration → ⋮ → *Download diagnostics*).
-2. Look at the `unmatched_keys` section — each entry is a field name your
-   hardware sent that produced no entity.
-3. For each key you care about, add a mapping (above) or, if it is genuinely
-   noise/identity, add it to `_skip_keys.yaml` to silence it.
-
-This closes the loop: missing support shows up as concrete field names, and each
-is fixed by a one-line YAML addition.
-
-## User overrides
-
-You can extend or correct the shipped library **without editing the integration
-files** — and without touching disk — directly from the Home Assistant UI:
-
-> **Settings → Devices & Services → rtl_433 → Configure → Device mappings**
-
-The *Device mappings* step opens Home Assistant's built-in YAML editor
-(`ha-yaml-editor`) pre-filled with that hub's current overrides. You edit the
-overrides as YAML, using the **same schema** as the themed library files:
-top-level keys are rtl_433 field names, values are entry mappings. They may
-optionally include a `skip_keys:` list to add extra skip entries, and an optional
-[`models:` block](#model-scoped-mappings-models) to add or override model-scoped
-descriptors.
-
-Overrides are stored **per hub** in that hub's config entry — each hub has its
-own independent set. The editor:
-
-- **Blocks invalid YAML syntax** before you can submit.
-- **Validates the mapping schema on save** and rejects bad input with a
-  per-field error naming the offending field and the reason. Invalid entries are
-  **no longer silently dropped** — a bad mapping fails the save loudly so you can
-  fix it.
-- **Applies the change by reloading that hub automatically** when you save
-  (entities rebuild). **No Home Assistant restart is required.**
-
-> **Comments and formatting are not preserved.** The editor returns parsed YAML,
-> so any comments or hand-formatting in what you paste are dropped once the
-> overrides are stored. The mapping *content* is preserved exactly.
-
-The overrides layer **on top of** the shipped library:
-
-- A field present in both the override and the shipped library: the **override
-  wins** (full entry replacement, not a deep merge), so you can correct a unit,
-  device class, or transform.
-- A field present only in the override: it is **added** as a new mapping.
-- `skip_keys` entries in the override are **unioned** with the shipped skip
-  list.
-- A `models:` block in the override is **merged per `(model, field_key)`**: an
-  override model-scoped entry replaces the shipped one for the same model and
-  field, while other shipped model fields are preserved. Per the
-  [precedence rules](#precedence-specificity-first), a model-scoped entry (from
-  either source) always beats a global one — so a **shipped** `models:` entry
-  outranks a **user-override global** entry for a matching model.
-
-Paste an override like the following into the *Device mappings* editor. This
-example adds an unmapped field and re-classifies `battery_ok` as a low-battery
-binary problem sensor:
-
-```yaml
-custom_field_C:
-  platform: sensor
-  device_class: temperature
-  unit_of_measurement: "°C"
-  state_class: measurement
-  name: Custom Probe
-  value_transform: { round: 1 }
-  object_suffix: TC
-
-battery_ok:
-  platform: binary_sensor
-  device_class: battery     # HA "battery": on == problem (low)
-  unit_of_measurement: null
-  state_class: null
-  name: Battery
-  payload: { on: "0", off: "1" }   # battery_ok == 0 means low -> problem
-  entity_category: diagnostic
-  object_suffix: B
-```
-
-`skip_keys:` entries work in the editor exactly as in the shipped library, and so
-do model-scoped overrides — the way to correct a mapping for **one specific
-device model** rather than every device that emits the field. Nest the per-model
-descriptors under a [`models:` block](#model-scoped-mappings-models) keyed by the
-exact rtl_433 `model` string; a model-scoped entry beats any global one for that
-model (see [precedence](#precedence-specificity-first)). For example, to rename
-one model's temperature sensor and round it more finely than the global default,
-leaving every other model untouched:
-
-```yaml
-models:
-  Acurite-Tower: # exact rtl_433 model string
-    temperature_C:
-      platform: sensor
-      device_class: temperature
-      unit_of_measurement: "°C"
-      state_class: measurement
-      name: Outdoor temperature
-      value_transform: { round: 2 }
-      object_suffix: T
-```
-
-Mapping overrides are **global or model-scoped only** — they apply to every device
-of a model, not a single physical unit. To change settings for one specific unit
-(its availability timeout, meter calibration, or motion clear delay), use the
-options flow's *Device settings* step instead.
-
-### Migrating an existing `rtl_433_mappings.yaml`
-
-Earlier versions read overrides from a `<config>/rtl_433_mappings.yaml` file.
-That file is **no longer read at runtime**. On upgrade, the integration performs
-a **one-time import**: the contents of any existing
-`<config>/rtl_433_mappings.yaml` are normalized and copied into the stored
-overrides of **each existing hub**, after which the file is **ignored**. The
-file is **left untouched on disk** — it is never edited or deleted — but it has
-no further effect; edit your overrides in the *Device mappings* step from then
-on. Hubs added **after** the upgrade start with empty overrides.
 
 ## Notes on fields that cannot be expressed declaratively
 

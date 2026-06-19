@@ -49,6 +49,10 @@ under the hub device in the config entity category:
 - **Hop interval** number in seconds, available only for multi-frequency hopping
   setups.
 
+Frequency hopping must be configured in rtl_433. Home Assistant can adjust the
+hop interval after rtl_433 is already running with multiple frequencies, but it
+does not provide an entity for editing the frequency list.
+
 On first connect, Home Assistant adopts the server's current settings into its
 desired state. It then re-applies managed settings on every reconnect so values
 survive rtl_433 restarts. If an initial frequency was configured during setup,
@@ -60,8 +64,7 @@ stored values on the next reconnect.
 
 ### Re-Syncing from rtl_433 Config
 
-There is deliberately no re-adopt button or service. To pick up direct rtl_433
-config edits:
+To pick up direct rtl_433 config edits:
 
 1. Turn **Manage rtl_433 settings from Home Assistant** off. This clears Home
    Assistant's stored desired state.
@@ -82,19 +85,3 @@ config edits:
 Turning management off removes the controls, stops Home Assistant from sending
 commands, and clears its stored desired state. The receiver's settings are left
 untouched.
-
-## Replacing a Radio
-
-If an RTL-SDR dongle dies, you can swap in a replacement without losing decoded
-devices, history, or automations. The hub config entry is re-pointed at the new
-radio in place.
-
-1. Remove the dead dongle and plug in the replacement.
-2. In the rtl_433 add-on, stamp the replacement with a fresh serial if needed,
-   restart it, and note the new radio ID and `host:port`.
-3. In Home Assistant, use the **rtl_433 server unreachable** repair card or the
-   hub's **Reconfigure** flow to enter the replacement radio ID and connection
-   details.
-
-If discovery already created a duplicate hub for the new radio, reconfigure can
-adopt its identity and remove the duplicate.

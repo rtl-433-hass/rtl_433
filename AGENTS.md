@@ -584,12 +584,11 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
    mapped. Download it from **Settings → Devices & Services → rtl_433 → ⋮ →
    Download diagnostics**. Every key there is a one-line YAML addition; the list
    shrinks as you add mappings. See the
-   [diagnostics feedback loop](docs/device-library.md#diagnostics-feedback-loop).
+   [add-a-mapping workflow](docs/device-library.md#add-a-mapping-workflow).
 
 For an installation-local change that should **not** be committed, use the
-hub's per-hub user overrides (the options-flow *Device mappings* step) instead
-of editing the shipped library (see
-[User overrides](docs/device-library.md#user-overrides)).
+hub's *Device mappings* options step instead of editing the shipped library (see
+[Adding device mappings](docs/device-library.md#adding-device-mappings)).
 
 ## Running the unit tests
 

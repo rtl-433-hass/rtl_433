@@ -19,25 +19,6 @@ repository:
 2. Confirm the final path is `<config>/custom_components/rtl_433/`.
 3. Restart Home Assistant.
 
-## rtl_433 Server Requirement
-
-The integration connects to rtl_433's HTTP/WebSocket server. Start rtl_433 with
-HTTP output enabled, for example:
-
-```sh
-rtl_433 -F http
-```
-
-By default rtl_433 binds to `0.0.0.0:8433`. For localhost-only operation, use a
-bind address such as:
-
-```sh
-rtl_433 -F http://127.0.0.1:8433
-```
-
-The integration does not control SDR hardware directly; rtl_433 owns the receiver
-and exposes decoded frames to Home Assistant.
-
 ## Next Step
 
 After installation, add a hub from Home Assistant using the
