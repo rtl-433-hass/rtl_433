@@ -1,0 +1,1639 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://rtl-433-hass.github.io/rtl_433/dev/device-library/">
+      
+      
+        <link rel="prev" href="../hub-entities/">
+      
+      
+        <link rel="next" href="../calibration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Device Library - rtl_433 for Home Assistant</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#device-mapping-library" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="rtl_433 for Home Assistant" class="md-header__button md-logo" aria-label="rtl_433 for Home Assistant" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            rtl_433 for Home Assistant
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Device Library
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="light-blue"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="blue-grey" data-md-color-accent="light-blue"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/rtl-433-hass/rtl_433" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    rtl-433-hass/rtl_433
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="rtl_433 for Home Assistant" class="md-nav__button md-logo" aria-label="rtl_433 for Home Assistant" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    rtl_433 for Home Assistant
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/rtl-433-hass/rtl_433" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    rtl-433-hass/rtl_433
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../device-discovery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device Discovery
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../availability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Availability
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../event-based-devices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Event-based Devices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics & Debugging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hub-entities/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Hub Entities
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device Library
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Device Library
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#adding-device-mappings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding device mappings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mapping-entry-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mapping entry schema
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mapping entry schema">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attributes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#value-transforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Value transforms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#binary-payloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Binary payloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#motion-occupancy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Motion / occupancy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#availability-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Availability classification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-entities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event entities
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Event entities">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#event_map-naming-raw-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        event_map: naming raw values
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-scoped-mappings-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model-scoped mappings (models:)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model-scoped mappings (models:)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lookup-resolution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookup resolution order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#precedence-specificity-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Precedence (specificity-first)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-skip-keys-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The skip-keys file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contributing-device-mappings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contributing device mappings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Contributing device mappings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-the-files-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the files live
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#add-a-mapping-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add-a-mapping workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes-on-fields-that-cannot-be-expressed-declaratively" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes on fields that cannot be expressed declaratively
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calibration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Utility-Meter Calibration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#adding-device-mappings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding device mappings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mapping-entry-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mapping entry schema
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Mapping entry schema">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#attributes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attributes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#value-transforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Value transforms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#binary-payloads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Binary payloads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#motion-occupancy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Motion / occupancy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#availability-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Availability classification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#event-entities" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event entities
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Event entities">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#event_map-naming-raw-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        event_map: naming raw values
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-scoped-mappings-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model-scoped mappings (models:)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model-scoped mappings (models:)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lookup-resolution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lookup resolution order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#precedence-specificity-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Precedence (specificity-first)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-skip-keys-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The skip-keys file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#contributing-device-mappings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Contributing device mappings
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Contributing device mappings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-the-files-live" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the files live
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#add-a-mapping-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add-a-mapping workflow
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes-on-fields-that-cannot-be-expressed-declaratively" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes on fields that cannot be expressed declaratively
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="device-mapping-library">Device Mapping Library<a class="headerlink" href="#device-mapping-library" title="Permanent link">&para;</a></h1>
+<p>The rtl_433 integration turns the JSON fields emitted by rtl_433 into Home
+Assistant entities using a <strong>data-driven device library</strong>: a set of YAML
+files that map each rtl_433 field name to a Home Assistant entity descriptor.</p>
+<p>Use device mappings to add support for fields your rtl_433 hardware already
+reports, without editing the integration code or waiting for a new release. You
+can add mappings from the Home Assistant UI; contributors can also add mappings
+to the shipped library.</p>
+<blockquote>
+<p>The shipped library is a faithful port of the curated <code>mappings</code> table and
+<code>SKIP_KEYS</code> from rtl_433's own
+<a href="https://github.com/merbanan/rtl_433/blob/90621a8cb56c79b766077cadce4dc37bc613c54c/examples/rtl_433_mqtt_hass.py"><code>examples/rtl_433_mqtt_hass.py</code></a>.
+The mapping
+<em>semantics</em> (device class, unit, state class, value transform, unique-id
+suffix) are reused; the MQTT transport is discarded.</p>
+</blockquote>
+<h2 id="adding-device-mappings">Adding device mappings<a class="headerlink" href="#adding-device-mappings" title="Permanent link">&para;</a></h2>
+<p>You can extend or correct the shipped library <strong>without editing the integration
+files</strong> directly from the Home Assistant UI:</p>
+<blockquote>
+<p><strong>Settings → Devices &amp; Services → rtl_433 → Configure → Device mappings</strong></p>
+</blockquote>
+<p>The <em>Device mappings</em> step opens Home Assistant's built-in YAML editor pre-filled
+with that hub's current mappings. You edit mappings as YAML, using the <strong>same
+schema</strong> as the shipped library: top-level keys are rtl_433 field names, values
+are entry mappings. They may optionally include a <code>skip_keys:</code> list to add extra
+skip entries, and an optional <a href="#model-scoped-mappings-models"><code>models:</code> block</a> to
+add or override model-scoped descriptors.</p>
+<p>Mappings are stored <strong>per hub</strong> in that hub's config entry — each hub has its own
+independent set. The editor:</p>
+<ul>
+<li><strong>Blocks invalid YAML syntax</strong> before you can submit.</li>
+<li><strong>Validates the mapping schema on save</strong> and rejects bad input with a
+  per-field error naming the offending field and the reason.</li>
+<li><strong>Reloads the hub automatically.</strong></li>
+</ul>
+<p><img alt="Device mappings step showing the YAML editor pre-filled with an example mapping" src="../images/05-mapping-overrides.png" /></p>
+<p>To find fields your device reports that do not yet have entities, download
+diagnostics for the hub from <strong>Settings → Devices &amp; Services → the rtl_433
+integration → ⋮ → Download diagnostics</strong> and inspect <code>unmatched_field_keys</code>. Each
+key is either a candidate for a mapping or, if it is genuinely noise/identity
+data, an entry for <code>skip_keys:</code>.</p>
+<blockquote>
+<p><strong>Comments and formatting are not preserved.</strong> The editor returns parsed YAML,
+so any comments or hand-formatting in what you paste are dropped once the
+mappings are stored. The mapping <em>content</em> is preserved exactly.</p>
+</blockquote>
+<p>Mappings you add in the UI layer <strong>on top of</strong> the shipped library:</p>
+<ul>
+<li>A field present in both the UI mapping and the shipped library: the <strong>UI mapping
+  wins</strong> (full entry replacement, not a deep merge), so you can correct a unit,
+  device class, or transform.</li>
+<li>A field present only in the UI mapping: it is <strong>added</strong> as a new mapping.</li>
+<li><code>skip_keys</code> entries in the UI mapping are <strong>unioned</strong> with the shipped skip
+  list.</li>
+<li>A <code>models:</code> block in the UI mapping is <strong>merged per <code>(model, field_key)</code></strong>: a
+  UI model-scoped entry replaces the shipped one for the same model and field,
+  while other shipped model fields are preserved. Per the
+  <a href="#precedence-specificity-first">precedence rules</a>, a model-scoped entry (from
+  either source) always beats a global one — so a <strong>shipped</strong> <code>models:</code> entry
+  outranks a <strong>UI global</strong> entry for a matching model.</li>
+</ul>
+<p>Paste a mapping like the following into the <em>Device mappings</em> editor. This
+example adds an unmapped field and re-classifies <code>battery_ok</code> as a low-battery
+binary problem sensor:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">custom_field_C</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
+<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span>
+<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;°C&quot;</span>
+<span class="w">  </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">measurement</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Custom Probe</span>
+<span class="w">  </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> round</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">TC</span>
+
+<span class="nt">battery_ok</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">binary_sensor</span>
+<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">battery</span><span class="w">     </span><span class="c1"># HA &quot;battery&quot;: on == problem (low)</span>
+<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
+<span class="w">  </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Battery</span>
+<span class="w">  </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> on</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0&quot;</span><span class="p p-Indicator">,</span><span class="nt"> off</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># battery_ok == 0 means low -&gt; problem</span>
+<span class="w">  </span><span class="nt">entity_category</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">diagnostic</span>
+<span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B</span>
+</code></pre></div>
+<p><code>skip_keys:</code> entries work in the editor exactly as in the shipped library, and so
+do model-scoped mappings — the way to correct a mapping for <strong>one specific device
+model</strong> rather than every device that emits the field. Nest the per-model
+descriptors under a <a href="#model-scoped-mappings-models"><code>models:</code> block</a> keyed by the
+exact rtl_433 <code>model</code> string; a model-scoped entry beats any global one for that
+model (see <a href="#precedence-specificity-first">precedence</a>). For example, to rename
+one model's temperature sensor and round it more finely than the global default,
+leaving every other model untouched:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">models</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">Acurite-Tower</span><span class="p">:</span><span class="w"> </span><span class="c1"># exact rtl_433 model string</span>
+<span class="w">    </span><span class="nt">temperature_C</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
+<span class="w">      </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span>
+<span class="w">      </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;°C&quot;</span>
+<span class="w">      </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">measurement</span>
+<span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Outdoor temperature</span>
+<span class="w">      </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> round</span><span class="p">:</span><span class="w"> </span><span class="nv">2</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">T</span>
+</code></pre></div>
+<p>Mapping overrides are <strong>global or model-scoped only</strong> — they apply to every device
+of a model, not a single physical unit. To change settings for one specific unit
+(its availability timeout, meter calibration, or motion clear delay), use the
+options flow's <em>Device settings</em> step instead.</p>
+<h2 id="mapping-entry-schema">Mapping entry schema<a class="headerlink" href="#mapping-entry-schema" title="Permanent link">&para;</a></h2>
+<p>Each library file is a YAML mapping whose <strong>top-level keys are rtl_433 field
+names</strong> exactly as they appear in the JSON event (e.g. <code>temperature_C</code>,
+<code>wind_avg_km_h</code>, <code>battery_ok</code>). Each value is an entry with the attributes
+below.</p>
+<div class="highlight"><pre><span></span><code><span class="nt">temperature_C</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
+<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span>
+<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;°C&quot;</span>
+<span class="w">  </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">measurement</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">                  </span><span class="c1"># HA names it &quot;Temperature&quot; from device_class</span>
+<span class="w">  </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> round</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">T</span>
+</code></pre></div>
+<h3 id="attributes">Attributes<a class="headerlink" href="#attributes" title="Permanent link">&para;</a></h3>
+<table>
+  <thead>
+    <tr>
+      <th style="min-width: 12rem;">Attribute</th>
+      <th>Required</th>
+      <th>Type</th>
+      <th>Meaning</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><code>platform</code></td><td>yes</td><td><code>sensor</code> | <code>binary_sensor</code> | <code>event</code></td><td>Which Home Assistant platform creates the entity. See <a href="#event-entities">Event entities</a> for <code>event</code>.</td></tr>
+    <tr><td><code>device_class</code></td><td>yes (nullable)</td><td>string | <code>null</code></td><td>Home Assistant device class (e.g. <code>temperature</code>, <code>humidity</code>, <code>safety</code>). Use <code>null</code> when the field has no appropriate device class. For <code>event</code> entries it is an <a href="https://www.home-assistant.io/integrations/event/#device-class"><code>EventDeviceClass</code></a> (<code>button</code>, <code>doorbell</code>).</td></tr>
+    <tr><td><code>unit_of_measurement</code></td><td>yes (nullable)</td><td>string | <code>null</code></td><td>Unit shown by the entity. <code>null</code> for unitless or binary fields.</td></tr>
+    <tr><td><code>state_class</code></td><td>yes (nullable)</td><td><code>measurement</code> | <code>total</code> | <code>total_increasing</code> | <code>null</code></td><td>Long-term-statistics class. <code>null</code> for binary fields and non-numeric sensors.</td></tr>
+    <tr><td><code>name</code></td><td>no</td><td>string | <code>null</code></td><td>Human-readable entity name (suffixed to the device name by HA). <strong>Omit it (or set <code>null</code>) to let Home Assistant derive a translated name from <code>device_class</code></strong>. Only set an explicit name when it adds information the device class doesn't.</td></tr>
+    <tr><td><code>object_suffix</code></td><td>yes</td><td>string</td><td>Short, stable token appended to the device key to form the entity's unique id. <strong>Must be stable</strong> — changing it orphans existing entities.</td></tr>
+    <tr><td><code>value_transform</code></td><td>no</td><td>mapping</td><td>Declarative numeric transform applied before the value is stored. See <a href="#value-transforms">Value transforms</a>. Omit for binary fields.</td></tr>
+    <tr><td><code>payload</code></td><td>no</td><td><code>{ on: &lt;raw&gt;, off: &lt;raw&gt; }</code></td><td>For <code>binary_sensor</code> only: maps the raw rtl_433 value to the HA on/off state. See <a href="#binary-payloads">Binary payloads</a>.</td></tr>
+    <tr><td><code>event_map</code></td><td>no</td><td><code>{ &lt;raw-string&gt;: &lt;event-type&gt; }</code></td><td>For <code>event</code> only: maps a stringified raw value to a named <code>event_type</code>; mapped types are declared up front in <code>event_types</code>. See <a href="#event-entities">Event entities</a>.</td></tr>
+    <tr><td><code>clear_delay</code></td><td>no</td><td>int (seconds)</td><td>For <code>binary_sensor</code> only: seconds after a detection to <strong>synthesize</strong> an off, for detect-only hardware that sends no off. Reschedules on each detection; per-device override via the options flow. See <a href="#motion-occupancy">Motion / occupancy</a>.</td></tr>
+    <tr><td><code>force_update</code></td><td>no</td><td>bool</td><td>Mirrors upstream <code>force_update</code>; write state even when the value is unchanged. Defaults to false.</td></tr>
+    <tr><td><code>entity_category</code></td><td>no</td><td><code>diagnostic</code> | <code>config</code> | <code>null</code></td><td>Categorizes the entity in the HA UI. Diagnostic fields (battery, signal, tamper) use <code>diagnostic</code>.</td></tr>
+    <tr><td><code>enabled_by_default</code></td><td>no</td><td>bool</td><td>Set <code>false</code> to register the entity disabled (the user can enable it). Defaults to true.</td></tr>
+    <tr><td><code>icon</code></td><td>no</td><td>string</td><td>Optional <code>mdi:</code> icon override.</td></tr>
+    <tr><td><code>event_driven</code></td><td>no</td><td>bool</td><td>Marks a <code>binary_sensor</code> field as a state field that transmits <strong>only on a change</strong>, so the device has no periodic check-in. Defaults to false. Drives availability — see <a href="#availability-classification">Availability classification</a>. <code>platform: event</code> fields are always event-driven and do not need this flag.</td></tr>
+  </tbody>
+</table>
+
+<p><code>null</code> is written explicitly (YAML <code>null</code>) rather than omitted for the three
+"required (nullable)" attributes, so every entry is uniform and the loader never
+has to guess intent. Optional attributes may simply be omitted.</p>
+<h3 id="value-transforms">Value transforms<a class="headerlink" href="#value-transforms" title="Permanent link">&para;</a></h3>
+<p><code>value_transform</code> declares how to convert the raw JSON value into the stored
+state. It replaces the Jinja <code>value_template</code> strings used by the upstream MQTT
+example. Supported keys (applied in this order):</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Effect</th>
+<th>Upstream template it replaces</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>float</code></td>
+<td>Coerce to float.</td>
+<td><code>{{ value\|float }}</code></td>
+</tr>
+<tr>
+<td><code>int</code></td>
+<td>Coerce to int.</td>
+<td><code>{{ value\|int }}</code></td>
+</tr>
+<tr>
+<td><code>scale</code></td>
+<td>Multiply by the given number.</td>
+<td>unit conversions, e.g. m/s → km/h (<code>* 3.6</code>)</td>
+</tr>
+<tr>
+<td><code>offset</code></td>
+<td>Add the given number (after <code>scale</code>).</td>
+<td>additive offsets</td>
+</tr>
+<tr>
+<td><code>round</code></td>
+<td>Round to N decimal places (the value of the key).</td>
+<td><code>\|round(N)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Keys combine. The application order is: coerce (<code>float</code>/<code>int</code>) → <code>scale</code> →
+<code>offset</code> → <code>round</code>. Examples drawn from the shipped library:</p>
+<table>
+<thead>
+<tr>
+<th>rtl_433 field</th>
+<th>Upstream <code>value_template</code></th>
+<th><code>value_transform</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>temperature_C</code></td>
+<td><code>{{ value\|float\|round(1) }}</code></td>
+<td><code>{ round: 1 }</code></td>
+</tr>
+<tr>
+<td><code>humidity</code></td>
+<td><code>{{ value\|float }}</code></td>
+<td><code>{ float: true }</code></td>
+</tr>
+<tr>
+<td><code>lux</code></td>
+<td><code>{{ value\|int }}</code></td>
+<td><code>{ int: true }</code></td>
+</tr>
+<tr>
+<td><code>wind_avg_m_s</code></td>
+<td><code>{{ (float(value) * 3.6) \| round(2) }}</code></td>
+<td><code>{ scale: 3.6, round: 2 }</code></td>
+</tr>
+<tr>
+<td><code>battery_ok</code></td>
+<td><code>{{ ((float(value) * 99)\|round(0)) + 1 }}</code></td>
+<td><code>{ scale: 99, offset: 1, round: 0 }</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>round</code> implies float coercion, so <code>{ round: 1 }</code> is equivalent to
+<code>{ float: true, round: 1 }</code> and the shorter form is preferred.</p>
+<h3 id="binary-payloads">Binary payloads<a class="headerlink" href="#binary-payloads" title="Permanent link">&para;</a></h3>
+<p><code>binary_sensor</code> entries use <code>payload</code> instead of <code>value_transform</code>. It maps the
+raw rtl_433 value to Home Assistant's on/off state:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">detect_wet</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">binary_sensor</span>
+<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">moisture</span>
+<span class="w">  </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> on</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span><span class="p p-Indicator">,</span><span class="nt"> off</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># 1 == wet == on</span>
+</code></pre></div>
+<p>Note the direction matters for some fields. The upstream <code>closed</code> field is
+<strong>inverted</strong> — a value of <code>0</code> means the contact is open — so its payload is
+<code>{ on: "0", off: "1" }</code>. Raw values are quoted strings to match how rtl_433
+emits them.</p>
+<blockquote>
+<p><strong><code>battery_ok</code> note.</strong> rtl_433's <code>battery_ok</code> is boolean-ish (<code>1</code> = OK,
+<code>0</code> = low). The upstream example does <em>not</em> model it as a binary sensor; it
+converts it to a battery <strong>percentage</strong> sensor (<code>0</code> → 1 %, <code>1</code> → 100 %) so it
+displays on the standard HA battery card. The shipped library preserves that:
+<code>battery_ok</code> is a <code>sensor</code> with <code>device_class: battery</code>, <code>unit: "%"</code>, and
+<code>value_transform: { scale: 99, offset: 1, round: 0 }</code>. If you prefer a
+low-battery binary problem sensor, add a mapping in the Home Assistant UI.</p>
+</blockquote>
+<h3 id="motion-occupancy">Motion / occupancy<a class="headerlink" href="#motion-occupancy" title="Permanent link">&para;</a></h3>
+<p>PIR / occupancy decoders (Interlogix, Risco Agility, Kerui, …) emit <code>motion</code>
+<strong>only on detection</strong> (raw value <code>1</code>) and <strong>never send an off</strong> — the hardware is
+detect-only. So <code>motion</code> is a <code>binary_sensor</code> (device class <code>occupancy</code>) whose
+<code>payload</code> declares only an <code>on</code> token; the off state is <strong>synthesized</strong> by a
+timer rather than received:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">motion</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">binary_sensor</span>
+<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">occupancy</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Motion</span>
+<span class="w">  </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> on</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># detect-only: no off token</span>
+<span class="w">  </span><span class="nt">clear_delay</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">90</span><span class="w">        </span><span class="c1"># synthesize off 90 s after the last detection</span>
+<span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">motion</span>
+</code></pre></div>
+<p>The <code>clear_delay</code> attribute (seconds) drives the synthesized off: the sensor
+turns <code>on</code> on each detection and is auto-cleared to off after the delay elapses
+with no re-detection. Every fresh detection <strong>reschedules</strong> the timer, so the
+off window restarts on each retrigger. The shipped default is <strong>90 s</strong>.</p>
+<p>A stale <code>on</code> is never restored across a restart (there would be no live timer to
+clear it): the sensor comes back off/unknown until the next detection.</p>
+<p><strong>Per-device override.</strong> The delay can be tuned per device in the options flow —
+<strong>Settings → Devices &amp; Services → rtl_433 → Configure → (device step)</strong> exposes a
+<em>Motion clear delay (seconds)</em> field, shown only for motion-bearing devices.
+Leave it blank to use the 90 s default. The override is resolved at runtime
+(per-device value, else the descriptor default).</p>
+<h3 id="availability-classification">Availability classification<a class="headerlink" href="#availability-classification" title="Permanent link">&para;</a></h3>
+<p>A device is marked <em>unavailable</em> when it falls silent past its availability
+timeout. RF devices signal presence only by transmitting, so the timeout is
+resolved per device: a per-device override, then an explicit hub default, then a
+<strong>device-class default</strong> derived from the device's known fields — both its
+adopted (persisted) fields and its latest payload, so an event-driven device that
+has been silent since a restart is still classified correctly before it next
+transmits (rather than briefly expiring its battery at the periodic default).</p>
+<p>The class default has two outcomes:</p>
+<ul>
+<li><strong>Event-driven</strong> → never-expire (the device, and all its entities including
+  battery, stay available once seen). These devices transmit <em>only on a state
+  change</em> — a door opening, motion, a button press — so any finite silence
+  timeout would eventually misfire and wrongly hide a healthy device. A field is
+  event-driven when it uses <code>platform: event</code> <strong>or</strong> sets <code>event_driven: true</code>
+  (e.g. <code>motion</code>, <code>contact_open</code>, <code>reed_open</code>, <code>closed</code>, <code>alarm</code>). The set is
+  derived from the active library (shipped descriptors plus user mappings).</li>
+<li><strong>Periodic</strong> → a finite default (10 min). Everything else — temperature,
+  humidity, power, etc. — which reports on a regular cadence.</li>
+</ul>
+<p>Diagnostic fields such as <code>battery_ok</code> do not decide the class on their own. If a
+device also has an event-driven field, the whole device uses the event-driven
+default, so its battery and other entities stay available between events. An
+explicit per-device or hub timeout always overrides the class default.</p>
+<p>Because an event-driven device's availability no longer signals freshness, its
+per-device <strong>Last seen</strong> timestamp sensor is enabled by default (it ships
+disabled for periodic devices). It stays available once seen, so "no signal for
+N minutes" automations keep working.</p>
+<h3 id="event-entities">Event entities<a class="headerlink" href="#event-entities" title="Permanent link">&para;</a></h3>
+<p><code>platform: event</code> is for <strong>momentary, fire-and-forget</strong> RF fields — a remote
+button, a doorbell press — that have no steady "on" / "off"
+state to track. Each genuine transmission fires <strong>one</strong> Home Assistant
+<a href="https://www.home-assistant.io/integrations/event/">event</a>, and the entity
+stays available between presses (no faked "off"). Event entries live in their
+own library file, <code>device_library/events.yaml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">button</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">event</span>
+<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">button</span><span class="w">     </span><span class="c1"># an EventDeviceClass</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Button</span>
+<span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">button</span>
+</code></pre></div>
+<p>How event entries differ from <code>sensor</code> / <code>binary_sensor</code>:</p>
+<ul>
+<li><strong>By default the fired <code>event_type</code> is the stringified field value</strong>
+  (<code>str(value)</code>). There is <strong>no <code>payload</code> and no <code>value_transform</code></strong> — the raw
+  value is stringified directly.</li>
+<li><strong>By default <code>event_types</code> are auto-populated, not declared.</strong> Each newly
+  observed value is recorded as a valid type the first time it is seen and
+  <strong>persisted per device</strong>, so after a restart the entity rebuilds knowing the
+  types it has seen before. You never list them in the YAML.</li>
+<li>A field whose value varies (a remote that reports which button was pressed)
+  auto-populates several types; a field that only ever emits one distinct value
+  fires that one type on every transmission.</li>
+<li><strong>The fired event carries no extra attributes</strong> — the type is the only
+  payload.</li>
+<li><code>device_class</code> is an <code>EventDeviceClass</code> (<code>button</code>, <code>doorbell</code>).</li>
+</ul>
+<h4 id="event_map-naming-raw-values"><code>event_map</code>: naming raw values<a class="headerlink" href="#event_map-naming-raw-values" title="Permanent link">&para;</a></h4>
+<p>The optional <code>event_map</code> attribute overrides the default stringified behavior:
+it maps a <strong>stringified raw value → named <code>event_type</code></strong>. When present:</p>
+<ul>
+<li>A transmission whose raw value is in the map fires the <strong>mapped</strong> type;
+  values <strong>not</strong> in the map still pass through as <code>str(value)</code>.</li>
+<li>The mapped types are <strong>declared up front</strong> in <code>event_types</code> (in map order),
+  rather than only appearing once observed — so a <code>device_trigger</code> lists them
+  even before the first press.</li>
+</ul>
+<p>The doorbell is the shipped example. <code>secret_knock</code> is emitted on <strong>every</strong>
+press: raw <code>0</code> is a regular single press and raw <code>1</code> is a "secret knock" (the
+button pressed three times rapidly). It maps both onto Home Assistant's doorbell
+standard:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">secret_knock</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">event</span>
+<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">doorbell</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Doorbell</span>
+<span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">secret_knock</span>
+<span class="w">  </span><span class="nt">event_map</span><span class="p">:</span>
+<span class="w">    </span><span class="s">&quot;0&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ring</span><span class="w">          </span><span class="c1"># DoorbellEventType.RING — the HA standard type</span>
+<span class="w">    </span><span class="s">&quot;1&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">secret_knock</span><span class="w">  </span><span class="c1"># custom type for the 3x-rapid &quot;secret knock&quot;</span>
+</code></pre></div>
+<p>The shipped <code>events.yaml</code> has two examples:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th><code>device_class</code></th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>button</code></td>
+<td><code>button</code></td>
+<td>Remote / key-fob button code; the value is the pressed code, so distinct presses auto-populate several types.</td>
+</tr>
+<tr>
+<td><code>secret_knock</code></td>
+<td><code>doorbell</code></td>
+<td>Honeywell ActivLink doorbell press; emitted on every press (<code>0</code> regular → <code>ring</code>, <code>1</code> secret knock → <code>secret_knock</code>) via <code>event_map</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="model-scoped-mappings-models">Model-scoped mappings (<code>models:</code>)<a class="headerlink" href="#model-scoped-mappings-models" title="Permanent link">&para;</a></h2>
+<p>The top-level keys above are the <strong>global</strong> defaults: a <code>temperature_C</code> entry
+applies to <em>every</em> device that emits <code>temperature_C</code>. Some fields, though, need
+a different descriptor depending on the <strong>device model</strong> — most notably the
+utility-meter consumption counters (<code>consumption</code>, <code>consumption_data</code>), whose
+unit and scale are <em>not</em> carried in the RF signal and differ between meter
+models. For those, a file may carry an optional top-level <strong><code>models:</code></strong> block
+that overrides the global descriptor for one specific rtl_433 <code>model</code> string.</p>
+<p><code>models:</code> is keyed by the exact rtl_433 <code>model</code> value, and each model maps to a
+table of <code>field_key → descriptor</code> using the <strong>same per-field attribute schema</strong>
+as the global entries (<code>platform</code>, <code>device_class</code>, <code>unit_of_measurement</code>,
+<code>state_class</code>, <code>name</code>, <code>object_suffix</code>, <code>value_transform</code>, …):</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># top-level global defaults (unchanged) live here ...</span>
+<span class="nt">temperature_C</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
+<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span>
+<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;°C&quot;</span>
+<span class="w">  </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">measurement</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Temperature</span>
+<span class="w">  </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> round</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">T</span>
+
+<span class="c1"># ... and an optional model-scoped block sits alongside them:</span>
+<span class="nt">models</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">Some-Model-Name</span><span class="p">:</span><span class="w">            </span><span class="c1"># an exact rtl_433 `model` string</span>
+<span class="w">    </span><span class="nt">consumption_data</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
+<span class="w">      </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">energy</span>
+<span class="w">      </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kWh</span>
+<span class="w">      </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">total_increasing</span>
+<span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Consumption</span>
+<span class="w">      </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> scale</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">consumption</span>
+</code></pre></div>
+<p>The <code>models:</code> block is <strong>additive and optional</strong>: every existing library file
+parses exactly as before, and the flat top-level keys remain the global default.
+It may appear in any library file (most naturally <code>power_electrical.yaml</code>) and in
+<a href="#adding-device-mappings">UI mappings</a>. <code>models</code> is a reserved top-level key —
+the loader intercepts it, so you cannot have a <em>field</em> literally named <code>models</code>.</p>
+<h3 id="lookup-resolution-order">Lookup resolution order<a class="headerlink" href="#lookup-resolution-order" title="Permanent link">&para;</a></h3>
+<p>When the integration builds an entity for a field on a device, it resolves the
+descriptor <strong>most-specific first</strong>:</p>
+<ol>
+<li>The <strong>model-scoped</strong> entry for <code>(model, field_key)</code>, if the device's model has
+   a <code>models:</code> block with that field.</li>
+<li>Otherwise the <strong>global</strong> flat entry for <code>field_key</code>.</li>
+<li>Otherwise the field is unmapped → no entity.</li>
+</ol>
+<p>So a <code>models:</code> entry only affects the model it names; every other model keeps the
+global descriptor for that same field.</p>
+<h3 id="precedence-specificity-first">Precedence (specificity-first)<a class="headerlink" href="#precedence-specificity-first" title="Permanent link">&para;</a></h3>
+<p>Combined with <a href="#adding-device-mappings">UI mappings</a> and the per-device meter
+calibration (the options-flow <em>Device settings</em> step), the full precedence for a
+single field on a single device is, <strong>highest to lowest</strong>:</p>
+<ol>
+<li><strong>Per-device calibration</strong> (commodity + base unit + scale, set in the options
+   flow) — applies only to the consumption field(s) of the one calibrated device.</li>
+<li><strong>Model-scoped</strong> entry — UI <code>models:</code> entry, else shipped <code>models:</code> entry.</li>
+<li><strong>Global</strong> flat entry — UI flat key, else shipped flat key.</li>
+<li>Unmapped → no entity.</li>
+</ol>
+<p>The rule is <strong>specificity-first</strong>: a model-scoped entry always beats a global one
+<em>regardless of source</em>. In particular a <strong>shipped</strong> <code>models:</code> entry outranks a
+<strong>UI global</strong> entry for a matching model. Within each tier the UI mapping beats
+the shipped library. (This falls out naturally from the merge: the UI mapping
+replaces the shipped entry <em>within</em> a tier, and the lookup checks the model tier
+before the global tier.)</p>
+<blockquote>
+<p><strong>No speculative real-meter mappings ship.</strong> Because a meter's consumption
+unit/scale is not knowable from the signal, the shipped library does <strong>not</strong>
+carry a guessed <code>models:</code> consumption mapping for any real model — a wrong
+scale would silently corrupt real Energy data. The example below is purely
+illustrative; for a real meter use the per-device calibration step in the
+options flow (see <a href="../calibration/">Utility-meter calibration</a>) until a model's unit/scale is authoritatively
+known.</p>
+</blockquote>
+<h2 id="the-skip-keys-file">The skip-keys file<a class="headerlink" href="#the-skip-keys-file" title="Permanent link">&para;</a></h2>
+<p><code>_skip_keys.yaml</code> lists fields that must never produce an entity — device
+identity (<code>model</code>, <code>id</code>, <code>channel</code>, <code>subtype</code>, <code>type</code>), message bookkeeping
+(<code>mic</code>, <code>mod</code>, <code>sequence_num</code>, <code>message_type</code>, <code>exception</code>, <code>raw_msg</code>), and the
+secondary radio-tuning fields (<code>freq1</code>, <code>freq2</code>, <code>protocol</code>). The primary
+per-event <code>freq</code> is <strong>not</strong> skipped — it is mapped in <code>misc.yaml</code> to a
+diagnostic Frequency sensor (disabled by default) alongside <code>rssi</code>, <code>snr</code>, and
+<code>noise</code>, so the tuned frequency can be recorded when rtl_433 reports level data:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">skip_keys</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">type</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">model</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">id</span>
+<span class="w">  </span><span class="c1"># ...</span>
+</code></pre></div>
+<p>The loader checks a field against this list <em>before</em> attempting a mapping
+lookup. Identity keys (<code>model</code> + <code>id</code>/<code>channel</code>/<code>subtype</code>) are consumed by the
+event normalizer to derive the device key, which is why they are skipped here
+rather than mapped to entities.</p>
+<h2 id="contributing-device-mappings">Contributing device mappings<a class="headerlink" href="#contributing-device-mappings" title="Permanent link">&para;</a></h2>
+<p>The easiest way to add support for your own installation is to use
+<a href="#adding-device-mappings">Adding device mappings</a>. If you want the mapping to
+ship with the integration for everyone, add it to the repository's device
+library and open a pull request.</p>
+<h3 id="where-the-files-live">Where the files live<a class="headerlink" href="#where-the-files-live" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>custom_components/rtl_433/device_library/
+├── _skip_keys.yaml         # fields that never become entities
+├── air_quality.yaml        # pm2.5 / pm10 / co2
+├── binary_states.yaml      # contacts, tamper, alarm, door state
+├── events.yaml             # momentary RF: button, doorbell
+├── humidity_moisture.yaml  # humidity, moisture, leak, depth, WH51 soil AD/boost
+├── light_uv.yaml           # illuminance, UV
+├── misc.yaml               # battery %, timestamp, signal, lightning
+├── power_electrical.yaml   # power, energy, current, voltage, consumption
+├── pressure.yaml           # barometric pressure
+├── rain.yaml               # rain total / rate
+├── temperature.yaml        # temperature variants
+└── wind.yaml               # wind speed / gust / direction
+</code></pre></div>
+<p>The loader reads <strong>every</strong> <code>*.yaml</code> file in this directory at startup, merges all
+entries into one lookup table keyed by field name, and reads <code>_skip_keys.yaml</code>
+separately as the exclusion list. Grouping is purely organizational: put a new
+field in whichever file fits its domain, or in <code>misc.yaml</code> if nothing
+fits. UI mappings from <a href="#adding-device-mappings">Adding device mappings</a> are
+layered on top of the merged shipped library.</p>
+<p>Files whose name starts with <code>_</code> (currently only <code>_skip_keys.yaml</code>) are treated
+specially by the loader and are not parsed as field-mapping tables.</p>
+<h3 id="add-a-mapping-workflow">Add-a-mapping workflow<a class="headerlink" href="#add-a-mapping-workflow" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Find the field name.</strong> Watch your rtl_433 stream or download diagnostics
+   for the hub from <strong>Settings → Devices &amp; Services → the rtl_433 integration →
+   ⋮ → Download diagnostics</strong>. The diagnostics export lists unmapped fields your
+   hardware has sent in <code>unmatched_field_keys</code>. Each key is either a candidate
+   for a mapping or, if it is genuinely noise/identity data, an entry for
+   <code>_skip_keys.yaml</code>. rtl_433 field names are case-sensitive and unit-suffixed
+   (<code>temperature_C</code>, not <code>temperature</code>).</li>
+<li><strong>Pick the file</strong> that matches the field's domain, or <code>misc.yaml</code>.</li>
+<li><strong>Add an entry</strong> keyed by the exact field name, filling in the required
+   attributes. Copy a similar existing entry as a template.</li>
+<li>For a numeric reading: choose <code>platform: sensor</code>, the closest
+     <a href="https://www.home-assistant.io/integrations/sensor/#device-class">HA device class</a>, the unit rtl_433 reports, a <code>state_class</code>
+     (<code>measurement</code> for instantaneous readings, <code>total_increasing</code> for
+     monotonic counters like rain or energy), and a <code>value_transform</code>.</li>
+<li>For a boolean: choose <code>platform: binary_sensor</code>, a device class, and a
+     <code>payload</code> mapping. Leave <code>unit_of_measurement</code> / <code>state_class</code> <code>null</code>.</li>
+<li>Choose a short, <strong>stable</strong> <code>object_suffix</code> that is unique among the fields
+     a single device emits.</li>
+<li><strong>Validate</strong> the YAML:
+   <div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob(&#39;custom_components/rtl_433/device_library/*.yaml&#39;)]; print(&#39;ok&#39;)&quot;</span>
+</code></pre></div></li>
+<li><strong>Add a fixture/test</strong> if you are contributing upstream (see the project test
+   suite) and open a PR with a <code>feat:</code> conventional commit.</li>
+</ol>
+<h2 id="notes-on-fields-that-cannot-be-expressed-declaratively">Notes on fields that cannot be expressed declaratively<a class="headerlink" href="#notes-on-fields-that-cannot-be-expressed-declaratively" title="Permanent link">&para;</a></h2>
+<p>The upstream <code>mappings</code> table includes two <code>device_automation</code> entries —
+<code>channel</code> and <code>button</code> — that publish MQTT <strong>device triggers</strong> (e.g.
+<code>button_short_release</code>) rather than entities. These have no <code>sensor</code> /
+<code>binary_sensor</code> equivalent in this schema:</p>
+<ul>
+<li><code>channel</code> is already a device-identity key and lives in <code>_skip_keys.yaml</code>.</li>
+<li><code>button</code> is modelled as an <a href="#event-entities">event entity</a> instead of an MQTT
+  device trigger — see <code>device_library/events.yaml</code>.</li>
+</ul>
+<p>Everything else from the upstream table is ported faithfully.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "navigation.sections"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
