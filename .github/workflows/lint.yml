@@ -40,4 +40,4 @@ jobs:
           python-version: "3.14"
 
       - name: Run pre-commit
-        run: uvx --with pre-commit-uv pre-commit run --all-files --show-diff-on-failure --color=always
+        run: uvx pre-commit run --all-files --show-diff-on-failure --color=always

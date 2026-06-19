@@ -4,7 +4,7 @@
 # Ruff and codespell run via pre-commit-managed hook environments, so they work
 # in any local checkout (and in CI) without relying on a project virtualenv.
 # Run them with `pre-commit install` (auto-runs on commit) or a one-off
-# `uvx --with pre-commit-uv pre-commit run --all-files`.
+# `uvx pre-commit run --all-files`.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.14
