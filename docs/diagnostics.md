@@ -1,4 +1,4 @@
-# Diagnostics
+# Diagnostics & Debugging
 
 ## Per-Device Signal Diagnostics
 
@@ -14,10 +14,9 @@ on the RF device:
 These entities are disabled by default. Enable the ones you want from the device
 page or entity settings to chart reception quality and antenna placement.
 
-Level fields are only present when rtl_433 emits them. With the rtl_433 Home
-Assistant add-on, use a recent add-on version that enables level reporting. When
-running rtl_433 yourself, start it with `-M level` or add `report_meta level` to
-the rtl_433 config.
+Level fields are only present when rtl_433 emits them. The rtl_433 Home Assistant
+add-on reports levels automatically. When running rtl_433 yourself, start it with
+`-M level` or add `report_meta level` to the rtl_433 config.
 
 If level data is not reported, the diagnostic sensors do not appear; normal event
 processing is unaffected.
@@ -30,7 +29,7 @@ to entities. Download diagnostics from **Settings → Devices & Services → rtl
 
 Each unmatched key is either a candidate for a one-line device-library mapping or
 noise/identity data that belongs in `_skip_keys.yaml`. See the
-[device-library diagnostics loop](device-library.md#diagnostics-feedback-loop).
+[Adding device mappings](device-library.md#adding-device-mappings) guide.
 
 ## Debug Logging
 

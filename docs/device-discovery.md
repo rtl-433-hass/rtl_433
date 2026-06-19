@@ -1,12 +1,12 @@
-# Discovery
+# Device Discovery
 
-RF devices appear automatically as nested devices under the hub. There is no
-separate discovery card to accept or dismiss for each RF device.
+Devices are added automatically to Home Assistant the first time they send a
+message. You may need to trigger doorbells and motion sensors manually to
+register them. New devices trigger a notification inside Home Assistant. Note
+that weak signals may show up as unexpected devices or as devices with missing
+fields.
 
-When the hub decodes a device it does not yet know, it adds the device under the
-hub and creates its sensor, binary sensor, and event entities. It also raises an
-in-app persistent notification with a stable per-device ID. Restarting Home
-Assistant does not re-notify for already-known devices.
+![Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics](images/02-device-page.png)
 
 ## Post-Connection Registration
 
@@ -30,6 +30,5 @@ back on lets new and previously deleted devices appear again when they transmit.
 To remove an unwanted device, open it under **Settings → Devices & Services →
 rtl_433 → the device → Delete**.
 
-There is no persistent ignore list. With discovery on, a deleted device reappears
-the next time it transmits. To keep it gone, turn the hub's discovery toggle off
-before deleting it.
+If unwanted devices keep registering, disable device discovery in the hub
+settings. This is highly recommended in urban areas!

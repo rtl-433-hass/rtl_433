@@ -30,13 +30,26 @@ and nested-device history can survive add-on restarts and USB port changes. For
 multi-dongle setups, stability is best when each dongle stays in a fixed USB port
 or has a unique serial.
 
-Manual setup remains supported for remote or non-add-on rtl_433 servers. A radio
-already added through discovery is not added a second time.
+## Manual rtl_433 Configuration
+
+The integration connects to rtl_433's HTTP/WebSocket server. Start rtl_433 with
+HTTP output enabled, for example:
+
+```sh
+rtl_433 -F http
+```
+
+By default rtl_433 binds to `0.0.0.0:8433`. For localhost-only operation, use a
+bind address such as:
+
+```sh
+rtl_433 -F http://127.0.0.1:8433
+```
 
 ## Reconfigure vs Configure
 
 Use **Reconfigure** to point an existing hub at the same server's new address:
-host, port, path, or secure mode. Nested devices and their history are preserved.
+host, port, path, or secure mode. Devices and their history are preserved.
 
 Use **Configure** for hub options:
 
@@ -45,6 +58,8 @@ Use **Configure** for hub options:
 - **Device settings**: per-device availability timeout, motion clear delay, and
   utility-meter calibration.
 - **Device mappings**: per-hub mapping overrides.
+
+![Hub options flow menu showing Hub settings, Device settings, and Device mappings](images/03-options-flow.png)
 
 Changing discovery or timeout options applies live. Changing the managed-settings
 toggle reloads the hub because the entity set changes.

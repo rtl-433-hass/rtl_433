@@ -38,12 +38,10 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Configuration: configuration.md
-  - Discovery: discovery.md
+  - Device Discovery: device-discovery.md
   - Availability: availability.md
-  - Diagnostics: diagnostics.md
+  - Event-based Devices: event-based-devices.md
+  - Diagnostics & Debugging: diagnostics.md
   - Hub Entities: hub-entities.md
   - Device Library: device-library.md
   - Utility-Meter Calibration: calibration.md
-  - WebSocket API: websocket-api.md
-  - Multiple Servers: multiple-servers.md
-  - Screenshots: screenshots.md
