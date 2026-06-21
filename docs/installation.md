@@ -22,4 +22,6 @@ repository:
 ## Next Step
 
 After installation, add a hub from Home Assistant using the
-[configuration guide](configuration.md).
+[configuration guide](configuration.md). You will see the connection form below.
+
+![The rtl_433 config flow form: host, port, WebSocket path, secure toggle, managed-settings and discovery toggles, and initial frequency](images/06-config-user.png)

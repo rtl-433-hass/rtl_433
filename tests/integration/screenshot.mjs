@@ -4,6 +4,13 @@
 // up, HA onboarding is seeded (ha-onboard.mjs), and the WebSocket is emitting
 // JSON (verified with ws-probe.mjs).
 //
+// Captured shots: 06 (empty config-flow form), 09 (integration overview / docs
+// home hero), 02 (device page), 11 (doorbell event entity), 03 (options menu),
+// 07 (Hub settings form), 05 (Device mappings YAML), 08 (Device settings form),
+// 12 (calibration step), 10 (device page with the signal-diagnostic sensors
+// enabled and populated), 04 (unavailable). The doorbell / energy meter / door /
+// leak devices come from ws-bridge replaying tests/fixtures.
+//
 // Stages (STAGE env var):
 //   add      - log in, add the rtl_433 hub via the config flow (host=wsbridge),
 //              then — in the new hub model — the RF device appears AUTOMATICALLY
@@ -18,6 +25,8 @@
 //              override and capture it.
 //   unavail  - (after run-harness.sh stops the rtl433 replay and waits past the
 //              timeout) capture the device page with all entities Unavailable.
+//   device   - re-capture only the Device settings + calibration steps against
+//              an already-running harness (hub already added); for iterating.
 //   full     - add, then unavail (the orchestrator stops replay in between).
 //
 // Every capture is gated on a selector/state where practical, never a blind long
@@ -92,6 +101,14 @@ async function addHubAndCapture(page) {
   // "Do you want to set up rtl_433?" confirm dialog.
   await page.getByRole("button", { name: /^ok$/i }).click({ timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(2500);
+  // Capture the empty "Connect to an rtl_433 server" form (docs: installation /
+  // configuration) before we type anything into it.
+  await page
+    .locator('ha-dialog input[name="host"], dialog input[name="host"]')
+    .first()
+    .waitFor({ state: "visible", timeout: 8000 })
+    .catch(() => {});
+  await shot(page, "06-config-user.png");
   // ha-form user step: host/port/path inputs by name.
   const fill = async (key, value) => {
     const f = page.locator(`ha-dialog input[name="${key}"], dialog input[name="${key}"]`);
@@ -119,9 +136,34 @@ async function addHubAndCapture(page) {
     await page.waitForTimeout(2000);
     await page.reload({ waitUntil: "domcontentloaded" });
   }
+  // Give the fixture-replayed devices (doorbell / energy meter / door / leak,
+  // emitted by ws-bridge every few seconds) a moment to register too, so the
+  // integration overview used as the docs home-page hero shows the full hub.
+  await page.waitForTimeout(6000);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+  await shot(page, "09-home-hero.png");
+
+  // --- Device page (Acurite-Tower): entities + signal diagnostics ----------
   await device.click();
   await page.waitForTimeout(3000);
+  // The device page doubles as the diagnostics surface (docs: diagnostics.md):
+  // it carries the Diagnostic card, the "Download diagnostics" action, and the
+  // disabled-by-default signal sensors (RSSI / SNR / noise).
   await shot(page, "02-device-page.png");
+
+  // --- Event entity (docs: event-based-devices.md) -------------------------
+  // The replayed Honeywell-Doorbell decodes to a momentary event entity.
+  await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  const doorbell = page.locator("text=Honeywell-Doorbell").last();
+  if (await doorbell.count()) {
+    await doorbell.click();
+    await page.waitForTimeout(3000);
+    await shot(page, "11-event-entity.png");
+  } else {
+    console.log("screenshot: doorbell device not present; skipping 11-event-entity.png");
+  }
 
   // --- Options flow MENU (Hub settings / Device settings / Device mappings) -
   await openOptionsMenu(page);
@@ -137,6 +179,9 @@ async function addHubAndCapture(page) {
   await page.waitForTimeout(2500);
   const tf = page.locator("ha-dialog input[type=number], dialog input[type=number]").first();
   await tf.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
+  // Capture the Hub settings form (docs: configuration / hub-entities) showing
+  // its defaults before we lower the timeout.
+  await shot(page, "07-hub-settings.png");
   if (await tf.count()) {
     await tf.fill(SHORT_TIMEOUT);
     // Blur so the ha-form commits the new value before we submit.
@@ -151,6 +196,140 @@ async function addHubAndCapture(page) {
   // reloads the hub; the screenshot only needs the editor showing real content.
   await openOptionsMenu(page);
   await captureMappings(page);
+
+  // --- Device settings + calibration steps ---------------------------------
+  await captureDeviceSettings(page);
+
+  // --- Per-device signal diagnostics ---------------------------------------
+  // Run last: it enables disabled-by-default entities and reloads the hub.
+  await enableAndCaptureDiagnostics(page);
+}
+
+// The per-device signal-diagnostic sensors (frequency / RSSI / SNR / noise) are
+// disabled by default, so the plain device page only shows "+N disabled
+// entities". For docs/diagnostics.md we enable them via the authenticated
+// frontend's WebSocket API (config/entity_registry/update -> disabled_by: null),
+// reload the hub so the platform re-adds them, wait for a fresh Acurite event to
+// populate real values, then capture the device page. The Acurite capture
+// carries freq/rssi/snr/noise (decoded with -M level), so the values are real.
+async function enableAndCaptureDiagnostics(page) {
+  await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+  const info = await page.evaluate(async () => {
+    const hass = document.querySelector("home-assistant")?.hass;
+    if (!hass) return { error: "no hass on page" };
+    const ents = await hass.callWS({ type: "config/entity_registry/list" });
+    // Scope to the Acurite RF device's disabled signal sensors only — never the
+    // hub's SDR center-frequency sensor.
+    const targets = ents.filter(
+      (e) =>
+        e.platform === "rtl_433" &&
+        e.disabled_by &&
+        /acurite/i.test(e.entity_id) &&
+        /(rssi|snr|noise|frequency|freq|last_seen)/i.test(e.entity_id),
+    );
+    let entryId = null;
+    for (const e of targets) {
+      entryId = e.config_entry_id || entryId;
+      await hass.callWS({
+        type: "config/entity_registry/update",
+        entity_id: e.entity_id,
+        disabled_by: null,
+      });
+    }
+    return { enabled: targets.map((e) => e.entity_id), entryId };
+  });
+  console.log("screenshot: diagnostics enable -> " + JSON.stringify(info));
+  if (info?.entryId) {
+    // Reload immediately rather than waiting out HA's 30s auto-reload delay.
+    await page.evaluate(async (entryId) => {
+      const hass = document.querySelector("home-assistant")?.hass;
+      await hass?.callWS({ type: "config_entries/reload", entry_id: entryId }).catch(() => {});
+    }, info.entryId);
+  }
+  // Poll until the newly enabled sensors actually carry a numeric value (the
+  // reload + reconnect + next Acurite event can take a while) so the capture
+  // never shows "Unknown". Bounded ~40s.
+  const ids = (info?.enabled || []).length
+    ? info.enabled
+    : ["sensor.acurite_tower_12053_chc_frequency", "sensor.acurite_tower_12053_chc_rssi"];
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(2000);
+    const ready = await page.evaluate((entityIds) => {
+      const hass = document.querySelector("home-assistant")?.hass;
+      if (!hass) return false;
+      return entityIds.every((id) => {
+        const st = hass.states[id];
+        return st && st.state !== "unknown" && st.state !== "unavailable";
+      });
+    }, ids);
+    if (ready) break;
+  }
+  await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator("text=Acurite-Tower").last().click();
+  await page.waitForTimeout(3000);
+  await shot(page, "10-diagnostics.png");
+}
+
+// Pick an option in an HA SelectSelector(DROPDOWN), which renders as an
+// ha-select (mwc-select): click the anchor to open the menu, then click the
+// list item whose text matches.
+async function selectPick(selectLoc, page, typeahead, optionRegex) {
+  await selectLoc.click();
+  await page.waitForTimeout(700);
+  const opt = page
+    .locator("mwc-list-item, ha-list-item, vaadin-combo-box-item")
+    .filter({ hasText: optionRegex })
+    .first();
+  if (await opt.count()) {
+    await opt.scrollIntoViewIfNeeded().catch(() => {});
+    const clicked = await opt
+      .click({ timeout: 4000 })
+      .then(() => true)
+      .catch(() => false);
+    if (clicked) {
+      await page.waitForTimeout(600);
+      return;
+    }
+  }
+  // Fallback: mwc-select typeahead — type the option's leading text, commit.
+  await page.keyboard.type(typeahead);
+  await page.waitForTimeout(400);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(600);
+}
+
+// Open the Device settings step, capture the form, then drive it to the
+// calibration step by selecting the replayed energy meter and commodity=energy
+// and capture that too. The forms are not submitted — the shots only need the
+// rendered steps.
+async function captureDeviceSettings(page) {
+  await openOptionsMenu(page);
+  await page.locator("text=Device settings").first().click({ timeout: 8000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  await shot(page, "08-device-settings.png");
+
+  // Device picker (select 0) + commodity (select 1). The motion clear-delay
+  // field only appears for motion-bearing devices, which the fixtures exclude.
+  const selects = page.locator("ha-dialog ha-select, dialog ha-select");
+  if ((await selects.count()) >= 2) {
+    await selectPick(selects.nth(0), page, "EnergyMeter", /EnergyMeter/).catch(() =>
+      console.log("screenshot: energy meter not pickable; using default device"),
+    );
+    await selectPick(selects.nth(1), page, "Energy", /Energy/).catch(() =>
+      console.log("screenshot: commodity=Energy not pickable"),
+    );
+    await page
+      .getByRole("button", { name: /^(submit|next)$/i })
+      .first()
+      .click({ timeout: 8000 })
+      .catch(() => {});
+    await page.waitForTimeout(2500);
+    await shot(page, "12-calibration.png");
+  } else {
+    console.log("screenshot: device-settings selects not found; skipping 12-calibration.png");
+  }
 }
 
 // Open the per-entry options flow, which lands on the menu step
@@ -218,6 +397,14 @@ async function run() {
     await login(page);
     if (STAGE === "unavail") {
       await captureUnavailable(page);
+    } else if (STAGE === "device") {
+      // Iterate the Device-settings + calibration captures against an already
+      // running harness (hub already added). Not part of the full pipeline.
+      await captureDeviceSettings(page);
+    } else if (STAGE === "diagnostics") {
+      // Iterate only the enable-and-capture diagnostics step against an already
+      // running harness (hub already added).
+      await enableAndCaptureDiagnostics(page);
     } else if (STAGE === "add") {
       await addHubAndCapture(page);
     } else {

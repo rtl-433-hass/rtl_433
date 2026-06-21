@@ -21,11 +21,27 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { WebSocketServer } from "ws";
 
 const PORT = Number(process.env.WS_PORT || 8433);
 // File that rtl_433 appends JSON events to (shared volume). The bridge tails it.
 const EVENTS_FILE = process.env.EVENTS_FILE || "/shared/events.jsonl";
+
+// Optional: replay project-authored JSON fixtures alongside the live Acurite
+// capture so the screenshot harness sees more device types (a doorbell event
+// entity, an energy meter for the calibration step, a door + leak sensor) than
+// the single .cu8 capture provides. FIXTURE_FILES is a comma-separated list of
+// filenames inside FIXTURE_DIR; each file is the same JSON-array shape used by
+// the pytest fixtures (tests/fixtures/*.json). Disabled when FIXTURE_FILES is
+// empty. See README "Replaying extra fixtures for screenshots".
+const FIXTURE_DIR = process.env.FIXTURE_DIR || "/fixtures";
+const FIXTURE_FILES = (process.env.FIXTURE_FILES || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const FIXTURE_INTERVAL_MS = Number(process.env.FIXTURE_INTERVAL_MS || 8000);
 
 const httpServer = createServer((req, res) => {
   // A trivial UI/health endpoint so curl and HA reachability checks see a 200.
@@ -79,6 +95,39 @@ rl.on("line", (line) => {
   }
   broadcast(text);
 });
+// --- Optional fixture replay ------------------------------------------------
+// Load the configured fixtures once, flatten their arrays into a flat event
+// list, and re-broadcast the whole set on an interval. Each emit restamps the
+// event's `time` to "now" so HA treats successive doorbell presses as fresh
+// events (an event entity keys on the timestamp) and availability stays live.
+const pad = (n) => String(n).padStart(2, "0");
+const rtlTime = (d) =>
+  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+  `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+const fixtureEvents = [];
+for (const name of FIXTURE_FILES) {
+  try {
+    const parsed = JSON.parse(readFileSync(join(FIXTURE_DIR, name), "utf-8"));
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    fixtureEvents.push(...list);
+    process.stderr.write(`ws-bridge: loaded ${list.length} event(s) from ${name}\n`);
+  } catch (e) {
+    process.stderr.write(`ws-bridge: failed to load fixture ${name}: ${e.message}\n`);
+  }
+}
+if (fixtureEvents.length) {
+  setInterval(() => {
+    const stamp = rtlTime(new Date());
+    for (const ev of fixtureEvents) {
+      broadcast(JSON.stringify({ ...ev, time: stamp }));
+    }
+  }, FIXTURE_INTERVAL_MS);
+  process.stderr.write(
+    `ws-bridge: replaying ${fixtureEvents.length} fixture event(s) every ${FIXTURE_INTERVAL_MS}ms\n`,
+  );
+}
+
 tail.stderr.on("data", (d) => process.stderr.write(`tail: ${d}`));
 tail.on("exit", (code) => {
   process.stderr.write(`ws-bridge: tail exited (${code}); shutting down\n`);

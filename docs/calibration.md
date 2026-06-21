@@ -22,6 +22,8 @@ pick the meter, and set its consumption calibration.
 When the meter reports a `MeterType` or `ert_type` hint, the commodity is
 pre-filled from it. You can override it.
 
+![The calibration step for an energy meter, with a base-unit selector and a scale multiplier](images/12-calibration.png)
+
 Once calibrated, the consumption sensor gets a real device class, native unit,
 and `state_class: total_increasing`. You do not need to pick the display unit in
 the calibration flow: Home Assistant can convert convertible units in the entity
