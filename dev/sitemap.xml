@@ -2,46 +2,46 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/availability/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/calibration/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/configuration/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/device-discovery/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/device-library/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/diagnostics/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/event-based-devices/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/hub-entities/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/installation/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/dev/websocket-api/</loc>
-         <lastmod>2026-06-20</lastmod>
+         <lastmod>2026-06-21</lastmod>
     </url>
 </urlset>

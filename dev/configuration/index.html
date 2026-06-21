@@ -709,6 +709,7 @@
 <h1 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h1>
 <p>Add a hub from <strong>Settings → Devices &amp; Services → Add Integration → rtl_433</strong>.
 Each hub points at one rtl_433 server's WebSocket endpoint.</p>
+<p><img alt="The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings and discovery toggles, and initial frequency" src="../images/06-config-user.png" /></p>
 <table>
 <thead>
 <tr>
@@ -789,6 +790,12 @@ host, port, path, or secure mode. Devices and their history are preserved.</p>
 <li><strong>Device mappings</strong>: per-hub mapping overrides.</li>
 </ul>
 <p><img alt="Hub options flow menu showing Hub settings, Device settings, and Device mappings" src="../images/03-options-flow.png" /></p>
+<p>The <strong>Hub settings</strong> step configures discovery and the default availability
+timeout for every device on the hub:</p>
+<p><img alt="Hub settings step with the discovery toggle, default availability timeout, and managed-settings toggle" src="../images/07-hub-settings.png" /></p>
+<p>The <strong>Device settings</strong> step targets one device for a timeout override, motion
+clear delay, or utility-meter calibration:</p>
+<p><img alt="Device settings step with a device picker, availability timeout override, and meter commodity selector" src="../images/08-device-settings.png" /></p>
 <p>Changing discovery or timeout options applies live. Changing the managed-settings
 toggle reloads the hub because the entity set changes.</p>
 <h2 id="ws-wss-and-authentication">ws, wss, and Authentication<a class="headerlink" href="#ws-wss-and-authentication" title="Permanent link">&para;</a></h2>
