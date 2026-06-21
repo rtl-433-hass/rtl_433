@@ -24,13 +24,22 @@ the reason neither trigger can reuse the core ``state`` trigger's
 fires on every transmission; a subtyped trigger fires only when the new state's
 ``event_type`` equals its ``subtype``.
 
-**Neither fires on the entity's restore at startup.** Across a restart HA's
-``EventEntity`` restores its last ``event_type`` + timestamp (for display), which
-surfaces as a ``state_changed`` with ``old_state is None`` carrying the old
-``event_type`` — and a raw listener would re-deliver that stale event (e.g. a
-doorbell "ring" from days ago) on **every** HA restart. A momentary event never
-legitimately fires on the entity's first appearance in the state machine, so the
-listener ignores a ``None`` ``old_state`` (the restore / initial add).
+**Neither fires on the entity's restore.** HA's ``EventEntity`` restores its last
+``event_type`` + timestamp (for display); a raw listener would re-deliver that
+stale event (e.g. a doorbell "ring" from days ago) as if it just happened. This
+surfaces two ways, and the listener guards both:
+
+* **HA restart** — the restore is a ``state_changed`` with ``old_state is None``
+  (the entity's first appearance in the state machine).
+* **Config-entry reload** (an options change, or the "server unreachable" repair
+  forcing a reconnect) — HA flips the always-available event entity
+  value → ``unavailable`` → restored value *while the automation's listener is
+  still attached* (a restart re-attaches it only after the restore), so the
+  restore arrives as ``unavailable`` → ``<old event>`` rather than ``None`` →.
+
+A momentary event never legitimately fires from these, so the listener ignores
+any edge into/out of a non-event placeholder (``None`` / ``unavailable`` /
+``unknown``) — except a first press rising from the never-fired ``unknown``.
 """
 
 from __future__ import annotations
@@ -48,6 +57,8 @@ from homeassistant.const import (
     CONF_ENTITY_ID,
     CONF_PLATFORM,
     CONF_TYPE,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
 )
 from homeassistant.core import (
     CALLBACK_TYPE,
@@ -211,9 +222,10 @@ async def _async_attach_event_trigger(
     Shared by the base trigger (``subtype is None`` — fires on every
     transmission) and a subtyped trigger (fires only when the new state's
     ``event_type`` equals ``subtype``). The listener has no ``old == new``
-    dedupe and ignores the entity's startup restore (``old_state is None``); see
-    the module docstring for the rationale. The trigger payload + context match
-    what the core state trigger produces for a ``device``-platform trigger.
+    dedupe and ignores the entity's restore on both an HA restart and a
+    config-entry reload (see the module docstring for the rationale). The trigger
+    payload + context match what the core state trigger produces for a
+    ``device``-platform trigger.
     """
     entity_id = async_get_entity_registry_entry_or_raise(
         hass, config[CONF_ENTITY_ID]
@@ -224,13 +236,29 @@ async def _async_attach_event_trigger(
 
     @callback
     def _listener(event: Event[EventStateChangedData]) -> None:
-        """Fire the action for a genuine transmission (not the startup restore)."""
+        """Fire the action for a genuine transmission (not a restore / reload)."""
         old_state = event.data["old_state"]
         new_state = event.data["new_state"]
-        # ``old_state is None`` is the entity's restore / initial add, not a
-        # transmission: suppress it so a restored event_type does not re-fire on
-        # every HA restart. ``new_state is None`` is the entity being removed.
-        if old_state is None or new_state is None:
+        # A genuine transmission writes a fresh timestamp state
+        # (``EventEntity._trigger_event``). Two non-transmission shapes must be
+        # ignored, or a stale restored event re-fires the automation:
+        #
+        # * ``new_state`` is ``None`` (entity removed) or a non-event placeholder
+        #   (``unavailable`` / ``unknown``) -- the unload edge, not a press.
+        # * ``old_state`` is ``None`` (the entity's restore / initial add at an HA
+        #   restart) or ``unavailable``. The latter is the config-entry reload
+        #   case: a reload flips the always-available event entity
+        #   value -> ``unavailable`` -> restored value *with this listener already
+        #   attached* (a full restart re-attaches the listener only after restore,
+        #   so it never sees that edge). Re-surfacing the restored last event from
+        #   ``unavailable`` must not re-fire -- this is the phantom doorbell "ring"
+        #   on reconnect/reload.
+        #
+        # An ``old_state`` of ``unknown`` is deliberately allowed: the very first
+        # press rises from the entity's never-fired ``unknown`` state and must fire.
+        if new_state is None or new_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return
+        if old_state is None or old_state.state == STATE_UNAVAILABLE:
             return
         # Subtyped trigger: only the matching ``event_type`` fires. No
         # ``old == new`` dedupe, so consecutive same-value presses each fire.
