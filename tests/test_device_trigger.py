@@ -40,6 +40,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.trigger import async_initialize_triggers
 from homeassistant.util import dt as dt_util
 
@@ -254,6 +255,75 @@ async def test_triggers_do_not_fire_on_restore_at_startup(hass, hub_entry_builde
     assert sub_calls == []
 
     # A genuine press afterwards still fires both (old_state is now non-None).
+    await _feed_presses(hass, coordinator, ["A"])
+    assert len(base_calls) == 1
+    assert len(sub_calls) == 1
+
+    remove_base()
+    remove_sub()
+
+
+# --------------------------------------------------------------------------- #
+# Neither trigger re-fires on a config-entry reload (the phantom-ring bug).     #
+# --------------------------------------------------------------------------- #
+async def test_triggers_do_not_fire_on_config_entry_reload(hass, hub_entry_builder):
+    """A reload must not re-fire the last event (the phantom doorbell "ring").
+
+    Reproduces the reported bug: with an automation already listening, a
+    config-entry reload (an options change, or the "server unreachable" repair
+    forcing a reconnect) flips the always-available event entity
+    ``<event> -> unavailable -> restored <event>``. That restore edge is
+    ``unavailable -> <event>`` (not ``None -> <event>`` as a full HA restart
+    produces), so the older ``old_state is None`` guard does not catch it and
+    both triggers re-fired a stale press. Neither must fire on the reload, yet a
+    genuine press afterwards still does.
+    """
+    hub = await _setup_button_hub(hass, hub_entry_builder)
+    device_id = _resolve_device_id(hass, hub.entry_id)
+    coordinator = _coordinator(hass, hub)
+
+    ent_reg = er.async_get(hass)
+    entity_id = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+    )
+
+    # A real press so the entity has a last fired event HA restores on reload.
+    await _feed_presses(hass, coordinator, ["A"])
+
+    triggers = await async_get_triggers(hass, device_id)
+    base = next(t for t in triggers if t[CONF_TYPE] == TRIGGER_TYPE_TRIGGERED)
+    subtype_a = next(
+        t
+        for t in triggers
+        if t[CONF_TYPE] == TRIGGER_TYPE_TRIGGERED_SUBTYPE and t[CONF_SUBTYPE] == "A"
+    )
+    # Attach BEFORE the reload, like a real automation that survives it.
+    base_calls, remove_base = await _attach(hass, base)
+    sub_calls, remove_sub = await _attach(hass, subtype_a)
+
+    # Capture the entity's state path across the reload to prove the test really
+    # exercises the ``unavailable`` round-trip (not a no-op / removed entity).
+    seen_states: list[str] = []
+
+    @callback
+    def _spy(event):
+        new_state = event.data["new_state"]
+        seen_states.append(None if new_state is None else new_state.state)
+
+    unsub_spy = async_track_state_change_event(hass, [entity_id], _spy)
+
+    assert await hass.config_entries.async_reload(hub.entry_id)
+    await hass.async_block_till_done()
+    unsub_spy()
+
+    # The reload genuinely passed the entity through ``unavailable`` and back to
+    # the restored event (otherwise the guard would not even be exercised).
+    assert "unavailable" in seen_states
+    assert base_calls == []
+    assert sub_calls == []
+
+    # A genuine press after the reload still fires both (the guard is not blanket).
+    coordinator = _coordinator(hass, hub)  # reload rebuilt the coordinator
     await _feed_presses(hass, coordinator, ["A"])
     assert len(base_calls) == 1
     assert len(sub_calls) == 1
