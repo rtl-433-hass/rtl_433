@@ -14,6 +14,8 @@ on the RF device:
 These entities are disabled by default. Enable the ones you want from the device
 page or entity settings to chart reception quality and antenna placement.
 
+![An rtl_433 device page with the enabled signal diagnostics in its Diagnostic card: Frequency 434.00 MHz, Last seen, Noise -17.15 dB, RSSI 0.63 dB, and SNR 17.15 dB](images/10-diagnostics.png)
+
 Level fields are only present when rtl_433 emits them. The rtl_433 Home Assistant
 add-on reports levels automatically. When running rtl_433 yourself, start it with
 `-M level` or add `report_meta level` to the rtl_433 config.

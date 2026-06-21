@@ -3,6 +3,8 @@
 Add a hub from **Settings → Devices & Services → Add Integration → rtl_433**.
 Each hub points at one rtl_433 server's WebSocket endpoint.
 
+![The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings and discovery toggles, and initial frequency](images/06-config-user.png)
+
 | Field | Default | Description |
 | --- | --- | --- |
 | **Host** | required | Hostname or IP of the machine running rtl_433. |
@@ -60,6 +62,16 @@ Use **Configure** for hub options:
 - **Device mappings**: per-hub mapping overrides.
 
 ![Hub options flow menu showing Hub settings, Device settings, and Device mappings](images/03-options-flow.png)
+
+The **Hub settings** step configures discovery and the default availability
+timeout for every device on the hub:
+
+![Hub settings step with the discovery toggle, default availability timeout, and managed-settings toggle](images/07-hub-settings.png)
+
+The **Device settings** step targets one device for a timeout override, motion
+clear delay, or utility-meter calibration:
+
+![Device settings step with a device picker, availability timeout override, and meter commodity selector](images/08-device-settings.png)
 
 Changing discovery or timeout options applies live. Changing the managed-settings
 toggle reloads the hub because the entity set changes.

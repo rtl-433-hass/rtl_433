@@ -10,6 +10,8 @@ Momentary RF devices such as remotes, doorbells, and key fobs are native Home
 Assistant `event` entities. Each genuine transmission fires one event whose type
 is the transmitted value. Event entities stay available between presses.
 
+![A doorbell device page showing an event entity with its most recent event type and the activity log of presses](images/11-event-entity.png)
+
 On reconnect or Home Assistant restart, rtl_433 replays recent event history.
 Momentary events that occurred while Home Assistant was disconnected are not
 re-fired, so an old doorbell press cannot trigger automations late. Their latest

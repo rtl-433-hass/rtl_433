@@ -22,11 +22,24 @@ stream stops. Playwright captures these screenshots (see `../../screenshots/`):
 
 | File | Shows |
 | --- | --- |
-| `01-discovery-card.png` | The discovered-device card at the top of Settings → Devices & Services |
-| `02-device-page.png` | The accepted device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
+| `02-device-page.png` | The device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
 | `03-options-flow.png` | The hub options flow menu (Hub settings / Device settings / Device mappings) |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
 | `05-mapping-overrides.png` | The **Device mappings** step: the YAML editor pre-filled with an example per-hub override |
+| `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
+| `07-hub-settings.png` | The **Hub settings** step (discovery, default availability timeout, managed settings) |
+| `08-device-settings.png` | The **Device settings** step (device picker, timeout override, meter commodity) |
+| `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
+| `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
+| `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
+| `12-calibration.png` | The utility-meter **calibration** step (base unit + scale) |
+
+Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
+`screenshots/` output directory itself is gitignored.
+
+The doorbell / energy meter / door / leak devices in the richer shots come from
+`ws-bridge.mjs` replaying the project fixtures in `tests/fixtures/` (configured
+via `FIXTURE_FILES` in `docker-compose.yml`) alongside the live Acurite capture.
 
 ## Prerequisites
 
@@ -153,6 +166,6 @@ battery indicator in one device.
 | `ws-probe.mjs` | Bounded readiness probe: connects to `/ws`, exits 0 on a decoded event |
 | `ha-config/configuration.yaml` | Minimal HA seed config (debug logging for the integration) |
 | `ha-onboard.mjs` | Seeds HA onboarding (owner + token) via the REST API |
-| `screenshot.mjs` | Playwright driver: login, add hub, capture the four screenshots |
+| `screenshot.mjs` | Playwright driver: login, add hub, capture the documentation screenshots |
 | `run-harness.sh` | Orchestrator with background+poll readiness gating |
 | `rtl_433_tests/` | Pinned, sparse git submodule with the `.cu8` captures (not vendored) |

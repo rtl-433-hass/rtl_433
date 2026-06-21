@@ -55,10 +55,17 @@ services:
     environment:
       WS_PORT: "8433"
       EVENTS_FILE: /shared/events.jsonl
+      # Replay project fixtures alongside the live Acurite capture so the
+      # screenshot harness sees a doorbell event entity, an energy meter (for the
+      # calibration step), and door/leak sensors. See ws-bridge.mjs.
+      FIXTURE_DIR: /fixtures
+      FIXTURE_FILES: "doorbell_event.json,power_sensor.json,contact_leak.json"
     volumes:
       - ./ws-bridge.mjs:/app/ws-bridge.mjs:ro
       # Reuse the installed ws module from the host node_modules.
       - ./node_modules:/app/node_modules:ro
+      # Project-authored JSON fixtures, replayed for the richer screenshots.
+      - ../fixtures:/fixtures:ro
       - shared:/shared:ro
     ports:
       # Exposed on the host too for debugging the WS with ws-probe.mjs.
