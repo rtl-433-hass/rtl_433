@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.18.0...v0.18.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* **ci:** avoid pre-commit-uv Python assertion ([#95](https://github.com/rtl-433-hass/rtl_433/issues/95)) ([7262e81](https://github.com/rtl-433-hass/rtl_433/commit/7262e8136f9ab3810e2654e24bf270b90e119c4c))
+* **device_trigger:** stop phantom event fire on config-entry reload ([4c188b3](https://github.com/rtl-433-hass/rtl_433/commit/4c188b3628fa8d365cda0fdaf0642b0b603cae7e))
+
+
+### Documentation
+
+* create mkdocs site foundation ([50d722a](https://github.com/rtl-433-hass/rtl_433/commit/50d722aaf854603d56b7806a631c80b0d33d51d1))
+* refine integration documentation site ([9f1b715](https://github.com/rtl-433-hass/rtl_433/commit/9f1b715ae9fa36a7b99481a5e94162c699d28f61))
+* refresh and expand UI screenshots ([d420c50](https://github.com/rtl-433-hass/rtl_433/commit/d420c506335f3cefd95fffa3ce403d2d66baf0f4))
+
 ## [0.18.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.17.0...v0.18.0) (2026-06-16)
 
 
