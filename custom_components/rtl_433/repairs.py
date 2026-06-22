@@ -6,11 +6,13 @@ actionable* problems, not speculative ones). Two hub-scoped issues live here:
 - **server unreachable** — raised when a hub's WebSocket coordinator has been
   unable to stay connected, cleared automatically the moment it comes back.
 - **sample rate low for band** — an advisory raised when a *single* high-band
-  frequency (>= 800 MHz) is left at the bare default sample rate. Its fix flow
-  applies rtl_433's own 1.024 MS/s default on confirm (persisted via
-  ``set_sdr`` so it survives a restart even when the hub is offline); many
-  devices still decode fine at the low rate, so it is optional and edge-triggered
-  so a dismissed card is not re-raised while the condition persists.
+  frequency (>= 800 MHz) is left at the bare default sample rate. Its fix flow is
+  a two-option menu: *apply* rtl_433's own 1.024 MS/s default (persisted via
+  ``set_sdr`` so it survives a restart even when the hub is offline), or *keep*
+  the current rate and durably silence the advisory for this hub. Many devices
+  decode fine at the low rate, so the advisory is optional; it is edge-triggered
+  so a dismissed card is not re-raised while the condition persists, and the
+  "keep" choice sets a persisted per-hub flag so it never re-raises again.
 
 The coordinator package is intentionally left untouched (it owns no HA-repairs
 knowledge). Instead :func:`async_track_hub_reachability` polls the coordinator's
@@ -40,6 +42,7 @@ from .const import (
     CONF_PATH,
     CONF_PORT,
     CONF_RADIO_ID,
+    CONF_SAMPLE_RATE_DISMISSED,
     DEFAULT_PATH,
     DEFAULT_PORT,
     DOMAIN,
@@ -90,6 +93,35 @@ def _unreachable_issue_id(entry: ConfigEntry) -> str:
 def _sample_rate_issue_id(entry: ConfigEntry) -> str:
     """Return the per-hub issue id for the low-sample-rate advisory."""
     return f"{ISSUE_SAMPLE_RATE_LOW}_{entry.entry_id}"
+
+
+def _sample_rate_advisory_dismissed(entry: ConfigEntry) -> bool:
+    """Return whether the user chose to keep the lower rate for this hub.
+
+    Read from ``entry.data`` (absent / falsey means "not dismissed"), so the
+    choice survives restarts and reloads where the tracker's in-memory state is
+    reset.
+    """
+    return bool(entry.data.get(CONF_SAMPLE_RATE_DISMISSED))
+
+
+@callback
+def _async_dismiss_sample_rate_advisory(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Durably record that the user accepted the lower rate for this hub.
+
+    Persisted in ``entry.data`` so the edge-triggered tracker stays silent across
+    restarts/reloads. Writing the flag fires the entry-update listener, which is
+    a no-op here: the flag changes none of the reload-triggering settings, so the
+    hub is not torn down. Idempotent — skips the write (and its listener) when the
+    flag is already set.
+    """
+    if _sample_rate_advisory_dismissed(entry):
+        return
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_SAMPLE_RATE_DISMISSED: True}
+    )
 
 
 def _sample_rate_looks_low(meta: dict[str, Any]) -> bool:
@@ -174,12 +206,17 @@ def async_track_sample_rate(
     Edge-triggered off ``signal_hub_update`` (which fires on every meta refresh):
     the advisory is raised once when the receiver enters the flagged state and
     cleared when it leaves it, so a card the user dismisses while still on a low
-    rate is not immediately re-raised. Returns an unsubscribe callable.
+    rate is not immediately re-raised. If the user chose "keep the current rate"
+    in the fix flow, ``entry.data`` carries a persisted dismissal flag and the
+    advisory is never raised again for this hub. Returns an unsubscribe callable.
     """
     state: dict[str, bool] = {"flagged": False}
 
     @callback
     def _evaluate(*_: Any) -> None:
+        if _sample_rate_advisory_dismissed(entry):
+            # User deliberately keeps the lower rate; never nag for this hub.
+            return
         low = _sample_rate_looks_low(coordinator.meta)
         if low and not state["flagged"]:
             state["flagged"] = True
@@ -332,43 +369,56 @@ class HubRadioReplaceRepairFlow(RepairsFlow):
         )
 
 
-class SampleRateApplyRepairFlow(RepairsFlow):
-    """Fix flow for the low-sample-rate advisory: apply 1.024 MS/s on confirm.
+class SampleRateRepairFlow(RepairsFlow):
+    """Fix flow for the low-sample-rate advisory: a two-option menu.
 
-    The advisory's whole point is that the receiver is left at the bare default
-    rate, so the natural fix is to widen it to the rtl_433 default of
-    1.024 MS/s. Confirming writes that through :meth:`Rtl433Coordinator.set_sdr`,
-    which persists the desired value (so the intent survives a restart even if
-    the hub is currently offline) and enforces it live when connected, then
-    clears the card. If the coordinator is no longer loaded we degrade to a
-    plain dismiss (the same outcome a confirm-only card would have had).
+    The advisory is only ever a recommendation — the receiver is left at the bare
+    default rate, which decodes fine for many devices — so the flow lets the user
+    choose between two actions:
+
+    - **apply** widens the rate to the rtl_433 default of 1.024 MS/s through
+      :meth:`Rtl433Coordinator.set_sdr`, which persists the desired value (so the
+      intent survives a restart even if the hub is offline) and enforces it live
+      when connected. If the coordinator is no longer loaded we degrade to a plain
+      dismiss (the same outcome a confirm-only card would have had).
+    - **ignore** records a durable per-hub flag in ``entry.data`` so the
+      edge-triggered tracker never re-raises this advisory for the hub, then
+      clears the card. This is the path for users who deliberately want the lower
+      rate and do not want to be nagged again.
+
+    Both menu choices clear the current card and complete the flow; HA deletes the
+    issue on completion regardless, so the ``async_clear_sample_rate_low`` calls
+    are belt-and-suspenders for the offline/degraded paths.
     """
 
     def __init__(self, entry: ConfigEntry) -> None:
         self._entry = entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
-        return await self.async_step_confirm()
-
-    async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> Any:
-        entry = self._entry
-        if user_input is not None:
-            coordinator: Rtl433Coordinator | None = self.hass.data.get(DOMAIN, {}).get(
-                entry.entry_id
-            )
-            if coordinator is not None:
-                await coordinator.set_sdr(KEY_SAMPLE_RATE, _SUGGESTED_SAMPLE_RATE_HZ)
-            async_clear_sample_rate_low(self.hass, entry)
-            return self.async_create_entry(title="", data={})
-
-        return self.async_show_form(
-            step_id="confirm",
-            data_schema=vol.Schema({}),
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["apply", "ignore"],
             description_placeholders={
-                "title": entry.title,
+                "title": self._entry.title,
                 "suggested": str(_SUGGESTED_SAMPLE_RATE_HZ),
             },
         )
+
+    async def async_step_apply(self, user_input: dict[str, Any] | None = None) -> Any:
+        entry = self._entry
+        coordinator: Rtl433Coordinator | None = self.hass.data.get(DOMAIN, {}).get(
+            entry.entry_id
+        )
+        if coordinator is not None:
+            await coordinator.set_sdr(KEY_SAMPLE_RATE, _SUGGESTED_SAMPLE_RATE_HZ)
+        async_clear_sample_rate_low(self.hass, entry)
+        return self.async_create_entry(title="", data={})
+
+    async def async_step_ignore(self, user_input: dict[str, Any] | None = None) -> Any:
+        entry = self._entry
+        _async_dismiss_sample_rate_advisory(self.hass, entry)
+        async_clear_sample_rate_low(self.hass, entry)
+        return self.async_create_entry(title="", data={})
 
 
 async def async_create_fix_flow(
@@ -380,11 +430,12 @@ async def async_create_fix_flow(
 
     The ``server_unreachable`` issue gets an actionable rebind flow (the dead
     radio is what raised it, so this is the natural recovery surface). The
-    ``sample_rate_low_for_band`` advisory gets a flow that *applies* the
-    recommended 1.024 MS/s rate on confirm rather than merely dismissing. Every
-    other issue is informational/dismissible, so a simple confirm-and-dismiss
-    flow is the right surface; those issues also self-clear, so the confirm
-    dialog mainly lets a user dismiss a stale card.
+    ``sample_rate_low_for_band`` advisory gets a two-option menu flow that either
+    *applies* the recommended 1.024 MS/s rate or *keeps* the current rate and
+    durably silences the advisory for the hub. Every other issue is
+    informational/dismissible, so a simple confirm-and-dismiss flow is the right
+    surface; those issues also self-clear, so the confirm dialog mainly lets a
+    user dismiss a stale card.
     """
     if issue_id.startswith(ISSUE_UNREACHABLE):
         entry_id = issue_id[len(ISSUE_UNREACHABLE) + 1 :]
@@ -395,7 +446,7 @@ async def async_create_fix_flow(
         entry_id = issue_id[len(ISSUE_SAMPLE_RATE_LOW) + 1 :]
         entry = hass.config_entries.async_get_entry(entry_id)
         if entry is not None:
-            return SampleRateApplyRepairFlow(entry)
+            return SampleRateRepairFlow(entry)
     return ConfirmRepairFlow()
 
 

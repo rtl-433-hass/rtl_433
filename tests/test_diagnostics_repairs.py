@@ -228,7 +228,7 @@ async def test_create_fix_flow_routes_by_issue_id(
     sample_rate = await repairs.async_create_fix_flow(
         hass, repairs._sample_rate_issue_id(entry), None
     )
-    assert isinstance(sample_rate, repairs.SampleRateApplyRepairFlow)
+    assert isinstance(sample_rate, repairs.SampleRateRepairFlow)
 
     # An unknown issue id still falls back to the plain dismiss flow.
     other = await repairs.async_create_fix_flow(hass, "some_other_issue", None)
@@ -238,11 +238,11 @@ async def test_create_fix_flow_routes_by_issue_id(
 async def test_sample_rate_fix_flow_applies_rate_and_clears_issue(
     hass: HomeAssistant, hub_entry_builder
 ):
-    """Confirming the advisory writes 1.024 MS/s and clears the card.
+    """Choosing "apply" writes 1.024 MS/s and clears the card.
 
     The coordinator is offline so no socket is touched; ``set_sdr`` still
     persists the desired value, which is exactly the restart-surviving intent we
-    want, and the issue is cleared on confirm.
+    want, and the issue is cleared on apply.
     """
     from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
 
@@ -259,15 +259,16 @@ async def test_sample_rate_fix_flow_applies_rate_and_clears_issue(
     issue_id = repairs._sample_rate_issue_id(entry)
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
-    flow = repairs.SampleRateApplyRepairFlow(entry)
+    flow = repairs.SampleRateRepairFlow(entry)
     flow.hass = hass
 
     init = await flow.async_step_init()
-    assert init["type"] == FlowResultType.FORM
-    assert init["step_id"] == "confirm"
+    assert init["type"] == FlowResultType.MENU
+    assert init["step_id"] == "init"
+    assert init["menu_options"] == ["apply", "ignore"]
     assert init["description_placeholders"]["suggested"] == "1024000"
 
-    result = await flow.async_step_confirm({})
+    result = await flow.async_step_apply()
     await hass.async_block_till_done()
     assert result["type"] == FlowResultType.CREATE_ENTRY
 
@@ -276,10 +277,10 @@ async def test_sample_rate_fix_flow_applies_rate_and_clears_issue(
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
 
-async def test_sample_rate_fix_flow_dismisses_when_coordinator_absent(
+async def test_sample_rate_fix_flow_apply_dismisses_when_coordinator_absent(
     hass: HomeAssistant, hub_entry_builder
 ):
-    """With no loaded coordinator, confirming just clears the card (no crash)."""
+    """With no loaded coordinator, "apply" just clears the card (no crash)."""
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
 
@@ -290,12 +291,89 @@ async def test_sample_rate_fix_flow_dismisses_when_coordinator_absent(
     issue_id = repairs._sample_rate_issue_id(entry)
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
-    flow = repairs.SampleRateApplyRepairFlow(entry)
+    flow = repairs.SampleRateRepairFlow(entry)
     flow.hass = hass
     await flow.async_step_init()
-    result = await flow.async_step_confirm({})
+    result = await flow.async_step_apply()
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_sample_rate_fix_flow_ignore_silences_advisory(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """Choosing "keep the current rate" persists a flag and clears the card.
+
+    The flag lives in ``entry.data`` so it survives reloads, and it must NOT
+    apply any sample-rate change to the coordinator.
+    """
+    from custom_components.rtl_433.const import CONF_SAMPLE_RATE_DISMISSED
+    from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
+
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator.connected = False
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    repairs.async_raise_sample_rate_low(
+        hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+    )
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._sample_rate_issue_id(entry)
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
+
+    flow = repairs.SampleRateRepairFlow(entry)
+    flow.hass = hass
+    await flow.async_step_init()
+    result = await flow.async_step_ignore()
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    # The card is gone and the durable dismissal flag is set.
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+    assert entry.data.get(CONF_SAMPLE_RATE_DISMISSED) is True
+    # "Keep the current rate" must not have touched the desired sample rate.
+    assert coordinator.get_desired(KEY_SAMPLE_RATE) is None
+
+
+async def test_dismissed_advisory_is_not_re_raised(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """Once dismissed, the tracker never re-raises the advisory for this hub.
+
+    This is the restart/reload case: a fresh tracker wired against a flagged hub
+    whose ``entry.data`` carries the dismissal flag must stay silent, even on the
+    immediate wire-up evaluation and on subsequent meta refreshes.
+    """
+    from custom_components.rtl_433.const import (
+        CONF_SAMPLE_RATE_DISMISSED,
+        signal_hub_update,
+    )
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    # Simulate a prior "keep the current rate" choice persisted on the entry.
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_SAMPLE_RATE_DISMISSED: True}
+    )
+
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
+
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._sample_rate_issue_id(entry)
+
+    unsub = repairs.async_track_sample_rate(hass, entry, coordinator)
+    # Immediate wire-up evaluation must not raise it despite the flagged meta.
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+
+    # A later meta refresh in the flagged state must also stay silent.
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+    unsub()
 
 
 async def test_rebind_fix_flow_repoints_hub_and_clears_issue(

@@ -68,6 +68,12 @@ CONF_INITIAL_FREQUENCY: Final = "initial_frequency"
 # ISM band most rtl_433 sensors use. Users can clear it to adopt the server's
 # current frequency instead.
 DEFAULT_INITIAL_FREQUENCY: Final = 433.92
+# Per-hub flag set when the user picks "keep the current rate" on the
+# low-sample-rate advisory. Persisted so the edge-triggered repairs tracker stays
+# silent for this hub across restarts/reloads (where its in-memory state resets).
+# Absent / falsey means "not dismissed" — many users deliberately want the lower
+# rate, so this lets them silence the advisory for good.
+CONF_SAMPLE_RATE_DISMISSED: Final = "sample_rate_advisory_dismissed"
 
 # --- Per-device config-entry keys ------------------------------------------
 # entry id of the parent hub entry; enables cascade removal when a hub is

@@ -195,9 +195,13 @@
       "title": "rtl_433 sample rate may be low for this frequency: {title}",
       "fix_flow": {
         "step": {
-          "confirm": {
+          "init": {
             "title": "Sample rate may be too low",
-            "description": "The receiver on {title} is tuned to a high-band frequency but is still sampling at the bare default rate. rtl_433 does not widen the sample rate automatically when it is retuned, so devices in the upper ISM bands may decode poorly. Confirm to set the **Sample rate** to {suggested} Hz — the 1.024 MS/s rate rtl_433 itself uses by default. Many devices still decode fine at the current rate, so this is optional; ignore this card to leave the rate unchanged."
+            "description": "The receiver on {title} is tuned to a high-band frequency but is still sampling at the bare default rate. rtl_433 does not widen the sample rate automatically when it is retuned, so devices in the upper ISM bands may decode poorly.\n\n- **Increase the sample rate** sets the **Sample rate** to {suggested} Hz — the 1.024 MS/s rate rtl_433 itself uses by default.\n- **Keep the current rate** leaves the rate unchanged and stops this advisory from appearing again for this hub. Many devices still decode fine at the lower rate, so this is a valid choice.",
+            "menu_options": {
+              "apply": "Increase the sample rate",
+              "ignore": "Keep the current rate (don't warn again)"
+            }
           }
         }
       }

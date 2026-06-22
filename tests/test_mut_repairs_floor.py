@@ -871,89 +871,99 @@ class TestHubRadioReplaceFlowSuccess:
 
 
 # ---------------------------------------------------------------------------
-# SampleRateApplyRepairFlow — async_step_confirm success / form paths
+# SampleRateRepairFlow — apply / ignore step CREATE_ENTRY paths
 # ---------------------------------------------------------------------------
 
 
 class TestSampleRateApplyFlowSuccess:
-    """Test precise details of the SampleRateApplyRepairFlow CREATE_ENTRY result.
+    """Test precise details of the SampleRateRepairFlow CREATE_ENTRY results.
 
-    Kills survivors 18 (title=None), 19 (data=None), 20 (title omitted), 22 (title='XXXX').
+    Kills survivors that set title=None, data=None, omit title, or set title='XXXX'
+    on the ``apply`` and ``ignore`` steps.
     """
 
-    async def test_confirm_creates_entry_with_empty_title(
+    async def test_apply_creates_entry_with_empty_title(
         self, hass: HomeAssistant, hub_entry_builder
     ):
-        """Confirming the sample-rate flow must produce title='' (not None or 'XXXX').
-
-        Kills mutmut_18, 20, 22.
-        """
+        """The apply step must produce title='' (not None or 'XXXX')."""
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
         coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-        flow = repairs.SampleRateApplyRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry)
         flow.hass = hass
 
-        result = await flow.async_step_confirm({})
+        result = await flow.async_step_apply()
         assert result["type"] == FlowResultType.CREATE_ENTRY
         assert result["title"] == ""
 
-    async def test_confirm_creates_entry_with_empty_data(
+    async def test_apply_creates_entry_with_empty_data(
         self, hass: HomeAssistant, hub_entry_builder
     ):
-        """Confirming the sample-rate flow must produce data={} (not None).
-
-        Kills mutmut_19.
-        """
+        """The apply step must produce data={} (not None)."""
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
         coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-        flow = repairs.SampleRateApplyRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry)
         flow.hass = hass
 
-        result = await flow.async_step_confirm({})
+        result = await flow.async_step_apply()
         assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["data"] == {}
+
+    async def test_ignore_creates_entry_with_empty_title_and_data(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """The ignore step must produce title='' and data={} on the flow result.
+
+        (This is the flow result, distinct from the entry.data dismissal flag.)
+        """
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+
+        flow = repairs.SampleRateRepairFlow(entry)
+        flow.hass = hass
+
+        result = await flow.async_step_ignore()
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        assert result["title"] == ""
         assert result["data"] == {}
 
 
 class TestSampleRateApplyFlowForm:
-    """Test the SampleRateApplyRepairFlow initial form details.
+    """Test the SampleRateRepairFlow initial menu details.
 
-    Kills survivors 24 (data_schema=None), 27 (data_schema omitted),
-    31 (data_schema=vol.Schema(None)), 32/33 (description_placeholders key wrong).
+    The init step is a menu offering the ``apply`` and ``ignore`` options, with
+    the title/suggested placeholders carried for the description.
     """
 
-    async def test_form_has_data_schema(self, hass: HomeAssistant, hub_entry_builder):
-        """The initial form must include a non-None data_schema.
-
-        Kills mutmut_24, 27, 31.
-        """
-        entry = hub_entry_builder()
-        entry.add_to_hass(hass)
-        flow = repairs.SampleRateApplyRepairFlow(entry)
-        flow.hass = hass
-
-        result = await flow.async_step_confirm(None)
-        assert result["type"] == FlowResultType.FORM
-        assert result.get("data_schema") is not None
-
-    async def test_form_description_placeholders_title_key(
+    async def test_init_is_menu_with_apply_and_ignore(
         self, hass: HomeAssistant, hub_entry_builder
     ):
-        """description_placeholders must use key 'title' (not 'XXtitleXX' or 'TITLE').
-
-        Kills mutmut_32 and mutmut_33.
-        """
-        entry = hub_entry_builder(host="rtl433.local")
+        """The initial step must be a menu listing exactly apply then ignore."""
+        entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.SampleRateApplyRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry)
         flow.hass = hass
 
-        result = await flow.async_step_confirm(None)
+        result = await flow.async_step_init()
+        assert result["type"] == FlowResultType.MENU
+        assert result["step_id"] == "init"
+        assert result["menu_options"] == ["apply", "ignore"]
+
+    async def test_menu_description_placeholders_title_key(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """description_placeholders must use key 'title' (not 'XXtitleXX' or 'TITLE')."""
+        entry = hub_entry_builder(host="rtl433.local")
+        entry.add_to_hass(hass)
+        flow = repairs.SampleRateRepairFlow(entry)
+        flow.hass = hass
+
+        result = await flow.async_step_init()
         placeholders = result["description_placeholders"]
         assert placeholders is not None
         assert "title" in placeholders
@@ -961,16 +971,16 @@ class TestSampleRateApplyFlowForm:
         assert "TITLE" not in placeholders
         assert placeholders["title"] == entry.title
 
-    async def test_form_description_placeholders_suggested_value(
+    async def test_menu_description_placeholders_suggested_value(
         self, hass: HomeAssistant, hub_entry_builder
     ):
         """description_placeholders 'suggested' must be '1024000'."""
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.SampleRateApplyRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry)
         flow.hass = hass
 
-        result = await flow.async_step_confirm(None)
+        result = await flow.async_step_init()
         placeholders = result["description_placeholders"]
         assert placeholders["suggested"] == "1024000"
 
@@ -985,7 +995,7 @@ class TestAsyncCreateFixFlow:
 
     Kills survivors:
     - mutmut_8: HubRadioReplaceRepairFlow(None) instead of HubRadioReplaceRepairFlow(entry)
-    - mutmut_16: SampleRateApplyRepairFlow(None) instead of SampleRateApplyRepairFlow(entry)
+    - mutmut_16: SampleRateRepairFlow(None) instead of SampleRateRepairFlow(entry)
     """
 
     async def test_unreachable_flow_has_correct_entry(
@@ -1007,7 +1017,7 @@ class TestAsyncCreateFixFlow:
     async def test_sample_rate_flow_has_correct_entry(
         self, hass: HomeAssistant, hub_entry_builder
     ):
-        """SampleRateApplyRepairFlow must hold a reference to the real entry, not None.
+        """SampleRateRepairFlow must hold a reference to the real entry, not None.
 
         Kills mutmut_16.
         """
@@ -1017,7 +1027,7 @@ class TestAsyncCreateFixFlow:
         flow = await repairs.async_create_fix_flow(
             hass, repairs._sample_rate_issue_id(entry), None
         )
-        assert isinstance(flow, repairs.SampleRateApplyRepairFlow)
+        assert isinstance(flow, repairs.SampleRateRepairFlow)
         assert flow._entry is entry
 
     async def test_unknown_issue_id_returns_confirm_flow(self, hass: HomeAssistant):
@@ -1706,76 +1716,77 @@ class TestHubRadioReplaceFlowNewUidNoneUniqueId:
 
 
 # ---------------------------------------------------------------------------
-# SampleRateApplyRepairFlow — vol.Schema({}) not vol.Schema(None)
+# SampleRateRepairFlow — ignore step persists the dismissal flag
 # ---------------------------------------------------------------------------
 
 
-class TestSampleRateFlowDataSchema:
-    """Test that the SampleRateApplyRepairFlow form uses vol.Schema({}) not vol.Schema(None).
+class TestSampleRateIgnoreFlow:
+    """Test that the ignore step persists the per-hub dismissal flag.
 
-    Kills mutmut_31 which changes vol.Schema({}) to vol.Schema(None).
+    The flag must land in ``entry.data`` (so it survives reloads) and the ignore
+    path must not touch the sample rate.
     """
 
-    async def test_sample_rate_form_schema_validates_empty_dict(
+    async def test_ignore_sets_dismissal_flag_in_entry_data(
         self, hass: HomeAssistant, hub_entry_builder
     ):
-        """The form's data_schema must validate an empty dict input (not pass None through).
-
-        vol.Schema(None) would accept None; vol.Schema({}) requires an empty dict.
-        We verify the schema correctly rejects None and accepts {}.
-        """
-        import voluptuous as vol
+        """async_step_ignore must persist CONF_SAMPLE_RATE_DISMISSED=True."""
+        from custom_components.rtl_433.const import CONF_SAMPLE_RATE_DISMISSED
 
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.SampleRateApplyRepairFlow(entry)
+
+        flow = repairs.SampleRateRepairFlow(entry)
         flow.hass = hass
 
-        result = await flow.async_step_confirm(None)
-        assert result["type"] == FlowResultType.FORM
-        schema = result["data_schema"]
-        assert schema is not None
+        assert not entry.data.get(CONF_SAMPLE_RATE_DISMISSED)
+        await flow.async_step_ignore()
+        assert entry.data.get(CONF_SAMPLE_RATE_DISMISSED) is True
 
-        # vol.Schema({}) should validate {} successfully
-        try:
-            validated = schema({})
-            assert validated == {}
-        except vol.Invalid:
-            pytest.fail("Schema should accept empty dict input")
+    async def test_ignore_does_not_apply_sample_rate(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """The ignore path must leave the coordinator's desired rate untouched."""
+        from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
 
-        # vol.Schema(None) would let None through; vol.Schema({}) should reject None
-        # We check by validating {} - both cases above verify the schema is functional.
-        # Additionally check the schema's internal structure is a dict, not None
-        assert isinstance(schema.schema, dict)
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+        flow = repairs.SampleRateRepairFlow(entry)
+        flow.hass = hass
+
+        await flow.async_step_ignore()
+        assert coordinator.get_desired(KEY_SAMPLE_RATE) is None
 
 
 # ---------------------------------------------------------------------------
-# SampleRateApplyRepairFlow — no coordinator branch
+# SampleRateRepairFlow — no coordinator branch (apply)
 # ---------------------------------------------------------------------------
 
 
 class TestSampleRateApplyFlowNoCoordinator:
-    """Test no-coordinator path does not call set_sdr but still clears the issue.
+    """Test the no-coordinator apply path still clears the issue without crashing.
 
-    The existing test_sample_rate_fix_flow_dismisses_when_coordinator_absent
-    covers this, but we add assertions about CREATE_ENTRY exact values to kill
-    the title/data mutation survivors.
+    Adds assertions about CREATE_ENTRY exact values to kill the title/data
+    mutation survivors.
     """
 
     async def test_no_coordinator_still_creates_entry_empty(
         self, hass: HomeAssistant, hub_entry_builder
     ):
-        """Without coordinator, result must still be CREATE_ENTRY with title='' data={}."""
+        """Without coordinator, apply must still be CREATE_ENTRY with title='' data={}."""
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
         # Ensure no coordinator is registered
         hass.data.setdefault(DOMAIN, {})
         hass.data[DOMAIN].pop(entry.entry_id, None)
 
-        flow = repairs.SampleRateApplyRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry)
         flow.hass = hass
 
-        result = await flow.async_step_confirm({})
+        result = await flow.async_step_apply()
         assert result["type"] == FlowResultType.CREATE_ENTRY
         assert result["title"] == ""
         assert result["data"] == {}
