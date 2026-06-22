@@ -7,7 +7,7 @@
 
 [project]
 name = "rtl_433"
-version = "0.18.1"   # Version is managed by release-please (also updates manifest.json)
+version = "0.19.0"   # Version is managed by release-please (also updates manifest.json)
 description = "Home Assistant custom integration for the rtl_433 WebSocket API"
 requires-python = ">=3.14"
 

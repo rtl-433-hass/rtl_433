@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.18.1...v0.19.0) (2026-06-22)
+
+
+### Features
+
+* **repairs:** let users keep a low sample rate and silence the advisory ([840d945](https://github.com/rtl-433-hass/rtl_433/commit/840d945d1135f78c7e074eab062e83613349f2d3))
+
 ## [0.18.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.18.0...v0.18.1) (2026-06-22)
 
 
