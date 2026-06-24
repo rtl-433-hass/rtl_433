@@ -35,6 +35,7 @@ from custom_components.rtl_433.const import (
     CONF_PATH,
     CONF_PORT,
     CONF_RADIO_ID,
+    DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_INITIAL_FREQUENCY,
     DEFAULT_MANAGE_SETTINGS,
     DEVICE_CALIBRATION,
@@ -149,6 +150,37 @@ async def test_hub_options_step_persists_discovery_and_timeout(hass, hub_entry_b
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_DISCOVERY_ENABLED] is False
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == 120
+
+
+async def test_hub_options_step_drops_default_timeout(hass, hub_entry_builder):
+    """Submitting the plain-default timeout does not persist it as an explicit hub
+    default.
+
+    The availability-timeout field is pre-filled with ``DEFAULT_AVAILABILITY_TIMEOUT``,
+    so a user who only toggles another setting and saves echoes that default back.
+    Persisting it would mask the device-class defaults and wrongly expire
+    event-driven devices (doorbells/motion/contacts), so the key is dropped — the
+    entry carries no explicit hub timeout and the per-device-type defaults apply.
+    """
+    entry = hub_entry_builder(discovery_enabled=True)
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "hub"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_DISCOVERY_ENABLED: False,
+            CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    # The deliberately-changed toggle is persisted...
+    assert entry.options[CONF_DISCOVERY_ENABLED] is False
+    # ...but the untouched plain-default timeout is not, so class defaults apply.
+    assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
 # --------------------------------------------------------------------------- #

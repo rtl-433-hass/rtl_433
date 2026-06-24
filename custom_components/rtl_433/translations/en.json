@@ -104,7 +104,7 @@
         },
         "data_description": {
           "discovery_enabled": "When on, newly observed devices on this server are added automatically as nested devices.",
-          "availability_timeout": "Mark a device unavailable after this many seconds without an event. Use 0 to never mark devices unavailable. Devices that send rare events (door, window, motion) automatically get a longer default.",
+          "availability_timeout": "Mark a device unavailable after this many seconds without an event. Use 0 to never mark devices unavailable. Leave this at the default and each device type is handled automatically: devices that send only rare events (door, window, motion, doorbell) are never marked unavailable, while periodic sensors use 600 seconds. Set a specific value to apply it to every device instead.",
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched."
         }
       },

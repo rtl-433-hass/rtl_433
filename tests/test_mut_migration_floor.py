@@ -77,7 +77,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 def _make_hub(
     *,
     version: int = 2,
-    minor_version: int = 6,
+    minor_version: int = 7,
     data: dict | None = None,
     options: dict | None = None,
     entry_id: str | None = None,
@@ -1713,13 +1713,13 @@ class TestAsyncMigrateEntry:
         result = await async_migrate_entry(hass, entry)
         assert result is False
 
-    async def test_version_2_with_minor_6_skips_all_steps(self, hass):
-        """Entry at version 2, minor 6 skips all migration steps."""
+    async def test_version_2_with_minor_7_skips_all_steps(self, hass):
+        """Entry at version 2, minor 7 (current) skips all migration steps."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             title="current",
             version=2,
-            minor_version=6,
+            minor_version=7,
             data={CONF_HOST: "h", CONF_PORT: 8433, CONF_PATH: "/ws"},
         )
         entry.add_to_hass(hass)
@@ -1966,6 +1966,92 @@ class TestAsyncMigrateEntry:
         assert result is True
         mock_enable.assert_not_called()
 
+    async def test_minor_version_7_drops_resaved_default_timeout(self, hass, caplog):
+        """Minor 6 → 7 drops a default timeout the options flow re-saved, and says so."""
+        import logging
+
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="my-resaved-hub",
+            version=2,
+            minor_version=6,
+            data={
+                CONF_HOST: "h",
+                CONF_PORT: 8433,
+                CONF_PATH: "/ws",
+                CONF_USER_MAPPINGS: {},
+            },
+            options={CONF_AVAILABILITY_TIMEOUT: LEGACY_DEFAULT_AVAILABILITY_TIMEOUT},
+        )
+        entry.add_to_hass(hass)
+
+        with caplog.at_level(logging.INFO, logger="custom_components.rtl_433"):
+            result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        assert CONF_AVAILABILITY_TIMEOUT not in entry.options
+        assert entry.minor_version >= 7
+        # The drop is announced with the dropped value and the hub title — pins the
+        # interpolated log args (a bare "version bumped" log would not mention them).
+        assert any(
+            str(LEGACY_DEFAULT_AVAILABILITY_TIMEOUT) in m and "my-resaved-hub" in m
+            for m in caplog.messages
+        )
+
+    async def test_minor_version_7_preserves_custom_timeout(self, hass):
+        """Minor 6 → 7 preserves a non-default timeout option."""
+        custom_timeout = 300  # Not the legacy/default sentinel
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="hub",
+            version=2,
+            minor_version=6,
+            data={
+                CONF_HOST: "h",
+                CONF_PORT: 8433,
+                CONF_PATH: "/ws",
+                CONF_USER_MAPPINGS: {},
+            },
+            options={CONF_AVAILABILITY_TIMEOUT: custom_timeout},
+        )
+        entry.add_to_hass(hass)
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        assert entry.options.get(CONF_AVAILABILITY_TIMEOUT) == custom_timeout
+
+    async def test_minor_version_7_skipped_when_already_at_7(self, hass):
+        """Entry at minor 7 skips the re-saved-default cleanup.
+
+        Validates the < 7 boundary: a sentinel timeout on a minor-7 entry is left
+        in place (the step does not re-run). Because minor 7 is the current
+        version, nothing else touches the option, so its survival is a clean
+        signal that the step was skipped.
+        """
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="hub",
+            version=2,
+            minor_version=7,
+            data={
+                CONF_HOST: "h",
+                CONF_PORT: 8433,
+                CONF_PATH: "/ws",
+                CONF_USER_MAPPINGS: {},
+            },
+            options={CONF_AVAILABILITY_TIMEOUT: LEGACY_DEFAULT_AVAILABILITY_TIMEOUT},
+        )
+        entry.add_to_hass(hass)
+
+        result = await async_migrate_entry(hass, entry)
+
+        assert result is True
+        assert (
+            entry.options.get(CONF_AVAILABILITY_TIMEOUT)
+            == LEGACY_DEFAULT_AVAILABILITY_TIMEOUT
+        )
+
     async def test_v1_device_entry_bumped_to_version_2_minor_2(self, hass):
         """A v1 device entry is bumped to version=2, minor_version=2."""
         hub_id = "hub-id-1"
@@ -2096,7 +2182,7 @@ class TestAsyncMigrateEntry:
         assert entry.options[CONF_AVAILABILITY_TIMEOUT] == 601
 
     async def test_v2_minor_1_goes_through_all_steps(self, hass):
-        """Version 2, minor 1 goes through steps 2 through 6."""
+        """Version 2, minor 1 goes through steps 2 through 7."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             title="hub",
@@ -2118,10 +2204,10 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         assert entry.version == 2
-        assert entry.minor_version == 6
+        assert entry.minor_version == 7
 
-    async def test_v2_minor_4_goes_through_steps_4_5_6(self, hass):
-        """Version 2, minor 4 skips steps 2 and 3, does 4, 5, 6."""
+    async def test_v2_minor_4_goes_through_steps_4_to_7(self, hass):
+        """Version 2, minor 4 skips steps 2 and 3, does 4, 5, 6, 7."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             title="hub",
@@ -2143,7 +2229,7 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         mock_read.assert_not_called()
-        assert entry.minor_version == 6
+        assert entry.minor_version == 7
 
     async def test_v1_device_without_hub_id_still_returns_true(self, hass):
         """A v1 device entry with no CONF_HUB_ENTRY_ID still returns True."""
@@ -3401,9 +3487,9 @@ class TestKillSurvivingMutants:
         ):
             await async_migrate_entry(hass, entry)
 
-        # Final result: version=2, minor_version=6
+        # Final result: version=2, minor_version=7
         assert entry.version == 2
-        assert entry.minor_version == 6
+        assert entry.minor_version == 7
 
         # Check the first update call (for minor 2) had correct version/minor
         calls = update_spy.call_args_list
@@ -3575,6 +3661,46 @@ class TestKillSurvivingMutants:
         assert minor6_updates[0].get("version") == 2
         assert minor6_updates[0].get("minor_version") == 6
 
+    async def test_migrate_entry_minor_7_sets_exact_version_2_minor_7(self, hass):
+        """Re-saved-default cleanup step sets version=2, minor_version=7 exactly.
+
+        Guards the minor 7 boundary (``< 7``) and that its update carries an
+        explicit version=2 / minor_version=7, and that it drops the sentinel
+        timeout the options flow had re-saved into options.
+        """
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="hub",
+            version=2,
+            minor_version=6,
+            data={
+                CONF_HOST: "h",
+                CONF_PORT: 8433,
+                CONF_PATH: "/ws",
+                CONF_USER_MAPPINGS: {},
+            },
+            options={CONF_AVAILABILITY_TIMEOUT: LEGACY_DEFAULT_AVAILABILITY_TIMEOUT},
+        )
+        entry.add_to_hass(hass)
+
+        updates = []
+        original = hass.config_entries.async_update_entry
+
+        def capture(e, **kwargs):
+            updates.append(kwargs)
+            return original(e, **kwargs)
+
+        with patch.object(
+            hass.config_entries, "async_update_entry", side_effect=capture
+        ):
+            await async_migrate_entry(hass, entry)
+
+        minor7_updates = [u for u in updates if u.get("minor_version") == 7]
+        assert len(minor7_updates) >= 1
+        assert minor7_updates[0].get("version") == 2
+        assert minor7_updates[0].get("minor_version") == 7
+        assert CONF_AVAILABILITY_TIMEOUT not in entry.options
+
     async def test_migrate_entry_minor_2_condition_uses_or_not_and(self, hass):
         """The condition for minor 2 is (version < 2 OR minor < 2), not AND.
 
@@ -3635,8 +3761,11 @@ class TestKillSurvivingMutants:
     async def test_migrate_entry_minor_4_skipped_when_at_4(self, hass):
         """Minor 4 step is skipped when minor_version is already 4.
 
-        Validates < 4 boundary. Kills mutmut_74 (<= 4) and mutmut_75 (< 5).
-        With <= 4, minor_version=4 would trigger the step again.
+        Validates the < 4 boundary. Kills mutmut_74 (<= 4) and mutmut_75 (< 5):
+        either would re-run the timeout-drop step at minor 4, emitting a
+        ``minor_version=4`` update call. The 600-in-options signal can no longer be
+        used (the minor 7 step also drops that sentinel), so assert directly that
+        no minor-4 bump was issued.
         """
         entry = MockConfigEntry(
             domain=DOMAIN,
@@ -3653,12 +3782,22 @@ class TestKillSurvivingMutants:
         )
         entry.add_to_hass(hass)
 
-        await async_migrate_entry(hass, entry)
+        updates = []
+        original = hass.config_entries.async_update_entry
 
-        # Minor 4 skipped — legacy timeout NOT dropped (step not run again)
-        # If <= 4 were used, step would run and drop the 600
-        assert CONF_AVAILABILITY_TIMEOUT in entry.options
-        assert entry.minor_version == 6
+        def capture(e, **kwargs):
+            updates.append(kwargs)
+            return original(e, **kwargs)
+
+        with patch.object(
+            hass.config_entries, "async_update_entry", side_effect=capture
+        ):
+            await async_migrate_entry(hass, entry)
+
+        # Step 4 skipped: no update call bumped the entry to minor 4. If <= 4 or
+        # < 5 were used, the step would re-run and emit a minor-4 bump.
+        assert [u for u in updates if u.get("minor_version") == 4] == []
+        assert entry.minor_version == 7
 
     async def test_migrate_entry_minor_5_skipped_when_at_5(self, hass):
         """Minor 5 step is skipped when minor_version is already 5.
