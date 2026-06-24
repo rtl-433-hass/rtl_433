@@ -1983,7 +1983,7 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
 
     for hub in (hub_a, hub_b):
         assert await async_migrate_entry(hass, hub) is True
-        assert hub.minor_version == 6
+        assert hub.minor_version == 7
         overrides = hub.data[CONF_USER_MAPPINGS]
         # Each hub got its own normalized copy: payload bare on/off -> string keys.
         assert overrides["battery_low"]["payload"] == {"on": "0", "off": "1"}
@@ -1991,10 +1991,10 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
     # The legacy file is left on disk (never deleted by the migration).
     assert os.path.exists(mappings_path)
 
-    # A second migrate call is a no-op: already at minor 5, mappings unchanged.
+    # A second migrate call is a no-op: already at minor 7, mappings unchanged.
     snapshot = dict(hub_a.data[CONF_USER_MAPPINGS])
     assert await async_migrate_entry(hass, hub_a) is True
-    assert hub_a.minor_version == 6
+    assert hub_a.minor_version == 7
     assert hub_a.data[CONF_USER_MAPPINGS] == snapshot
 
 
@@ -2019,7 +2019,7 @@ async def test_migration_seeds_empty_mappings_when_file_missing(
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
     assert entry.data[CONF_USER_MAPPINGS] == {}
 
 
@@ -2081,7 +2081,7 @@ async def test_migration_disables_existing_last_seen_sensors(
     ).entity_id
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
 
     # The enabled Last-seen sensor is now disabled by the integration.
     assert (
@@ -2095,9 +2095,9 @@ async def test_migration_disables_existing_last_seen_sensors(
         ent_reg.async_get(already_disabled).disabled_by is er.RegistryEntryDisabler.USER
     )
 
-    # A second migrate call is a no-op: already at minor 5.
+    # A second migrate call is a no-op: already at minor 7.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
 
 
 # --------------------------------------------------------------------------- #
@@ -2137,12 +2137,33 @@ async def test_migration_drops_legacy_default_timeout(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
-    # A second migrate call is a no-op: already at minor 5.
+    # A second migrate call is a no-op: already at minor 7.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
+    assert CONF_AVAILABILITY_TIMEOUT not in entry.options
+
+
+async def test_migration_minor6_drops_resaved_default_timeout(hass):
+    """An entry re-polluted at minor 6 has the re-saved default dropped at minor 7.
+
+    The options flow used to write the plain default (600s) back into options on
+    every save, re-masking the device-class defaults that minor 4 had cleared (so
+    event-driven doorbells/motion/contacts wrongly expired again). The minor 6 -> 7
+    migration drops exactly that sentinel so those devices return to never-expire.
+    """
+    from custom_components.rtl_433 import async_migrate_entry
+
+    entry = _timeout_hub(
+        {CONF_AVAILABILITY_TIMEOUT: LEGACY_DEFAULT_AVAILABILITY_TIMEOUT},
+        minor_version=6,
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.minor_version == 7
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2161,7 +2182,7 @@ async def test_migration_keeps_deliberate_timeout(hass, configured):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == configured
 
 
@@ -2173,12 +2194,12 @@ async def test_migration_timeout_no_option_just_bumps_version(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
-async def test_migration_timeout_minor2_through_to_5(hass):
-    """An entry at minor 2 walks each minor bump in one call, ending at 5."""
+async def test_migration_timeout_minor2_through_to_current(hass):
+    """An entry at minor 2 walks each minor bump in one call, ending at current."""
     from custom_components.rtl_433 import async_migrate_entry
 
     entry = _timeout_hub(
@@ -2188,11 +2209,11 @@ async def test_migration_timeout_minor2_through_to_5(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
 
 
 # --------------------------------------------------------------------------- #
@@ -2231,14 +2252,14 @@ async def test_migration_rewrites_persisted_doorbell_event_types(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
     persisted = entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]
     assert persisted["secret_knock"] == ["ring", "secret_knock"]
 
     # Re-running is a no-op: already-mapped values pass through unchanged.
     snapshot = persisted["secret_knock"]
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
     assert (
         entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]["secret_knock"]
         == snapshot
@@ -2299,7 +2320,7 @@ async def test_migration_reenables_last_seen_for_event_driven_devices(hass):
     user_ls = _register_last_seen(user_key, er.RegistryEntryDisabler.USER)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 6
+    assert entry.minor_version == 7
 
     # Event-driven + integration-disabled -> re-enabled.
     assert ent_reg.async_get(motion_ls).disabled_by is None

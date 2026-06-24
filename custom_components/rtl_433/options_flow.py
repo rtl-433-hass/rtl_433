@@ -102,9 +102,25 @@ class Rtl433OptionsFlow(OptionsFlow):
     async def async_step_hub(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show and persist the hub-level options (writes ``entry.options``)."""
+        """Show and persist the hub-level options (writes ``entry.options``).
+
+        The availability-timeout field is ``vol.Required`` and pre-filled with the
+        plain :data:`DEFAULT_AVAILABILITY_TIMEOUT`, so the form echoes a value back
+        on every save even when the user never touched it. Persisting that default
+        as an *explicit* hub timeout would mask the device-class defaults — most
+        importantly it would expire event-driven devices (doorbells, motion,
+        contacts) that must never go unavailable on silence. So a submitted value
+        equal to the plain default is treated as "use the per-device-type defaults"
+        and the key is dropped; any deliberately chosen value (including ``0`` =
+        never-expire) is persisted unchanged. This mirrors the one-time migration
+        that strips the same sentinel from older entries and stops the entry from
+        re-acquiring it on every options save.
+        """
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            options = dict(user_input)
+            if options.get(CONF_AVAILABILITY_TIMEOUT) == DEFAULT_AVAILABILITY_TIMEOUT:
+                options.pop(CONF_AVAILABILITY_TIMEOUT, None)
+            return self.async_create_entry(title="", data=options)
 
         entry = self.config_entry
         discovery_default = entry.options.get(

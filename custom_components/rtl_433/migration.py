@@ -436,7 +436,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     with no mappings and their "Last seen" sensors already disabled. Version 2
     minor 6 re-enables the "Last seen" sensor for event-driven devices (which now
     never expire, making it their only freshness signal) — only instances the
-    integration disabled, not ones the user disabled.
+    integration disabled, not ones the user disabled. Version 2 minor 7 repeats the
+    minor-4 cleanup: it drops a hub availability timeout still pinned to the legacy
+    global default (600s) that the options flow re-persisted on save, which masked
+    the device-class defaults again (expiring event-driven devices); the options
+    flow no longer writes that sentinel, so this heal is final.
     """
     if entry.version > 2:
         # Downgrade from a future schema is unsupported.
@@ -520,5 +524,31 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass, entry, er.async_get(hass)
         )
         hass.config_entries.async_update_entry(entry, version=2, minor_version=6)
+
+    if (entry.minor_version or 1) < 7:
+        # The options flow used to re-persist the plain default availability
+        # timeout into ``entry.options`` on every save, which re-masked the
+        # device-class defaults that minor 4 had cleared — so event-driven devices
+        # (doorbells/motion/contacts) wrongly expired at the periodic timeout
+        # again, taking their battery/RSSI/SNR/noise sensors unavailable. Re-strip
+        # that exact sentinel (identical to the minor-4 cleanup) so the class
+        # defaults apply again; a hub timeout the user deliberately set to anything
+        # else is preserved. The options flow no longer writes the sentinel, so the
+        # entry cannot re-acquire it after this one-time heal.
+        new_options = dict(entry.options)
+        if (
+            new_options.get(CONF_AVAILABILITY_TIMEOUT)
+            == LEGACY_DEFAULT_AVAILABILITY_TIMEOUT
+        ):
+            del new_options[CONF_AVAILABILITY_TIMEOUT]
+            LOGGER.info(
+                "Removed the default %ss availability timeout re-saved into the "
+                "options of hub %s; per-device-type defaults now apply",
+                LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
+                entry.title,
+            )
+        hass.config_entries.async_update_entry(
+            entry, options=new_options, version=2, minor_version=7
+        )
 
     return True
