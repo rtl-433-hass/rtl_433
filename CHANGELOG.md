@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.0...v0.19.1) (2026-06-24)
+
+
+### Bug Fixes
+
+* **availability:** keep event-driven device sensors available across options saves ([92abd60](https://github.com/rtl-433-hass/rtl_433/commit/92abd6076f8fe81e24e12eb74bc5aa71a159b870))
+
 ## [0.19.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.18.1...v0.19.0) (2026-06-22)
 
 
