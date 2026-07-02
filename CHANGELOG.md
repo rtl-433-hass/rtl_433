@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.2](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.1...v0.19.2) (2026-07-02)
+
+
+### Bug Fixes
+
+* **sensor:** show temperature in the user's unit system ([b7ab25e](https://github.com/rtl-433-hass/rtl_433/commit/b7ab25ea380648ad3dcab3080d5f0ec4d1d92f7d))
+
 ## [0.19.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.0...v0.19.1) (2026-06-24)
 
 
