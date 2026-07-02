@@ -667,6 +667,53 @@ async def test_sensor_device_class_state_class_unit_from_descriptor(
     assert bat_state.state == "100"
 
 
+async def test_fahrenheit_sensor_converts_to_metric_unit_system(
+    hass, hub_entry_builder
+):
+    """A native-°F temperature sensor is displayed in the unit system's unit.
+
+    Regression test for the Acurite-986 (and any other natively-Fahrenheit
+    decoder) showing °F on a metric/Celsius install. Home Assistant's sensor
+    base only fires its legacy temperature unit conversion when
+    ``self.device_class is SensorDeviceClass.TEMPERATURE`` -- an *identity*
+    check that a bare ``"temperature"`` string from the device library fails.
+    Rtl433Sensor must therefore coerce the descriptor's device_class to the
+    ``SensorDeviceClass`` enum so the conversion fires and the reading follows
+    the user's unit system.
+
+    The default test ``hass`` uses the metric unit system, so ``temperature_F``
+    (native °F) must surface as ``°C``. An unconverted sensor would report the
+    raw ``°F`` here, which is exactly the reported bug.
+    """
+    device_key = "Acurite-986-33576"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {CONF_MODEL: "Acurite-986", DEVICE_FIELDS: ["temperature_F"]}
+        },
+    )
+
+    # 50 °F == 10 °C exactly, so the converted value is unambiguous.
+    _feed(
+        _coordinator(hass, hub),
+        {"model": "Acurite-986", "id": 33576, "temperature_F": 50},
+    )
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    temp_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:F"
+    )
+    assert temp_eid is not None
+    state = hass.states.get(temp_eid)
+    assert state.attributes["device_class"] == "temperature"
+    # The heart of the regression: display unit follows the metric unit system.
+    assert state.attributes["unit_of_measurement"] == "°C"
+    # The value is converted alongside the unit (50 °F -> 10 °C).
+    assert float(state.state) == pytest.approx(10.0, abs=0.05)
+
+
 async def test_sensor_battery_ok_zero_value(hass, hub_entry_builder):
     """battery_ok=0 transforms to 1 (scale=99, offset=1, round=0)."""
     device_key = "Bresser-5in1-7"
