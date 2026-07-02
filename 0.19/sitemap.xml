@@ -2,46 +2,46 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/availability/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/calibration/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/configuration/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/device-discovery/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/device-library/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/diagnostics/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/event-based-devices/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/hub-entities/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/installation/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
     <url>
          <loc>https://rtl-433-hass.github.io/rtl_433/0.19/websocket-api/</loc>
-         <lastmod>2026-06-24</lastmod>
+         <lastmod>2026-07-02</lastmod>
     </url>
 </urlset>
