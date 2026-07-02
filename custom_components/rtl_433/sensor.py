@@ -26,6 +26,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
+from homeassistant.util.enum import try_parse_enum
 
 from .const import DOMAIN
 from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
@@ -55,8 +56,21 @@ class Rtl433Sensor(Rtl433Entity, SensorEntity):
     ) -> None:
         """Initialize sensor-specific description fields."""
         super().__init__(coordinator, hub_entry_id, device_key, model, descriptor)
-        self._attr_device_class = descriptor.device_class
-        self._attr_state_class = descriptor.state_class
+        # Coerce the device-library's plain-string ``device_class`` /
+        # ``state_class`` into their canonical enum members. Home Assistant's
+        # sensor base performs its legacy temperature unit conversion behind an
+        # identity check (``self.device_class is SensorDeviceClass.TEMPERATURE``),
+        # which a bare ``"temperature"`` string fails -- so without this the
+        # native unit (e.g. Acurite-986 °F) is shown verbatim instead of being
+        # converted to the user's unit system. ``try_parse_enum`` returns the
+        # singleton member for a valid value and ``None`` for an unknown one
+        # (equivalent to leaving the attribute unset).
+        self._attr_device_class = try_parse_enum(
+            SensorDeviceClass, descriptor.device_class
+        )
+        self._attr_state_class = try_parse_enum(
+            SensorStateClass, descriptor.state_class
+        )
         self._attr_native_unit_of_measurement = descriptor.unit_of_measurement
         self._attr_force_update = descriptor.force_update
 
