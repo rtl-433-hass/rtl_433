@@ -56,12 +56,16 @@ from custom_components.rtl_433.const import (
     signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.mapping import FieldDescriptor
 from custom_components.rtl_433.sensor import (
     _LAST_SEEN_FIELD,
     _NON_RESTORABLE,
+    _SENSOR_PRIVATE_OPTIONS,
+    _SUGGESTED_UNIT_OPTION,
     HUB_SENSORS,
     LAST_SEEN_DESCRIPTOR,
     Rtl433HubSensor,
+    Rtl433Sensor,
     _frames,
     _gain,
     _meta,
@@ -1744,3 +1748,193 @@ async def test_sensor_voltage_and_current(hass, hub_entry_builder):
     assert a_state.attributes["device_class"] == "current"
     assert a_state.attributes["unit_of_measurement"] == "A"
     assert float(a_state.state) == pytest.approx(6.27)
+
+
+# ---------------------------------------------------------------------------
+# Stale "frozen unit" pin cleanup for upgraded temperature sensors
+# ---------------------------------------------------------------------------
+# When the integration starts reporting a different displayed unit for an
+# existing sensor (as the temperature fix does), Home Assistant freezes the
+# previously-shown unit into ``sensor.private.suggested_unit_of_measurement`` so
+# it does not change under the user. For temperature that pin is only ever this
+# artifact and freezes the pre-fix native unit (e.g. Acurite-986 °F) on a metric
+# install. ``Rtl433Sensor`` drops it as each temperature entity is added.
+
+
+async def test_temperature_pin_cleared_without_deleting_device(hass, hub_entry_builder):
+    """An upgraded °F-pinned temperature sensor follows the unit system on reload.
+
+    Reproduces the post-upgrade state (HA froze the pre-fix native °F into the
+    registry) and asserts a plain reload -- i.e. a Home Assistant restart, with
+    NO device deletion -- drops the pin so the sensor follows the metric unit
+    system. The default test ``hass`` is metric.
+    """
+    device_key = "Acurite-986-33576"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {CONF_MODEL: "Acurite-986", DEVICE_FIELDS: ["temperature_F"]}
+        },
+    )
+    _feed(
+        _coordinator(hass, hub),
+        {"model": "Acurite-986", "id": 33576, "temperature_F": 50},
+    )
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:F"
+    )
+    assert eid is not None
+    # A fresh install already converts to the unit system.
+    assert hass.states.get(eid).attributes["unit_of_measurement"] == "°C"
+
+    # Freeze the old °F unit, exactly as an in-place upgrade from the buggy
+    # version would have (HA's add_to_platform_start), and confirm it sticks.
+    ent_reg.async_update_entity_options(
+        eid, _SENSOR_PRIVATE_OPTIONS, {_SUGGESTED_UNIT_OPTION: "°F"}
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).attributes["unit_of_measurement"] == "°F"
+
+    # A plain reload (a restart, no device delete) re-adds the entity; the fix
+    # drops the pin and the reading follows the metric unit system again.
+    await hass.config_entries.async_reload(hub.entry_id)
+    await hass.async_block_till_done()
+    _feed(
+        _coordinator(hass, hub),
+        {"model": "Acurite-986", "id": 33576, "temperature_F": 50},
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get(eid)
+    assert state.attributes["unit_of_measurement"] == "°C"
+    assert float(state.state) == pytest.approx(10.0, abs=0.05)
+    entry = ent_reg.async_get(eid)
+    assert _SUGGESTED_UNIT_OPTION not in entry.options.get(_SENSOR_PRIVATE_OPTIONS, {})
+
+
+def _pin_test_sensor(device_class: str = "temperature") -> Rtl433Sensor:
+    """Build a bare Rtl433Sensor (mock coordinator) for pin-cleanup unit tests."""
+    descriptor = FieldDescriptor(
+        field_key="temperature_F",
+        platform="sensor",
+        name=None,
+        object_suffix="F",
+        device_class=device_class,
+        unit_of_measurement="°F",
+        state_class="measurement",
+        value_transform={"round": 1},
+    )
+    coordinator = MagicMock()
+    coordinator.devices = {}
+    coordinator.last_seen = {}
+    sensor = Rtl433Sensor(coordinator, "hub", "dev", "Acurite-986", descriptor)
+    sensor.entity_id = "sensor.acurite_986_temperature"
+    sensor.hass = MagicMock()
+    return sensor
+
+
+def _registry_returning(options: dict | None) -> MagicMock:
+    """A mock entity registry whose entry carries ``options`` (None -> no entry)."""
+    registry = MagicMock()
+    if options is None:
+        registry.async_get.return_value = None
+    else:
+        entry = MagicMock()
+        entry.options = options
+        registry.async_get.return_value = entry
+    return registry
+
+
+class TestDropStaleTemperatureUnitOverride:
+    """Branch coverage for ``Rtl433Sensor._drop_stale_temperature_unit_override``."""
+
+    def test_fahrenheit_pin_removed(self):
+        sensor = _pin_test_sensor("temperature")
+        registry = _registry_returning(
+            {_SENSOR_PRIVATE_OPTIONS: {_SUGGESTED_UNIT_OPTION: "°F"}}
+        )
+        with patch(
+            "custom_components.rtl_433.sensor.er.async_get", return_value=registry
+        ):
+            sensor._drop_stale_temperature_unit_override()
+        registry.async_update_entity_options.assert_called_once_with(
+            sensor.entity_id, _SENSOR_PRIVATE_OPTIONS, None
+        )
+
+    def test_celsius_pin_removed(self):
+        sensor = _pin_test_sensor("temperature")
+        registry = _registry_returning(
+            {_SENSOR_PRIVATE_OPTIONS: {_SUGGESTED_UNIT_OPTION: "°C"}}
+        )
+        with patch(
+            "custom_components.rtl_433.sensor.er.async_get", return_value=registry
+        ):
+            sensor._drop_stale_temperature_unit_override()
+        registry.async_update_entity_options.assert_called_once_with(
+            sensor.entity_id, _SENSOR_PRIVATE_OPTIONS, None
+        )
+
+    def test_other_private_options_preserved(self):
+        sensor = _pin_test_sensor("temperature")
+        registry = _registry_returning(
+            {
+                _SENSOR_PRIVATE_OPTIONS: {
+                    _SUGGESTED_UNIT_OPTION: "°F",
+                    "suggested_display_precision": 1,
+                }
+            }
+        )
+        with patch(
+            "custom_components.rtl_433.sensor.er.async_get", return_value=registry
+        ):
+            sensor._drop_stale_temperature_unit_override()
+        registry.async_update_entity_options.assert_called_once_with(
+            sensor.entity_id,
+            _SENSOR_PRIVATE_OPTIONS,
+            {"suggested_display_precision": 1},
+        )
+
+    def test_non_temperature_device_class_ignored(self):
+        sensor = _pin_test_sensor("humidity")
+        registry = _registry_returning(
+            {_SENSOR_PRIVATE_OPTIONS: {_SUGGESTED_UNIT_OPTION: "°F"}}
+        )
+        with patch(
+            "custom_components.rtl_433.sensor.er.async_get", return_value=registry
+        ):
+            sensor._drop_stale_temperature_unit_override()
+        registry.async_update_entity_options.assert_not_called()
+
+    def test_missing_registry_entry_ignored(self):
+        sensor = _pin_test_sensor("temperature")
+        registry = _registry_returning(None)
+        with patch(
+            "custom_components.rtl_433.sensor.er.async_get", return_value=registry
+        ):
+            sensor._drop_stale_temperature_unit_override()
+        registry.async_update_entity_options.assert_not_called()
+
+    def test_no_private_options_ignored(self):
+        sensor = _pin_test_sensor("temperature")
+        registry = _registry_returning({"sensor": {"suggested_display_precision": 1}})
+        with patch(
+            "custom_components.rtl_433.sensor.er.async_get", return_value=registry
+        ):
+            sensor._drop_stale_temperature_unit_override()
+        registry.async_update_entity_options.assert_not_called()
+
+    def test_non_temperature_pinned_unit_ignored(self):
+        # A pin that is not a temperature unit is not this artifact -> left alone.
+        sensor = _pin_test_sensor("temperature")
+        registry = _registry_returning(
+            {_SENSOR_PRIVATE_OPTIONS: {_SUGGESTED_UNIT_OPTION: "kPa"}}
+        )
+        with patch(
+            "custom_components.rtl_433.sensor.er.async_get", return_value=registry
+        ):
+            sensor._drop_stale_temperature_unit_override()
+        registry.async_update_entity_options.assert_not_called()

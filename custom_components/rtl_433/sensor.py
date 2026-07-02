@@ -16,13 +16,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import (
+    DOMAIN as SENSOR_DOMAIN,
     SensorDeviceClass,
     SensorEntity,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import MATCH_ALL, UnitOfFrequency
+from homeassistant.const import MATCH_ALL, UnitOfFrequency, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -41,6 +43,21 @@ PLATFORM = "sensor"
 
 # States that should not overwrite a fresh value when restoring.
 _NON_RESTORABLE = (None, "unknown", "unavailable")
+
+# Entity-registry option Home Assistant's sensor base writes to freeze a sensor's
+# previously-shown unit when the integration later reports a different one, so an
+# existing sensor's displayed unit does not change under the user
+# (``SensorEntity.add_to_platform_start``). Stored under the sensor platform's
+# private options key.
+_SENSOR_PRIVATE_OPTIONS = f"{SENSOR_DOMAIN}.private"
+_SUGGESTED_UNIT_OPTION = "suggested_unit_of_measurement"
+# HA never derives a unit-system suggested unit for temperature (it converts
+# temperature via a display-time legacy path instead), so a ``°C``/``°F`` pin on
+# a temperature entity is only ever the freeze-the-old-unit artifact above and is
+# safe to drop.
+_TEMPERATURE_UNITS = frozenset(
+    {UnitOfTemperature.CELSIUS, UnitOfTemperature.FAHRENHEIT}
+)
 
 
 class Rtl433Sensor(Rtl433Entity, SensorEntity):
@@ -79,6 +96,45 @@ class Rtl433Sensor(Rtl433Entity, SensorEntity):
         last_event = coordinator.devices.get(device_key)
         if last_event is not None and descriptor.field_key in last_event.fields:
             self._apply_value(last_event.fields[descriptor.field_key])
+
+    async def async_added_to_hass(self) -> None:
+        """Restore state, then drop any stale frozen temperature unit."""
+        await super().async_added_to_hass()
+        self._drop_stale_temperature_unit_override()
+
+    def _drop_stale_temperature_unit_override(self) -> None:
+        """Clear Home Assistant's freeze-the-old-unit pin for temperature.
+
+        When an integration starts reporting a different displayed unit for an
+        existing sensor, HA's sensor base freezes the previously-shown unit into
+        the entity registry as ``sensor.private.suggested_unit_of_measurement``
+        so the unit does not change under the user. For a temperature sensor that
+        pin is only ever this artifact -- HA has no unit-system suggested unit for
+        temperature -- and here it freezes the pre-fix native unit (e.g. the
+        Acurite-986's ``°F``) on a metric install, defeating the unit-system
+        conversion. HA also restores the pin from its deleted-entities store when
+        a device is removed and rediscovered, so a one-shot config migration would
+        miss a later rediscovery; clearing it as each temperature entity is added
+        catches every path. A user's explicit per-entity unit override lives under
+        a different key (``sensor.unit_of_measurement``) and is left untouched.
+        """
+        if self.device_class is not SensorDeviceClass.TEMPERATURE:
+            return
+        registry = er.async_get(self.hass)
+        entry = registry.async_get(self.entity_id)
+        if entry is None:
+            return
+        private = entry.options.get(_SENSOR_PRIVATE_OPTIONS)
+        if not private or private.get(_SUGGESTED_UNIT_OPTION) not in _TEMPERATURE_UNITS:
+            return
+        remaining = {
+            key: value
+            for key, value in private.items()
+            if key != _SUGGESTED_UNIT_OPTION
+        }
+        registry.async_update_entity_options(
+            self.entity_id, _SENSOR_PRIVATE_OPTIONS, remaining or None
+        )
 
     def _apply_value(self, raw_value: Any) -> None:
         """Transform and store a raw value as the sensor's native value."""
