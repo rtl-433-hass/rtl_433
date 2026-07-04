@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.3](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.2...v0.19.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **sensor:** clear frozen °F unit on temperature sensors after upgrade ([9ac3eb7](https://github.com/rtl-433-hass/rtl_433/commit/9ac3eb771cd2c1fc37f69b87ace45508d721a7f8))
+
 ## [0.19.2](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.1...v0.19.2) (2026-07-02)
 
 
