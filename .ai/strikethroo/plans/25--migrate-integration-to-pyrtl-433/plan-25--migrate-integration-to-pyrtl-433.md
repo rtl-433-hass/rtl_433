@@ -326,10 +326,10 @@ No circular dependencies: the graph is a DAG (1 → {2,3} → 4 → {5,6} → 7)
 **Parallel Tasks:**
 - ✔️ Task 004: Re-architect `Rtl433Coordinator` to wrap `pyrtl_433.Rtl433Client` (depends on: 002, 003) — completed
 
-### Phase 4: Realign Verification & Docs
+### ✅ Phase 4: Realign Verification & Docs
 **Parallel Tasks:**
-- Task 005: Realign the pytest suite and rescope the mutmut ratchet (depends on: 004)
-- Task 006: Update `AGENTS.md` and the dependency narrative (depends on: 004)
+- ✔️ Task 005: Realign the pytest suite and rescope the mutmut ratchet (depends on: 004) — completed (1518 passed, 0 failed)
+- ✔️ Task 006: Update `AGENTS.md` and the dependency narrative (depends on: 004) — completed
 
 ### Phase 5: Prove Parity
 **Parallel Tasks:**

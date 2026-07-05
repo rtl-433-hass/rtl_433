@@ -24,7 +24,6 @@ Time travel uses ``freeze_time`` like the existing watchdog tests.
 from __future__ import annotations
 
 from datetime import timedelta
-import json
 import logging
 from unittest.mock import patch
 
@@ -43,6 +42,7 @@ from custom_components.rtl_433.const import (
     class_default_timeout,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.mapping import FieldDescriptor, event_driven_field_keys
 from custom_components.rtl_433.sensor import Rtl433Sensor
 from homeassistant.helpers import entity_registry as er
@@ -60,7 +60,7 @@ def _no_socket():
     async def _noop(self) -> None:
         return None
 
-    with patch.object(Rtl433Coordinator, "_connect_loop", _noop):
+    with patch.object(Rtl433Client, "start", _noop):
         yield
 
 
@@ -70,7 +70,7 @@ def _coordinator(hass, hub: MockConfigEntry) -> Rtl433Coordinator:
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
     """Push one event dict through the coordinator's frame handler."""
-    coordinator._handle_text_frame(json.dumps(event))
+    coordinator._client._process_event(event)
 
 
 async def _setup(hass, hub: MockConfigEntry) -> Rtl433Coordinator:
@@ -614,7 +614,7 @@ async def test_watchdog_logs_never_timeout_for_event_device(
     assert "source=class-default" in lines[0]
 
 
-def test_log_timeout_change_relogs_on_change(hass, hub_entry_builder, caplog):
+async def test_log_timeout_change_relogs_on_change(hass, hub_entry_builder, caplog):
     """Calling ``_log_timeout_change`` directly logs once, then only on change.
 
     A heavy watchdog setup is unnecessary to lock the dedupe-and-relog contract:

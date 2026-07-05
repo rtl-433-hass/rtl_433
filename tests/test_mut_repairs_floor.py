@@ -1201,7 +1201,10 @@ class TestAsyncTrackSampleRateInitialEval:
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
         coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
-        coordinator.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
+        coordinator._client.meta = {
+            "center_frequency": 915_000_000,
+            "samp_rate": 250_000,
+        }
 
         issue_reg = ir.async_get(hass)
         issue_id = repairs._sample_rate_issue_id(entry)
@@ -1218,7 +1221,10 @@ class TestAsyncTrackSampleRateInitialEval:
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
         coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
-        coordinator.meta = {"center_frequency": 433_920_000, "samp_rate": 250_000}
+        coordinator._client.meta = {
+            "center_frequency": 433_920_000,
+            "samp_rate": 250_000,
+        }
 
         issue_reg = ir.async_get(hass)
         issue_id = repairs._sample_rate_issue_id(entry)

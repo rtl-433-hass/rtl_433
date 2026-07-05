@@ -84,6 +84,9 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
         "switch.py",
         "sdr_settings.py",
     ],
+    # The sdr_settings HA adapter mapping (``test_sdr_settings_adapter`` does not
+    # auto-resolve to a source module via the naming convention).
+    "tests/test_sdr_settings_adapter.py": ["sdr_settings.py"],
     # The ``mapping`` package: its test files exercise the whole package, and the
     # package root (``mapping/__init__.py``) is unreachable via the naming
     # convention (there is no ``mapping.py``), so map all three explicitly.
@@ -111,11 +114,9 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
     # Mutation-floor test files: their ``_floor`` suffix does not auto-resolve to
     # a source module via the naming convention, so each is mapped explicitly.
     "tests/test_mut_calibration_floor.py": ["calibration.py"],
-    "tests/test_mut_coordinator_base_floor.py": ["coordinator/base.py"],
     "tests/test_mut_library_floor.py": ["library.py"],
     "tests/test_mut_migration_floor.py": ["migration.py"],
     "tests/test_mut_repairs_floor.py": ["repairs.py"],
-    "tests/test_mut_sdr_settings_floor.py": ["sdr_settings.py"],
 }
 
 

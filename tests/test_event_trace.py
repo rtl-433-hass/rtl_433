@@ -19,12 +19,12 @@ from __future__ import annotations
 import logging
 from unittest.mock import patch
 
+from pyrtl_433.normalizer import NormalizedEvent
 import pytest
 
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.event import Rtl433Event
 from custom_components.rtl_433.mapping import FieldDescriptor
-from custom_components.rtl_433.normalizer import NormalizedEvent
 
 _TRACE_LOGGER = "custom_components.rtl_433"
 _DEVICE_KEY = "Honeywell-Doorbell-7"
@@ -32,7 +32,7 @@ _FIELD_KEY = "secret_knock"
 
 
 @pytest.fixture
-def event_entity(hass, hub_entry_builder) -> Rtl433Event:
+async def event_entity(hass, hub_entry_builder) -> Rtl433Event:
     """A doorbell ``secret_knock`` event entity wired to a bare coordinator.
 
     ``__init__`` only reads ``coordinator.entry.data`` and the descriptor, so a

@@ -100,7 +100,7 @@ async def test_reachability_raises_after_grace_and_clears_on_reconnect(
     entry.add_to_hass(hass)
 
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
-    coordinator.connected = False
+    coordinator._client.connected = False
 
     # Capture the poll callback the tracker schedules.
     polls: list = []
@@ -131,7 +131,7 @@ async def test_reachability_raises_after_grace_and_clears_on_reconnect(
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
     # Reconnect -> the issue clears on the next poll.
-    coordinator.connected = True
+    coordinator._client.connected = True
     poll(start + timedelta(seconds=150))
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
@@ -179,12 +179,12 @@ async def test_sample_rate_advisory_edge_triggered(
     issue_id = repairs._sample_rate_issue_id(entry)
 
     # Wire the tracker with meta already in the good (low-band) state.
-    coordinator.meta = {"center_frequency": 433_920_000, "samp_rate": 250_000}
+    coordinator._client.meta = {"center_frequency": 433_920_000, "samp_rate": 250_000}
     unsub = repairs.async_track_sample_rate(hass, entry, coordinator)
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     # Retune into the high band at the default rate -> advisory raised.
-    coordinator.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
+    coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
     async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
     await hass.async_block_till_done()
     issue = issue_reg.async_get_issue(DOMAIN, issue_id)
@@ -199,10 +199,10 @@ async def test_sample_rate_advisory_edge_triggered(
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     # Raising the sample rate, then dropping back, re-triggers the edge.
-    coordinator.meta = {"center_frequency": 915_000_000, "samp_rate": 1_024_000}
+    coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 1_024_000}
     async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
     await hass.async_block_till_done()
-    coordinator.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
+    coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
     async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
@@ -249,7 +249,7 @@ async def test_sample_rate_fix_flow_applies_rate_and_clears_issue(
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
-    coordinator.connected = False
+    coordinator._client.connected = False
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     repairs.async_raise_sample_rate_low(
@@ -313,7 +313,7 @@ async def test_sample_rate_fix_flow_ignore_silences_advisory(
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
-    coordinator.connected = False
+    coordinator._client.connected = False
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     repairs.async_raise_sample_rate_low(
@@ -360,7 +360,7 @@ async def test_dismissed_advisory_is_not_re_raised(
     )
 
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
-    coordinator.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
+    coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
 
     issue_reg = ir.async_get(hass)
     issue_id = repairs._sample_rate_issue_id(entry)

@@ -37,7 +37,6 @@ cover every class and every branch in the module:
 from __future__ import annotations
 
 from datetime import timedelta
-import json
 from unittest.mock import MagicMock, patch
 
 from freezegun import freeze_time
@@ -56,6 +55,7 @@ from custom_components.rtl_433.const import (
     signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.mapping import FieldDescriptor
 from custom_components.rtl_433.sensor import (
     _LAST_SEEN_FIELD,
@@ -90,7 +90,7 @@ def _no_socket():
     async def _noop(self) -> None:
         return None
 
-    with patch.object(Rtl433Coordinator, "_connect_loop", _noop):
+    with patch.object(Rtl433Client, "start", _noop):
         yield
 
 
@@ -99,7 +99,7 @@ def _coordinator(hass: HomeAssistant, hub_entry: MockConfigEntry) -> Rtl433Coord
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
-    coordinator._handle_text_frame(json.dumps(event))
+    coordinator._client._process_event(event)
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
@@ -1376,7 +1376,7 @@ async def test_hub_sensor_center_frequency_metadata(hass, hub_entry_builder):
     """Center-frequency sensor has correct device_class, unit, and extra attrs."""
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
-    coordinator.meta = {
+    coordinator._client.meta = {
         "center_frequency": 433920000,
         "frequencies": [433920000],
         "hop_times": [600],
@@ -1400,7 +1400,7 @@ async def test_hub_sensor_decoded_events_metadata(hass, hub_entry_builder):
     """Decoded-events sensor has TOTAL_INCREASING and extra attrs."""
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
-    coordinator.stats = {
+    coordinator._client.stats = {
         "enabled": 5,
         "since": "2026-05-26T10:00:00",
         "frames": {"count": 12, "fsk": 3, "events": 40},
@@ -1424,7 +1424,7 @@ async def test_hub_sensor_ook_fsk_frames(hass, hub_entry_builder):
     """OOK and FSK frame counters read from frames sub-dict."""
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
-    coordinator.stats = {"frames": {"count": 8, "fsk": 3, "events": 40}}
+    coordinator._client.stats = {"frames": {"count": 8, "fsk": 3, "events": 40}}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
@@ -1445,7 +1445,7 @@ async def test_hub_sensor_enabled_decoders_measurement(hass, hub_entry_builder):
     """Enabled-decoders sensor has MEASUREMENT state_class."""
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
-    coordinator.stats = {"enabled": 7, "frames": {}}
+    coordinator._client.stats = {"enabled": 7, "frames": {}}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
@@ -1524,7 +1524,7 @@ async def test_hub_sensor_gain_auto_in_unmanaged_mode(hass, hub_entry_builder):
         hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
     )
     coordinator = _coordinator(hass, hub)
-    coordinator.meta = {"gain": ""}
+    coordinator._client.meta = {"gain": ""}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
@@ -1540,7 +1540,7 @@ async def test_hub_sensor_gain_numeric_in_unmanaged_mode(hass, hub_entry_builder
         hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
     )
     coordinator = _coordinator(hass, hub)
-    coordinator.meta = {"gain": "40.2"}
+    coordinator._client.meta = {"gain": "40.2"}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
@@ -1556,7 +1556,7 @@ async def test_hub_sensor_sample_rate_in_unmanaged_mode(hass, hub_entry_builder)
         hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
     )
     coordinator = _coordinator(hass, hub)
-    coordinator.meta = {"samp_rate": 250000}
+    coordinator._client.meta = {"samp_rate": 250000}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
@@ -1576,7 +1576,7 @@ async def test_hub_sensor_hop_interval_in_unmanaged_mode(hass, hub_entry_builder
         hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
     )
     coordinator = _coordinator(hass, hub)
-    coordinator.meta = {"hop_interval": 600}
+    coordinator._client.meta = {"hop_interval": 600}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
@@ -1596,7 +1596,7 @@ async def test_hub_sensor_ppm_error_in_unmanaged_mode(hass, hub_entry_builder):
         hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
     )
     coordinator = _coordinator(hass, hub)
-    coordinator.meta = {"ppm_error": -3}
+    coordinator._client.meta = {"ppm_error": -3}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
@@ -1612,7 +1612,7 @@ async def test_hub_sensor_conversion_mode_in_unmanaged_mode(hass, hub_entry_buil
         hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
     )
     coordinator = _coordinator(hass, hub)
-    coordinator.meta = {"conversion_mode": 2}
+    coordinator._client.meta = {"conversion_mode": 2}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
@@ -1636,7 +1636,7 @@ async def test_hub_sensor_extra_attrs_none_when_all_values_none(
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     # center_frequency meta: neither frequencies nor hop_times set -> both None.
-    coordinator.meta = {"center_frequency": 433920000}
+    coordinator._client.meta = {"center_frequency": 433920000}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
@@ -1656,7 +1656,7 @@ async def test_hub_sensor_extra_attrs_present_when_some_values_set(
     """extra_state_attributes only includes non-None values."""
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
-    coordinator.meta = {
+    coordinator._client.meta = {
         "center_frequency": 433920000,
         "frequencies": [433920000],
         # hop_times absent -> None

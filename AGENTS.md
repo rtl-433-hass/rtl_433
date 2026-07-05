@@ -8,10 +8,19 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - `custom_components/rtl_433/` — the integration.
   - `device_library/*.yaml` — the shipped, data-driven device mappings.
-  - `coordinator/` — package (`base.py`) for the push WebSocket coordinator.
+  - `coordinator/` — package (`base.py`) for the push coordinator, now a **thin
+    Home Assistant adapter** over `pyrtl_433.Rtl433Client` (see
+    [Runtime dependency](#runtime-dependency-pyrtl_433) below). `base.py` owns and
+    drives the client; the mixins (`_events.py`, `_sdr.py`, `_watchdog.py`) hold
+    the HA-side policy (event fan-out, managed-SDR desired state, availability
+    watchdog) the library deliberately leaves out.
   - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`, `mapping.py`,
     `normalizer.py`, `diagnostics.py`, `repairs.py`, `sensor.py`,
-    `binary_sensor.py`, `event.py`, `translations/en.json`.
+    `binary_sensor.py`, `event.py`, `translations/en.json`. `normalizer.py` now
+    holds **only** the local `_safe_token` entity-slug helper; the actual event
+    normalizer (`normalize` / `device_key` / `NormalizedEvent` /
+    `DEFAULT_SKIP_KEYS`) lives in `pyrtl_433.normalizer`. `sdr_settings.py` is a
+    thin adapter over `pyrtl_433.sdr` (see below).
   - `__init__.py` keeps only the steady-state config-entry lifecycle
     (`async_setup_entry` / `async_unload_entry` / `_async_update_listener` /
     `async_remove_config_entry_device`). Three sibling modules hold the rest:
@@ -21,6 +30,55 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     `_calibration_map`).
 - `docs/device-library.md` — **authoritative** device-library reference.
 - `tests/` — unit tests. `tests/integration/` — container/screenshot harness.
+
+## Runtime dependency (pyrtl_433)
+
+The integration has **one third-party runtime dependency**:
+`pyrtl_433==0.1.0` (declared in `manifest.json` `requirements` and mirrored in
+`requirements.txt`; Home Assistant installs it on load). It is the extracted
+rtl_433 protocol layer — the WebSocket connect/reconnect loop and JSON frame
+parsing, the event **normalizer**, the reconnect-**replay/stale classifier**, and
+the **SDR `/cmd`** command definitions and getters/setters. The integration no
+longer carries its own copy of any of that; it consumes the library:
+
+- **`pyrtl_433.Rtl433Client`** — owns the transport. The coordinator
+  (`coordinator/base.py`) **owns and drives one client per hub**, constructed with
+  Home Assistant's **shared aiohttp session** (`async_get_clientsession`), which the
+  client therefore **never closes** on `stop()` (HA owns the session lifecycle).
+  Events arrive via the client's **`on_event`** callback →
+  `_EventProcessingMixin._on_client_event` (HA-side dispatch), and connectivity /
+  meta / stats / dev-info changes via **`on_hub_update`** → `_emit_hub_update`
+  (connect/disconnect edge handling, hub-identity refresh, `signal_hub_update`
+  fan-out). The library owns neither the managed-SDR policy nor the availability
+  watchdog, so those are driven HA-side off the connect edge and a time interval.
+- **`pyrtl_433.normalizer`** — `normalize` / `device_key` / `NormalizedEvent` /
+  `DEFAULT_SKIP_KEYS`. Consumers import these directly from the library. The only
+  remaining local shim is `normalizer._safe_token` (the private entity-slug helper
+  the library does not export), so unique_ids and dispatcher signals stay
+  byte-identical.
+- **`pyrtl_433.replay`** — `classify_replay` / `ReplayVerdict` / `parse_event_time`
+  plus `DISCOVERY_BACKLOG_GRACE` / `REPLAY_STALE_THRESHOLD`. The client applies the
+  classification and stamps the verdict on the `NormalizedEvent`;
+  `coordinator/_events.py` re-derives only the HA-side **pre-connection backlog
+  gate** off `_connection_time` using the same boundary constant.
+- **`pyrtl_433.sdr`** — the wire-protocol half of the managed SDR controls
+  (`SdrCommand` / `SDR_COMMANDS`: how to read each field from `meta`, the `/cmd`
+  command, `val`/`arg` kind, value transforms, capability/availability gates).
+  `sdr_settings.py` is the **thin integration adapter** that re-supplies the HA
+  entity metadata the library drops (name, unique-id token, platform, Number
+  bounds/mode/unit, Select options) and merges it with the library's protocol
+  callables (taken **by reference** from `SDR_COMMANDS`) into the `SdrSetting`
+  records the coordinator and platforms consume. It re-exports the library's helper
+  functions and stable keys unchanged, so every existing consumer keeps the same
+  import names.
+- **`CannotConnect`** is the library's error, imported and **re-exported** from the
+  coordinator package so existing import sites (`config_flow.py`, `repairs.py`) are
+  unchanged. `validate_connection` delegates to `Rtl433Client.validate_connection`.
+- **`/cmd` write path.** pyrtl_433 0.1.0 exposes no public setter; the coordinator's
+  `_send_cmd` delegates to the client's underscore-prefixed **`Rtl433Client._send_cmd`**
+  (a known private-API wart to revisit when the library grows a public alias). All
+  `/cmd` issuance is serialized **inside the client** (its own send lock), so a user
+  write and a reconnect enforcement replay can never interleave.
 
 ## Config-entry model (hub + nested devices)
 
@@ -274,19 +332,26 @@ UI-pickable **device triggers**. Contracts that must survive refactors:
 
 ## WebSocket frames & hub observability
 
-Durable contracts for the coordinator's frame routing and the hub diagnostic
-entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
+Durable contracts for how streamed frames become device/hub updates and drive the
+hub diagnostic entities. Frame classification, normalization, the replay/stale
+classifier, and the `/cmd` getters now live **inside `pyrtl_433.Rtl433Client`**;
+the coordinator (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`) consumes
+them via the client's callbacks and adds the HA-side policy (dispatch, the
+registration gate, hub-identity refresh, sensor mapping). The method names below
+name the library's internals unless stated otherwise — they are documented here
+because these are the contracts the integration relies on:
 
-- **Frame classification** (`_classify_frame`). A streamed frame is treated as a
+- **Frame classification** (client-side `_classify_frame`). A streamed frame is treated as a
   decoded-device event **iff** it has a `model` key **or** an identity key
-  (`id` / `channel` / `subtype`, kept in sync with `normalizer.IDENTITY_KEYS`).
+  (`id` / `channel` / `subtype`, kept in sync with `pyrtl_433.normalizer.IDENTITY_KEYS`).
   A `{"shutdown": ...}` frame drives the **connectivity** sensor (flips it off).
   **Every other frame is ignored** on the socket (`meta`, periodic state/stats,
   RPC `result`/`error`). This is why non-event frames no longer create a phantom
   `"unknown"` device or pollute `seen_fields` / the diagnostics
   `unmatched_field_keys`.
-- **Replay/stale suppression** (`_process_event`, `_parse_event_time`). On every
-  (re)connect the server replays up to its last 100 events, so the coordinator
+- **Replay/stale suppression** (client-side `classify_replay` / `parse_event_time`,
+  `pyrtl_433.replay`). On every
+  (re)connect the server replays up to its last 100 events, so the client
   reads the raw `time` **before `normalize()`** (which drops it) and classifies
   each frame via **three signals**: a **high-water mark** of the max event `time`
   ever parsed (a frame at or below it is an **already-seen replay**); the event
@@ -310,8 +375,9 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   (local-naive `time` is read in HA's time zone). **Limitation:** with server
   timestamps disabled (`report_meta notime`) there is no usable `time`, so every
   frame is treated as live and **events fire on replay**.
-- **Post-connection device-registration gate** (`_process_event`,
-  `_connection_time`, `DISCOVERY_BACKLOG_GRACE`). Distinct from the replay/event
+- **Post-connection device-registration gate** (HA-side, `_events.py`
+  `_on_client_event` / `_maybe_register_device`, `_connection_time`,
+  `DISCOVERY_BACKLOG_GRACE`). Distinct from the replay/event
   classification above: it governs **whether a previously-unknown device
   auto-registers**, not whether events fire. The coordinator stamps
   `_connection_time` (UTC) on every successful connect and clears it on drop. A
@@ -325,29 +391,32 @@ entities (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`):
   treated as post-connection (registers), and once disconnected
   (`_connection_time is None`) the gate is open. **Assumes the server and HA
   clocks are roughly NTP-synced.**
-- **Hub observability data source.** SDR/meta and server stats are **not** read
-  from the socket. They come from one-shot HTTP GETs to `scheme://host:port/cmd`
-  at the **server root** (`https` when `secure`/`wss`, else `http`) —
-  `_build_cmd_url` never derives from the configured WS `path`, so a proxy that
+- **Hub observability data source** (client-side, `pyrtl_433.Rtl433Client`). SDR/meta
+  and server stats are **not** read
+  from the socket. The client issues one-shot HTTP GETs to `scheme://host:port/cmd`
+  at the **server root** (`https` when `secure`/`wss`, else `http`) — the `/cmd` URL
+  never derives from the configured WS `path`, so a proxy that
   hides `/cmd` degrades gracefully (the stream + connectivity sensor stay up; the
   meta/stats/gain/ppm sensors read `unknown`). Each getter swallows its own
-  errors (`_fetch_cmd`) so it can never raise into the connect loop or watchdog.
+  errors so it can never raise into the client's connect loop or the HA watchdog.
   The request uses the `cmd` query param; scalar getters are read defensively
-  through a `{"result": ...}` unwrap (`_unwrap_result`).
-- **Exact getter set** (`_refresh_meta` + `_refresh_stats` + `_refresh_dev_info`):
-  `get_meta` + `get_gain` + `get_ppm_error` + `get_stats` + `get_dev_info` +
-  `get_dev_query`. **Gain and ppm are absent from
+  through a `{"result": ...}` unwrap. The coordinator surfaces the results via
+  read-only properties (`meta`, `stats`, `dev_info`, `dev_query`) that delegate to
+  the client, and a `_refresh_meta` that delegates to `Rtl433Client.refresh_meta`.
+- **Exact getter set** (client-owned): `get_meta` + `get_gain` + `get_ppm_error` +
+  `get_stats` + `get_dev_info` + `get_dev_query`. **Gain and ppm are absent from
   `get_meta`** — they come from `get_gain` (string; empty ⇒ `auto`) and
   `get_ppm_error` (int) respectively. **Hop interval = `hop_times[0]`.**
-  `get_dev_info`/`get_dev_query` are the SDR's identity and are fetched **only on
-  (re)connect** (`_refresh_dev_info`, not on the interval tick): they are static
-  per dongle. When the identity changes, the coordinator's `hub_info_callback`
-  fires so `__init__.py` refreshes the **hub** device-registry entry's
+  `get_dev_info`/`get_dev_query` are the SDR's identity and the client fetches them
+  **only on (re)connect** (not on its interval tick): they are static
+  per dongle. When the identity changes, the client fires `on_hub_update`, and the
+  coordinator's `_maybe_refresh_hub_identity` then fires the HA-side
+  `hub_info_callback` so `__init__.py` refreshes the **hub** device-registry entry's
   `manufacturer`/`model`/`serial_number` (replacing the generic `rtl_433` /
   `rtl_433 server` placeholders). Empty when no SDR is open (e.g. `-D manual`),
   in which case the placeholders are kept.
-  `_async_refresh_tick` re-polls **both** `_refresh_meta` and `_refresh_stats`
-  on a fixed interval (`_REFRESH_INTERVAL`, 60 s) while connected, on top of the
+  The client re-polls **both** meta and stats
+  on a fixed interval (60 s) while connected, on top of the
   once-per-(re)connect refresh and the post-write read-back. Re-polling meta on
   the interval is what lets the "actual" SDR sensors converge to the server's
   current values within the window — a single post-write read-back can race the
@@ -384,10 +453,17 @@ End-user docs live in
 [docs/hub-entities.md](docs/hub-entities.md#managing-sdr-settings-from-home-assistant) —
 keep this contributor-facing.
 
-- **Settings-registry contract** (`sdr_settings.py`, the single source of truth
-  for the control set; import-disjoint like `mapping.py`). `SDR_SETTINGS` is the
-  authoritative list; each `SdrSetting` is pure data plus tiny callables so the
-  coordinator and the platforms can iterate it **without importing each other**.
+- **Settings-registry contract** (`sdr_settings.py`, import-disjoint like
+  `mapping.py`). The wire-protocol half — how to read each field from `meta`, the
+  `/cmd` command, the `val`/`arg` kind, the value transforms, and the
+  capability/availability gates — lives in **`pyrtl_433.sdr`** (`SdrCommand` /
+  `SDR_COMMANDS`), which drops all HA entity metadata. `sdr_settings.py` is the
+  thin **adapter** that merges that protocol contract (protocol callables taken
+  **by reference** from `SDR_COMMANDS`, so argument composition is byte-identical)
+  with the HA metadata the library omits, producing the `SDR_SETTINGS` list of
+  `SdrSetting` records the control set is built from; each `SdrSetting` is pure
+  data plus tiny callables so the coordinator and the platforms can iterate it
+  **without importing each other**.
   Six fields (gain is a **pair** sharing one command — seven registry entries):
   - `center_frequency` → number, command `center_frequency`, `val` = Hz on the
     wire, but **presented in MHz**: `read` converts `meta["center_frequency"]`
@@ -430,12 +506,14 @@ keep this contributor-facing.
     hopping** (`≤ 1`), mirroring the adoption hop-mode guard so a hopping receiver
     is never pinned. The API has no command to set the frequency *list*, so these
     modes are mutually exclusive and set in the rtl_433 config.
-- **Adoption + full enforcement on reconnect** (`coordinator/base.py`,
-  `_connect_loop` → `_seed_desired_on_first_connect`). When `manage_settings` is
+- **Adoption + full enforcement on reconnect** (`coordinator/base.py`, driven
+  HA-side off the client's connect edge: `_emit_hub_update` → `_on_connect` →
+  `_seed_desired_on_first_connect`, `_sdr.py`). The library client owns the
+  transport but **not** this managed-SDR policy. When `manage_settings` is
   on: on first connect (when `_desired` is empty) `_adopt_from_server()` seeds the
   desired state from `self.meta`; then `_enforce_all()` **replays every managed
   field on every (re)connect**, so values survive an rtl_433 restart. Both run
-  after `_refresh_meta`, are wrapped so a failure can never kill the connect loop,
+  after a `_refresh_meta`, are wrapped so a failure can never kill the connection,
   and every `/cmd` is best-effort.
   - **Authoritative setup frequency:** a configured `initial_center_frequency` is
     applied **once** in `_seed_desired_on_first_connect` (gated on the persisted
@@ -448,7 +526,9 @@ keep this contributor-facing.
   - **`/cmd`-down guard:** if `self.meta` is empty (getters failed / proxy hides
     `/cmd`) adoption seeds **nothing** and leaves the Store empty — never raises.
   - **Serialization lock:** all issuance (user write, reconnect replay,
-    read-back) goes through `_send_cmd` under `self._cmd_lock`, so a user write
+    read-back) goes through the coordinator's `_send_cmd`, which delegates to the
+    client's underscore-prefixed `Rtl433Client._send_cmd` (the only write path in
+    pyrtl_433 0.1.0). The send lock lives **inside the client**, so a user write
     and a reconnect replay can never interleave requests to the same server.
     `arg` is sent **verbatim including the empty string** (the gain "auto"
     sentinel), so the gain command always passes `arg` and never omits it.
@@ -622,6 +702,15 @@ that some test fails for each. A surviving mutant is a behaviour no test asserts
 Config lives in `[tool.mutmut]` in `pyproject.toml` (whole package in scope).
 mutmut copies the package plus `tests/` into a `mutants/` working tree (git-ignored)
 and forks once per mutant.
+
+**Scope note (post-`pyrtl_433` extraction).** The transport, event normalizer,
+replay/stale classifier, and SDR `/cmd` protocol logic now live in the
+`pyrtl_433` library, which carries **its own** test + mutation coverage. Those
+extracted shards are therefore **retired from this repo's mutation scope** — the
+in-scope modules (`normalizer.py`'s `_safe_token`, `sdr_settings.py`'s HA-metadata
+adapter, and the coordinator's HA-side policy) are the thin seams that remain
+here. The baseline/timings reflect only what still ships in
+`custom_components/rtl_433/`.
 
 ```bash
 uv run mutmut run                              # full run (writes results under mutants/)

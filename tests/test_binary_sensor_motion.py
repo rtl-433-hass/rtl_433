@@ -27,7 +27,7 @@ from custom_components.rtl_433.const import (
     DEVICE_MOTION_CLEAR_DELAY,
     DOMAIN,
 )
-from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.repairs import ISSUE_MOTION_MOVED
 from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from homeassistant.util import dt as dt_util
@@ -46,7 +46,7 @@ def _no_socket():
     async def _noop(self) -> None:
         return None
 
-    with patch.object(Rtl433Coordinator, "_connect_loop", _noop):
+    with patch.object(Rtl433Client, "start", _noop):
         yield
 
 
