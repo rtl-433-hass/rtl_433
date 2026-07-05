@@ -313,9 +313,9 @@ graph TD
 
 No circular dependencies: the graph is a DAG (1 → {2,3} → 4 → {5,6} → 7).
 
-### Phase 1: Establish the Dependency
+### ✅ Phase 1: Establish the Dependency
 **Parallel Tasks:**
-- Task 001: Declare `pyrtl_433==0.1.0` and verify clean import under Python 3.14 (gate)
+- ✔️ Task 001: Declare `pyrtl_433==0.1.0` and verify clean import under Python 3.14 (gate) — completed
 
 ### Phase 2: Replace Pure Helper Modules
 **Parallel Tasks:**
