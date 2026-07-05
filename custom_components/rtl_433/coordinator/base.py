@@ -293,6 +293,10 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # ``_emit_hub_update``. No ``clock`` is injected: the coordinator has no
         # deterministic time source of its own, so the client defaults to
         # ``datetime.now(UTC)`` — the same wall clock ``dt_util.utcnow`` reads.
+        # ``event_tz`` is HA's configured zone, so an offset-less rtl_433 ``time``
+        # stamp is classified in that zone (matching the pre-extraction
+        # ``dt_util.as_utc`` behavior) rather than the host process zone — the two
+        # diverge when the container/OS zone differs from HA's configured zone.
         self._client = Rtl433Client(
             host,
             port=port,
@@ -302,6 +306,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             skip_keys=self.skip_keys,
             on_event=self._on_client_event,
             on_hub_update=self._emit_hub_update,
+            event_tz=dt_util.get_default_time_zone(),
         )
 
         # --- Internal lifecycle handles --------------------------------------

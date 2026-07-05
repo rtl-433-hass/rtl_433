@@ -23,7 +23,7 @@ pytest-homeassistant-custom-component==0.13.344
 # The integration's runtime dependency (declared in manifest.json /
 # requirements.txt). Installed here so the pytest environment can import the
 # rtl_433 protocol layer under test.
-pyrtl_433==0.1.0
+pyrtl_433==0.1.1
 
 # Mutation testing. mutmut 3.x copies the package into a mutants/ working tree
 # and forks once per mutant, running the pytest suite with coverage-based test

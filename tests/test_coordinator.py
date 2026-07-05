@@ -386,3 +386,27 @@ def test_validate_connection_delegates_to_client(hass):
     from custom_components.rtl_433.coordinator.base import CannotConnect as ReExported
 
     assert ReExported is CannotConnect
+
+
+# --------------------------------------------------------------------------- #
+# The client is given HA's configured zone for naive-timestamp classification. #
+# --------------------------------------------------------------------------- #
+async def test_client_receives_ha_configured_event_tz(hass, hub_entry_builder):
+    """The coordinator passes HA's configured zone as the client's event_tz.
+
+    Regression guard: an offset-less rtl_433 ``time`` stamp must be classified in
+    HA's configured zone (matching the pre-extraction ``dt_util.as_utc`` behavior),
+    not the host process zone. Dropping ``event_tz`` would silently misclassify
+    live events as stale replays whenever the host zone differs from HA's.
+    """
+    await hass.config.async_set_time_zone("America/New_York")
+    configured = dt_util.get_default_time_zone()
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+
+    coordinator = Rtl433Coordinator(
+        hass, entry, host="rtl433.local", availability_timeout=600
+    )
+
+    assert coordinator._client._event_tz == configured
+    assert coordinator._client._event_tz.key == "America/New_York"

@@ -372,7 +372,9 @@ because these are the contracts the integration relies on:
   needs no extra signature. The **watchdog re-dispatch passes `is_replay=False`**
   so its unavailable re-paint of a cached (maybe-replay) event is never
   suppressed. **Assumes the server and HA clocks are roughly NTP-synced**
-  (local-naive `time` is read in HA's time zone). **Limitation:** with server
+  (a local-naive `time` is read in HA's configured zone — the coordinator passes
+  `event_tz=dt_util.get_default_time_zone()` into the `pyrtl_433` client, so
+  classification does not depend on the host process zone). **Limitation:** with server
   timestamps disabled (`report_meta notime`) there is no usable `time`, so every
   frame is treated as live and **events fire on replay**.
 - **Post-connection device-registration gate** (HA-side, `_events.py`
