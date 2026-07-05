@@ -2,10 +2,11 @@
 
 These are the heaviest, most valuable tests: a single hub ``ConfigEntry`` is set
 up through ``async_setup_entry``, events are fed through the live coordinator,
-and assertions are made against the entity / device registries. The WebSocket
-connect loop is stubbed out (``_connect_loop`` is a no-op) so no socket is
-opened; events are injected by calling the coordinator's frame handler directly,
-exactly as ``_read_frames`` would.
+and assertions are made against the entity / device registries. The transport
+now lives in ``pyrtl_433.Rtl433Client``; its ``start`` is stubbed to a no-op so
+no socket is opened, and events are injected through the client's own
+``_process_event`` seam (which normalizes + replay-classifies and invokes the
+coordinator's ``on_event`` callback), exactly as an incoming frame would.
 
 Covered:
 * nested-device + entity creation from a seeded devices map, with the right
@@ -25,7 +26,6 @@ Covered:
 from __future__ import annotations
 
 from datetime import timedelta
-import json
 import logging
 from unittest.mock import patch
 
@@ -64,6 +64,7 @@ from custom_components.rtl_433.const import (
     signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -76,12 +77,17 @@ LEGACY_OBSERVED_FIELDS = "observed_fields"
 
 @pytest.fixture(autouse=True)
 def _no_socket():
-    """Stub the connect loop so the coordinator never opens a real WebSocket."""
+    """Stub the client's connect loop so no real WebSocket is ever opened.
+
+    The transport now lives in :class:`pyrtl_433.Rtl433Client`; patching its
+    ``start`` to a no-op keeps ``coordinator.async_start`` (desired-state load +
+    watchdog arm) intact while preventing any socket connect or refresh loop.
+    """
 
     async def _noop(self) -> None:
         return None
 
-    with patch.object(Rtl433Coordinator, "_connect_loop", _noop):
+    with patch.object(Rtl433Client, "start", _noop):
         yield
 
 
@@ -91,8 +97,14 @@ def _coordinator(hass: HomeAssistant, hub_entry: MockConfigEntry) -> Rtl433Coord
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
-    """Inject a single event as the coordinator's text-frame path would."""
-    coordinator._handle_text_frame(json.dumps(event))
+    """Inject a single event through the client's own normalize+classify seam.
+
+    Drives ``coordinator._client._process_event`` exactly as an incoming
+    WebSocket frame would: the client normalizes, classifies the frame against
+    the reconnect replay, and invokes the ``on_event`` callback wired to the
+    coordinator (``_on_client_event``) -- the same path production uses.
+    """
+    coordinator._client._process_event(event)
 
 
 def _live(event: dict) -> dict:
@@ -242,13 +254,13 @@ async def test_hub_connectivity_sensor(hass, hub_entry_builder):
     assert entity_id is not None
 
     # Mark connected and notify -> state on.
-    coordinator.connected = True
+    coordinator._client.connected = True
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == "on"
 
-    # A shutdown frame flips it back off (Task 1 path).
-    _feed(coordinator, {"shutdown": "goodbye"})
+    # A shutdown frame flips connectivity off (client-owned frame routing).
+    coordinator._client._handle_shutdown()
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == "off"
 
@@ -285,7 +297,7 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     assert coordinator.manage_settings is True
-    coordinator.meta = {
+    coordinator._client.meta = {
         "center_frequency": 433920000,
         "samp_rate": 250000,
         "conversion_mode": 1,
@@ -295,7 +307,7 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
         "gain": "",  # empty string -> rendered as "auto"
         "ppm_error": 0,
     }
-    coordinator.stats = {
+    coordinator._client.stats = {
         "enabled": 5,
         "since": "2026-05-26T10:00:00",
         "frames": {"count": 12, "fsk": 3, "events": 40},
@@ -364,7 +376,7 @@ async def test_hub_diagnostic_sensors_unmanaged(hass, hub_entry_builder):
     )
     coordinator = _coordinator(hass, hub)
     assert coordinator.manage_settings is False
-    coordinator.meta = {
+    coordinator._client.meta = {
         "center_frequency": 433920000,
         "samp_rate": 250000,
         "conversion_mode": 1,

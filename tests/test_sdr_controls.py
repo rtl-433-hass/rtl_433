@@ -26,7 +26,6 @@ scenario needs it.
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -40,6 +39,7 @@ from custom_components.rtl_433.const import (
     signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.sdr_settings import (
     KEY_CENTER_FREQUENCY,
     KEY_CONVERSION_MODE,
@@ -110,8 +110,13 @@ def _mock_setters(aioclient_mock) -> None:
 
 
 @pytest.fixture
-def coordinator(hass, hub_entry_builder):
-    """A coordinator wired to a managed hub entry (no socket opened)."""
+async def coordinator(hass, hub_entry_builder, aioclient_mock):
+    """A coordinator wired to a managed hub entry (no socket opened).
+
+    Async + ``aioclient_mock`` so the client is constructed inside the loop
+    with the mocked aiohttp session already patched in (the client captures
+    the session at construction).
+    """
     entry = hub_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     return Rtl433Coordinator(
@@ -129,7 +134,8 @@ def coordinator(hass, hub_entry_builder):
 def test_write_path_command_mapping(hass, coordinator, aioclient_mock):
     """Each control write emits the exact /cmd and records desired state."""
     _mock_setters(aioclient_mock)
-    coordinator.connected = True
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
 
     cases = [
         (
@@ -158,7 +164,8 @@ def test_write_path_command_mapping(hass, coordinator, aioclient_mock):
 def test_write_path_gain_auto_on_sends_empty_arg(hass, coordinator, aioclient_mock):
     """Auto gain on sends gain with an explicit EMPTY arg (the auto sentinel)."""
     _mock_setters(aioclient_mock)
-    coordinator.connected = True
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
 
     with patch(DISPATCH):
         _run(hass, coordinator.set_sdr(KEY_GAIN_AUTO, True))
@@ -175,7 +182,8 @@ def test_write_path_gain_db_when_auto_off_sends_db_arg(
 ):
     """Auto gain off + a dB write sends gain with the formatted dB string arg."""
     _mock_setters(aioclient_mock)
-    coordinator.connected = True
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
 
     with patch(DISPATCH):
         # Auto off first, then the dB value: the composed arg is the dB string.
@@ -202,7 +210,7 @@ def test_write_path_gain_db_when_auto_off_sends_db_arg(
 # --------------------------------------------------------------------------- #
 def test_adoption_normal_populates_and_marks_managed(hass, coordinator):
     """A single-frequency meta is adopted: all fields populated + managed."""
-    coordinator.meta = dict(_META_SINGLE)
+    coordinator._client.meta = dict(_META_SINGLE)
     _run(hass, coordinator._adopt_from_server())
 
     # Center frequency IS adopted when not hopping (meta Hz -> desired MHz).
@@ -221,7 +229,7 @@ def test_adoption_normal_populates_and_marks_managed(hass, coordinator):
 
 def test_adoption_hop_mode_skips_center_frequency(hass, coordinator):
     """A multi-frequency meta leaves center frequency unmanaged (hop guard)."""
-    coordinator.meta = dict(_META_HOPPING)
+    coordinator._client.meta = dict(_META_HOPPING)
     _run(hass, coordinator._adopt_from_server())
 
     assert coordinator.get_desired("center_frequency") is None
@@ -245,7 +253,9 @@ async def test_initial_frequency_seeds_over_adoption_on_first_connect(
         manage_settings=True,
         initial_center_frequency=915.0,
     )
-    coordinator.meta = dict(_META_SINGLE)  # would adopt 433.92 absent the override
+    coordinator._client.meta = dict(
+        _META_SINGLE
+    )  # would adopt 433.92 absent the override
     assert coordinator._desired == {}
 
     await coordinator._seed_desired_on_first_connect()
@@ -286,7 +296,7 @@ async def test_initial_frequency_wins_when_desired_already_populated(
     coordinator._desired = {KEY_CENTER_FREQUENCY: 433.92}
     coordinator._managed = {KEY_CENTER_FREQUENCY}
     coordinator._initial_freq_seeded = False
-    coordinator.meta = dict(_META_SINGLE)
+    coordinator._client.meta = dict(_META_SINGLE)
 
     await coordinator._seed_desired_on_first_connect()
 
@@ -313,7 +323,7 @@ async def test_initial_frequency_seeded_once_preserves_user_change(
     coordinator._desired = {KEY_CENTER_FREQUENCY: 868.0}
     coordinator._managed = {KEY_CENTER_FREQUENCY}
     coordinator._initial_freq_seeded = True
-    coordinator.meta = dict(_META_SINGLE)
+    coordinator._client.meta = dict(_META_SINGLE)
 
     await coordinator._seed_desired_on_first_connect()
 
@@ -325,7 +335,8 @@ def test_adoption_cmd_down_adopts_nothing(hass, coordinator, aioclient_mock):
     """An empty meta (/cmd hidden) adopts nothing, issues nothing, never raises."""
     # The full connect path: getters all 500 -> meta stays empty.
     aioclient_mock.get(_CMD_URL, status=500)
-    coordinator.connected = True
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
 
     with patch(DISPATCH):
         _run(hass, coordinator._refresh_meta())  # populates nothing
@@ -349,7 +360,8 @@ def test_enforcement_replays_all_managed_on_each_connect(
 ):
     """Two successive enforce passes each replay every managed field once."""
     _mock_setters(aioclient_mock)
-    coordinator.connected = True
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
     # Seed desired state directly (as adoption / the Store would).
     coordinator._desired = {
         "center_frequency": 433.92,
@@ -403,8 +415,11 @@ def test_enforce_all_reconciles_meta_and_emits(hass, coordinator, aioclient_mock
     aioclient_mock.get(
         _CMD_URL, params={"cmd": "center_frequency"}, json={"result": "Ok"}
     )
-    coordinator.connected = True
-    coordinator.meta = {"center_frequency": 433920000}  # stale connect-time snapshot
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
+    coordinator._client.meta = {
+        "center_frequency": 433920000
+    }  # stale connect-time snapshot
     coordinator._desired = {"center_frequency": 915.0}
     coordinator._managed = {"center_frequency"}
 
@@ -422,7 +437,8 @@ def test_enforce_all_reconciles_meta_and_emits(hass, coordinator, aioclient_mock
 def test_enforce_all_no_managed_skips_meta_reconcile(hass, coordinator, aioclient_mock):
     """With nothing managed there is no read-back (the connect refresh already ran)."""
     aioclient_mock.get(_CMD_URL, params={"cmd": "get_meta"}, json={"result": {}})
-    coordinator.connected = True
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
     coordinator._desired = {}
     coordinator._managed = set()
 
@@ -579,7 +595,7 @@ def _no_socket():
     async def _noop(self) -> None:
         return None
 
-    with patch.object(Rtl433Coordinator, "_connect_loop", _noop):
+    with patch.object(Rtl433Client, "start", _noop):
         yield
 
 
@@ -638,14 +654,14 @@ async def test_center_and_hop_availability_track_frequencies(hass, hub_entry_bui
         return hass.states.get(eid).state
 
     # Single frequency -> center frequency available, hop interval hidden.
-    coordinator.meta = dict(_META_SINGLE)
+    coordinator._client.meta = dict(_META_SINGLE)
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
     assert num_state("center_frequency") != STATE_UNAVAILABLE
     assert num_state("hop_interval") == STATE_UNAVAILABLE
 
     # Hopping -> hop interval available, center frequency hidden.
-    coordinator.meta = dict(_META_HOPPING)
+    coordinator._client.meta = dict(_META_HOPPING)
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
     assert num_state("hop_interval") != STATE_UNAVAILABLE
@@ -665,7 +681,8 @@ async def test_select_entity_writes_convert_int_command(
     _mock_setters(aioclient_mock)
     hub = await _setup_hub(hass, hub_entry_builder)  # managed by default
     coordinator = hass.data[DOMAIN][hub.entry_id]
-    coordinator.connected = True
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
 
     eid = er.async_get(hass).async_get_entity_id(
         "select", DOMAIN, f"{hub.entry_id}:hub:conversion_mode"
@@ -762,7 +779,8 @@ def test_write_failure_keeps_desired_value(hass, coordinator, aioclient_mock):
     aioclient_mock.get(_CMD_URL, params={"cmd": "get_meta"}, json={"result": {}})
     aioclient_mock.get(_CMD_URL, params={"cmd": "get_gain"}, json={"result": "32.8"})
     aioclient_mock.get(_CMD_URL, params={"cmd": "get_ppm_error"}, json={"result": 2})
-    coordinator.connected = True
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
 
     with patch(DISPATCH):
         # Must not raise even though the send fails.
@@ -778,7 +796,8 @@ def test_enforcement_failure_keeps_desired_and_event_stream_works(
 ):
     """A failed enforcement keeps desired state; a normal event still processes."""
     aioclient_mock.get(_CMD_URL, status=500)  # every /cmd fails
-    coordinator.connected = True
+    coordinator._client.connected = True
+    coordinator._was_connected = True  # already past the connect edge
     coordinator._desired = {"center_frequency": 868.0, KEY_GAIN_AUTO: True}
     coordinator._managed = {"center_frequency", KEY_GAIN_AUTO}
 
@@ -792,61 +811,14 @@ def test_enforcement_failure_keeps_desired_and_event_stream_works(
 
     # A normal device event fed afterwards is still processed (stream undisturbed).
     with patch(DISPATCH) as dispatch:
-        coordinator._handle_text_frame(
-            '{"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4}'
+        coordinator._client._process_event(
+            {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4}
         )
     assert "Acurite-606TX-42" in coordinator.devices
     dispatch.assert_called_once()
 
 
-async def test_cmd_issuance_serialized_through_lock(hass, hub_entry_builder):
-    """A write and an enforcement replay cannot interleave their /cmd sends.
-
-    ``_send_cmd`` holds ``_cmd_lock`` around the whole HTTP request. We patch the
-    session ``get`` to record entry/exit ordering with an await in between; if two
-    concurrent ``_send_cmd`` calls interleaved, an entry would appear before the
-    prior call's exit. The lock must serialize them.
-    """
-    entry = hub_entry_builder(availability_timeout=600)
-    entry.add_to_hass(hass)
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
-    coordinator.connected = True
-
-    order: list[str] = []
-
-    class _FakeResp:
-        async def __aenter__(self):
-            # A real suspension point inside the request: without the lock the
-            # second _send_cmd would enter here before the first exited.
-            await asyncio.sleep(0)
-            return self
-
-        async def __aexit__(self, *exc):
-            return False
-
-        def raise_for_status(self):
-            return None
-
-    def _fake_get(url, params=None, timeout=None):
-        cmd = params["cmd"]
-        order.append(f"enter:{cmd}")
-        return _FakeResp()
-
-    async def _send(cmd: str) -> None:
-        await coordinator._send_cmd(cmd, val=1)
-        order.append(f"exit:{cmd}")
-
-    session = type("S", (), {"get": staticmethod(_fake_get)})()
-    with patch(
-        "custom_components.rtl_433.coordinator.base.async_get_clientsession",
-        return_value=session,
-    ):
-        await asyncio.gather(_send("a"), _send("b"))
-
-    # Each command's enter is immediately followed by its own exit: the lock
-    # prevented the second enter from landing between the first enter and exit.
-    assert order in (
-        ["enter:a", "exit:a", "enter:b", "exit:b"],
-        ["enter:b", "exit:b", "enter:a", "exit:a"],
-    )
-    assert coordinator._cmd_lock.locked() is False
+# The ``/cmd`` issuance lock that serializes a user write against a reconnect
+# enforcement replay now lives inside :class:`pyrtl_433.Rtl433Client` (its own
+# ``_cmd_lock``) and is verified in the library's own test-suite, so the
+# coordinator no longer owns that serialization to test here.

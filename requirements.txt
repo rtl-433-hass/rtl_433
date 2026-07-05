@@ -3,10 +3,10 @@
 # These are installed by Home Assistant when the integration is loaded.
 # See custom_components/rtl_433/manifest.json for the authoritative list.
 #
-# This integration intentionally has NO third-party runtime dependency: it
-# consumes the rtl_433 HTTP server's WebSocket stream, parses the JSON events
-# with the standard library, and maps fields to Home Assistant entities. The
-# WebSocket client uses aiohttp and YAML parsing uses PyYAML / voluptuous,
-# all of which Home Assistant core already provides.
+# The integration depends on pyrtl_433 for the rtl_433 protocol layer: the
+# WebSocket client, event normalizer, replay classifier, and SDR command
+# definitions live in that library. Home Assistant core still provides the
+# supporting packages it builds on (aiohttp, PyYAML, voluptuous).
 #
-# Keep this file empty unless a genuinely new runtime package is required.
+# Keep this list in sync with the manifest's requirements array.
+pyrtl_433==0.1.1

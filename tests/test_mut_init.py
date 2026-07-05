@@ -7,7 +7,6 @@ test_lifecycle.py (hub_entry_builder fixture, _no_socket stub, etc.).
 
 from __future__ import annotations
 
-import json
 from unittest.mock import patch
 
 import pytest
@@ -50,6 +49,7 @@ from custom_components.rtl_433.const import (
     PLATFORMS,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.hub_settings import (
     _calibration_map,
     _hub_availability_timeout,
@@ -78,7 +78,7 @@ def _no_socket():
     async def _noop(self) -> None:
         return None
 
-    with patch.object(Rtl433Coordinator, "_connect_loop", _noop):
+    with patch.object(Rtl433Client, "start", _noop):
         yield
 
 
@@ -90,7 +90,7 @@ def _coordinator(hass: HomeAssistant, hub_entry: MockConfigEntry) -> Rtl433Coord
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
-    coordinator._handle_text_frame(json.dumps(event))
+    coordinator._client._process_event(event)
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
@@ -564,7 +564,7 @@ async def test_hub_info_callback_updates_hub_device_identity(hass, hub_entry_bui
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
 
-    coordinator.dev_info = {
+    coordinator._client.dev_info = {
         "vendor": "Realtek",
         "product": "RTL2838UHIDIR",
         "serial": "00000001",
@@ -584,7 +584,7 @@ async def test_hub_info_callback_noop_when_identity_empty(hass, hub_entry_builde
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
 
-    coordinator.dev_info = {}
+    coordinator._client.dev_info = {}
     coordinator.hub_info_callback()
     await hass.async_block_till_done()
 

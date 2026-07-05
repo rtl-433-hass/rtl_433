@@ -8,7 +8,6 @@ removed statements, and negated conditions.
 from __future__ import annotations
 
 from datetime import timedelta
-import json
 from unittest.mock import patch
 
 from freezegun import freeze_time
@@ -31,6 +30,7 @@ from custom_components.rtl_433.const import (
     signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.entity import (
     _apply_calibration,
     _resolve_entity_category,
@@ -56,7 +56,7 @@ def _no_socket():
     async def _noop(self) -> None:
         return None
 
-    with patch.object(Rtl433Coordinator, "_connect_loop", _noop):
+    with patch.object(Rtl433Client, "start", _noop):
         yield
 
 
@@ -65,7 +65,7 @@ def _coordinator(hass, hub_entry: MockConfigEntry) -> Rtl433Coordinator:
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
-    coordinator._handle_text_frame(json.dumps(event))
+    coordinator._client._process_event(event)
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
@@ -1447,12 +1447,12 @@ async def test_hub_entity_subscribes_to_hub_update(hass, hub_entry_builder):
     assert connectivity_eid is not None
 
     # Change coordinator.connected and fire hub_update signal
-    coordinator.connected = True
+    coordinator._client.connected = True
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
     assert hass.states.get(connectivity_eid).state == "on"
 
-    coordinator.connected = False
+    coordinator._client.connected = False
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
     assert hass.states.get(connectivity_eid).state == "off"
@@ -1478,7 +1478,7 @@ async def test_hub_entity_reload_rewires_subscription(hass, hub_entry_builder):
 
     coordinator2 = _coordinator(hass, hub)
     # After reload, the hub_update signal must still work
-    coordinator2.connected = True
+    coordinator2._client.connected = True
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 

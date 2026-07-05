@@ -22,7 +22,6 @@ Design notes:
 from __future__ import annotations
 
 from datetime import timedelta
-import json
 from unittest.mock import patch
 
 from freezegun import freeze_time
@@ -40,6 +39,7 @@ from custom_components.rtl_433.const import (
     DOMAIN,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -66,7 +66,7 @@ def _no_socket():
     async def _noop(self) -> None:
         return None
 
-    with patch.object(Rtl433Coordinator, "_connect_loop", _noop):
+    with patch.object(Rtl433Client, "start", _noop):
         yield
 
 
@@ -75,7 +75,7 @@ def _coordinator(hass: HomeAssistant, hub) -> Rtl433Coordinator:
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
-    coordinator._handle_text_frame(json.dumps(event))
+    coordinator._client._process_event(event)
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):

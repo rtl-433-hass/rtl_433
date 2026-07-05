@@ -22,6 +22,7 @@ import pytest
 
 from custom_components.rtl_433.const import DOMAIN
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.sdr_settings import KEY_GAIN_AUTO, SDR_SETTINGS_BY_KEY
 from custom_components.rtl_433.switch import PLATFORM, Rtl433SwitchControl
 
@@ -37,7 +38,7 @@ def _no_socket():
     async def _noop(self) -> None:
         return None
 
-    with patch.object(Rtl433Coordinator, "_connect_loop", _noop):
+    with patch.object(Rtl433Client, "start", _noop):
         yield
 
 
@@ -403,8 +404,8 @@ async def test_setup_entry_entity_reads_coordinator_meta(hass, hub_entry_builder
     )
     assert gain_auto_eid is not None
 
-    # Update coordinator state and trigger repaint.
-    coordinator.meta = {"gain": ""}
+    # Update coordinator state and trigger repaint (meta is client-owned).
+    coordinator._client.meta = {"gain": ""}
     async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
     await hass.async_block_till_done()
 
