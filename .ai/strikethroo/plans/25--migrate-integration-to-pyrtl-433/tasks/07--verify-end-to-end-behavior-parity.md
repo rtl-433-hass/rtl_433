@@ -2,7 +2,7 @@
 id: 7
 group: "validation"
 dependencies: [5, 6]
-status: "pending"
+status: "completed"
 created: 2026-07-04
 skills:
   - home-assistant

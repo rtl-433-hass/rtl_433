@@ -331,9 +331,9 @@ No circular dependencies: the graph is a DAG (1 → {2,3} → 4 → {5,6} → 7)
 - ✔️ Task 005: Realign the pytest suite and rescope the mutmut ratchet (depends on: 004) — completed (1518 passed, 0 failed)
 - ✔️ Task 006: Update `AGENTS.md` and the dependency narrative (depends on: 004) — completed
 
-### Phase 5: Prove Parity
+### ✅ Phase 5: Prove Parity
 **Parallel Tasks:**
-- Task 007: Verify end-to-end behavior parity against a live/replayed stream (depends on: 005, 006)
+- ✔️ Task 007: Verify end-to-end behavior parity against a live/replayed stream (depends on: 005, 006) — completed (parity verified, no defect)
 
 ### Post-phase Actions
 After each phase, run `.ai/strikethroo/config/hooks/POST_PHASE.md` validation before advancing.
@@ -343,3 +343,76 @@ guards the plan's primary success criterion.
 ### Execution Summary
 - Total Phases: 5
 - Total Tasks: 7
+
+---
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-07-04
+
+### Results
+
+The integration now consumes the published `pyrtl_433==0.1.0` PyPI library and its
+duplicated protocol layer has been deleted. Delivered across five phases:
+
+- **Dependency** pinned in `manifest.json`, `requirements.txt`, and `requirements_test.txt`;
+  imports cleanly under Python 3.14.
+- **Pure helpers** sourced from the library: `normalize`/`device_key`/`NormalizedEvent`/
+  `DEFAULT_SKIP_KEYS` from `pyrtl_433.normalizer`; `classify_replay`/`ReplayVerdict`/
+  `parse_event_time` from `pyrtl_433.replay`; SDR transforms from `pyrtl_433.sdr` via a thin
+  local adapter that merges the HA entity metadata the library omits. The private `_safe_token`
+  entity-slug helper was re-homed locally.
+- **Transport** re-architected: `coordinator/base.py` shrank 817→476 lines and now owns a
+  `pyrtl_433.Rtl433Client` built with HA's shared aiohttp session (`async_get_clientsession`,
+  never closed by the client) and `on_event`/`on_hub_update` callbacks feeding the HA dispatcher.
+  The embedded WebSocket/HTTP transport (`_connect_loop`, `_read_frames`, `_fetch_cmd`,
+  `_unwrap_result`, `_build_ws_url`/`_build_cmd_url`, local `CannotConnect`) was deleted;
+  `CannotConnect` and `validate_connection` are delegated to the library.
+- **Tests & mutation ratchet** realigned: behavioral tests driven through the new client seam,
+  extracted-code mutation shards retired, adapter/`_safe_token` coverage added. Final: **1518
+  passed, 0 failed**; ruff clean; mutmut floor gate green.
+- **Docs**: `AGENTS.md` updated to describe the dependency and adapter architecture.
+- **Parity verified** end-to-end through the real client seam: device discovery, event→sensor
+  state, SDR `/cmd` round-trip, and availability unavailable→recover all match pre-migration;
+  entity ids / `device_key` / `_safe_token` slugs are byte-identical.
+
+### Noteworthy Events
+
+- **Accepted timezone semantic change (Risk 1).** `pyrtl_433.replay.parse_event_time` interprets
+  naive (offset-less) rtl_433 timestamps in the **host system** timezone (stdlib `astimezone()`),
+  whereas the old code used HA's **configured** zone (`dt_util.as_utc`). rtl_433 emits naive
+  timestamps, so this path is live. Impact is **nil when the host OS timezone matches HA's
+  configured zone** (the normal co-located deployment); when they differ, event timestamps shift
+  by the offset, which can misclassify live frames as stale replays. This is the plan's documented,
+  accepted trade-off of consuming the standalone library — not a regression introduced here. See
+  Necessary follow-ups.
+- **`is_backlog` re-derived HA-side.** The library carries `is_replay`/`event_time` but not
+  `is_backlog`; it is recomputed in `coordinator/_events.py` with the identical expression and the
+  same 5s `DISCOVERY_BACKLOG_GRACE`, off a connect-edge `_connection_time`. Verified bit-identical
+  to pre-migration across representative timings, including the strict 5s boundary.
+- **Duplicate refresh loop removed.** The library's `Rtl433Client.start()` runs its own 60s
+  meta/stats refresh loop; the coordinator's separate refresh tick was removed to avoid doubling
+  poll traffic. Cadence and content are preserved.
+- **Per-frame RX debug log relocated** from the integration to the library (prefix `pyrtl_433 RX`,
+  same fields + classification label). Information preserved; logger name changed.
+- **mutmut coordinator baselines deferred.** The four extracted/rewritten coordinator modules
+  (`base.py`, `_events.py`, `_sdr.py`, `_watchdog.py`) had their baseline entries removed so the
+  floor gate treats them as new files (green) to be re-measured on the nightly full run — the
+  ratchet's designed path. `normalizer.py` (18/19) and the `sdr_settings.py` adapter were freshly
+  measured this session.
+- **Dirty working tree at execution start.** Untracked Strikethroo artifacts + a stray `restart.log`
+  blocked the feature-branch guard; per user direction the log was deleted and the artifacts
+  committed before branching.
+
+### Necessary follow-ups
+
+- **Timezone handling for naive timestamps.** Consider whether `pyrtl_433` should accept an injected
+  timezone (or the integration should pre-stamp offsets) so naive rtl_433 timestamps resolve to HA's
+  configured zone regardless of host OS tz. Track upstream in `pyrtl_433`. Low priority given the
+  co-located norm, but worth a documented note for users whose host tz ≠ HA tz.
+- **Nightly mutmut re-baseline** of the four coordinator modules to restore a real floor for the new
+  adapter code (currently deferred to the nightly full run).
+- **Public `/cmd` setter alias upstream.** `pyrtl_433.Rtl433Client._send_cmd` is the only setter and
+  is underscore-prefixed in 0.1.0; a public alias in a future `pyrtl_433` release would remove the
+  private-API call from the coordinator.
