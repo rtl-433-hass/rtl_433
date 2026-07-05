@@ -80,11 +80,7 @@ from ..const import (
     signal_device_update,
     signal_hub_update,
 )
-from ._events import (
-    DISCOVERY_BACKLOG_GRACE as DISCOVERY_BACKLOG_GRACE,  # re-export for tests
-    REPLAY_STALE_THRESHOLD as REPLAY_STALE_THRESHOLD,  # re-export for tests
-    _EventProcessingMixin,
-)
+from ._events import _EventProcessingMixin
 from ._sdr import _SdrSettingsMixin, _SdrStore
 from ._watchdog import _WATCHDOG_INTERVAL, _AvailabilityMixin
 
@@ -443,7 +439,12 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         """
         if not self.manage_settings:
             return
-        await self._client.refresh_meta()
+        # The library client runs its own post-connect ``refresh_meta``; only
+        # fetch here when ``meta`` is still empty (first connect, before that
+        # refresh lands) so adoption has data. Avoids a duplicate ``/cmd`` GET on
+        # every reconnect.
+        if not self._client.meta:
+            await self._client.refresh_meta()
         try:
             await self._seed_desired_on_first_connect()
             await self._enforce_all()

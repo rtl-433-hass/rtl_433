@@ -28,10 +28,7 @@ here from the event's ``event_time`` and the coordinator's connect-edge anchor
 from __future__ import annotations
 
 from pyrtl_433.normalizer import NormalizedEvent
-from pyrtl_433.replay import (
-    DISCOVERY_BACKLOG_GRACE as DISCOVERY_BACKLOG_GRACE,  # re-export for base.py/tests
-    REPLAY_STALE_THRESHOLD as REPLAY_STALE_THRESHOLD,  # re-export for base.py/tests
-)
+from pyrtl_433.replay import DISCOVERY_BACKLOG_GRACE
 
 from homeassistant.util import dt as dt_util
 
