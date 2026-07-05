@@ -1,35 +1,36 @@
-"""Event frame processing for the rtl_433 coordinator.
+"""Event fan-out for the rtl_433 coordinator.
 
-Turns one decoded JSON event into a normalized event, classifies it against the
-reconnect replay (live vs already-seen replay vs stale gap vs pre-connection
-backlog), updates per-device runtime state, registers newly-discovered devices,
-and hands the result to ``base.py``'s ``_dispatch`` to fan out to the device's
-entities.
+The transport half — parsing WebSocket frames, normalizing them, and classifying
+each frame against the reconnect replay — now lives in ``pyrtl_433.Rtl433Client``
+(see ``base.py``). The client hands the coordinator a fully-formed, already
+replay-classified :class:`~pyrtl_433.normalizer.NormalizedEvent` (``is_replay``
+and ``event_time`` pre-computed) through its ``on_event`` callback. This module
+holds only the *Home Assistant side* of the old ``_process_event`` path: it
+updates per-device runtime state, registers newly-discovered devices, and hands
+the result to ``base.py``'s ``_dispatch`` to fan out to the device's entities.
 
-The replay classification — historically the densest branch in the coordinator —
-lives in the pure :func:`classify_replay` helper so it can be reasoned about and
-unit-tested in isolation; :meth:`_EventProcessingMixin._process_event` just
-applies its verdict.
+No normalization or replay classification happens here — doing it a second time
+would double-classify what the client already decided. The one verdict the
+library does not carry on the event object is ``is_backlog`` (the
+pre-connection-backlog flag that gates device registration), so it is re-derived
+here from the event's ``event_time`` and the coordinator's connect-edge anchor
+(``_connection_time``, set in ``base.py``'s ``_emit_hub_update``) using the same
+:data:`DISCOVERY_BACKLOG_GRACE` boundary the library applied.
 
 :class:`_EventProcessingMixin` is mixed into ``Rtl433Coordinator`` (see
 ``base.py``) and relies on the runtime state declared in that class's
 ``__init__`` (``devices``, ``last_seen``, ``available``, ``seen_fields``,
-``device_fields``, ``skip_keys``, ``known_field_keys``, ``_event_high_water``,
-``_connection_time``, ``_discovered``, ``_logged_unmapped``,
-``discovery_enabled``, ``new_device_callback``) plus ``_dispatch`` (base.py).
+``device_fields``, ``known_field_keys``, ``_connection_time``, ``_discovered``,
+``_logged_unmapped``, ``discovery_enabled``, ``new_device_callback``) plus
+``_dispatch`` (base.py).
 """
 
 from __future__ import annotations
 
-import dataclasses
-from typing import Any
-
-from pyrtl_433.normalizer import NormalizedEvent, normalize
+from pyrtl_433.normalizer import NormalizedEvent
 from pyrtl_433.replay import (
     DISCOVERY_BACKLOG_GRACE as DISCOVERY_BACKLOG_GRACE,  # re-export for base.py/tests
     REPLAY_STALE_THRESHOLD as REPLAY_STALE_THRESHOLD,  # re-export for base.py/tests
-    classify_replay,
-    parse_event_time,
 )
 
 from homeassistant.util import dt as dt_util
@@ -38,53 +39,38 @@ from ..const import LOGGER
 
 
 class _EventProcessingMixin:
-    """Normalize, classify, and dispatch one decoded rtl_433 event frame."""
+    """Fan one already-normalized, replay-classified rtl_433 event out to HA."""
 
-    def _process_event(self, event: dict[str, Any]) -> None:
-        """Normalize an event, classify it (live vs replay), and dispatch.
+    def _on_client_event(self, normalized: NormalizedEvent) -> None:
+        """Ingest one event from the client and dispatch it to the entities.
 
-        Replays and stale gap events seed sensor values but must NOT re-fire
-        ``event`` entities or refresh ``last_seen`` / ``available``. The
-        classification is delegated to :func:`classify_replay`; this method
-        applies its verdict to runtime state and the discovery gate.
+        The client delivers ``normalized`` fully classified: ``is_replay`` and
+        ``event_time`` are already stamped, so this method never re-normalizes or
+        re-classifies. It only applies the verdict to HA-side runtime state and
+        the discovery gate.
+
+        Replays and stale gap events (``is_replay=True``) still seed sensor values
+        but must NOT refresh ``last_seen`` / ``available`` or raise a "new device"
+        notification, so a genuinely-offline device is not resurrected by the
+        reconnect replay.
         """
-        normalized = normalize(event, self.skip_keys)
         key = normalized.device_key
+        is_replay = normalized.is_replay
+
+        # Re-derive the pre-connection-backlog flag (not carried on the event
+        # object) from the event's timestamp and this connection's anchor, using
+        # the same boundary the library applied. ``_connection_time`` is the
+        # HA-side connect anchor set on the connect edge in ``_emit_hub_update``;
+        # it is ``None`` while disconnected, which (like a frame with no usable
+        # ``event_time``) keeps ``is_backlog`` False -- "never drop a real one".
+        conn = self._connection_time
+        is_backlog = (
+            conn is not None
+            and normalized.event_time is not None
+            and normalized.event_time < conn - DISCOVERY_BACKLOG_GRACE
+        )
 
         now = dt_util.utcnow()
-
-        # Read the raw ``time`` independently of ``normalize`` (which drops it)
-        # and classify the frame into live / already-seen replay / stale gap /
-        # pre-connection backlog.
-        event_time = parse_event_time(event.get("time"))
-        verdict = classify_replay(
-            event_time,
-            now,
-            high_water=self._event_high_water,
-            connection_time=self._connection_time,
-        )
-        is_replay = verdict.is_replay
-        is_backlog = verdict.is_backlog
-        if verdict.new_high_water is not None:
-            self._event_high_water = verdict.new_high_water
-
-        # Carry the classification on the event object (the dispatch carrier), so
-        # every ``_handle_dispatch`` sees a consistent flag with no signature
-        # churn and the event platform can log a suppressed transmission's age.
-        normalized = dataclasses.replace(
-            normalized, is_replay=is_replay, event_time=event_time
-        )
-
-        # Compact ingestion/classification trace for every event frame reaching
-        # this point -- emitted upstream of the registration / discovery gate so
-        # unregistered, disabled, and discovery-off devices are still logged.
-        LOGGER.debug(
-            "rtl_433 RX %s fields=%s time=%s -> %s",
-            key,
-            normalized.fields,
-            event_time.isoformat() if event_time is not None else "none",
-            verdict.label,
-        )
 
         self.devices[key] = normalized
 

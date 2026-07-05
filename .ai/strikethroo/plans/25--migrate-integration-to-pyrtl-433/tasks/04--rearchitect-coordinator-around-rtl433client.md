@@ -2,7 +2,7 @@
 id: 4
 group: "transport"
 dependencies: [2, 3]
-status: "pending"
+status: "completed"
 created: 2026-07-04
 skills:
   - home-assistant
