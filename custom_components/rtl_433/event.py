@@ -37,9 +37,10 @@ from .const import CONF_DEVICES, DEVICE_EVENT_TYPES, LOGGER
 from .entity import Rtl433Entity, async_setup_hub_platform, async_upsert_event_types
 
 if TYPE_CHECKING:
+    from pyrtl_433.normalizer import NormalizedEvent
+
     from .coordinator import Rtl433Coordinator
     from .mapping import FieldDescriptor
-    from .normalizer import NormalizedEvent
 
 # This platform owns only descriptors whose ``platform`` attribute equals this.
 PLATFORM = "event"

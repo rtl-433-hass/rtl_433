@@ -317,10 +317,10 @@ No circular dependencies: the graph is a DAG (1 → {2,3} → 4 → {5,6} → 7)
 **Parallel Tasks:**
 - ✔️ Task 001: Declare `pyrtl_433==0.1.0` and verify clean import under Python 3.14 (gate) — completed
 
-### Phase 2: Replace Pure Helper Modules
+### ✅ Phase 2: Replace Pure Helper Modules
 **Parallel Tasks:**
-- Task 002: Swap normalizer + replay classifier to `pyrtl_433`; re-home `_safe_token` (depends on: 001)
-- Task 003: Replace SDR transforms with `pyrtl_433.sdr` via a local adapter (depends on: 001)
+- ✔️ Task 002: Swap normalizer + replay classifier to `pyrtl_433`; re-home `_safe_token` (depends on: 001) — completed
+- ✔️ Task 003: Replace SDR transforms with `pyrtl_433.sdr` via a local adapter (depends on: 001) — completed
 
 ### Phase 3: Re-architect the Transport
 **Parallel Tasks:**

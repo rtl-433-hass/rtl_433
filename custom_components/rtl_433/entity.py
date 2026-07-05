@@ -9,7 +9,7 @@ four concerns the platforms would otherwise duplicate:
   ``via_device`` so every device groups under its hub.
 * **Dispatcher subscription** — each entity subscribes to the per-device signal
   ``signal_device_update(hub_entry_id, device_key)`` that the coordinator fans a
-  :class:`~custom_components.rtl_433.normalizer.NormalizedEvent` out on, and
+  :class:`~pyrtl_433.normalizer.NormalizedEvent` out on, and
   unsubscribes in ``async_will_remove_from_hass``.
 * **Availability** — computed from the coordinator's ``last_seen`` timestamp
   versus the effective per-device timeout. On startup the entity baselines a
@@ -69,8 +69,9 @@ from .normalizer import _safe_token
 from .sdr_settings import SDR_SETTINGS
 
 if TYPE_CHECKING:
+    from pyrtl_433.normalizer import NormalizedEvent
+
     from .coordinator import Rtl433Coordinator
-    from .normalizer import NormalizedEvent
     from .sdr_settings import SdrSetting
 
 

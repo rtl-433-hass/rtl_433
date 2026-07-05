@@ -35,8 +35,9 @@ from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
 from .mapping import FieldDescriptor, apply_transform
 
 if TYPE_CHECKING:
+    from pyrtl_433.normalizer import NormalizedEvent
+
     from .coordinator import Rtl433Coordinator
-    from .normalizer import NormalizedEvent
 
 # This platform owns only descriptors whose ``platform`` attribute equals this.
 PLATFORM = "sensor"

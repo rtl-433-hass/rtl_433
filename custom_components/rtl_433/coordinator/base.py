@@ -61,6 +61,7 @@ import json
 from typing import Any
 
 import aiohttp
+from pyrtl_433.normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -80,7 +81,6 @@ from ..const import (
     signal_device_update,
     signal_hub_update,
 )
-from ..normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent
 from ._events import (
     DISCOVERY_BACKLOG_GRACE as DISCOVERY_BACKLOG_GRACE,  # re-export for tests
     REPLAY_STALE_THRESHOLD as REPLAY_STALE_THRESHOLD,  # re-export for tests
