@@ -2,7 +2,7 @@
 id: 1
 group: "environment"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-07-06
 skills:
   - git
