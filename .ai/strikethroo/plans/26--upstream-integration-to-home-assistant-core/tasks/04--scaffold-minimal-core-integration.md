@@ -2,7 +2,7 @@
 id: 4
 group: "core-scaffold"
 dependencies: [1, 2]
-status: "pending"
+status: "completed"
 created: 2026-07-06
 skills:
   - home-assistant
@@ -13,7 +13,7 @@ complexity_notes: "Reduces a ~20-module integration to a Bronze-tier minimal sub
 # Scaffold the Minimal Core Integration (Bronze Quality Scale)
 
 ## Objective
-Scaffold the smallest reviewable `rtl_433` integration in the core fork at `~/github.com/deviantintegral/core/homeassistant/components/rtl_433/`: `manifest.json`, `const.py`, `__init__.py` with one `DataUpdateCoordinator`, `config_flow.py`, the `sensor` platform only, and a `quality_scale.yaml` targeting Bronze. It must reproduce the frozen compatibility contract's `unique_id` and device-identifier formats exactly. (Tests are Task 5.)
+Scaffold the smallest reviewable `rtl_433` integration in the core fork at `~/github.com/deviantintegral/core-2/homeassistant/components/rtl_433/`: `manifest.json`, `const.py`, `__init__.py` with one `DataUpdateCoordinator`, `config_flow.py`, the `sensor` platform only, and a `quality_scale.yaml` targeting Bronze. It must reproduce the frozen compatibility contract's `unique_id` and device-identifier formats exactly. (Tests are Task 5.)
 
 ## Skills Required
 - **home-assistant**: integration structure, config flow, `DataUpdateCoordinator`, entity platforms, manifest, quality scale.

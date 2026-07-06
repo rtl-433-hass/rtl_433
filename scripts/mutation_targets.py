@@ -116,6 +116,10 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
     "tests/test_mut_calibration_floor.py": ["calibration.py"],
     "tests/test_mut_library_floor.py": ["library.py"],
     "tests/test_mut_migration_floor.py": ["migration.py"],
+    # End-to-end migration round-trip identity tests: exercise the migration
+    # ladder (``async_migrate_entry``) against seeded registries; the
+    # ``_roundtrip`` suffix does not auto-resolve to a module.
+    "tests/test_migration_roundtrip.py": ["migration.py"],
     "tests/test_mut_repairs_floor.py": ["repairs.py"],
 }
 
