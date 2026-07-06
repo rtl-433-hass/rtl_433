@@ -230,10 +230,10 @@ No circular dependencies. Every task appears in exactly one phase below.
 - ✔️ Task 002: Freeze the HACS/core compatibility contract as an ABI (no dependencies) — `completed` (`COMPATIBILITY_CONTRACT.md`)
 - ✔️ Task 006: Seed CORE_UPSTREAM.md tracker and ordered follow-up PR plan (no dependencies) — `completed` (`CORE_UPSTREAM.md`)
 
-### Phase 2: Build on the Contract
+### ✅ Phase 2: Build on the Contract
 **Parallel Tasks:**
-- Task 003: Add config-entry round-trip migration tests (depends on: 002)
-- Task 004: Scaffold the minimal core integration (depends on: 001, 002)
+- ✔️ Task 003: Add config-entry round-trip migration tests (depends on: 002) — `completed` (`tests/test_migration_roundtrip.py`, 2 tests green)
+- ✔️ Task 004: Scaffold the minimal core integration (depends on: 001, 002) — `completed` (7 files in `core-2/homeassistant/components/rtl_433/`)
 
 ### Phase 3: Validate the Scaffold
 **Parallel Tasks:**
