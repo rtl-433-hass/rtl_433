@@ -2,7 +2,7 @@
 id: 2
 group: "compatibility"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-07-06
 skills:
   - home-assistant

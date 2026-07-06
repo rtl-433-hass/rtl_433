@@ -224,11 +224,11 @@ graph TD
 
 No circular dependencies. Every task appears in exactly one phase below.
 
-### Phase 1: Foundations (Fork, Contract, Roadmap)
+### ✅ Phase 1: Foundations (Fork, Contract, Roadmap)
 **Parallel Tasks:**
-- Task 001: Set up core fork and verify rtl_433 domain/brand availability (no dependencies)
-- Task 002: Freeze the HACS/core compatibility contract as an ABI (no dependencies)
-- Task 006: Seed CORE_UPSTREAM.md tracker and ordered follow-up PR plan (no dependencies)
+- ✔️ Task 001: Set up core fork and verify rtl_433 domain/brand availability (no dependencies) — `completed` (fork at `deviantintegral/core-2`; domain & core brand free)
+- ✔️ Task 002: Freeze the HACS/core compatibility contract as an ABI (no dependencies) — `completed` (`COMPATIBILITY_CONTRACT.md`)
+- ✔️ Task 006: Seed CORE_UPSTREAM.md tracker and ordered follow-up PR plan (no dependencies) — `completed` (`CORE_UPSTREAM.md`)
 
 ### Phase 2: Build on the Contract
 **Parallel Tasks:**
