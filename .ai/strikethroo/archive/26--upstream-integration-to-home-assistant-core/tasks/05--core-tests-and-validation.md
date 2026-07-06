@@ -2,7 +2,7 @@
 id: 5
 group: "core-scaffold"
 dependencies: [4]
-status: "pending"
+status: "completed"
 created: 2026-07-06
 skills:
   - pytest

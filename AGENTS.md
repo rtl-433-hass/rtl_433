@@ -31,6 +31,29 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
 - `docs/device-library.md` — **authoritative** device-library reference.
 - `tests/` — unit tests. `tests/integration/` — container/screenshot harness.
 
+## Upstreaming to Home Assistant core (shared domain — frozen contract)
+
+This integration is being upstreamed into Home Assistant **core** as a minimal,
+iteratively-expanded integration (plan 26). Core and this HACS build share the
+**single `rtl_433` domain**: Home Assistant loads `custom_components/rtl_433/` in
+preference to a same-named core integration (logging a "custom integration"
+warning), so the HACS build stays the feature-ahead parallel channel while core
+catches up. The minimal core build lives on the `rtl_433-integration` branch of a
+`home-assistant/core` fork; **do not invent a second domain.**
+
+Because both builds share the domain, three identity surfaces are a **frozen
+compatibility contract** — they MUST stay byte-identical across both builds and
+must not change without a coordinated, non-downgrading migration shipped in both:
+
+- entity `unique_id` formats,
+- device `identifiers` tuples,
+- the config-entry `VERSION`/`MINOR_VERSION` ladder and its migrations.
+
+The authoritative spec is [`COMPATIBILITY_CONTRACT.md`](COMPATIBILITY_CONTRACT.md);
+`tests/test_migration_roundtrip.py` guards it. Per-module upstreaming progress and
+the ordered follow-up PR sequence are tracked in
+[`CORE_UPSTREAM.md`](CORE_UPSTREAM.md).
+
 ## Runtime dependency (pyrtl_433)
 
 The integration has **one third-party runtime dependency**:
