@@ -13,10 +13,12 @@ that WebSocket endpoint, normalizes each event into a stable device identity, an
 maps raw fields to Home Assistant sensors, binary sensors, and events through the
 [device library](device-library.md).
 
-The best way to use this integration is to use the
+The best way to use this integration is with the
 [rtl_433 Home Assistant add-on](https://github.com/rtl-433-hass/rtl_433-hass-addons)
-with a supported USB radio. Otherwise, the integration can connect to any rtl_433
-server with HTTP output enabled.
+and a supported USB radio: install this integration first, restart Home
+Assistant, and then install and start the add-on. Each radio the add-on detects
+is discovered automatically — no connection details to type. Otherwise, the
+integration can connect to any rtl_433 server with HTTP output enabled.
 
 ## Features
 

@@ -1,7 +1,31 @@
 # Configuration
 
+There are two ways to create a hub: automatically through
+[add-on discovery](#home-assistant-os-add-on-discovery) (recommended), or
+[manually](#manual-configuration) for any other rtl_433 server. Each hub points
+at one rtl_433 server's WebSocket endpoint.
+
+## Home Assistant OS Add-On Discovery
+
+If you run the
+[rtl_433 add-on](https://github.com/rtl-433-hass/rtl_433-hass-addons) on Home
+Assistant OS, each radio it detects is published through Supervisor discovery.
+It appears under **Settings → Devices & Services** as a discovered **rtl_433**
+card. Click **Add** and confirm; no host or port needs to be typed.
+
+For discovery to work, this integration must already be installed and loaded
+when the add-on starts — install the integration, restart Home Assistant, and
+then start the add-on. If you started the add-on first and no card appeared,
+restart the add-on so it republishes discovery.
+
+Discovered radios use the add-on's stable per-radio identifier, so the same hub
+and nested-device history can survive add-on restarts and USB port changes. For
+multi-dongle setups, stability is best when each dongle stays in a fixed USB port
+or has a unique serial.
+
+## Manual Configuration
+
 Add a hub from **Settings → Devices & Services → Add Integration → rtl_433**.
-Each hub points at one rtl_433 server's WebSocket endpoint.
 
 ![The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings and discovery toggles, and initial frequency](images/06-config-user.png)
 
@@ -18,19 +42,6 @@ Each hub points at one rtl_433 server's WebSocket endpoint.
 The integration validates that the WebSocket can be reached before creating the
 hub. Manual hub identity is derived from `host:port`, so the same server cannot
 be added twice.
-
-## Home Assistant OS Add-On Discovery
-
-If you run the
-[rtl_433 add-on](https://github.com/rtl-433-hass/rtl_433-hass-addons) on Home
-Assistant OS, each radio it detects is published through Supervisor discovery.
-It appears under **Settings → Devices & Services** as a discovered **rtl_433**
-card. Click **Add** and confirm; no host or port needs to be typed.
-
-Discovered radios use the add-on's stable per-radio identifier, so the same hub
-and nested-device history can survive add-on restarts and USB port changes. For
-multi-dongle setups, stability is best when each dongle stays in a fixed USB port
-or has a unique serial.
 
 ## Manual rtl_433 Configuration
 
