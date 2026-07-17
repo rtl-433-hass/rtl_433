@@ -57,7 +57,7 @@ the ordered follow-up PR sequence are tracked in
 ## Runtime dependency (pyrtl_433)
 
 The integration has **one third-party runtime dependency**:
-`pyrtl_433==0.1.0` (declared in `manifest.json` `requirements` and mirrored in
+`pyrtl_433==0.2.0` (declared in `manifest.json` `requirements` and mirrored in
 `requirements.txt`; Home Assistant installs it on load). It is the extracted
 rtl_433 protocol layer — the WebSocket connect/reconnect loop and JSON frame
 parsing, the event **normalizer**, the reconnect-**replay/stale classifier**, and
@@ -368,6 +368,14 @@ because these are the contracts the integration relies on:
   decoded-device event **iff** it has a `model` key **or** an identity key
   (`id` / `channel` / `subtype`, kept in sync with `pyrtl_433.normalizer.IDENTITY_KEYS`).
   A `{"shutdown": ...}` frame drives the **connectivity** sensor (flips it off).
+  A **server log frame** (`{"time", "src", "lvl", "msg"}`, rtl_433 ≥ 23.11 —
+  recognized by `msg` + `lvl` with no model/identity keys) goes to the client's
+  `_handle_log`: `src == "Auto Level"` messages are parsed
+  (`pyrtl_433.autolevel`, exact upstream wording, unparseable ⇒ ignored) into
+  the client's `noise_level` / `min_level` snapshots — the **only** source of
+  the receiver noise floor rtl_433 offers (no structured getter exists) — and
+  fire `on_hub_update` on change; the raw frame also reaches the optional
+  `on_log` callback (unused by the integration today).
   **Every other frame is ignored** on the socket (`meta`, periodic state/stats,
   RPC `result`/`error`). This is why non-event frames no longer create a phantom
   `"unknown"` device or pollute `seen_fields` / the diagnostics
@@ -464,6 +472,12 @@ because these are the contracts the integration relies on:
     since-start counters that tolerate the server-restart reset, so HA records
     long-term statistics); `enabled` → enabled decoders is a gauge →
     **`MEASUREMENT`**; `stats[]` / `since` are surfaced as attributes.
+  - Noise level / minimum detection level hub sensors → the coordinator's
+    `noise_level` / `min_level` properties (delegating to the client's parsed
+    "Auto Level" snapshots above) — **socket-sourced**, not `/cmd`-sourced, so
+    they survive a proxy that hides `/cmd` but stay `unknown` unless the server
+    runs `-Y autolevel` and/or `-M noise[:secs]`. Both are dB gauges →
+    **`MEASUREMENT`** (`SIGNAL_STRENGTH` device class).
 - **Phantom-unknown cleanup.** `async_setup_entry` (`__init__.py`) calls
   `_cleanup_phantom_unknown_device` (`migration.py`), which **idempotently** removes a legacy
   persisted `"unknown"` device from `entry.data["devices"]` and the matching

@@ -194,9 +194,11 @@ class TestLastSeenSentinel:
 class _FakeCoord:
     """Minimal coordinator stub for testing pure helpers."""
 
-    def __init__(self, meta=None, stats=None):
+    def __init__(self, meta=None, stats=None, noise_level=None, min_level=None):
         self.meta = meta or {}
         self.stats = stats or {}
+        self.noise_level = noise_level
+        self.min_level = min_level
 
 
 class TestMetaHelper:
@@ -286,7 +288,7 @@ class TestHubSensorsDescriptors:
         raise KeyError(suffix)
 
     def test_count(self):
-        assert len(HUB_SENSORS) == 10
+        assert len(HUB_SENSORS) == 12
 
     def test_center_frequency(self):
         d = self._by_suffix("center_frequency")
@@ -354,6 +356,27 @@ class TestHubSensorsDescriptors:
         d = self._by_suffix("enabled_decoders")
         assert d.name == "Enabled decoders"
         assert d.state_class == SensorStateClass.MEASUREMENT
+
+    def test_noise_level(self):
+        d = self._by_suffix("noise_level")
+        assert d.name == "Noise level"
+        assert d.device_class == SensorDeviceClass.SIGNAL_STRENGTH
+        assert d.native_unit == "dB"
+        assert d.state_class == SensorStateClass.MEASUREMENT
+        # Never folded: no managed control covers the noise floor.
+        assert d.folded_when_managing is False
+        assert d.value(_FakeCoord(noise_level=-38.4)) == -38.4
+        assert d.value(_FakeCoord()) is None
+
+    def test_min_level(self):
+        d = self._by_suffix("min_level")
+        assert d.name == "Minimum detection level"
+        assert d.device_class == SensorDeviceClass.SIGNAL_STRENGTH
+        assert d.native_unit == "dB"
+        assert d.state_class == SensorStateClass.MEASUREMENT
+        assert d.folded_when_managing is False
+        assert d.value(_FakeCoord(min_level=-35.4)) == -35.4
+        assert d.value(_FakeCoord()) is None
 
     def test_center_frequency_attrs_lambda(self):
         """The center_frequency attrs lambda reads frequencies and hop_times."""
