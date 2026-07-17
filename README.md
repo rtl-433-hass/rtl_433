@@ -31,12 +31,26 @@ them, with no cloud dependency and no polling.
 
 ## Quick Start
 
-1. Run rtl_433 with its HTTP/WebSocket output enabled, usually `rtl_433 -F http`.
-2. Install this integration through HACS as a custom repository, or copy
+The recommended setup on Home Assistant OS (or any Supervisor-based install):
+
+1. Install this integration through HACS as a custom repository, or copy
    `custom_components/rtl_433` into Home Assistant's `custom_components` folder.
-3. Restart Home Assistant.
-4. Add **rtl_433** from **Settings → Devices & Services → Add Integration** and
-   enter the rtl_433 server host, port, path, and security settings.
+2. Restart Home Assistant so the integration is loaded.
+3. Install and start the
+   [rtl_433 add-on](https://github.com/rtl-433-hass/rtl_433-hass-addons) with a
+   supported USB radio plugged in.
+4. Each radio the add-on detects appears as a discovered **rtl_433** card under
+   **Settings → Devices & Services**. Click **Add** and confirm — no host or
+   port needs to be typed.
+
+The order matters: install the integration and restart Home Assistant *before*
+starting the add-on, so the integration is loaded when the add-on publishes its
+discovery information.
+
+Not using the add-on? Run any rtl_433 server with its HTTP/WebSocket output
+enabled (usually `rtl_433 -F http`), then add **rtl_433** from **Settings →
+Devices & Services → Add Integration** and enter the rtl_433 server host, port,
+path, and security settings.
 
 See the [installation](https://rtl-433-hass.github.io/rtl_433/latest/installation/)
 and [configuration](https://rtl-433-hass.github.io/rtl_433/latest/configuration/)
