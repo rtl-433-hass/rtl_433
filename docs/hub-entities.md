@@ -23,6 +23,35 @@ Read-only diagnostic sensors report the receiver's current configuration:
 The configured `frequencies` and `hop_times` arrays appear as attributes on the
 center-frequency sensor.
 
+## Receiver Noise
+
+Two diagnostic sensors track the receiver's noise floor, so you can graph RF
+noise over time and alert when it climbs high enough to drown out your devices:
+
+- **Noise level** — the receiver's estimated noise level in dB.
+- **Minimum detection level** — the auto-adjusted pulse-detection threshold in
+  dB; transmissions weaker than this are not decoded.
+
+rtl_433 only reports these when its auto-level feature is active, so run the
+server with `-Y autolevel` (updates on every shift greater than 1 dB) and
+optionally `-M noise:30` (a periodic report every 30 seconds). The config-file
+equivalents are:
+
+```text
+pulse_detect autolevel
+report_meta noise:30
+```
+
+With the Home Assistant add-on, put those two lines in the radio's optional
+per-radio override file in the add-on config directory (see the add-on
+documentation). Without them the sensors stay `unknown`. Note that `autolevel`
+changes reception behavior by design: it continuously adapts the pulse
+detector's minimum level to the measured noise floor.
+
+Unlike the sensors below, this data arrives over the event stream itself
+(rtl_433 ≥ 23.11), so it works even when `/cmd` is proxied away behind a
+WebSocket-only proxy.
+
 ## Server Statistics
 
 Server statistics include cumulative decoded events, OOK frames, FSK frames, and

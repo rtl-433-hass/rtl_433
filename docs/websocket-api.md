@@ -180,6 +180,13 @@ frames:
   plus device fields, such as
   `{"time":"...","model":"...","id":...,"temperature_C":...}`.
 - **States**: larger JSON objects emitted for periodic statistics/state.
+- **Log frames** (rtl_433 ≥ 23.11): the server's own log output, forwarded as
+  `{"time":"...","src":"<subsystem>","lvl":<int>,"msg":"<text>"}` objects. The
+  HTTP output consumes all log levels, but the server's global verbosity
+  (default `WARNING`; raise with `-v`) gates what is generated. Notably the
+  pulse detector's noise estimates (`src` `"Auto Level"`, from `-Y autolevel`
+  adjustments and `-M noise[:secs]` periodic reports) arrive this way — the
+  only place rtl_433 surfaces its noise floor; there is no structured getter.
 
 On server shutdown each WebSocket receives `{"shutdown":"goodbye"}`.
 
