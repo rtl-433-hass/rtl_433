@@ -12,8 +12,15 @@ permissions: {}
 
 jobs:
   pytest:
-    name: "pytest"
+    # The job name is the status-check context required by the main branch
+    # ruleset ("pytest (Python 3.14)"), so it must not drift. The matrix value
+    # only labels the check here; the interpreter comes from .python-version.
+    name: "pytest (Python ${{ matrix.python-version }})"
     runs-on: "ubuntu-latest"
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.14"]
     steps:
       - name: Checkout the repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
