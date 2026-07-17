@@ -349,6 +349,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#recommended-setup-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended Setup Order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#hacs-custom-repository" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -632,6 +643,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#recommended-setup-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended Setup Order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#hacs-custom-repository" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -685,6 +707,19 @@
 
 
 <h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
+<h2 id="recommended-setup-order">Recommended Setup Order<a class="headerlink" href="#recommended-setup-order" title="Permanent link">&para;</a></h2>
+<p>If you plan to use the
+<a href="https://github.com/rtl-433-hass/rtl_433-hass-addons">rtl_433 add-on</a> on Home
+Assistant OS or another Supervisor-based install, set things up in this order:</p>
+<ol>
+<li>Install this integration (HACS or manual, below).</li>
+<li>Restart Home Assistant so the integration is loaded.</li>
+<li>Install and start the add-on.</li>
+</ol>
+<p>With the integration already loaded, each radio the add-on detects appears as a
+discovered <strong>rtl_433</strong> card under <strong>Settings → Devices &amp; Services</strong> — no manual
+connection details needed. See
+<a href="../configuration/#home-assistant-os-add-on-discovery">Add-On Discovery</a>.</p>
 <h2 id="hacs-custom-repository">HACS Custom Repository<a class="headerlink" href="#hacs-custom-repository" title="Permanent link">&para;</a></h2>
 <p>This integration is not yet in the default HACS store, so add it as a custom
 repository:</p>
@@ -704,7 +739,10 @@ repository:</p>
 <li>Restart Home Assistant.</li>
 </ol>
 <h2 id="next-step">Next Step<a class="headerlink" href="#next-step" title="Permanent link">&para;</a></h2>
-<p>After installation, add a hub from Home Assistant using the
+<p>If you are using the rtl_433 add-on, install and start it now; each detected
+radio appears as a discovered <strong>rtl_433</strong> card under <strong>Settings → Devices &amp;
+Services</strong>, ready to add with one click.</p>
+<p>For any other rtl_433 server, add a hub manually using the
 <a href="../configuration/">configuration guide</a>. You will see the connection form below.</p>
 <p><img alt="The rtl_433 config flow form: host, port, WebSocket path, secure toggle, managed-settings and discovery toggles, and initial frequency" src="../images/06-config-user.png" /></p>
 

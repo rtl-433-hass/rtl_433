@@ -387,6 +387,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#manual-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#manual-rtl_433-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -654,6 +665,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#manual-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Configuration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#manual-rtl_433-configuration" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -707,8 +729,26 @@
 
 
 <h1 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h1>
-<p>Add a hub from <strong>Settings → Devices &amp; Services → Add Integration → rtl_433</strong>.
-Each hub points at one rtl_433 server's WebSocket endpoint.</p>
+<p>There are two ways to create a hub: automatically through
+<a href="#home-assistant-os-add-on-discovery">add-on discovery</a> (recommended), or
+<a href="#manual-configuration">manually</a> for any other rtl_433 server. Each hub points
+at one rtl_433 server's WebSocket endpoint.</p>
+<h2 id="home-assistant-os-add-on-discovery">Home Assistant OS Add-On Discovery<a class="headerlink" href="#home-assistant-os-add-on-discovery" title="Permanent link">&para;</a></h2>
+<p>If you run the
+<a href="https://github.com/rtl-433-hass/rtl_433-hass-addons">rtl_433 add-on</a> on Home
+Assistant OS, each radio it detects is published through Supervisor discovery.
+It appears under <strong>Settings → Devices &amp; Services</strong> as a discovered <strong>rtl_433</strong>
+card. Click <strong>Add</strong> and confirm; no host or port needs to be typed.</p>
+<p>For discovery to work, this integration must already be installed and loaded
+when the add-on starts — install the integration, restart Home Assistant, and
+then start the add-on. If you started the add-on first and no card appeared,
+restart the add-on so it republishes discovery.</p>
+<p>Discovered radios use the add-on's stable per-radio identifier, so the same hub
+and nested-device history can survive add-on restarts and USB port changes. For
+multi-dongle setups, stability is best when each dongle stays in a fixed USB port
+or has a unique serial.</p>
+<h2 id="manual-configuration">Manual Configuration<a class="headerlink" href="#manual-configuration" title="Permanent link">&para;</a></h2>
+<p>Add a hub from <strong>Settings → Devices &amp; Services → Add Integration → rtl_433</strong>.</p>
 <p><img alt="The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings and discovery toggles, and initial frequency" src="../images/06-config-user.png" /></p>
 <table>
 <thead>
@@ -759,16 +799,6 @@ Each hub points at one rtl_433 server's WebSocket endpoint.</p>
 <p>The integration validates that the WebSocket can be reached before creating the
 hub. Manual hub identity is derived from <code>host:port</code>, so the same server cannot
 be added twice.</p>
-<h2 id="home-assistant-os-add-on-discovery">Home Assistant OS Add-On Discovery<a class="headerlink" href="#home-assistant-os-add-on-discovery" title="Permanent link">&para;</a></h2>
-<p>If you run the
-<a href="https://github.com/rtl-433-hass/rtl_433-hass-addons">rtl_433 add-on</a> on Home
-Assistant OS, each radio it detects is published through Supervisor discovery.
-It appears under <strong>Settings → Devices &amp; Services</strong> as a discovered <strong>rtl_433</strong>
-card. Click <strong>Add</strong> and confirm; no host or port needs to be typed.</p>
-<p>Discovered radios use the add-on's stable per-radio identifier, so the same hub
-and nested-device history can survive add-on restarts and USB port changes. For
-multi-dongle setups, stability is best when each dongle stays in a fixed USB port
-or has a unique serial.</p>
 <h2 id="manual-rtl_433-configuration">Manual rtl_433 Configuration<a class="headerlink" href="#manual-rtl_433-configuration" title="Permanent link">&para;</a></h2>
 <p>The integration connects to rtl_433's HTTP/WebSocket server. Start rtl_433 with
 HTTP output enabled, for example:</p>

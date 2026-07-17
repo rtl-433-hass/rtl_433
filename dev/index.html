@@ -671,10 +671,12 @@ and can expose decoded events through its HTTP API. This integration connects to
 that WebSocket endpoint, normalizes each event into a stable device identity, and
 maps raw fields to Home Assistant sensors, binary sensors, and events through the
 <a href="device-library/">device library</a>.</p>
-<p>The best way to use this integration is to use the
+<p>The best way to use this integration is with the
 <a href="https://github.com/rtl-433-hass/rtl_433-hass-addons">rtl_433 Home Assistant add-on</a>
-with a supported USB radio. Otherwise, the integration can connect to any rtl_433
-server with HTTP output enabled.</p>
+and a supported USB radio: install this integration first, restart Home
+Assistant, and then install and start the add-on. Each radio the add-on detects
+is discovered automatically — no connection details to type. Otherwise, the
+integration can connect to any rtl_433 server with HTTP output enabled.</p>
 <h2 id="features">Features<a class="headerlink" href="#features" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Local push</strong> over the rtl_433 WebSocket, with no cloud dependency and no
