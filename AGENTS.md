@@ -371,7 +371,7 @@ because these are the contracts the integration relies on:
   A **server log frame** (`{"time", "src", "lvl", "msg"}`, rtl_433 ≥ 23.11 —
   recognized by `msg` + `lvl` with no model/identity keys) goes to the client's
   `_handle_log`: `src == "Auto Level"` messages are parsed
-  (`pyrtl_433.autolevel`, exact upstream wording, unparseable ⇒ ignored) into
+  (`pyrtl_433.autolevel`, exact upstream wording, unparsable ⇒ ignored) into
   the client's `noise_level` / `min_level` snapshots — the **only** source of
   the receiver noise floor rtl_433 offers (no structured getter exists) — and
   fire `on_hub_update` on change; the raw frame also reaches the optional
