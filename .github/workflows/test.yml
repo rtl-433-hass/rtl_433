@@ -12,14 +12,14 @@ permissions: {}
 
 jobs:
   pytest:
+    # The job name is the status-check context required by the main branch
+    # ruleset ("pytest (Python 3.14)"), so it must not drift. The matrix value
+    # only labels the check here; the interpreter comes from .python-version.
     name: "pytest (Python ${{ matrix.python-version }})"
     runs-on: "ubuntu-latest"
     strategy:
       fail-fast: false
       matrix:
-        # Home Assistant 2026.4+ requires Python 3.14; older Python versions
-        # are no longer supported (and pytest-homeassistant-custom-component
-        # drops them too).
         python-version: ["3.14"]
     steps:
       - name: Checkout the repository
@@ -27,10 +27,10 @@ jobs:
         with:
           submodules: false
 
+      # Python version comes from .python-version (tracks the Home Assistant
+      # requirement); uv reads it automatically.
       - name: Install uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          python-version: ${{ matrix.python-version }}
 
       - name: Install requirements
         run: |

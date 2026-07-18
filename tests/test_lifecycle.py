@@ -369,6 +369,62 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
     assert cf_entry.entity_category == "diagnostic"
 
 
+async def test_hub_noise_sensors_track_autolevel_log_frames(hass, hub_entry_builder):
+    """The noise sensors update from real "Auto Level" log frames on the socket.
+
+    Drives the full pipeline: the client's own frame handler classifies the log
+    frame, parses the message, and fires ``on_hub_update`` -> the coordinator's
+    dispatcher fan-out repaints the hub sensors. No ``/cmd`` involved.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+
+    ent_reg = er.async_get(hass)
+
+    def sensor_id(suffix):
+        return ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, f"{hub.entry_id}:hub:{suffix}"
+        )
+
+    # Unknown until the server reports (requires -Y autolevel / -M noise).
+    assert hass.states.get(sensor_id("noise_level")).state == "unknown"
+    assert hass.states.get(sensor_id("min_level")).state == "unknown"
+
+    # A -Y autolevel adjustment frame, exactly as broadcast by rtl_433 >= 23.11.
+    coordinator._client._handle_text_frame(
+        '{"time": "2026-05-26 10:00:00", "src": "Auto Level", "lvl": 4, '
+        '"msg": "Estimated noise level is -38.4 dB, '
+        'adjusting minimum detection level to -35.4 dB"}'
+    )
+    await hass.async_block_till_done()
+
+    noise_state = hass.states.get(sensor_id("noise_level"))
+    assert noise_state.state == "-38.4"
+    assert noise_state.attributes["device_class"] == "signal_strength"
+    assert noise_state.attributes["unit_of_measurement"] == "dB"
+    assert noise_state.attributes["state_class"] == "measurement"
+    min_state = hass.states.get(sensor_id("min_level"))
+    assert min_state.state == "-35.4"
+    assert min_state.attributes["state_class"] == "measurement"
+
+    # A periodic -M noise report moves the estimate; min level is untouched.
+    coordinator._client._handle_text_frame(
+        '{"time": "2026-05-26 10:00:30", "src": "Auto Level", "lvl": 4, '
+        '"msg": "Current noise level -37.9 dB, estimated noise -39.1 dB"}'
+    )
+    await hass.async_block_till_done()
+
+    assert hass.states.get(sensor_id("noise_level")).state == "-39.1"
+    assert hass.states.get(sensor_id("min_level")).state == "-35.4"
+
+    # The log frame never became a phantom device: only the hub device exists.
+    dev_reg = dr.async_get(hass)
+    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    noise_entry = ent_reg.async_get(sensor_id("noise_level"))
+    assert noise_entry.device_id == hub_device.id
+    assert noise_entry.entity_category == "diagnostic"
+
+
 async def test_hub_diagnostic_sensors_unmanaged(hass, hub_entry_builder):
     """With management off, all six SDR sensors render and no controls exist."""
     hub = await _setup_hub(
