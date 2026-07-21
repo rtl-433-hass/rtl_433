@@ -9,4 +9,4 @@
 # supporting packages it builds on (aiohttp, PyYAML, voluptuous).
 #
 # Keep this list in sync with the manifest's requirements array.
-pyrtl_433==0.1.1
+pyrtl_433==0.2.0
