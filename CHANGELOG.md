@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.3...v0.20.0) (2026-07-21)
+
+
+### Features
+
+* **upstream:** phase 1 — fork, compatibility contract, upstream tracker ([f9a960d](https://github.com/rtl-433-hass/rtl_433/commit/f9a960de6d5c1b593b4cf93a3e75cd9b239081c8))
+
+
+### Documentation
+
+* **plan:** add plan 26 — upstream rtl_433 integration to HA core ([b7ee236](https://github.com/rtl-433-hass/rtl_433/commit/b7ee2368c0c9c910548755d2a376b8a85ffd0733))
+* recommend integration-first setup order for add-on discovery ([a63fdd9](https://github.com/rtl-433-hass/rtl_433/commit/a63fdd9b14e09415477101cdf25eea791ec7c501))
+* **upstream:** finalize plan 26 — validation, AGENTS note, archive ([427e313](https://github.com/rtl-433-hass/rtl_433/commit/427e31389c3f8b49a6f260c9d449d5144fde38d1))
+
 ## [0.19.3](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.2...v0.19.3) (2026-07-04)
 
 
