@@ -278,4 +278,41 @@ The coordinator package, normalizer, mapping library, SDR settings, and device-l
 
 - 2026-07-23 (refinement): Resolved three open decisions autonomously with recommended defaults after the interactive prompt was declined, and recorded them as Clarifications #4–#6 (skew-tolerant debounce dedup; earliest-receiver survivor; location-scoped Level 1). Added Clarifications #7 (subentries available at min HA 2026.4.0, auto-resolved) and #8 (discovery-toggle/`via_device`/reconfigure-mapping assumptions). Reworked Component 4's dedup around the provenance of `event_time` (each host's decode clock) and a named debounce window; reordered the delivery so the subentry topology precedes location-scoped Level 1 grouping; specified a **non-merging** upgrade (each existing entry → its own location) with a deterministic keep-first forced-merge path and Repairs notice on opt-in consolidation. Added a merged-identity/aggregator **data contract**, a `device_key` id-stability risk, and a clock-sync assumption; updated the state table, Executive Summary, success criteria (#3/#7/#8), and self-validation (#2/#3/#6/#7) to match.
 
-*Note: the workspace's `config/hooks/PRE_PLAN.md`, `config/hooks/POST_PLAN.md`, and `config/templates/PLAN_TEMPLATE.md` referenced in `.init-metadata.json` are not materialized in this checkout, so those hooks could not be executed; this plan's structure was conformed to the repository's existing plans.*
+## Execution Blueprint
+
+**Validation Gates:** the workspace's `config/hooks/*` are not materialized in this checkout, so gates use the project's real checks — `uv run ruff check custom_components/rtl_433` and `uv run pytest tests/` — at each phase boundary.
+
+### Dependency Diagram
+
+```mermaid
+graph TD
+    T1["Task 1: Location/receiver topology + hub→receiver rename"]
+    T2["Task 2: Level 1 location-scoped device identity"]
+    T3["Task 3: Level 2 aggregator + entity union + skew-tolerant dedup"]
+    T4["Task 4: Merged availability + per-receiver diagnostics"]
+    T5["Task 5: Seamless v2→v3 migration"]
+    T6["Task 6: Test suite"]
+    T7["Task 7: Docs & screenshots"]
+    T1 --> T2 --> T3 --> T4 --> T5
+    T5 --> T6
+    T5 --> T7
+```
+
+### Phases
+
+- **Phase 1 — Topology foundation:** Task 1. *(Most later files overlap this task, so it runs alone.)*
+- **Phase 2 — Level 1 grouping:** Task 2 (depends on 1).
+- **Phase 3 — Union + dedup:** Task 3 (depends on 2).
+- **Phase 4 — Availability + diagnostics:** Task 4 (depends on 3).
+- **Phase 5 — Migration:** Task 5 (depends on 2, 3, 4).
+- **Phase 6 — Tests & docs (parallel, file-disjoint):** Tasks 6 and 7 (depend on 5).
+
+### Execution Summary
+- Total Phases: 6
+- Total Tasks: 7
+
+*Note on parallelism: Components 1–5 touch heavily overlapping files (`__init__.py`, `config_flow.py`, `entity.py`, `migration.py`), so Phases 1–5 are deliberately sequential single-task phases to avoid conflicting edits; only Phase 6 (tests vs docs) is file-disjoint and parallelizable.*
+
+---
+
+*Note: the workspace's `config/hooks/PRE_PLAN.md`, `config/hooks/POST_PLAN.md`, `config/hooks/POST_PHASE.md`, `config/hooks/POST_EXECUTION.md`, and `config/templates/*` referenced in `.init-metadata.json` are not materialized in this checkout, so the strikethroo lifecycle hooks/templates could not be executed and were substituted (plan structure modeled on existing plans; validation gates use `ruff` + `pytest`).*
