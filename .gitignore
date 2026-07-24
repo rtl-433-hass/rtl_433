@@ -1,6 +1,8 @@
-# Home Assistant configuration and runtime (development/testing)
-config/
-!config/configuration.yaml
+# Home Assistant configuration and runtime (development/testing).
+# Anchored to the repo root so it does NOT also match nested config dirs such
+# as .ai/strikethroo/config/ (the strikethroo lifecycle hooks/templates).
+/config/
+!/config/configuration.yaml
 
 # Virtual environments (shared dev venv lives at $HOME/rtl433-venv, outside the
 # repo; still ignore any in-repo venv just in case)
