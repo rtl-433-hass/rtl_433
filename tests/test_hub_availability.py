@@ -31,6 +31,7 @@ from custom_components.rtl_433.const import (
     DOMAIN,
     HUB_OFFLINE_GRACE,
     signal_hub_availability,
+    signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.helpers import entity_registry as er
@@ -450,12 +451,139 @@ async def test_removal_unsubscribes_from_both_signals(hass, hub_entry_builder):
     assert entity._unsub_hub_availability is None
     assert entity._unsub_dispatcher is None
 
-    with patch.object(type(entity), "async_write_ha_state") as write:
+    with patch.object(entity, "async_write_ha_state") as write:
         async_dispatcher_send(hass, signal_hub_availability(hub.entry_id))
         _feed(
             _coordinator(hass, hub),
             {"model": "EnergyMeter-2000", "id": 1234, "power_W": 6.0},
         )
+        await hass.async_block_till_done()
+        write.assert_not_called()
+
+
+async def test_offline_hub_takes_the_hub_diagnostic_sensors_unavailable(
+    hass, hub_entry_builder
+):
+    """The hub's own diagnostic sensors are gated too, but connectivity is not.
+
+    Every hub diagnostic value is fetched over HTTP ``/cmd``, so an outage
+    freezes it; the Connectivity binary sensor must stay available because it is
+    what reports the outage.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+    coordinator._client.meta = {"center_frequency": 433_920_000, "samp_rate": 250_000}
+    coordinator._client.stats = {"frames": {"count": 7, "fsk": 2, "events": 5}}
+
+    ent_reg = er.async_get(hass)
+    freq_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:hub:center_frequency"
+    )
+    ook_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:hub:ook_frames"
+    )
+    conn_eid = ent_reg.async_get_entity_id(
+        "binary_sensor", DOMAIN, f"{hub.entry_id}:hub:connectivity"
+    )
+    assert freq_eid is not None
+    assert ook_eid is not None
+    assert conn_eid is not None
+
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _connect(coordinator)  # repaint with the meta/stats above
+        await hass.async_block_till_done()
+    assert hass.states.get(freq_eid).state != "unavailable"
+    assert hass.states.get(ook_eid).state != "unavailable"
+
+    # A blip leaves the diagnostics alone; connectivity flips immediately.
+    with freeze_time(start + timedelta(seconds=1)):
+        _drop(coordinator)
+        await hass.async_block_till_done()
+        assert hass.states.get(freq_eid).state != "unavailable"
+        assert hass.states.get(conn_eid).state == "off"
+
+    # Past the grace window the frozen readings read unavailable...
+    with freeze_time(start + HUB_OFFLINE_GRACE + timedelta(seconds=2)):
+        async_fire_time_changed(hass, dt_util.utcnow())
+        await hass.async_block_till_done()
+        assert hass.states.get(freq_eid).state == "unavailable"
+        assert hass.states.get(ook_eid).state == "unavailable"
+        # ...but connectivity keeps reporting, which is its whole job.
+        assert hass.states.get(conn_eid).state == "off"
+
+        _connect(coordinator)
+        await hass.async_block_till_done()
+        assert hass.states.get(freq_eid).state != "unavailable"
+        assert hass.states.get(ook_eid).state != "unavailable"
+        assert hass.states.get(conn_eid).state == "on"
+
+
+async def test_hub_entity_repaints_on_the_availability_signal(hass, hub_entry_builder):
+    """Hub entities subscribe to the gate's own signal, not just ``hub_update``.
+
+    ``signal_hub_update`` fires on the connect/disconnect edges but *not* when the
+    grace window elapses, which is the moment a gated hub entity's ``available``
+    changes. Asserted by dispatching the signal directly: a subscription bound to
+    the wrong name (or missing) leaves the entity unpainted, which the end-to-end
+    test above cannot pin down on its own.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    ent_reg = er.async_get(hass)
+    freq_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:hub:center_frequency"
+    )
+    entity = hass.data["entity_components"]["sensor"].get_entity(freq_eid)
+    assert entity is not None
+
+    with patch.object(entity, "async_write_ha_state") as write:
+        async_dispatcher_send(hass, signal_hub_availability(hub.entry_id))
+        await hass.async_block_till_done()
+        write.assert_called_once()
+
+    # A different hub's flip must not repaint this one.
+    with patch.object(entity, "async_write_ha_state") as write:
+        async_dispatcher_send(hass, signal_hub_availability("some-other-hub"))
+        await hass.async_block_till_done()
+        write.assert_not_called()
+
+
+async def test_missing_hub_key_reads_unknown_not_unavailable(hass, hub_entry_builder):
+    """A key the server omits is ``unknown`` while connected — not unavailable."""
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+    coordinator._client.meta = {}
+    coordinator._client.stats = {}
+    _connect(coordinator)
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    freq_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:hub:center_frequency"
+    )
+    assert hass.states.get(freq_eid).state == "unknown"
+
+
+async def test_hub_entity_removal_unsubscribes_from_both_signals(
+    hass, hub_entry_builder
+):
+    """A removed hub entity drops the hub-update *and* availability subscriptions."""
+    hub = await _setup_hub(hass, hub_entry_builder)
+    ent_reg = er.async_get(hass)
+    freq_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:hub:center_frequency"
+    )
+    entity = hass.data["entity_components"]["sensor"].get_entity(freq_eid)
+    assert entity._unsub_hub is not None
+    assert entity._unsub_hub_availability is not None
+
+    await entity.async_will_remove_from_hass()
+    assert entity._unsub_hub is None
+    assert entity._unsub_hub_availability is None
+
+    with patch.object(entity, "async_write_ha_state") as write:
+        async_dispatcher_send(hass, signal_hub_availability(hub.entry_id))
+        async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
         await hass.async_block_till_done()
         write.assert_not_called()
 

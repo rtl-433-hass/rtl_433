@@ -495,8 +495,15 @@ all?". End-user docs live in
   *before* the silence check, and the two `available` overrides
   (`Rtl433Event`, `Rtl433LastSeenSensor`) route through it too. **Never-expire
   devices are not exempt** — that exemption is from *silence*, not from the
-  transport being gone. Hub entities (connectivity, hub diagnostics, SDR
-  controls) are unaffected: the connectivity sensor *is* the connection report.
+  transport being gone.
+- **The hub's own diagnostic sensors read it too.** `Rtl433HubSensor.available`
+  returns `hub_available`: every value it renders is HTTP `/cmd`-sourced, so an
+  outage freezes it with nothing on the entity to say so. A key missing from a
+  *live* payload still reads `unknown` (a `None` native value), not unavailable.
+  Two hub entities stay ungated: `Rtl433HubConnectivity` (it *is* the connection
+  report — `available` is hardcoded `True` and it flips `off` on the drop with no
+  grace window) and `Rtl433HubControl` (availability is a capability gate on
+  `meta`).
 - **The clock starts at `async_start`,** not at the first drop, so a Home
   Assistant restart while the server is down expires the restored states after
   the grace window instead of leaving them available forever.
@@ -507,7 +514,10 @@ all?". End-user docs live in
   three funnel into `_async_sync_hub_availability`, which dispatches
   `SIGNAL_HUB_AVAILABILITY` **once per flip** (a hub-wide signal, deliberately
   separate from `SIGNAL_HUB_UPDATE`, which also fires on every meta/stats refresh
-  and would otherwise write state for every device entity on each poll).
+  and would otherwise write state for every device entity on each poll). Both
+  `Rtl433Entity` and `Rtl433HubEntity` subscribe: `SIGNAL_HUB_UPDATE` covers the
+  connect/disconnect edges but **not** the moment the grace window elapses, which
+  is exactly when a gated entity's `available` changes.
 - **Logging.** The library logs drops at DEBUG under its own logger, which is
   invisible to anyone debugging the integration. The coordinator logs the loss
   and the recovery (with the outage duration) at **INFO**, and the moment the

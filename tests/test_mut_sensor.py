@@ -477,6 +477,9 @@ def _make_hub_sensor(desc, meta=None, stats=None, entry_id="test_entry"):
     coord = MagicMock()
     coord.meta = meta or {}
     coord.stats = stats or {}
+    # Hub sensors read the connection gate for ``available``; a MagicMock would
+    # otherwise return a truthy mock rather than a bool.
+    coord.hub_available = True
     sensor = Rtl433HubSensor.__new__(Rtl433HubSensor)
     sensor._coordinator = coord
     sensor._desc = desc
@@ -496,9 +499,12 @@ def _desc_by_suffix(suffix):
 
 
 class TestRtl433HubSensorProperties:
-    def test_always_available(self):
+    def test_available_follows_the_hub_connection(self):
+        """Hub values are HTTP-sourced, so an outage freezes them -> unavailable."""
         sensor = _make_hub_sensor(_desc_by_suffix("gain"))
         assert sensor.available is True
+        sensor._coordinator.hub_available = False
+        assert sensor.available is False
 
     def test_entity_category_is_diagnostic(self):
         # _attr_entity_category is intercepted by the CachedProperties metaclass; test

@@ -37,9 +37,16 @@ Shorter drops are ignored. The client reconnects with a backoff of 1 to 60
 seconds, so a server restart or a brief network blip normally recovers well
 inside the 60 second window without flapping any device's availability.
 
-The hub's own **Connectivity** binary sensor reports the socket state directly and
-stays available throughout. The Home Assistant log records the drop, the moment
-the devices are marked unavailable, and the reconnect:
+The hub's own diagnostic sensors (center frequency, sample rate, gain, frame
+counters, and the rest) go unavailable on the same 60 second window. Their values
+are fetched from the server over HTTP, so an outage freezes them at whatever was
+last read.
+
+The **Connectivity** binary sensor is the exception: it reports the socket state
+directly, flips to `off` the moment the connection drops — no grace window — and
+stays available throughout, because it is the entity that tells you the hub is
+down. The Home Assistant log records the drop, the moment the devices are marked
+unavailable, and the reconnect:
 
 ```text
 INFO  rtl_433 lost the connection to ws://rtl433.local:8433/ws; reconnecting, ...

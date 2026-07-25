@@ -319,6 +319,13 @@ class Rtl433HubEntity(Entity):
     Unlike :class:`Rtl433Entity` (one per device field, availability gated by the
     per-device timeout), hub entities are one-per-hub, attach to the hub device,
     and re-read the coordinator's hub state on every ``signal_hub_update``.
+
+    They also subscribe to ``signal_hub_availability``, which fires only when the
+    hub-connection gate flips (see ``coordinator/_watchdog.py``). ``signal_hub_update``
+    covers the connect/disconnect edges but not the moment ``HUB_OFFLINE_GRACE``
+    elapses, which is exactly when a connection-gated hub entity's ``available``
+    changes. Subclasses that do not read the gate (the connectivity sensor, the
+    SDR controls) simply re-write an unchanged state on that edge.
     """
 
     _attr_has_entity_name = True
@@ -332,21 +339,30 @@ class Rtl433HubEntity(Entity):
             identifiers={(DOMAIN, hub_entry_id)},
         )
         self._unsub_hub: Callable[[], None] | None = None
+        self._unsub_hub_availability: Callable[[], None] | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to the hub-update dispatcher signal."""
+        """Subscribe to the hub-update and availability-gate signals."""
         await super().async_added_to_hass()
         self._unsub_hub = async_dispatcher_connect(
             self.hass,
             signal_hub_update(self._hub_entry_id),
             self._handle_hub_update,
         )
+        self._unsub_hub_availability = async_dispatcher_connect(
+            self.hass,
+            signal_hub_availability(self._hub_entry_id),
+            self._handle_hub_update,
+        )
 
     async def async_will_remove_from_hass(self) -> None:
-        """Tear down the hub-update subscription."""
+        """Tear down both hub subscriptions."""
         if self._unsub_hub is not None:
             self._unsub_hub()
             self._unsub_hub = None
+        if self._unsub_hub_availability is not None:
+            self._unsub_hub_availability()
+            self._unsub_hub_availability = None
 
     @callback
     def _handle_hub_update(self) -> None:
