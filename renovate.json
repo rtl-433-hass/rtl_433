@@ -54,12 +54,6 @@
       "description": "Hook revs are developer tooling. Sharing the group above keeps the ruff== pin in requirements_dev.txt and the ruff-pre-commit rev in one PR, so the two cannot drift apart"
     },
     {
-      "matchManagers": ["pre-commit"],
-      "matchUpdateTypes": ["major"],
-      "automerge": false,
-      "description": "A major hook bump can drop hooks or change which checks run, so review it rather than automerging"
-    },
-    {
       "matchManagers": ["github-actions"],
       "automerge": false
     }
