@@ -24,6 +24,10 @@
   ],
   "automerge": true,
   "minimumReleaseAge": "3 days",
+  "pre-commit": {
+    "enabled": true,
+    "description": "Renovate's pre-commit manager is disabled by default, so .pre-commit-config.yaml revs were never updated and drifted behind the equivalent pins in requirements_dev.txt"
+  },
   "packageRules": [
     {
       "matchDepNames": ["homeassistant"],
@@ -43,6 +47,17 @@
       "matchPackageNames": ["ruff", "pre-commit", "codespell"],
       "groupName": "dev dependencies",
       "description": "Group developer tooling updates into a single PR"
+    },
+    {
+      "matchManagers": ["pre-commit"],
+      "groupName": "dev dependencies",
+      "description": "Hook revs are developer tooling. Sharing the group above keeps the ruff== pin in requirements_dev.txt and the ruff-pre-commit rev in one PR, so the two cannot drift apart"
+    },
+    {
+      "matchManagers": ["pre-commit"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "description": "A major hook bump can drop hooks or change which checks run, so review it rather than automerging"
     },
     {
       "matchManagers": ["github-actions"],

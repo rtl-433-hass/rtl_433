@@ -8,9 +8,8 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     # Keep in sync with the ruff== pin in requirements_dev.txt so the Ruff and
-    # pre-commit jobs cannot disagree. Renovate tracks this rev as
-    # astral-sh/ruff-pre-commit, not as the "ruff" PyPI package, so the two pins
-    # arrive in separate PRs.
+    # pre-commit CI jobs cannot disagree. Renovate's "dev dependencies" group
+    # covers both, so they arrive in the same PR.
     rev: v0.15.22
     hooks:
       # Linter (with autofix)
@@ -20,7 +19,8 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
+    # Keep in sync with the codespell== pin in requirements_dev.txt.
+    rev: v2.4.3
     hooks:
       - id: codespell
         args: ["--ignore-words-list=hass,keep-alives,retuned", "--quiet-level=2"]
