@@ -70,6 +70,14 @@ exclude_lines = [
 # Based on https://github.com/home-assistant/core/blob/dev/pyproject.toml
 target-version = "py314"
 line-length = 88
+# Ruff 0.16.0 formats Python code blocks in Markdown by default. The Strikethroo
+# plan and task documents are frozen records whose fenced blocks are illustrative
+# sketches, not source: hand-aligned comment columns and deliberately compact
+# definitions that the formatter would rewrite. Exclude them from both the linter
+# and the formatter; they contain no Python files.
+# extend-exclude, not exclude: plain `exclude` would replace ruff's built-in
+# defaults (.git, .venv, __pycache__, ...) rather than add to them.
+extend-exclude = [".ai"]
 
 [tool.ruff.lint]
 select = [
