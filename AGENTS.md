@@ -715,7 +715,22 @@ timeout, xdist, freezegun). To match CI, include coverage:
 uv run pytest --cov=custom_components/rtl_433 tests/
 ```
 
-CI runs on Python 3.14 (the minimum Home Assistant 2026.4 supports).
+CI runs on Python 3.14 (the minimum Home Assistant 2026.4 supports), and
+`pyproject.toml` sets `requires-python = ">=3.14"`. **The codebase uses 3.14-only
+syntax and will not parse on an older interpreter.** In particular it relies on
+[PEP 758](https://peps.python.org/pep-0758/), which allows unparenthesized
+exception tuples:
+
+```python
+except OSError, yaml.YAMLError:   # valid on 3.14+, SyntaxError on <= 3.13
+```
+
+This appears in `calibration.py`, `coordinator/_sdr.py`, `mapping/_loader.py`,
+`mapping/_transform.py`, `migration.py`, and `sensor.py`. Running `python -m
+compileall`, a linter, or a type checker under 3.13 or earlier reports
+`SyntaxError: multiple exception types must be parenthesized` on these files.
+That is a stale interpreter, **not** a defect — check `python --version` before
+concluding the tree is broken, and do not "fix" it by adding parentheses.
 
 ## Mutation testing (mutmut)
 
