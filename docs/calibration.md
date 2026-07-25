@@ -10,8 +10,11 @@ make it eligible for Home Assistant's Energy dashboard, calibrate the device.
 
 ## Calibration Flow
 
-Open **Settings → Devices & Services → rtl_433 → Configure → Device settings**,
-pick the meter, and set its consumption calibration.
+Open **Settings → Devices & Services → rtl_433 → Configure → Device settings**
+and pick the meter. Meters whose commodity the integration recognized from the
+signal are labelled with it in the picker (for example
+`SCMplus (SCMplus-1234) — gas detected`). The next step sets that device's
+consumption calibration.
 
 | Field | Meaning |
 | --- | --- |
@@ -20,7 +23,13 @@ pick the meter, and set its consumption calibration.
 | **Scale** | Multiplier applied to the raw counter so the stored value is in the chosen base unit. |
 
 When the meter reports a `MeterType` or `ert_type` hint, the commodity is
-pre-filled from it. You can override it.
+pre-filled from it — for the device you selected, however many meters the hub
+has. You can override it. Re-editing an already-calibrated device pre-fills its
+stored commodity, unit and scale.
+
+The counter field itself needs no configuration: SCM and ERT meters report
+`consumption_data` and SCMplus meters report `Consumption`, and both ship in the
+device library. Neither requires a YAML override.
 
 ![The calibration step for an energy meter, with a base-unit selector and a scale multiplier](images/12-calibration.png)
 

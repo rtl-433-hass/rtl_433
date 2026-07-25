@@ -110,15 +110,23 @@
       },
       "device": {
         "title": "Device settings",
-        "description": "Pick a device and override its availability timeout. Leave the timeout blank to clear the override and use the hub default. For a utility meter, choose a commodity to calibrate its consumption sensor for the Energy dashboard.",
+        "description": "Pick the device you want to change. Utility meters whose commodity was detected from the signal are labelled with it.",
         "data": {
-          "device": "Device",
+          "device": "Device"
+        },
+        "data_description": {
+          "device": "The device whose settings you want to change."
+        }
+      },
+      "device_settings": {
+        "title": "Device settings",
+        "description": "Settings for {device}. Leave the timeout blank to clear the override and use the hub default. For a utility meter, choose a commodity to calibrate its consumption sensor for the Energy dashboard.",
+        "data": {
           "timeout_override": "Availability timeout override (seconds)",
           "commodity": "Meter commodity",
           "motion_clear_delay": "Motion clear delay (seconds)"
         },
         "data_description": {
-          "device": "The device whose settings you want to change.",
           "timeout_override": "Mark this device unavailable after this many seconds without an event. Use 0 to never mark it unavailable. Leave blank to use the automatic default for this device's type (longer for door/window/motion sensors).",
           "commodity": "What this meter measures. Pick Energy, Gas, or Water to calibrate the consumption sensor (next step) so it works in the Energy dashboard. Pick None to leave it unitless (and clear any existing calibration).",
           "motion_clear_delay": "For a motion sensor, auto-clear it to off this many seconds after the last motion. Leave blank to use the default."
