@@ -28,16 +28,17 @@ stream stops. Playwright captures these screenshots (see `../../screenshots/`):
 | `05-mapping-overrides.png` | The **Device mappings** step: the YAML editor pre-filled with an example per-hub override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
 | `07-hub-settings.png` | The **Hub settings** step (discovery, default availability timeout, managed settings) |
-| `08-device-settings.png` | The **Device settings** step (device picker, timeout override, meter commodity) |
+| `13-device-picker.png` | The **Device settings** device picker, with the SCMplus meter labelled `— gas detected` from its `MeterType` |
+| `08-device-settings.png` | The per-device settings step for that meter (timeout override, meter commodity pre-filled to Gas) |
 | `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
 | `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
-| `12-calibration.png` | The utility-meter **calibration** step (base unit + scale) |
+| `12-calibration.png` | The utility-meter **calibration** step for that gas meter (base unit + scale) |
 
 Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
 `screenshots/` output directory itself is gitignored.
 
-The doorbell / energy meter / door / leak devices in the richer shots come from
+The doorbell / energy meter / SCMplus gas meter / door / leak devices in the richer shots come from
 `ws-bridge.mjs` replaying the project fixtures in `tests/fixtures/` (configured
 via `FIXTURE_FILES` in `docker-compose.yml`) alongside the live Acurite capture.
 
@@ -69,8 +70,13 @@ sudo npx playwright install-deps chromium   # system libs (see note below)
 > ```bash
 > sudo apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
 >   libxdamage1 libxkbcommon0 libnss3 libcups2 libdrm2 libgbm1 \
->   libpango-1.0-0 libcairo2 libasound2
+>   libpango-1.0-0 libcairo2 libasound2 \
+>   libxcomposite1 libxfixes3 libxrandr2
 > ```
+>
+> Chromium reports missing libs in batches, so a first run can still fail after
+> installing the list above; the three `libx*` packages on the last line are the
+> ones it asks for second.
 
 ## Running
 

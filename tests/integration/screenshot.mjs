@@ -300,36 +300,54 @@ async function selectPick(selectLoc, page, typeahead, optionRegex) {
   await page.waitForTimeout(600);
 }
 
-// Open the Device settings step, capture the form, then drive it to the
-// calibration step by selecting the replayed energy meter and commodity=energy
-// and capture that too. The forms are not submitted — the shots only need the
-// rendered steps.
+// Drive the three-form Device settings path and capture each rendered step:
+//
+//   13-device-picker.png    the picker alone, showing the SCMplus gas meter
+//                           annotated "— gas detected" from its MeterType
+//   08-device-settings.png  that device's settings, commodity pre-filled to gas
+//   12-calibration.png      the gas base-unit + scale form
+//
+// The picker is its own step precisely so the settings form can be pre-filled
+// from the selected device, so the shots must be taken in sequence rather than
+// off one combined form. Only the picker and settings forms are submitted (to
+// advance); the calibration form is left unsubmitted.
 async function captureDeviceSettings(page) {
   await openOptionsMenu(page);
   await page.locator("text=Device settings").first().click({ timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(2500);
-  await shot(page, "08-device-settings.png");
 
-  // Device picker (select 0) + commodity (select 1). The motion clear-delay
-  // field only appears for motion-bearing devices, which the fixtures exclude.
-  const selects = page.locator("ha-dialog ha-select, dialog ha-select");
-  if ((await selects.count()) >= 2) {
-    await selectPick(selects.nth(0), page, "EnergyMeter", /EnergyMeter/).catch(() =>
-      console.log("screenshot: energy meter not pickable; using default device"),
-    );
-    await selectPick(selects.nth(1), page, "Energy", /Energy/).catch(() =>
-      console.log("screenshot: commodity=Energy not pickable"),
-    );
-    await page
+  const submit = () =>
+    page
       .getByRole("button", { name: /^(submit|next)$/i })
       .first()
       .click({ timeout: 8000 })
       .catch(() => {});
-    await page.waitForTimeout(2500);
-    await shot(page, "12-calibration.png");
-  } else {
-    console.log("screenshot: device-settings selects not found; skipping 12-calibration.png");
+
+  // Step 1 — the picker is the only field on the form.
+  const picker = page.locator("ha-dialog ha-select, dialog ha-select").first();
+  if (!(await picker.count())) {
+    console.log("screenshot: device picker not found; skipping 13/08/12");
+    return;
   }
+  // Select the gas meter FIRST, then capture: the point of this shot is the
+  // per-device "— <commodity> detected" annotation, and the collapsed anchor
+  // shows it for the chosen device. (Screenshotting with the menu expanded is
+  // not worth it — holding an mwc-select menu open across a capture reliably
+  // dismisses the whole dialog.)
+  await selectPick(picker, page, "SCMplus", /SCMplus/).catch(() =>
+    console.log("screenshot: SCMplus meter not pickable; using default device"),
+  );
+  await shot(page, "13-device-picker.png");
+  await submit();
+  await page.waitForTimeout(2500);
+  await shot(page, "08-device-settings.png");
+
+  // Step 2 — commodity is pre-filled from MeterType, so just submit it through
+  // to the calibration step. (The motion clear-delay field is absent here: the
+  // selected device is not motion-bearing.)
+  await submit();
+  await page.waitForTimeout(2500);
+  await shot(page, "12-calibration.png");
 }
 
 // Open the per-entry options flow, which lands on the menu step
@@ -338,21 +356,39 @@ async function captureDeviceSettings(page) {
 async function openOptionsMenu(page) {
   await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
-  const hubHeader = page.locator(`text=rtl_433 (${RTL_HOST})`).first();
-  const box = await hubHeader.boundingBox();
-  // The gear (options/Configure) icon sits at the right edge of the hub header.
-  if (box) {
-    await page.mouse.click(1243, box.y + box.height / 2);
-  } else {
-    // Fallback: open Configure from a kebab/Configure button if the header
-    // layout shifts.
-    await page.getByRole("button", { name: /configure/i }).first().click({ timeout: 5000 }).catch(() => {});
-  }
+  // Gate on the integration card actually rendering: a fixed sleep races the
+  // frontend's "Loading data" splash on a cold load, and clicking through it
+  // silently produces no dialog.
   await page
-    .locator("text=Hub settings")
+    .locator(`text=rtl_433 (${RTL_HOST})`)
     .first()
-    .waitFor({ state: "visible", timeout: 8000 })
+    .waitFor({ state: "visible", timeout: 30000 })
     .catch(() => {});
+
+  const menuShown = () =>
+    page
+      .locator("text=Hub settings")
+      .first()
+      .waitFor({ state: "visible", timeout: 8000 })
+      .then(() => true)
+      .catch(() => false);
+
+  // The gear (options/Configure) icon sits at the right edge of the hub header.
+  // On a cold page load the first click can land before the card is interactive,
+  // so retry a couple of times rather than silently continuing without a dialog.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const hubHeader = page.locator(`text=rtl_433 (${RTL_HOST})`).first();
+    const box = await hubHeader.boundingBox().catch(() => null);
+    if (box) {
+      await page.mouse.click(1243, box.y + box.height / 2);
+    } else {
+      // Fallback: open Configure from a kebab/Configure button if the header
+      // layout shifts.
+      await page.getByRole("button", { name: /configure/i }).first().click({ timeout: 5000 }).catch(() => {});
+    }
+    if (await menuShown()) break;
+    await page.waitForTimeout(1500);
+  }
   await page.waitForTimeout(1500);
 }
 
