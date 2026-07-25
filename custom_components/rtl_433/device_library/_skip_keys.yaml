@@ -30,9 +30,12 @@ skip_keys:
   - freq2
   # protocol number and decoder bookkeeping.
   - protocol
-  # SCMplus identity / transport fields. `EndpointID` carries the same value as
-  # `id` (upstream `src/devices/scmplus.c` has a "TODO: remove this (see id)"
-  # against it), so it would only ever duplicate the device identity.
-  # `PacketCRC` is the frame checksum -- transport noise, like `mic`.
+  # SCMplus identity / transport fields, both of which upstream itself marks for
+  # removal. `EndpointID` carries the same value as `id` ("TODO: remove this
+  # (see \"id\")"), so it would only ever duplicate the device identity, and
+  # `PacketCRC` is the frame checksum -- transport noise, like `mic`
+  # ("TODO: remove this"). Links pinned to a commit so the lines stay accurate:
+  #   EndpointID: https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/scmplus.c#L146
+  #   PacketCRC:  https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/scmplus.c#L149
   - EndpointID
   - PacketCRC
