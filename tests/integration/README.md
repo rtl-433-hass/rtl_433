@@ -51,7 +51,9 @@ One-time setup:
 
 ```bash
 # 1. Fetch the pinned, sparse test-capture submodule (only the Acurite dirs).
-git submodule update --init tests/integration/rtl_433_tests
+#    It's marked `update = none` in .gitmodules so plain clones/updates skip
+#    it by default; --checkout is required to opt in explicitly.
+git submodule update --init --checkout tests/integration/rtl_433_tests
 
 # 2. Install Node deps (Playwright + ws) and the Chromium browser.
 cd tests/integration
