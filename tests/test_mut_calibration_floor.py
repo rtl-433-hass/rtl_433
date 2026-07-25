@@ -330,7 +330,8 @@ class TestCommodityFromFieldsErtTypeUpstreamAlignment:
 
     These three were previously absent from the table, so an ERT-SCM meter with
     one of them got no commodity pre-fill at all. Upstream's ``scmplus.c``
-    classifies them as gas/gas/water; the integration now agrees.
+    classifies them as gas/gas/water; the integration now agrees. The pinned
+    permalink to that switch lives on ``calibration.commodity_from_fields``.
     """
 
     def test_ert_type_0_is_gas(self):
