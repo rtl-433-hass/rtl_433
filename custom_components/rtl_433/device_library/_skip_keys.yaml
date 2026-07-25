@@ -30,3 +30,9 @@ skip_keys:
   - freq2
   # protocol number and decoder bookkeeping.
   - protocol
+  # SCMplus identity / transport fields. `EndpointID` carries the same value as
+  # `id` (upstream `src/devices/scmplus.c` has a "TODO: remove this (see id)"
+  # against it), so it would only ever duplicate the device identity.
+  # `PacketCRC` is the frame checksum -- transport noise, like `mic`.
+  - EndpointID
+  - PacketCRC
