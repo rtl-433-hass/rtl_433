@@ -681,8 +681,45 @@ def test_existing_themed_file_loads_identically(library, tmp_path):
     for field_key in (
         "power_W",
         "energy_kWh",
-        "consumption",
+        "Consumption",
         "consumption_data",
         "ext_power",
     ):
         assert reloaded.flat[field_key] == registry.flat[field_key]
+
+
+# --------------------------------------------------------------------------- #
+# SCMplus `Consumption` is CamelCased to match the wire name.                  #
+# --------------------------------------------------------------------------- #
+def test_scmplus_consumption_key_is_camelcase(library):
+    """``lookup("Consumption")`` resolves the SCMplus utility-meter descriptor.
+
+    rtl_433's SCMplus decoder emits the field as ``Consumption`` (CamelCase,
+    alongside ``MeterType`` / ``EndpointID``) and field matching is
+    case-sensitive, so the shipped library must key it that way. It previously
+    shipped as lowercase ``consumption``, which never matched a real event.
+    """
+    registry, _ = library
+
+    descriptor = lookup("Consumption")
+    assert descriptor is not None
+    assert descriptor.field_key == "Consumption"
+    assert descriptor.platform == "sensor"
+    # Ships unitless; a real device_class/unit comes from a per-device calibration.
+    assert descriptor.device_class is None
+    assert descriptor.unit_of_measurement is None
+    assert descriptor.state_class == "total_increasing"
+    # The entity's object id is unchanged by the rename.
+    assert descriptor.object_suffix == "consumption"
+    assert "Consumption" in registry.flat
+
+
+def test_lowercase_consumption_no_longer_ships():
+    """The old lowercase ``consumption`` key is gone from the shipped library.
+
+    Guards the rename: lookup is case-sensitive, so a stale lowercase entry would
+    silently shadow nothing and give SCMplus users an entity that never updates.
+    """
+    assert lookup("consumption") is None
+    # The SCM/ERT sibling keeps its own (genuinely lowercase) wire name.
+    assert lookup("consumption_data") is not None

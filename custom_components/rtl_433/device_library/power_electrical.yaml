@@ -71,7 +71,12 @@ consumption_data:
   value_transform: { int: true }
   object_suffix: consumption
 
-consumption:
+# SCMplus emits this field CamelCased as `Consumption`, alongside its other
+# CamelCased fields (`EndpointID`, `MeterType`, ...). rtl_433 field names are
+# case-sensitive, so the key must match the wire name exactly.
+#
+# https://github.com/merbanan/rtl_433/blob/90621a8cb56c79b766077cadce4dc37bc613c54c/src/devices/scmplus.c#L126
+Consumption:
   platform: sensor
   device_class: null
   unit_of_measurement: null
