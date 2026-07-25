@@ -7,7 +7,11 @@
 # `uvx pre-commit run --all-files`.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.14
+    # Keep in sync with the ruff== pin in requirements_dev.txt so the Ruff and
+    # pre-commit jobs cannot disagree. Renovate tracks this rev as
+    # astral-sh/ruff-pre-commit, not as the "ruff" PyPI package, so the two pins
+    # arrive in separate PRs.
+    rev: v0.15.22
     hooks:
       # Linter (with autofix)
       - id: ruff-check
