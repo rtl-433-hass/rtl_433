@@ -289,19 +289,12 @@ class TestCommodityFromFieldsMeterType:
 
 
 class TestCommodityFromFieldsErtTypeDefault:
-    """commodity_from_fields returns COMMODITY_NONE for unmapped nibble values."""
+    """commodity_from_fields returns COMMODITY_NONE for unmapped nibble values.
 
-    def test_ert_type_unmapped_nibble_0_returns_none(self):
-        """Nibble 0 is unmapped → COMMODITY_NONE (kills _26, _28)."""
-        assert commodity_from_fields({"ert_type": 0}) == COMMODITY_NONE
-
-    def test_ert_type_unmapped_nibble_1_returns_none(self):
-        """Nibble 1 is unmapped → COMMODITY_NONE (kills _26, _28)."""
-        assert commodity_from_fields({"ert_type": 1}) == COMMODITY_NONE
-
-    def test_ert_type_unmapped_nibble_3_returns_none(self):
-        """Nibble 3 is unmapped → COMMODITY_NONE (kills _26, _28)."""
-        assert commodity_from_fields({"ert_type": 3}) == COMMODITY_NONE
+    Nibbles 0, 1 and 3 are *mapped* (gas/gas/water, matching upstream
+    ``scmplus.c``) and are asserted in
+    :class:`TestCommodityFromFieldsErtTypeUpstreamAlignment` instead.
+    """
 
     def test_ert_type_unmapped_nibble_6_returns_none(self):
         """Nibble 6 is unmapped → COMMODITY_NONE (kills _26, _28)."""
@@ -321,9 +314,51 @@ class TestCommodityFromFieldsErtTypeDefault:
 
     def test_ert_type_default_is_commodity_none_not_none_python(self):
         """Unmapped nibble yields COMMODITY_NONE string, not Python None (kills _26)."""
-        result = commodity_from_fields({"ert_type": 0})
+        result = commodity_from_fields({"ert_type": 6})
         assert result is not None
         assert result == COMMODITY_NONE
+
+
+# ---------------------------------------------------------------------------
+# commodity_from_fields — ert_type nibbles 0/1/3, aligned with upstream
+# rtl_433 src/devices/scmplus.c (0/1/2/9/12 gas, 3/11/13 water)
+# ---------------------------------------------------------------------------
+
+
+class TestCommodityFromFieldsErtTypeUpstreamAlignment:
+    """Nibbles 0, 1 and 3 map the way upstream's endpoint-type switch does.
+
+    These three were previously absent from the table, so an ERT-SCM meter with
+    one of them got no commodity pre-fill at all. Upstream's ``scmplus.c``
+    classifies them as gas/gas/water; the integration now agrees.
+    """
+
+    def test_ert_type_0_is_gas(self):
+        """ert_type=0 (nibble 0) → COMMODITY_GAS, per upstream."""
+        assert commodity_from_fields({"ert_type": 0}) == COMMODITY_GAS
+
+    def test_ert_type_1_is_gas(self):
+        """ert_type=1 (nibble 1) → COMMODITY_GAS, per upstream."""
+        assert commodity_from_fields({"ert_type": 1}) == COMMODITY_GAS
+
+    def test_ert_type_3_is_water(self):
+        """ert_type=3 (nibble 3) → COMMODITY_WATER, per upstream."""
+        assert commodity_from_fields({"ert_type": 3}) == COMMODITY_WATER
+
+    def test_ert_type_16_nibble_0_is_gas(self):
+        """ert_type=16 (0x10, nibble 0) → COMMODITY_GAS: the mask still applies."""
+        assert commodity_from_fields({"ert_type": 16}) == COMMODITY_GAS
+
+    def test_ert_type_19_nibble_3_is_water(self):
+        """ert_type=19 (0x13, nibble 3) → COMMODITY_WATER: the mask still applies."""
+        assert commodity_from_fields({"ert_type": 19}) == COMMODITY_WATER
+
+    def test_meter_type_still_wins_over_ert_type(self):
+        """An explicit MeterType outranks the nibble table for the same event."""
+        assert (
+            commodity_from_fields({"MeterType": "Water", "ert_type": 0})
+            == COMMODITY_WATER
+        )
 
 
 # ---------------------------------------------------------------------------
