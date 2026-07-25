@@ -34,6 +34,7 @@ from custom_components.rtl_433.const import (
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 from tests.test_lifecycle import _coordinator, _feed, _setup_hub
 
@@ -87,7 +88,7 @@ def _availability_signals(dispatch, entry_id: str) -> list:
 # --------------------------------------------------------------------------- #
 def test_grace_window_is_sixty_seconds():
     """60 s is the window docs/availability.md promises and the client's max backoff."""
-    assert HUB_OFFLINE_GRACE == timedelta(seconds=60)
+    assert timedelta(seconds=60) == HUB_OFFLINE_GRACE
 
 
 def test_availability_signal_is_scoped_per_hub():
@@ -420,6 +421,43 @@ async def test_offline_hub_takes_every_device_entity_unavailable(
         await hass.async_block_till_done()
         assert hass.states.get(temp_eid).state != "unavailable"
         assert hass.states.get(button_eid).state != "unavailable"
+
+
+async def test_removal_unsubscribes_from_both_signals(hass, hub_entry_builder):
+    """A removed entity drops the availability *and* device subscriptions.
+
+    Both handlers write state, so a subscription left behind would have a
+    removed entity writing after teardown.
+    """
+    device_key = "EnergyMeter-2000-1234"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
+        },
+    )
+    ent_reg = er.async_get(hass)
+    watts_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:watts"
+    )
+    entity = hass.data["entity_components"]["sensor"].get_entity(watts_eid)
+    assert entity is not None
+    assert entity._unsub_hub_availability is not None
+    assert entity._unsub_dispatcher is not None
+
+    await entity.async_will_remove_from_hass()
+    assert entity._unsub_hub_availability is None
+    assert entity._unsub_dispatcher is None
+
+    with patch.object(type(entity), "async_write_ha_state") as write:
+        async_dispatcher_send(hass, signal_hub_availability(hub.entry_id))
+        _feed(
+            _coordinator(hass, hub),
+            {"model": "EnergyMeter-2000", "id": 1234, "power_W": 6.0},
+        )
+        await hass.async_block_till_done()
+        write.assert_not_called()
 
 
 async def test_offline_hub_takes_the_last_seen_sensor_unavailable(
