@@ -80,9 +80,14 @@ timeout for every device on the hub:
 ![Hub settings step with the discovery toggle, default availability timeout, and managed-settings toggle](images/07-hub-settings.png)
 
 The **Device settings** step targets one device for a timeout override, motion
-clear delay, or utility-meter calibration:
+clear delay, or utility-meter calibration. You pick the device first, then
+configure it — every field on the second form is pre-filled from the device you
+picked, and fields that do not apply to it (such as the motion clear delay on a
+non-motion device) are hidden:
 
-![Device settings step with a device picker, availability timeout override, and meter commodity selector](images/08-device-settings.png)
+![Device picker step, with a utility meter labelled with its detected commodity](images/13-device-picker.png)
+
+![Device settings step with the availability timeout override and meter commodity selector](images/08-device-settings.png)
 
 Changing discovery or timeout options applies live. Changing the managed-settings
 toggle reloads the hub because the entity set changes.
