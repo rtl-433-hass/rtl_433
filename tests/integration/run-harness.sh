@@ -26,7 +26,7 @@ log() { printf '[harness] %s\n' "$*"; }
 ensure_submodule() {
   if [ ! -f rtl_433_tests/tests/acurite/Acurite_592TXR/acurite-592txr-003.cu8 ]; then
     log "submodule capture missing; initializing sparse submodule"
-    git -C ../.. submodule update --init tests/integration/rtl_433_tests
+    git -C ../.. submodule update --init --checkout tests/integration/rtl_433_tests
   fi
 }
 
