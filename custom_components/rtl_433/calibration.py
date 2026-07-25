@@ -115,11 +115,16 @@ def commodity_from_fields(fields: dict[str, Any] | None) -> str:
     ``"Water"`` -> water) when present; otherwise the low nibble of an
     ``ert_type`` integer. Never raises; defaults to ``none``.
 
-    The nibble table mirrors the ERT endpoint-type switch in upstream rtl_433's
-    ``src/devices/scmplus.c`` (4/5/7/8 electric, 0/1/2/9/12 gas, 3/11/13 water,
-    everything else unknown). SCMplus decodes that switch for us and emits the
-    result as ``MeterType``, so the nibble path matters mainly for ``ERT-SCM``,
-    whose decoder emits only the raw ``ert_type`` integer.
+    The nibble table mirrors the ERT endpoint-type switch in upstream rtl_433
+    (4/5/7/8 electric, 0/1/2/9/12 gas, 3/11/13 water, everything else unknown):
+
+    https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/scmplus.c#L107-L129
+
+    SCMplus decodes that switch for us and emits the result as ``MeterType``, so
+    the nibble path matters mainly for ``ERT-SCM``, whose decoder emits only the
+    raw ``ert_type`` integer. The link is pinned to a commit rather than
+    ``master`` so the line range keeps pointing at the switch; re-check it
+    against upstream ``master`` when revisiting this table.
     """
     if not isinstance(fields, dict):
         return COMMODITY_NONE
