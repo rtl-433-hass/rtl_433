@@ -229,6 +229,7 @@ After all tasks are complete, an LLM should execute these concrete checks:
 7. **Level 1 checkpoint (location-scoped)**: within a single location before the aggregation layer, assert both receivers' entities appear under one device-registry device with preserved history; assert a second location hearing the same `model+id` produces a *separate* device.
 8. **Vocabulary sweep**: confirm `grep -rin "hub" custom_components/rtl_433/ translations/ README.md` shows only migration-legacy reads (reading old keys/literals), with no user-facing string or new runtime identifier using "hub".
 9. **Version bump**: verify `VERSION = 3` in `config_flow.py` and that `async_migrate_entry` handles v2→v3.
+10. **Real-system end-to-end (beyond the test harness)**: bring up a dev Home Assistant with the integration loaded and a location containing two receiver subentries pointed at two `ws-bridge`/replay sources emitting the same `device_key` (reuse the `tests/integration/` harness). Then, against the running instance, inspect the registries — e.g. a script over the HA websocket/`config/.storage/core.device_registry` + `core.entity_registry`, or the existing screenshot harness — to confirm: exactly **one** device for that sensor with **one** entity per field, per-receiver RSSI/SNR/last-seen diagnostics attached, and the device staying `available` when one source is silenced. Capture a screenshot of the merged device page as evidence.
 
 ## Documentation
 
@@ -280,7 +281,8 @@ The coordinator package, normalizer, mapping library, SDR settings, and device-l
 
 ## Execution Blueprint
 
-**Validation Gates:** the workspace's `config/hooks/*` are not materialized in this checkout, so gates use the project's real checks — `uv run ruff check custom_components/rtl_433` and `uv run pytest tests/` — at each phase boundary.
+**Validation Gates:**
+- Reference: `/config/hooks/POST_PHASE.md`
 
 ### Dependency Diagram
 
@@ -298,21 +300,36 @@ graph TD
     T5 --> T7
 ```
 
-### Phases
+### Phase 1: Topology foundation
+**Parallel Tasks:**
+- Task 001: Location/receiver subentry topology + hub→receiver rename
 
-- **Phase 1 — Topology foundation:** Task 1. *(Most later files overlap this task, so it runs alone.)*
-- **Phase 2 — Level 1 grouping:** Task 2 (depends on 1).
-- **Phase 3 — Union + dedup:** Task 3 (depends on 2).
-- **Phase 4 — Availability + diagnostics:** Task 4 (depends on 3).
-- **Phase 5 — Migration:** Task 5 (depends on 2, 3, 4).
-- **Phase 6 — Tests & docs (parallel, file-disjoint):** Tasks 6 and 7 (depend on 5).
+### Phase 2: Level 1 device grouping
+**Parallel Tasks:**
+- Task 002: Location-scoped device identity (depends on: 001)
+
+### Phase 3: Entity union + skew-tolerant dedup
+**Parallel Tasks:**
+- Task 003: Location aggregator, entity union, dedup (depends on: 002)
+
+### Phase 4: Merged availability + diagnostics
+**Parallel Tasks:**
+- Task 004: Merged availability + per-receiver diagnostics (depends on: 003)
+
+### Phase 5: Migration
+**Parallel Tasks:**
+- Task 005: Seamless v2→v3 migration (depends on: 002, 003, 004)
+
+### Phase 6: Tests & docs (file-disjoint, parallel)
+**Parallel Tasks:**
+- Task 006: Test suite (depends on: 005)
+- Task 007: Docs & screenshots (depends on: 005)
+
+### Post-phase Actions
+Each phase ends with the `POST_PHASE.md` gate: linting passes (`uv run ruff check custom_components/rtl_433`) and a conventional-commit for the phase is created; the plan's task/phase statuses are updated (✅ phase, ✔️ tasks). Tests (`uv run pytest tests/`) are additionally run at each phase boundary since most phases change runtime behavior.
+
+*Parallelism note: Phases 1–5 touch heavily overlapping files (`__init__.py`, `config_flow.py`, `entity.py`, `migration.py`), so they are deliberately single-task phases to avoid conflicting edits; only Phase 6 (tests vs docs) is file-disjoint and parallelizable.*
 
 ### Execution Summary
 - Total Phases: 6
 - Total Tasks: 7
-
-*Note on parallelism: Components 1–5 touch heavily overlapping files (`__init__.py`, `config_flow.py`, `entity.py`, `migration.py`), so Phases 1–5 are deliberately sequential single-task phases to avoid conflicting edits; only Phase 6 (tests vs docs) is file-disjoint and parallelizable.*
-
----
-
-*Note: the workspace's `config/hooks/PRE_PLAN.md`, `config/hooks/POST_PLAN.md`, `config/hooks/POST_PHASE.md`, `config/hooks/POST_EXECUTION.md`, and `config/templates/*` referenced in `.init-metadata.json` are not materialized in this checkout, so the strikethroo lifecycle hooks/templates could not be executed and were substituted (plan structure modeled on existing plans; validation gates use `ruff` + `pytest`).*
