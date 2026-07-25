@@ -40,6 +40,9 @@ class _FakeCoordinator:
         self.path = "/ws"
         self.secure = False
         self.connected = True
+        # Connection-backed availability gate: connected, so no outage clock.
+        self.hub_available = True
+        self.disconnected_since = None
         self.discovery_enabled = True
         self.availability_timeout = 600
         self.seen_fields = {"temperature_C", "humidity", "made_up_field"}

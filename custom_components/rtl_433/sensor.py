@@ -242,8 +242,15 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Available once a real/restored timestamp exists, ignoring the timeout."""
-        return self._attr_native_value is not None
+        """Available once a real/restored timestamp exists, ignoring the timeout.
+
+        The device's silence timeout is deliberately not applied (the whole point
+        of this sensor is to keep reporting how long the device has been quiet),
+        but the hub-connection gate is: with the socket down the timestamp is
+        frozen at whenever the integration stopped listening and would read as a
+        device that has just gone quiet, which is exactly the wrong conclusion.
+        """
+        return self._attr_native_value is not None and self._coordinator.hub_available
 
 
 # --------------------------------------------------------------------------- #

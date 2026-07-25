@@ -102,3 +102,32 @@ def build_hub_entry(
 def hub_entry_builder():
     """Expose :func:`build_hub_entry` as a fixture."""
     return build_hub_entry
+
+
+def mark_hub_connected(coordinator: Any) -> None:
+    """Put a coordinator in the state a live hub connection leaves behind.
+
+    Tests inject events straight into the client's frame handler instead of over
+    a real socket, so the client's ``connected`` flag stays False and the
+    coordinator's connection-backed availability gate reads the whole run as one
+    long outage: past ``HUB_OFFLINE_GRACE`` every device behind the hub is
+    unavailable whatever its own silence timeout says (see
+    ``coordinator/_watchdog.py``). Any test that feeds events or jumps the clock
+    beyond that window is implicitly assuming the hub is connected, so it has to
+    say so — this is that statement.
+
+    Sets the connect-edge state directly rather than firing the client callback:
+    the callback path also triggers SDR adoption, which these tests do not want.
+    """
+    coordinator._client.connected = True
+    coordinator._was_connected = True
+    coordinator._ever_connected = True
+    coordinator._async_cancel_hub_offline_timer()
+    coordinator._disconnected_since = None
+    coordinator._devices_offline = False
+
+
+@pytest.fixture
+def hub_connected():
+    """Expose :func:`mark_hub_connected` as a fixture."""
+    return mark_hub_connected
