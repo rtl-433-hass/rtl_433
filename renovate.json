@@ -64,11 +64,11 @@
       "automergeType": "pr"
     },
     {
-      "description": "Major action bumps: cooldown, manual review",
+      "description": "Major action bumps: cooldown, then automerge",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["major"],
       "minimumReleaseAge": "3 days",
-      "automerge": false
+      "automerge": true
     },
     {
       "description": "Pure digest moves: no timestamp available, always review",
