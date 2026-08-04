@@ -715,6 +715,19 @@ timeout, xdist, freezegun). To match CI, include coverage:
 uv run pytest --cov=custom_components/rtl_433 tests/
 ```
 
+`addopts` in `pyproject.toml` passes `-n auto`, so the suite runs across all CPUs
+via xdist (~80s to ~18s on 8 cores). Pass `-n0` to force a serial run:
+
+```bash
+uv run pytest -n0 tests/test_coordinator.py   # single file: ~4s serial, ~9s under xdist
+uv run pytest -n0 --pdb tests/                # xdist swallows --pdb and -s
+```
+
+Prefer `-n0` when selecting one file or a handful of tests -- xdist spends about
+four seconds starting an interpreter and importing Home Assistant *per worker*,
+which costs more than it saves below roughly a hundred tests. Mutation runs pin
+`-n0` themselves; see `[tool.mutmut]` in `pyproject.toml`.
+
 CI runs on Python 3.14 (the minimum Home Assistant 2026.4 supports), and
 `pyproject.toml` sets `requires-python = ">=3.14"`. **The codebase uses 3.14-only
 syntax and will not parse on an older interpreter.** In particular it relies on
