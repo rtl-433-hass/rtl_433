@@ -40,7 +40,13 @@ log_date_format = "%Y-%m-%d %H:%M:%S"
 asyncio_debug = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "-ra -q --strict-markers"
+# -n auto runs the suite across all CPUs via pytest-xdist (~80s -> ~18s on 8
+# cores). The tests share no mutable state, so distribution order is free.
+# Override with `-n0` for a serial run: xdist costs ~4s of per-worker interpreter
+# and Home Assistant import startup, which dominates a single-file selection, and
+# it is incompatible with `--pdb` and `-s`. [tool.mutmut] pins `-n0` for the same
+# reason -- see the comment there.
+addopts = "-ra -q --strict-markers -n auto"
 markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (may use coordinator/time service)",
@@ -117,5 +123,12 @@ docstring-code-format = true
 # so intra-package imports resolve inside mutants/.
 source_paths = ["custom_components/rtl_433/"]
 pytest_add_cli_args_test_selection = ["tests/"]
+# Cancel the `-n auto` in [tool.pytest.ini_options].addopts, which the copied
+# pyproject.toml would otherwise apply to every mutant. mutmut already forks one
+# process per mutant, so xdist would nest a worker pool inside each of them; it
+# also calls pytest.main() with an in-process results plugin, and under xdist the
+# tests run in worker subprocesses where that plugin never sees them. mutmut
+# appends these args last, so `-n0` wins over addopts.
+pytest_add_cli_args = ["-n0"]
 # custom_components/ has no __init__.py (namespace package); copy it only if present.
 also_copy = ["custom_components/__init__.py"]
