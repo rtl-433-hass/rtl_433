@@ -879,6 +879,13 @@ fully documented, including prerequisites, the orchestrator steps
   event on `ws://0.0.0.0:8433/ws` — the same frame shape the coordinator expects.
   The bridge is a transport stand-in **for the harness only**; it is not part of
   the shipped integration.
+- The bridge also tails rtl_433's `-F log` output and re-frames each log line as
+  the structured `{"time","src","lvl","msg"}` frame a real `-F http` server
+  pushes, which is the only channel carrying the "Auto Level" noise-floor data
+  behind the hub's noise sensors. The replay feeds RF silence between capture
+  passes so that noise floor genuinely moves; without it `-Y autolevel` never
+  logs an adjustment. The bridge serves no `/cmd`, so the `/cmd`-sourced hub
+  sensors read `unknown` in the harness — never synthesize them.
 
 Full runbook:
 
