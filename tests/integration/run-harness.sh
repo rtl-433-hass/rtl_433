@@ -87,6 +87,20 @@ shots() {
     node ./screenshot.mjs
 }
 
+# Capture the hub's Diagnostic card with both receiver-noise sensors populated.
+# Restart the decoder first: `-M noise` reports the noise level periodically, but
+# `-Y autolevel` only logs the adjustment line behind "Minimum detection level"
+# while its estimate is still converging — a burst over the first seconds of a
+# run, then nothing once it settles. Restarting re-runs that convergence while
+# Home Assistant is connected, so the sensor picks up a real value. The bridge
+# and its WebSocket stay up across the restart, so HA never disconnects.
+hubnoise() {
+  log "restarting rtl_433 so -Y autolevel re-converges while HA is connected"
+  $COMPOSE restart rtl433
+  poll_ws_json 60
+  HA_BASE="$HA_BASE" STAGE=hubnoise node ./screenshot.mjs
+}
+
 # Stop the replay so the device goes silent. The options flow above lowered the
 # hub availability timeout to 15s and the watchdog ticks every 30s, so ~50s after
 # stopping the replay the device's entities flip to unavailable; then capture it.
@@ -119,15 +133,17 @@ main() {
     down) down ;;
     onboard) onboard ;;
     shots) shots ;;
+    hubnoise) hubnoise ;;
     unavailable) unavailable ;;
     full)
       up
       onboard
       shots
+      hubnoise
       unavailable
       log "done; screenshots in ../../screenshots"
       ;;
-    *) echo "usage: $0 [full|up|down|onboard|shots|unavailable]" >&2; exit 2 ;;
+    *) echo "usage: $0 [full|up|down|onboard|shots|hubnoise|unavailable]" >&2; exit 2 ;;
   esac
 }
 

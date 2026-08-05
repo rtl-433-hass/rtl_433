@@ -8,8 +8,9 @@
 // home hero), 02 (device page), 11 (doorbell event entity), 03 (options menu),
 // 07 (Hub settings form), 05 (Device mappings YAML), 08 (Device settings form),
 // 12 (calibration step), 10 (device page with the signal-diagnostic sensors
-// enabled and populated), 04 (unavailable). The doorbell / energy meter / door /
-// leak devices come from ws-bridge replaying tests/fixtures.
+// enabled and populated), 13 (the hub device's Diagnostic card with the
+// receiver-noise sensors), 04 (unavailable). The doorbell / energy meter / door
+// / leak devices come from ws-bridge replaying tests/fixtures.
 //
 // Stages (STAGE env var):
 //   add      - log in, add the rtl_433 hub via the config flow (host=wsbridge),
@@ -27,6 +28,8 @@
 //              timeout) capture the device page with all entities Unavailable.
 //   device   - re-capture only the Device settings + calibration steps against
 //              an already-running harness (hub already added); for iterating.
+//   hubnoise - re-capture only the hub Diagnostic card (receiver-noise sensors)
+//              against an already-running harness; for iterating.
 //   full     - add, then unavail (the orchestrator stops replay in between).
 //
 // Every capture is gated on a selector/state where practical, never a blind long
@@ -203,6 +206,78 @@ async function addHubAndCapture(page) {
   // --- Per-device signal diagnostics ---------------------------------------
   // Run last: it enables disabled-by-default entities and reloads the hub.
   await enableAndCaptureDiagnostics(page);
+  // The hub's receiver-noise capture is a separate step (STAGE=hubnoise): it
+  // needs the orchestrator to restart the decoder first — see captureHubNoise.
+}
+
+// The hub device page carries the hub-level diagnostic sensors. Two of them —
+// Noise level and Minimum detection level (docs/hub-entities.md "Receiver
+// Noise") — are fed by rtl_433's "Auto Level" log frames, which the harness
+// produces for real: the decoder runs with `-Y autolevel -M noise:10` and the
+// ws-bridge re-frames its `-F log` output as the structured log frames a real
+// `-F http` server pushes. Resolve the hub device from the device registry
+// (model "rtl_433 server"), poll until both noise sensors carry a number, then
+// capture the Diagnostic card.
+//
+// Run this via run-harness.sh's `hubnoise` step, which restarts the decoder
+// first. `-M noise` reports the noise level every 10s, but `-Y autolevel` only
+// logs the *adjustment* line behind Minimum detection level while its estimate
+// is still converging — a burst over the first seconds of a decoder run, then
+// silence once it settles. Without that restart the sensor stays `unknown`.
+async function captureHubNoise(page) {
+  await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+  const hub = await page.evaluate(async () => {
+    const hass = document.querySelector("home-assistant")?.hass;
+    if (!hass) return { error: "no hass on page" };
+    const devices = await hass.callWS({ type: "config/device_registry/list" });
+    const device = devices.find((d) => d.model === "rtl_433 server");
+    const ents = await hass.callWS({ type: "config/entity_registry/list" });
+    const noise = ents
+      .filter((e) => e.device_id === device?.id && /(noise_level|min_level|minimum)/i.test(e.entity_id))
+      .map((e) => e.entity_id);
+    return { deviceId: device?.id, noise };
+  });
+  console.log("screenshot: hub device -> " + JSON.stringify(hub));
+  if (!hub?.deviceId) {
+    console.log("screenshot: hub device not found; skipping 14-hub-noise.png");
+    return;
+  }
+  // The periodic report is every 10s and a reconnect re-arms it; poll ~60s.
+  for (let i = 0; i < 30; i++) {
+    const ready = await page.evaluate((ids) => {
+      const hass = document.querySelector("home-assistant")?.hass;
+      if (!hass || !ids.length) return false;
+      return ids.every((id) => {
+        const st = hass.states[id];
+        return st && st.state !== "unknown" && st.state !== "unavailable";
+      });
+    }, hub.noise || []);
+    if (ready) break;
+    await page.waitForTimeout(2000);
+  }
+  const states = await page.evaluate((ids) => {
+    const hass = document.querySelector("home-assistant")?.hass;
+    return ids.map((id) => `${id}=${hass?.states[id]?.state}`);
+  }, hub.noise || []);
+  console.log("screenshot: hub noise states -> " + JSON.stringify(states));
+  await page.goto(`${BASE}/config/devices/device/${hub.deviceId}`, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(3000);
+  // Capture the Diagnostic card itself rather than the whole page: the hub's
+  // sensors sit below the fold, and HA's device page scrolls an inner container
+  // that ignores scripted scrollIntoView. An element screenshot also keeps the
+  // shot readable at docs width. `has:` matches through shadow DOM.
+  const card = page
+    .locator("ha-card")
+    .filter({ has: page.getByText("Diagnostic", { exact: true }) })
+    .first();
+  if (!(await card.count())) {
+    console.log("screenshot: Diagnostic card not found; capturing full page instead");
+    await shot(page, "14-hub-noise.png");
+    return;
+  }
+  await card.screenshot({ path: resolve(SHOTS, "14-hub-noise.png") });
+  console.log(`screenshot: ${resolve(SHOTS, "14-hub-noise.png")}`);
 }
 
 // The per-device signal-diagnostic sensors (frequency / RSSI / SNR / noise) are
@@ -437,6 +512,10 @@ async function run() {
       // Iterate the Device-settings + calibration captures against an already
       // running harness (hub already added). Not part of the full pipeline.
       await captureDeviceSettings(page);
+    } else if (STAGE === "hubnoise") {
+      // Iterate only the hub device page / receiver-noise capture against an
+      // already running harness (hub already added).
+      await captureHubNoise(page);
     } else if (STAGE === "diagnostics") {
       // Iterate only the enable-and-capture diagnostics step against an already
       // running harness (hub already added).

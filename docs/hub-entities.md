@@ -52,6 +52,12 @@ Unlike the sensors below, this data arrives over the event stream itself
 (rtl_433 ≥ 23.11), so it works even when `/cmd` is proxied away behind a
 WebSocket-only proxy.
 
+![The hub device's Diagnostic card: Noise level -36.4 dB and Minimum detection level -33.4 dB alongside Connectivity Connected, with the sensors fetched over /cmd reading Unknown](images/14-hub-noise.png)
+
+That capture is from a server reachable only over its WebSocket stream, which is
+why the two noise sensors report while the `/cmd`-sourced sensors described below
+read `unknown`.
+
 ## Server Statistics
 
 Server statistics include cumulative decoded events, OOK frames, FSK frames, and
