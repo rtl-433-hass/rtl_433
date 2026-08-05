@@ -824,8 +824,12 @@ host, port, path, or secure mode. Devices and their history are preserved.</p>
 timeout for every device on the hub:</p>
 <p><img alt="Hub settings step with the discovery toggle, default availability timeout, and managed-settings toggle" src="../images/07-hub-settings.png" /></p>
 <p>The <strong>Device settings</strong> step targets one device for a timeout override, motion
-clear delay, or utility-meter calibration:</p>
-<p><img alt="Device settings step with a device picker, availability timeout override, and meter commodity selector" src="../images/08-device-settings.png" /></p>
+clear delay, or utility-meter calibration. You pick the device first, then
+configure it — every field on the second form is pre-filled from the device you
+picked, and fields that do not apply to it (such as the motion clear delay on a
+non-motion device) are hidden:</p>
+<p><img alt="Device picker step, with a utility meter labelled with its detected commodity" src="../images/13-device-picker.png" /></p>
+<p><img alt="Device settings step with the availability timeout override and meter commodity selector" src="../images/08-device-settings.png" /></p>
 <p>Changing discovery or timeout options applies live. Changing the managed-settings
 toggle reloads the hub because the entity set changes.</p>
 <h2 id="ws-wss-and-authentication">ws, wss, and Authentication<a class="headerlink" href="#ws-wss-and-authentication" title="Permanent link">&para;</a></h2>

@@ -1152,6 +1152,12 @@ options flow's <em>Device settings</em> step instead.</p>
 names</strong> exactly as they appear in the JSON event (e.g. <code>temperature_C</code>,
 <code>wind_avg_km_h</code>, <code>battery_ok</code>). Each value is an entry with the attributes
 below.</p>
+<p>Field names are matched <strong>case-sensitively</strong>, and not every decoder uses
+<code>snake_case</code>. SCMplus, for instance, emits CamelCased fields — <code>Consumption</code>,
+<code>MeterType</code>, <code>EndpointID</code> — so those keys are CamelCased in the library too. Copy
+the name verbatim from the event or from the decoder source (SCMplus:
+<a href="https://github.com/merbanan/rtl_433/blob/90621a8cb56c79b766077cadce4dc37bc613c54c/src/devices/scmplus.c#L126"><code>scmplus.c</code></a>);
+a key that differs only in case silently never matches.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">temperature_C</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
 <span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span>
@@ -1425,7 +1431,7 @@ standard:</p>
 <p>The top-level keys above are the <strong>global</strong> defaults: a <code>temperature_C</code> entry
 applies to <em>every</em> device that emits <code>temperature_C</code>. Some fields, though, need
 a different descriptor depending on the <strong>device model</strong> — most notably the
-utility-meter consumption counters (<code>consumption</code>, <code>consumption_data</code>), whose
+utility-meter consumption counters (<code>Consumption</code>, <code>consumption_data</code>), whose
 unit and scale are <em>not</em> carried in the RF signal and differ between meter
 models. For those, a file may carry an optional top-level <strong><code>models:</code></strong> block
 that overrides the global descriptor for one specific rtl_433 <code>model</code> string.</p>

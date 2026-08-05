@@ -571,6 +571,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Calibration Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-pick-the-meter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Pick the meter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-choose-the-commodity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Choose the commodity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-set-the-base-unit-and-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Set the base unit and scale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -638,6 +677,45 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Calibration Flow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-pick-the-meter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Pick the meter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-choose-the-commodity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Choose the commodity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-set-the-base-unit-and-scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Set the base unit and scale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -690,8 +768,22 @@ cannot derive Energy-dashboard-ready values automatically.</p>
 <p>Out of the box, consumption is a plain unitless <code>total_increasing</code> counter. To
 make it eligible for Home Assistant's Energy dashboard, calibrate the device.</p>
 <h2 id="calibration-flow">Calibration Flow<a class="headerlink" href="#calibration-flow" title="Permanent link">&para;</a></h2>
-<p>Open <strong>Settings → Devices &amp; Services → rtl_433 → Configure → Device settings</strong>,
-pick the meter, and set its consumption calibration.</p>
+<p>Open <strong>Settings → Devices &amp; Services → rtl_433 → Configure → Device settings</strong>.
+Calibration takes three short steps.</p>
+<h3 id="1-pick-the-meter">1. Pick the meter<a class="headerlink" href="#1-pick-the-meter" title="Permanent link">&para;</a></h3>
+<p>Meters whose commodity the integration recognized from the signal are labelled
+with it in the picker, so you can tell at a glance which devices are calibratable
+and what they measure.</p>
+<p><img alt="The device picker, with the SCMplus meter labelled &quot;gas detected&quot;" src="../images/13-device-picker.png" /></p>
+<h3 id="2-choose-the-commodity">2. Choose the commodity<a class="headerlink" href="#2-choose-the-commodity" title="Permanent link">&para;</a></h3>
+<p>When the meter reports a <code>MeterType</code> or <code>ert_type</code> hint, the commodity is
+pre-filled from it — for the device you picked, however many meters the hub has.
+You can override it. Re-editing an already-calibrated device pre-fills its stored
+commodity, unit and scale.</p>
+<p>Choosing <code>none</code> here clears any existing calibration and leaves the counter
+unitless.</p>
+<p><img alt="The device settings step for the gas meter, with the meter commodity pre-filled to Gas" src="../images/08-device-settings.png" /></p>
+<h3 id="3-set-the-base-unit-and-scale">3. Set the base unit and scale<a class="headerlink" href="#3-set-the-base-unit-and-scale" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
@@ -714,13 +806,14 @@ pick the meter, and set its consumption calibration.</p>
 </tr>
 </tbody>
 </table>
-<p>When the meter reports a <code>MeterType</code> or <code>ert_type</code> hint, the commodity is
-pre-filled from it. You can override it.</p>
-<p><img alt="The calibration step for an energy meter, with a base-unit selector and a scale multiplier" src="../images/12-calibration.png" /></p>
+<p><img alt="The calibration step for a gas meter, with a base-unit selector and a scale multiplier" src="../images/12-calibration.png" /></p>
 <p>Once calibrated, the consumption sensor gets a real device class, native unit,
 and <code>state_class: total_increasing</code>. You do not need to pick the display unit in
 the calibration flow: Home Assistant can convert convertible units in the entity
 settings.</p>
+<p>The counter field itself needs no configuration: SCM and ERT meters report
+<code>consumption_data</code> and SCMplus meters report <code>Consumption</code>, and both ship in the
+device library. Neither requires a YAML override.</p>
 <h2 id="statistics-caveat">Statistics Caveat<a class="headerlink" href="#statistics-caveat" title="Permanent link">&para;</a></h2>
 <p>Changing commodity, base unit, or scale changes the sensor's native unit or
 device class. Home Assistant treats that as a non-convertible change for long
