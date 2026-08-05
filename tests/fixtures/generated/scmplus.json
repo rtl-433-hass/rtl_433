@@ -1,0 +1,38 @@
+[
+  {
+    "time": "@0.045207s",
+    "model": "SCMplus",
+    "id": 68211547,
+    "ProtocolID": "0x1E",
+    "EndpointType": "0xAB",
+    "EndpointID": 68211547,
+    "Consumption": 6883,
+    "Tamper": "0x4900",
+    "PacketCRC": "0x39BE",
+    "MeterType": "Water",
+    "mic": "CRC",
+    "mod": "ASK",
+    "freq": 912.985,
+    "rssi": -1.644,
+    "snr": 40.5,
+    "noise": -42.144
+  },
+  {
+    "time": "@0.030631s",
+    "model": "SCMplus",
+    "id": 68211547,
+    "ProtocolID": "0x1E",
+    "EndpointType": "0xAB",
+    "EndpointID": 68211547,
+    "Consumption": 6653,
+    "Tamper": "0x4900",
+    "PacketCRC": "0xFA00",
+    "MeterType": "Water",
+    "mic": "CRC",
+    "mod": "ASK",
+    "freq": 912.841,
+    "rssi": -2.826,
+    "snr": 32.329,
+    "noise": -35.154
+  }
+]

@@ -1,0 +1,63 @@
+name: Captures
+
+# Decodes the pinned .cu8 captures with the pinned rtl_433 image and fails if the
+# result no longer matches the golden fixtures committed under
+# tests/fixtures/generated/.
+#
+# The device library's field keys are transcribed by hand from upstream rtl_433
+# `data_make()` calls, and matching is case-sensitive, so a rename upstream
+# silently stops producing entities. This job is what makes that loud: a changed
+# decode shows up as a red build with a diff, instead of as a sensor that quietly
+# never appears.
+#
+# It only needs to run when the inputs move -- the pin, the script, or the
+# fixtures themselves -- so it is path-filtered rather than run on every push.
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - ".github/workflows/captures.yml"
+      - "scripts/fetch_captures.sh"
+      - "scripts/regen_capture_fixtures.py"
+      - "tests/fixtures/generated/**"
+      - "tests/integration/docker-compose.yml"
+  pull_request:
+    branches:
+      - "main"
+    paths:
+      - ".github/workflows/captures.yml"
+      - "scripts/fetch_captures.sh"
+      - "scripts/regen_capture_fixtures.py"
+      - "tests/fixtures/generated/**"
+      - "tests/integration/docker-compose.yml"
+  # Upstream can change under a moving tag even when nothing here does, and a
+  # renovate bump of the image digest should be caught before it lands.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  golden-fixtures:
+    name: "Golden capture fixtures"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The captures submodule is fetched by scripts/fetch_captures.sh as a
+          # blobless sparse clone (13 MB of the ~1.5 GB upstream repo); letting
+          # actions/checkout do it would pull the whole thing.
+          submodules: false
+
+      - name: Fetch the pinned captures
+        run: ./scripts/fetch_captures.sh
+
+      # Only stdlib is used, so the runner's Python is enough -- no uv, no venv,
+      # no Home Assistant install. The script shells out to Docker, which is
+      # preinstalled on ubuntu-latest.
+      - name: Verify the committed fixtures match a fresh decode
+        run: python3 scripts/regen_capture_fixtures.py --check
