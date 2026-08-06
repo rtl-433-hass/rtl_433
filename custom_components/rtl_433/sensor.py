@@ -242,8 +242,15 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Available once a real/restored timestamp exists, ignoring the timeout."""
-        return self._attr_native_value is not None
+        """Available once a real/restored timestamp exists, ignoring the timeout.
+
+        The device's silence timeout is deliberately not applied (the whole point
+        of this sensor is to keep reporting how long the device has been quiet),
+        but the hub-connection gate is: with the socket down the timestamp is
+        frozen at whenever the integration stopped listening and would read as a
+        device that has just gone quiet, which is exactly the wrong conclusion.
+        """
+        return self._attr_native_value is not None and self._coordinator.hub_available
 
 
 # --------------------------------------------------------------------------- #
@@ -424,8 +431,21 @@ class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Always available: a missing value reads ``unknown``, not unavailable."""
-        return True
+        """Available while the hub connection is up; a missing key reads ``unknown``.
+
+        Every value here is read from the server over HTTP ``/cmd`` — the SDR
+        configuration and the since-start frame counters — so once the connection
+        has been down past ``HUB_OFFLINE_GRACE`` they are frozen at whatever was
+        last fetched, with nothing on the entity to say so. Gating them on the
+        same window as the device entities (see ``coordinator/_watchdog.py``)
+        makes a stale reading read as unavailable rather than as current.
+
+        Within the connection, a key the server does not report is still
+        ``unknown`` (a ``None`` native value), not unavailable — that is a gap in
+        the payload, not a dead hub. The hub's Connectivity binary sensor stays
+        available throughout: it is the entity that reports the outage.
+        """
+        return self._coordinator.hub_available
 
     @property
     def native_value(self) -> Any:

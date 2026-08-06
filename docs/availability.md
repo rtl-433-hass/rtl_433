@@ -19,6 +19,41 @@ How long a device can reasonably stay silent depends on the device type.
 Periodic devices use finite timeouts. Event-driven devices default to never
 expiring because a long silence is normal and does not imply failure.
 
+## Hub Connection
+
+Silence only means something while the integration is listening. If the
+connection to the rtl_433 server drops, no events can arrive for any device, so a
+device's last reading says nothing about whether the device is still there.
+
+When the WebSocket has been down for 60 seconds, every device behind that hub is
+marked `unavailable` regardless of its own timeout — including event-driven
+devices that never expire on silence, their event entities, and their **Last
+seen** sensors. This is the same behavior an MQTT device gets from an availability
+topic and a last-will message. The devices come back as soon as the connection is
+re-established; their values are the last ones received, and the usual silence
+timeouts resume from there.
+
+Shorter drops are ignored. The client reconnects with a backoff of 1 to 60
+seconds, so a server restart or a brief network blip normally recovers well
+inside the 60 second window without flapping any device's availability.
+
+The hub's own diagnostic sensors (center frequency, sample rate, gain, frame
+counters, and the rest) go unavailable on the same 60 second window. Their values
+are fetched from the server over HTTP, so an outage freezes them at whatever was
+last read.
+
+The **Connectivity** binary sensor is the exception: it reports the socket state
+directly, flips to `off` the moment the connection drops — no grace window — and
+stays available throughout, because it is the entity that tells you the hub is
+down. The Home Assistant log records the drop, the moment the devices are marked
+unavailable, and the reconnect:
+
+```text
+INFO  rtl_433 lost the connection to ws://rtl433.local:8433/ws; reconnecting, ...
+WARN  rtl_433 has had no connection to ws://rtl433.local:8433/ws for 60s; marking all 12 device(s) ...
+INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
+```
+
 ## Timeout Sources
 
 The effective availability timeout is resolved in this order:
@@ -48,4 +83,6 @@ expire and the timestamp is their freshness signal. It is disabled by default fo
 periodic devices, whose availability already conveys freshness.
 
 Unlike measurement sensors, Last seen stays available after the device falls
-silent, so it can drive staleness automations.
+silent, so it can drive staleness automations. It does go unavailable while the
+hub connection is down, because the timestamp then only records when the
+integration stopped listening.

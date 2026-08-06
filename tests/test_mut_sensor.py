@@ -77,6 +77,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
+from tests.conftest import mark_hub_connected
 
 # ---------------------------------------------------------------------------
 # Helpers shared with test_lifecycle
@@ -103,10 +104,17 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
+    """Set up a hub entry with the hub marked connected.
+
+    Without the connected marking the connection-backed availability gate reads
+    the socket-less test run as an outage and takes every device unavailable
+    after ``HUB_OFFLINE_GRACE`` (see :func:`tests.conftest.mark_hub_connected`).
+    """
     hub = hub_entry_builder(availability_timeout=600, devices=devices, **kwargs)
     hub.add_to_hass(hass)
     assert await hass.config_entries.async_setup(hub.entry_id)
     await hass.async_block_till_done()
+    mark_hub_connected(_coordinator(hass, hub))
     return hub
 
 
@@ -129,6 +137,8 @@ async def _enable_last_seen(hass, hub, device_key):
         hass, dt_util.utcnow() + timedelta(seconds=RELOAD_AFTER_UPDATE_DELAY + 1)
     )
     await hass.async_block_till_done()
+    # The reload built a fresh coordinator, so re-assert the connected hub.
+    mark_hub_connected(_coordinator(hass, hub))
     return eid
 
 
@@ -467,6 +477,9 @@ def _make_hub_sensor(desc, meta=None, stats=None, entry_id="test_entry"):
     coord = MagicMock()
     coord.meta = meta or {}
     coord.stats = stats or {}
+    # Hub sensors read the connection gate for ``available``; a MagicMock would
+    # otherwise return a truthy mock rather than a bool.
+    coord.hub_available = True
     sensor = Rtl433HubSensor.__new__(Rtl433HubSensor)
     sensor._coordinator = coord
     sensor._desc = desc
@@ -486,9 +499,12 @@ def _desc_by_suffix(suffix):
 
 
 class TestRtl433HubSensorProperties:
-    def test_always_available(self):
+    def test_available_follows_the_hub_connection(self):
+        """Hub values are HTTP-sourced, so an outage freezes them -> unavailable."""
         sensor = _make_hub_sensor(_desc_by_suffix("gain"))
         assert sensor.available is True
+        sensor._coordinator.hub_available = False
+        assert sensor.available is False
 
     def test_entity_category_is_diagnostic(self):
         # _attr_entity_category is intercepted by the CachedProperties metaclass; test

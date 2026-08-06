@@ -7,6 +7,7 @@ modules import from here, so names are intended to be stable.
 
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 from typing import Any, Final
 
@@ -184,6 +185,18 @@ LEGACY_DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
 # explicitly per device or, as an explicit hub default, for every non-overridden
 # device.
 AVAILABILITY_TIMEOUT_NEVER: Final = 0
+# How long the hub's WebSocket connection may stay down before every device
+# behind it is marked unavailable, regardless of its own silence timeout.
+#
+# The per-device timeouts above answer "has this radio transmitted recently?",
+# which is only meaningful while the integration is actually listening. Once the
+# socket is down the integration hears nothing, so a device's cached state says
+# nothing about the device -- exactly the situation an MQTT availability topic
+# covers with an LWT. The client reconnects with a 1-60 s capped backoff, so this
+# grace window lets a brief blip (a server restart, a dropped frame) recover
+# without flapping every device's availability, while a genuine outage still
+# surfaces promptly.
+HUB_OFFLINE_GRACE: Final = timedelta(seconds=60)
 # Default seconds after which a motion/event binary_sensor auto-clears to "off"
 # when no explicit clear signal arrives. Overridable per device.
 DEFAULT_MOTION_CLEAR_DELAY: Final = 90
@@ -273,3 +286,18 @@ SIGNAL_HUB_UPDATE: Final = "rtl_433_hub_update_{hub_entry_id}"
 def signal_hub_update(hub_entry_id: str) -> str:
     """Return the hub-level update dispatcher signal for one hub."""
     return SIGNAL_HUB_UPDATE.format(hub_entry_id=hub_entry_id)
+
+
+# Hub-level "the connection-backed availability gate flipped" signal. The
+# coordinator dispatches this (no payload) only on an edge: when the socket has
+# been down for :data:`HUB_OFFLINE_GRACE` (every device behind the hub becomes
+# unavailable) and when it comes back. Every *device* entity subscribes, so one
+# dispatch repaints the whole hub. Kept separate from
+# :data:`SIGNAL_HUB_UPDATE` — which also fires on every meta/stats refresh — so
+# a routine hub poll never writes state for hundreds of device entities.
+SIGNAL_HUB_AVAILABILITY: Final = "rtl_433_hub_availability_{hub_entry_id}"
+
+
+def signal_hub_availability(hub_entry_id: str) -> str:
+    """Return the hub-level availability-gate dispatcher signal for one hub."""
+    return SIGNAL_HUB_AVAILABILITY.format(hub_entry_id=hub_entry_id)

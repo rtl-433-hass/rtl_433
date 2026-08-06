@@ -12,8 +12,9 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     Home Assistant adapter** over `pyrtl_433.Rtl433Client` (see
     [Runtime dependency](#runtime-dependency-pyrtl_433) below). `base.py` owns and
     drives the client; the mixins (`_events.py`, `_sdr.py`, `_watchdog.py`) hold
-    the HA-side policy (event fan-out, managed-SDR desired state, availability
-    watchdog) the library deliberately leaves out.
+    the HA-side policy (event fan-out, managed-SDR desired state, the silence
+    watchdog and the hub-connection availability gate) the library deliberately
+    leaves out.
   - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`, `mapping.py`,
     `normalizer.py`, `diagnostics.py`, `repairs.py`, `sensor.py`,
     `binary_sensor.py`, `event.py`, `translations/en.json`. `normalizer.py` now
@@ -239,7 +240,10 @@ base `async_added_to_hass` baseline:
 - **Always-available override.** It overrides `available` to be true whenever it
   has a value, so it stays readable after the device falls silent (it ignores
   the per-device availability timeout) and can drive "last_seen older than X"
-  staleness automations.
+  staleness automations. It is **not** exempt from the hub-connection gate (see
+  [Hub-connection availability gate](#hub-connection-availability-gate)): with
+  the socket down the timestamp only records when the integration stopped
+  listening, so the sensor goes unavailable with the rest of the device.
 
 ## Event platform (`event.py`, value-as-type, auto-populated)
 
@@ -274,8 +278,11 @@ coordinator watchdog, and the devices map:
 - **Type-only fired event.** `_trigger_event(event_type)` is called with **no
   extra attributes** (the type is the whole payload); there is **no `payload`
   and no `value_transform`** — the raw value is stringified directly.
-- **Always available; no construction-time replay.** `available` is always
-  `True` (events are momentary; a timeout would hide the entity almost always).
+- **Always available; no construction-time replay.** `available` ignores the
+  silence timeout (events are momentary; a timeout would hide the entity almost
+  always) and tracks `coordinator.hub_available` instead — while there is no
+  socket the device's events cannot arrive at all (see
+  [Hub-connection availability gate](#hub-connection-availability-gate)).
   `_async_restore_state` is a **no-op** — HA's
   `EventEntity.async_internal_added_to_hass` restores the last displayed event.
   The entity does **not** seed/replay `coordinator.devices[key]` on construction
@@ -472,6 +479,58 @@ because these are the contracts the integration relies on:
   persisted `"unknown"` device from `entry.data["devices"]` and the matching
   registry device `(DOMAIN, f"{entry_id}:unknown")`. Safe on every setup; the
   classifier above prevents recreation.
+
+## Hub-connection availability gate
+
+Durable contract for the second availability gate (`coordinator/_watchdog.py`,
+`entity.py`, `event.py`, `sensor.py`). The per-device *silence* timeouts answer
+"has this radio transmitted lately?", which only means anything while the
+integration is listening; this gate answers "is the integration listening at
+all?". End-user docs live in
+[docs/availability.md](docs/availability.md#hub-connection).
+
+- **`coordinator.hub_available`.** `True` while the client's socket is open;
+  `True` for `HUB_OFFLINE_GRACE` (60 s, `const.py`) after a drop, so the client's
+  1–60 s reconnect backoff rides out a blip without flapping every device; `False`
+  for as long as an outage outlives that window. Also `True` before
+  `async_start` — nothing has been attempted, so there is nothing to report.
+- **Every device entity reads it.** `Rtl433Entity.available` short-circuits on it
+  *before* the silence check, and the two `available` overrides
+  (`Rtl433Event`, `Rtl433LastSeenSensor`) route through it too. **Never-expire
+  devices are not exempt** — that exemption is from *silence*, not from the
+  transport being gone.
+- **The hub's own diagnostic sensors read it too.** `Rtl433HubSensor.available`
+  returns `hub_available`: every value it renders is HTTP `/cmd`-sourced, so an
+  outage freezes it with nothing on the entity to say so. A key missing from a
+  *live* payload still reads `unknown` (a `None` native value), not unavailable.
+  Two hub entities stay ungated: `Rtl433HubConnectivity` (it *is* the connection
+  report — `available` is hardcoded `True` and it flips `off` on the drop with no
+  grace window) and `Rtl433HubControl` (availability is a capability gate on
+  `meta`).
+- **The clock starts at `async_start`,** not at the first drop, so a Home
+  Assistant restart while the server is down expires the restored states after
+  the grace window instead of leaving them available forever.
+- **Lazy gate, edge-driven repaint.** Entities evaluate `hub_available` on every
+  state read, so it is always correct; the coordinator only *repaints*. The
+  disconnect edge arms a one-shot `async_call_later(HUB_OFFLINE_GRACE)`, the
+  connect edge cancels it, and each watchdog tick re-checks as a backstop. All
+  three funnel into `_async_sync_hub_availability`, which dispatches
+  `SIGNAL_HUB_AVAILABILITY` **once per flip** (a hub-wide signal, deliberately
+  separate from `SIGNAL_HUB_UPDATE`, which also fires on every meta/stats refresh
+  and would otherwise write state for every device entity on each poll). Both
+  `Rtl433Entity` and `Rtl433HubEntity` subscribe: `SIGNAL_HUB_UPDATE` covers the
+  connect/disconnect edges but **not** the moment the grace window elapses, which
+  is exactly when a gated entity's `available` changes.
+- **Logging.** The library logs drops at DEBUG under its own logger, which is
+  invisible to anyone debugging the integration. The coordinator logs the loss
+  and the recovery (with the outage duration) at **INFO**, and the moment the
+  devices are marked unavailable at **WARNING** (naming the URL and the device
+  count). A teardown (`async_stop`) is not an outage and logs neither — the
+  `_started` guard in `_emit_hub_update` covers the socket close it performs.
+- **Tests must state the connection.** Feeding events straight into the client
+  leaves `connected` False, which the gate reads as one long outage; the shared
+  `tests/conftest.py::mark_hub_connected` helper is how a test says "the hub is
+  up" (and must be re-applied after a reload, which rebuilds the coordinator).
 
 ## Hub SDR controls (HA-managed settings)
 
@@ -878,7 +937,9 @@ Full runbook:
 - Keep `const.py` the single source of truth for config keys and defaults
   (`DEFAULT_PORT=8433`, `DEFAULT_PATH="/ws"`, `DEFAULT_AVAILABILITY_TIMEOUT=600`)
   and for the dispatcher signals (`SIGNAL_NEW_DEVICE`, `SIGNAL_HUB_UPDATE` — the
-  latter fans connectivity/meta/stats changes out to the hub entities).
+  latter fans connectivity/meta/stats changes out to the hub entities — and
+  `SIGNAL_HUB_AVAILABILITY`, the per-flip device repaint behind
+  `HUB_OFFLINE_GRACE`).
 - Always run `pytest tests/` before proposing a change, and follow the
   conventional-commit and lint rules in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Always open pull requests with a **conventional-commit-style title** that
