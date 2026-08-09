@@ -133,11 +133,17 @@ CALIBRATION_COMMODITIES: Final[tuple[str, ...]] = (
 )
 
 # The known utility-meter consumption field keys a per-device calibration may be
-# applied to (SCM/ERT ``consumption_data``; SCMplus ``consumption``). The
+# applied to (SCM/ERT ``consumption_data``; SCMplus ``Consumption``). The
 # calibration overlay (config_flow + entity) only touches these field keys, never
 # arbitrary fields.
+#
+# ``Consumption`` is CamelCased because that is the wire name SCMplus actually
+# emits and field matching is case-sensitive -- see the upstream decoder:
+# https://github.com/merbanan/rtl_433/blob/90621a8cb56c79b766077cadce4dc37bc613c54c/src/devices/scmplus.c#L126
+# The lowercase ``consumption`` is kept alongside it so a user override file that
+# defines the old spelling still gets the calibration overlay.
 CONSUMPTION_FIELD_KEYS: Final[frozenset[str]] = frozenset(
-    {"consumption", "consumption_data"}
+    {"Consumption", "consumption", "consumption_data"}
 )
 
 # --- hass.data keys ---------------------------------------------------------

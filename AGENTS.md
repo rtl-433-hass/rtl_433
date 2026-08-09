@@ -137,9 +137,12 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   map, and removes the obsolete per-device entries.
 - Per-device configuration lives in the **hub OptionsFlow** (`config_flow.py`):
   a menu with a *Hub settings* step (discovery toggle + default timeout, written
-  to `entry.options`) and a *Device settings* step (per-device timeout override,
-  written into `entry.data["devices"]`).
-- **Utility-meter calibration** (`calibration.py`, options `Device settings` →
+  to `entry.options`) and a *Device settings* pair — a `device` picker step
+  followed by a `device_settings` step (per-device timeout override, commodity
+  and motion clear-delay, written into `entry.data["devices"]`). The picker is a
+  separate step so every default on `device_settings` is derived from the
+  **selected** device; the picker labels devices whose commodity was detected.
+- **Utility-meter calibration** (`calibration.py`, options `device_settings` →
   `calibration` step) writes a `DEVICE_CALIBRATION` sub-record (`{commodity,
   unit, scale}`) into `entry.data[CONF_DEVICES][device_key]` next to
   `timeout_override`. It overlays the consumption descriptor (the

@@ -4,10 +4,12 @@ A small menu offering a *hub* step, a *device* step, and a *mappings* step:
 
 - **hub** persists the per-hub discovery toggle, the default availability
   timeout, and the manage-settings toggle to ``entry.options``.
-- **device** picks a known device from the hub's ``entry.data["devices"]`` map
-  and sets/clears that device's availability-timeout override, an optional
-  utility-meter calibration (advancing to the *calibration* step for a real
-  commodity), and a per-device motion clear-delay.
+- **device** picks a known device from the hub's ``entry.data["devices"]`` map,
+  then **device_settings** sets/clears that device's availability-timeout
+  override, an optional utility-meter calibration (advancing to the *calibration*
+  step for a real commodity), and a per-device motion clear-delay. The picker is
+  its own step so every default on the settings form can be derived from the
+  selected device.
 - **mappings** edits this hub's device-library overrides as YAML.
 
 Split out of ``config_flow.py`` (which keeps the hub add/reconfigure/discovery
@@ -73,19 +75,21 @@ MAPPINGS_DOCS_URL = (
 
 
 class Rtl433OptionsFlow(OptionsFlow):
-    """Hub options: a menu with a hub-settings step and a device step.
+    """Hub options: a menu with a hub-settings step and a device-settings pair.
 
     The hub step persists the discovery toggle and the default availability
-    timeout to ``entry.options``. The device step writes a per-device
-    availability-timeout override and an optional utility-meter calibration
-    into the hub's ``entry.data["devices"]`` map.
+    timeout to ``entry.options``. The device picker chooses one device and the
+    device-settings step writes that device's availability-timeout override and
+    an optional utility-meter calibration into ``entry.data["devices"]``.
     """
 
-    # State carried from the device step into the (optional) calibration step.
-    _calibration_device: str = ""
+    # The device chosen on the device step, carried into the device-settings step
+    # (whose defaults are all derived from it) and on into the calibration step.
+    _device_key: str = ""
+    # State carried from the device-settings step into the calibration step.
     _calibration_override: int | None = None
     _calibration_commodity: str = COMMODITY_NONE
-    # Per-device motion clear-delay override submitted on the device step, carried
+    # Per-device motion clear-delay override submitted on the settings step, carried
     # through the (optional) calibration step into the finish path. ``None`` means
     # "no value submitted" -> clear any prior override.
     _motion_clear_delay: int | None = None
@@ -297,24 +301,78 @@ class Rtl433OptionsFlow(OptionsFlow):
 
         return self.async_create_entry(title="", data=options)
 
+    def _device_label(self, device_key: str, record: dict[str, Any]) -> str:
+        """Human label for the device picker, annotated with a detected commodity.
+
+        Surfaces the ``MeterType`` / ``ert_type`` hint *in the picker itself* so a
+        user with several meters can see the integration already recognizes one as
+        gas/water before choosing it -- the per-device calibration is otherwise
+        easy to miss.
+        """
+        label = f"{record.get(CONF_MODEL, device_key)} ({device_key})"
+        commodity = self._device_commodity_default(device_key)
+        if commodity != COMMODITY_NONE:
+            label = f"{label} — {commodity} detected"
+        return label
+
     async def async_step_device(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Pick a known device; set its timeout override and meter commodity.
+        """Pick the device whose settings to edit.
 
-        Collects the per-device availability-timeout override and the consumption
-        commodity (none / energy / gas / water). Choosing ``none`` writes the
-        record (clearing any calibration) and finishes; choosing a real commodity
-        advances to :meth:`async_step_calibration` to pick a commodity-constrained
-        base unit + scale. The commodity default is pre-filled from the device's
-        decoded ``MeterType`` / ``ert_type`` when present.
+        Deliberately a picker-only step: every knob on the following
+        :meth:`async_step_device_settings` form is pre-filled *from the chosen
+        device*, which is impossible while the picker shares a form with them.
         """
         devices: dict[str, Any] = dict(self.config_entry.data.get(CONF_DEVICES, {}))
         if not devices:
             return self.async_abort(reason="no_devices")
 
         if user_input is not None:
-            device_key: str = user_input[CONF_DEVICE]
+            self._device_key = user_input[CONF_DEVICE]
+            return await self.async_step_device_settings()
+
+        options = [
+            SelectOptionDict(
+                value=device_key, label=self._device_label(device_key, record)
+            )
+            for device_key, record in sorted(devices.items())
+        ]
+        return self.async_show_form(
+            step_id="device",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_DEVICE): SelectSelector(
+                        SelectSelectorConfig(
+                            options=options,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    )
+                }
+            ),
+        )
+
+    async def async_step_device_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Set the chosen device's timeout override, commodity and clear-delay.
+
+        Every default here reflects **the device selected on the previous step**:
+        the timeout override and motion clear-delay are pre-filled from that
+        device's persisted record, and the commodity from its existing calibration
+        or, failing that, its decoded ``MeterType`` / ``ert_type`` hint.
+
+        Choosing commodity ``none`` writes the record (clearing any calibration)
+        and finishes; choosing a real commodity advances to
+        :meth:`async_step_calibration` to pick a commodity-constrained base unit
+        + scale.
+        """
+        device_key = self._device_key
+        record: dict[str, Any] = self.config_entry.data.get(CONF_DEVICES, {}).get(
+            device_key, {}
+        )
+
+        if user_input is not None:
             override = user_input.get(DEVICE_TIMEOUT_OVERRIDE)
             commodity = user_input.get(CALIBRATION_COMMODITY, COMMODITY_NONE)
             # Optional + no key in the schema for non-motion devices -> ``None``.
@@ -328,39 +386,31 @@ class Rtl433OptionsFlow(OptionsFlow):
                     motion_clear_delay=clear_delay,
                 )
 
-            # Carry the device + timeout + commodity into the calibration step.
-            self._calibration_device = device_key
+            # Carry the timeout + commodity into the calibration step.
             self._calibration_override = override
             self._calibration_commodity = commodity
             self._motion_clear_delay = clear_delay
             return await self.async_step_calibration()
 
-        options = [
-            SelectOptionDict(
-                value=device_key,
-                label=f"{record.get(CONF_MODEL, device_key)} ({device_key})",
-            )
-            for device_key, record in sorted(devices.items())
-        ]
         commodity_options = [
             SelectOptionDict(value=value, label=value)
             for value in CALIBRATION_COMMODITIES
         ]
-        # Best-effort commodity pre-fill: the device picker and commodity share
-        # one form, so the default can only reflect a specific device when there
-        # is exactly one (the focused-calibration case). With several devices the
-        # default stays ``none`` and the user picks the commodity explicitly.
-        commodity_default = COMMODITY_NONE
-        if len(devices) == 1:
-            commodity_default = self._device_commodity_default(next(iter(devices)))
+        # Pre-fill the commodity from this device's existing calibration when it
+        # has one, else from its decoded MeterType / ert_type hint.
+        existing = normalize_calibration(record.get(DEVICE_CALIBRATION))
+        commodity_default = (
+            existing[CALIBRATION_COMMODITY]
+            if existing is not None
+            else self._device_commodity_default(device_key)
+        )
+        # ``suggested_value`` (not ``default``) so an emptied field still submits
+        # as absent and clears the persisted override.
         schema_dict: dict[Any, Any] = {
-            vol.Required(CONF_DEVICE): SelectSelector(
-                SelectSelectorConfig(
-                    options=options,
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Optional(DEVICE_TIMEOUT_OVERRIDE): vol.All(int, vol.Range(min=0)),
+            vol.Optional(
+                DEVICE_TIMEOUT_OVERRIDE,
+                description={"suggested_value": record.get(DEVICE_TIMEOUT_OVERRIDE)},
+            ): vol.All(int, vol.Range(min=0)),
             vol.Optional(
                 CALIBRATION_COMMODITY, default=commodity_default
             ): SelectSelector(
@@ -372,24 +422,21 @@ class Rtl433OptionsFlow(OptionsFlow):
             ),
         }
         # The clear-delay knob is only meaningful for motion-bearing devices
-        # (those with a field whose descriptor carries a ``clear_delay``). The
-        # device picker and this field share one form, so -- like the commodity
-        # pre-fill -- the field is conditionally included iff any device on the
-        # hub is motion-bearing, and pre-filled from the persisted override only
-        # when there is exactly one device (the focused-config case).
-        if any(self._is_motion_bearing(key) for key in devices):
-            clear_default = DEFAULT_MOTION_CLEAR_DELAY
-            if len(devices) == 1:
-                clear_default = (
-                    self.config_entry.data.get(CONF_DEVICES, {})
-                    .get(next(iter(devices)), {})
-                    .get(DEVICE_MOTION_CLEAR_DELAY, DEFAULT_MOTION_CLEAR_DELAY)
-                )
+        # (those with a field whose descriptor carries a ``clear_delay``), so it
+        # appears iff *this* device is one, pre-filled from its persisted override.
+        if self._is_motion_bearing(device_key):
             schema_dict[
-                vol.Optional(DEVICE_MOTION_CLEAR_DELAY, default=clear_default)
+                vol.Optional(
+                    DEVICE_MOTION_CLEAR_DELAY,
+                    default=record.get(
+                        DEVICE_MOTION_CLEAR_DELAY, DEFAULT_MOTION_CLEAR_DELAY
+                    ),
+                )
             ] = vol.All(int, vol.Range(min=1))
         return self.async_show_form(
-            step_id="device", data_schema=vol.Schema(schema_dict)
+            step_id="device_settings",
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders={"device": self._device_label(device_key, record)},
         )
 
     async def async_step_calibration(
@@ -397,14 +444,14 @@ class Rtl433OptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Pick the commodity-constrained base unit + scale for a consumption meter.
 
-        Reached from :meth:`async_step_device` only when a real commodity was
+        Reached from :meth:`async_step_device_settings` only when a real commodity was
         chosen. The unit selector is constrained to the units Home Assistant
         recognizes as convertible for the commodity's device_class, so the
         resulting consumption sensor is Energy-dashboard-eligible. The
         ``{commodity, unit, scale}`` triple is written into the device record and
         applies to the device's known consumption field(s) only.
         """
-        device_key = self._calibration_device
+        device_key = self._device_key
         commodity = self._calibration_commodity
 
         if user_input is not None:

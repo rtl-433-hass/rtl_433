@@ -1,0 +1,15 @@
+[
+  {
+    "time": "2026-05-25 10:02:00",
+    "model": "SCMplus",
+    "id": 41783294,
+    "ProtocolID": "0x1E",
+    "EndpointType": "0xAB",
+    "EndpointID": 41783294,
+    "Consumption": 5417320,
+    "Tamper": "0x00",
+    "PacketCRC": "0x2B4D",
+    "MeterType": "Gas",
+    "mic": "CRC"
+  }
+]

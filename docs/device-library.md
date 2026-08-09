@@ -124,6 +124,13 @@ names** exactly as they appear in the JSON event (e.g. `temperature_C`,
 `wind_avg_km_h`, `battery_ok`). Each value is an entry with the attributes
 below.
 
+Field names are matched **case-sensitively**, and not every decoder uses
+`snake_case`. SCMplus, for instance, emits CamelCased fields — `Consumption`,
+`MeterType`, `EndpointID` — so those keys are CamelCased in the library too. Copy
+the name verbatim from the event or from the decoder source (SCMplus:
+[`scmplus.c`](https://github.com/merbanan/rtl_433/blob/90621a8cb56c79b766077cadce4dc37bc613c54c/src/devices/scmplus.c#L126));
+a key that differs only in case silently never matches.
+
 ```yaml
 temperature_C:
   platform: sensor
@@ -358,7 +365,7 @@ The shipped `events.yaml` has two examples:
 The top-level keys above are the **global** defaults: a `temperature_C` entry
 applies to *every* device that emits `temperature_C`. Some fields, though, need
 a different descriptor depending on the **device model** — most notably the
-utility-meter consumption counters (`consumption`, `consumption_data`), whose
+utility-meter consumption counters (`Consumption`, `consumption_data`), whose
 unit and scale are *not* carried in the RF signal and differ between meter
 models. For those, a file may carry an optional top-level **`models:`** block
 that overrides the global descriptor for one specific rtl_433 `model` string.
