@@ -71,7 +71,6 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
-from tests.conftest import mark_hub_connected
 
 LEGACY_OBSERVED_FIELDS = "observed_fields"
 
@@ -122,18 +121,18 @@ def _live(event: dict) -> dict:
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
     """Set up a single hub entry (optionally pre-seeded) and return it.
 
-    The hub is marked connected: tests feed events straight into the client's
-    frame handler rather than over a socket, and the connection-backed
-    availability gate would otherwise read the whole run as an outage and take
-    every device unavailable after ``HUB_OFFLINE_GRACE`` (see
-    :func:`tests.conftest.mark_hub_connected`). Tests that exercise the
-    disconnected side set ``_client.connected`` themselves.
+    The coordinator comes back connected: the autouse
+    ``hub_connected_by_default`` fixture in ``tests/conftest.py`` leaves every
+    started coordinator on a live connection, because tests feed events straight
+    into the client's frame handler rather than over a socket and the
+    connection-backed availability gate would otherwise read the whole run as one
+    long outage. Modules that exercise the disconnected side opt out with
+    ``@pytest.mark.hub_disconnected``.
     """
     hub = hub_entry_builder(availability_timeout=600, devices=devices, **kwargs)
     hub.add_to_hass(hass)
     assert await hass.config_entries.async_setup(hub.entry_id)
     await hass.async_block_till_done()
-    mark_hub_connected(_coordinator(hass, hub))
     return hub
 
 
@@ -154,7 +153,6 @@ async def _enable_entity(hass, hub, entity_id):
     )
     await hass.async_block_till_done()
     # The reload built a fresh coordinator, so re-assert the connected hub.
-    mark_hub_connected(_coordinator(hass, hub))
 
 
 def _ts(value):

@@ -26,6 +26,7 @@ from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.restore_state import RestoredExtraData
 
 from .const import DOMAIN
 from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
@@ -133,6 +134,20 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
         self._attr_is_on = False
         self.async_write_ha_state()
 
+    @property
+    def extra_restore_state_data(self) -> RestoredExtraData | None:
+        """Persist the on/off value independently of ``available``.
+
+        Home Assistant writes ``unavailable`` as the *state* whenever
+        ``available`` is False, so a restart during a hub outage (or after a
+        device's silence timeout elapsed) would otherwise lose the value
+        entirely. Never-expire contacts are the ones that suffer: they may not
+        transmit again for days.
+        """
+        if self._attr_is_on is None:
+            return None
+        return RestoredExtraData({"is_on": self._attr_is_on})
+
     async def _async_restore_state(self) -> None:
         """Restore the last known on/off state on startup.
 
@@ -144,6 +159,10 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
         if self._descriptor.clear_delay is not None:
             return
         if self._attr_is_on is not None:
+            return
+        extra = await self.async_get_last_extra_data()
+        if extra is not None and (restored := extra.as_dict().get("is_on")) is not None:
+            self._attr_is_on = bool(restored)
             return
         last_state = await self.async_get_last_state()
         if last_state is None or last_state.state in (None, "unknown", "unavailable"):

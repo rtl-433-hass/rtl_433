@@ -77,7 +77,6 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
-from tests.conftest import mark_hub_connected
 
 # ---------------------------------------------------------------------------
 # Helpers shared with test_lifecycle
@@ -104,17 +103,16 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
-    """Set up a hub entry with the hub marked connected.
+    """Set up a hub entry; the coordinator is left connected.
 
-    Without the connected marking the connection-backed availability gate reads
-    the socket-less test run as an outage and takes every device unavailable
-    after ``HUB_OFFLINE_GRACE`` (see :func:`tests.conftest.mark_hub_connected`).
+    The autouse ``hub_connected_by_default`` fixture does the marking; without it
+    the connection-backed availability gate reads the socket-less test run as an
+    outage and takes every device unavailable after ``HUB_OFFLINE_GRACE``.
     """
     hub = hub_entry_builder(availability_timeout=600, devices=devices, **kwargs)
     hub.add_to_hass(hass)
     assert await hass.config_entries.async_setup(hub.entry_id)
     await hass.async_block_till_done()
-    mark_hub_connected(_coordinator(hass, hub))
     return hub
 
 
@@ -138,7 +136,6 @@ async def _enable_last_seen(hass, hub, device_key):
     )
     await hass.async_block_till_done()
     # The reload built a fresh coordinator, so re-assert the connected hub.
-    mark_hub_connected(_coordinator(hass, hub))
     return eid
 
 

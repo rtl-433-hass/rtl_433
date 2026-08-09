@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -27,8 +28,18 @@ from custom_components.rtl_433.const import (
     DEFAULT_PORT,
     DOMAIN,
 )
+from custom_components.rtl_433.coordinator import Rtl433Coordinator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def pytest_configure(config):
+    """Register the suite's own markers."""
+    config.addinivalue_line(
+        "markers",
+        "hub_disconnected: do not auto-connect coordinators (see "
+        "hub_connected_by_default)",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -131,3 +142,29 @@ def mark_hub_connected(coordinator: Any) -> None:
 def hub_connected():
     """Expose :func:`mark_hub_connected` as a fixture."""
     return mark_hub_connected
+
+
+@pytest.fixture(autouse=True)
+def hub_connected_by_default(request):
+    """Leave every coordinator a test starts in the connected state.
+
+    A connected hub is what almost every test means, so it is the default rather
+    than an opt-in each setup site has to remember: forgetting it does not fail
+    where the hub is set up, it fails much later as an unrelated-looking device
+    timeout the moment the test jumps the clock past ``HUB_OFFLINE_GRACE``.
+
+    Tests that exercise the outage side opt out with
+    ``@pytest.mark.hub_disconnected`` and drive the edges themselves.
+    """
+    if "hub_disconnected" in request.keywords:
+        yield
+        return
+
+    original = Rtl433Coordinator.async_start
+
+    async def _async_start(self: Rtl433Coordinator) -> None:
+        await original(self)
+        mark_hub_connected(self)
+
+    with patch.object(Rtl433Coordinator, "async_start", _async_start):
+        yield

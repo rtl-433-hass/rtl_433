@@ -192,11 +192,21 @@ AVAILABILITY_TIMEOUT_NEVER: Final = 0
 # which is only meaningful while the integration is actually listening. Once the
 # socket is down the integration hears nothing, so a device's cached state says
 # nothing about the device -- exactly the situation an MQTT availability topic
-# covers with an LWT. The client reconnects with a 1-60 s capped backoff, so this
-# grace window lets a brief blip (a server restart, a dropped frame) recover
-# without flapping every device's availability, while a genuine outage still
-# surfaces promptly.
-HUB_OFFLINE_GRACE: Final = timedelta(seconds=60)
+# covers with an LWT, and the gate ``zwave_js`` applies when its driver
+# connection drops. (Both of those flip instantly; the grace window below is this
+# integration's own choice, because the transport here is a WebSocket to an
+# rtl_433 process users restart routinely, not a supervised local daemon.)
+#
+# 90 s, not 60 s, because the client's reconnect attempts land at roughly
+# t = 1, 3, 7, 15, 31, 63 s (``_BACKOFF_MIN`` doubling to ``_BACKOFF_MAX``). A
+# 60 s window expires three seconds before the t~63 s attempt, so every outage in
+# the ~31-63 s band -- an rtl_433 server restart, the single most common cause --
+# would take every entity unavailable and hand it straight back, which is the
+# exact flap the window exists to prevent. 90 s clears that attempt, matches
+# ``repairs._UNREACHABLE_GRACE`` so the entities and the "server unreachable"
+# repair issue agree on when the hub is down, and is a multiple of the 30 s
+# watchdog tick that backstops the one-shot timer.
+HUB_OFFLINE_GRACE: Final = timedelta(seconds=90)
 # Default seconds after which a motion/event binary_sensor auto-clears to "off"
 # when no explicit clear signal arrives. Overridable per device.
 DEFAULT_MOTION_CLEAR_DELAY: Final = 90

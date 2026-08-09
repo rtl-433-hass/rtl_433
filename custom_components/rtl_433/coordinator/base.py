@@ -259,11 +259,19 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # every meta/stats refresh, where connectivity is unchanged).
         self._was_connected = False
         # --- Hub-connection availability gate (see ``_watchdog.py``) ---------
-        # UTC time the current outage began, or ``None`` while connected (and
-        # before the coordinator has ever started). ``hub_available`` measures
-        # ``HUB_OFFLINE_GRACE`` from it; once that elapses every device behind
-        # this hub reads unavailable, whatever its own silence timeout says.
+        # UTC time the current run of connection trouble began, or ``None`` while
+        # the connection is healthy (and before the coordinator has ever
+        # started). ``hub_available`` measures ``HUB_OFFLINE_GRACE`` from it; once
+        # that elapses every device behind this hub reads unavailable, whatever
+        # its own silence timeout says. A reconnect does *not* clear it on the
+        # spot: a socket that flaps faster than the grace window delivers nothing
+        # and must not keep resetting the clock, so it is retired only once the
+        # link has held for a full grace window (see ``_async_note_connected``).
         self._disconnected_since: datetime | None = None
+        # UTC time the current connected span began, or ``None`` while
+        # disconnected. Only used to decide whether a reconnect has held long
+        # enough to count as a recovery rather than a flap.
+        self._connected_since: datetime | None = None
         # Last gate state dispatched on ``signal_hub_availability``, so the
         # repaint fires once per flip rather than on every check.
         self._devices_offline = False
@@ -347,12 +355,15 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
     @property
     def disconnected_since(self) -> datetime | None:
-        """UTC start of the current outage, or ``None`` while connected.
+        """UTC start of the current run of connection trouble, else ``None``.
 
         Set on the disconnect edge (and at ``async_start``, before the first
-        connect), cleared on the connect edge. ``hub_available`` measures
-        ``HUB_OFFLINE_GRACE`` from it; diagnostics report it so an outage's age is
-        visible in a support dump.
+        connect). A reconnect does not clear it immediately — it is retired once
+        the link has held for a full ``HUB_OFFLINE_GRACE``, so a flapping socket
+        cannot keep resetting the window — which means it can read non-``None``
+        for up to one grace window after the connection is back.
+        ``hub_available`` measures ``HUB_OFFLINE_GRACE`` from it; diagnostics
+        report it so an outage's age is visible in a support dump.
         """
         return self._disconnected_since
 
@@ -390,11 +401,23 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # of leaving restored states showing indefinitely. The connect edge
         # clears it, normally well inside that window.
         self._async_note_disconnected()
-        # Load the persisted desired state (or wipe it when management is off)
-        # before the client can connect and the connect-edge adoption/enforcement
-        # can run against it.
-        await self.async_load_desired_state()
-        await self._client.start()
+        try:
+            # Load the persisted desired state (or wipe it when management is off)
+            # before the client can connect and the connect-edge adoption/enforcement
+            # can run against it.
+            await self.async_load_desired_state()
+            await self._client.start()
+        except Exception:
+            # ``async_setup_entry`` awaits this without a handler, so a failure
+            # here leaves the entry in ``setup_retry`` and ``async_stop`` is never
+            # called. Drop the grace timer the clock above armed, or it would
+            # outlive this abandoned coordinator and fire a repaint (and a
+            # lingering-timer failure under the test harness) against whatever
+            # coordinator the retry installs under this entry id.
+            self._started = False
+            self._async_cancel_hub_offline_timer()
+            self._disconnected_since = None
+            raise
         self._watchdog_unsub = async_track_time_interval(
             self.hass,
             self._async_watchdog,
@@ -440,6 +463,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # armed by an outage that was already in flight.
         self._async_cancel_hub_offline_timer()
         self._disconnected_since = None
+        self._connected_since = None
         self._devices_offline = False
         self._ever_connected = False
         LOGGER.debug("rtl_433 coordinator stopped for %s", self.ws_url)

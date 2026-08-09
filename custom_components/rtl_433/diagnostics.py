@@ -116,7 +116,15 @@ async def async_get_config_entry_diagnostics(
             "model": normalized.model,
             "identity": normalized.identity,
             "fields": sorted(coordinator.device_fields.get(device_key, set())),
-            "available": coordinator.available.get(device_key),
+            # What the entities actually report: the watchdog's per-device
+            # silence verdict *and* the hub gate, which short-circuits it. Both
+            # legs are kept separately so a dump distinguishes "the device fell
+            # silent" from "the hub went away and took everything with it".
+            "available": (
+                coordinator.hub_available
+                and bool(coordinator.available.get(device_key))
+            ),
+            "silence_available": coordinator.available.get(device_key),
             "last_seen": (
                 last_seen.isoformat()
                 if (last_seen := coordinator.last_seen.get(device_key)) is not None

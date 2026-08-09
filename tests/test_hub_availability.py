@@ -23,8 +23,12 @@ from unittest.mock import patch
 
 from freezegun import freeze_time
 import pytest
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant_custom_component.common import (
+    async_fire_time_changed,
+    mock_restore_cache_with_extra_data,
+)
 
+from custom_components.rtl_433 import repairs
 from custom_components.rtl_433.const import (
     CONF_MODEL,
     DEVICE_FIELDS,
@@ -34,13 +38,20 @@ from custom_components.rtl_433.const import (
     signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from homeassistant.core import State
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
+from tests.conftest import mark_hub_connected
 from tests.test_lifecycle import _coordinator, _feed, _setup_hub
 
 DISPATCH = "custom_components.rtl_433.coordinator._watchdog.async_dispatcher_send"
 _LOGGER_NAME = "custom_components.rtl_433"
+
+# This module *is* the outage suite, so it opts out of the conftest fixture that
+# leaves every started coordinator connected and drives the edges itself.
+pytestmark = pytest.mark.hub_disconnected
 
 
 @pytest.fixture
@@ -87,9 +98,17 @@ def _availability_signals(dispatch, entry_id: str) -> list:
 # --------------------------------------------------------------------------- #
 # Constants: the documented contract                                           #
 # --------------------------------------------------------------------------- #
-def test_grace_window_is_sixty_seconds():
-    """60 s is the window docs/availability.md promises and the client's max backoff."""
-    assert timedelta(seconds=60) == HUB_OFFLINE_GRACE
+def test_grace_window_is_ninety_seconds():
+    """90 s is the window docs/availability.md promises.
+
+    It has to clear the client's t~63 s reconnect attempt (a 60 s window expires
+    three seconds short of it, so an ordinary server restart would trip the gate
+    and immediately untrip it), and it matches ``repairs._UNREACHABLE_GRACE`` so
+    the entities and the "server unreachable" repair agree on when the hub is
+    down.
+    """
+    assert timedelta(seconds=90) == HUB_OFFLINE_GRACE
+    assert HUB_OFFLINE_GRACE == repairs._UNREACHABLE_GRACE
 
 
 def test_availability_signal_is_scoped_per_hub():
@@ -145,7 +164,13 @@ def test_hub_unavailable_once_the_grace_window_elapses(hass, coordinator):
 
 
 def test_reconnect_reopens_the_gate(hass, coordinator):
-    """Reconnecting clears the outage clock, whatever its age."""
+    """Reconnecting reopens the gate immediately, whatever the outage's age.
+
+    The clock itself is retired only once the new connection has proven itself
+    by holding for a full grace window (see
+    :func:`test_flapping_connection_keeps_the_original_outage_clock`), so it is
+    still readable right after the reconnect.
+    """
     start = dt_util.utcnow()
     with freeze_time(start):
         _drop(coordinator)
@@ -154,7 +179,37 @@ def test_reconnect_reopens_the_gate(hass, coordinator):
         assert coordinator.hub_available is False
         _connect(coordinator)
         assert coordinator.hub_available is True
+        assert coordinator.disconnected_since == start
+
+    # A grace window of unbroken connection retires the clock.
+    with freeze_time(start + timedelta(seconds=600) + HUB_OFFLINE_GRACE):
+        coordinator._async_sync_hub_availability()
         assert coordinator.disconnected_since is None
+
+
+def test_flapping_connection_keeps_the_original_outage_clock(hass, coordinator):
+    """A socket that reconnects for less than the grace window is still an outage.
+
+    A server stuck in a crash-restart loop connects and drops faster than the
+    grace window. Restarting the clock on each drop would hold the gate open
+    forever even though no event ever gets through, so the original clock keeps
+    running and the gate closes on schedule.
+    """
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _drop(coordinator)
+
+    # Three connect/drop cycles, each far shorter than the grace window.
+    for offset in (20, 40, 55):
+        with freeze_time(start + timedelta(seconds=offset)):
+            _connect(coordinator)
+            assert coordinator.hub_available is True
+        with freeze_time(start + timedelta(seconds=offset + 1)):
+            _drop(coordinator)
+        assert coordinator.disconnected_since == start
+
+    with freeze_time(start + HUB_OFFLINE_GRACE + timedelta(seconds=1)):
+        assert coordinator.hub_available is False
 
 
 async def test_start_arms_the_outage_clock(hass, hub_entry_builder):
@@ -265,6 +320,60 @@ async def test_stop_cancels_the_pending_grace_timer(hass, coordinator):
         assert coordinator.hub_available is True
 
 
+async def test_failed_start_cancels_the_outage_timer(hass, hub_entry_builder):
+    """A start that raises leaves no timer on the abandoned coordinator.
+
+    ``async_setup_entry`` awaits ``async_start`` with no handler, so the entry
+    goes to ``setup_retry`` and ``async_stop`` is never called. A timer left
+    armed here would outlive this coordinator and fire a repaint against the one
+    the retry installs under the same entry id (and fail the test harness's
+    lingering-timer check).
+    """
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    coord = Rtl433Coordinator(hass, entry, host="rtl433.local")
+
+    with (
+        patch.object(coord._client, "start", side_effect=OSError("no route")),
+        pytest.raises(OSError),
+    ):
+        await coord.async_start()
+
+    assert coord._hub_offline_unsub is None
+    assert coord.disconnected_since is None
+    # The failed attempt did not consume the one-shot start guard either.
+    assert coord._started is False
+
+
+async def test_grace_timer_rearms_when_the_window_is_not_up_yet(hass, coordinator):
+    """A timer that fires early re-arms instead of dropping the repaint.
+
+    The timer runs on the loop's monotonic clock while the window is measured
+    against the wall clock, so a clock step can leave the window unexpired when
+    it fires. Simulated here by invoking the callback ahead of time.
+    """
+
+    def _fire_timer_now() -> None:
+        """Run the timer callback as the loop would, handle already consumed."""
+        coordinator._async_cancel_hub_offline_timer()
+        coordinator._async_hub_offline_timer(dt_util.utcnow())
+
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _drop(coordinator)
+
+    with freeze_time(start + timedelta(seconds=10)):
+        _fire_timer_now()
+        # Still inside the window, so no repaint — but a timer is armed again.
+        assert coordinator.hub_available is True
+        assert coordinator._hub_offline_unsub is not None
+
+    with freeze_time(start + HUB_OFFLINE_GRACE + timedelta(seconds=1)):
+        _fire_timer_now()
+        assert coordinator.hub_available is False
+        assert coordinator._hub_offline_unsub is None
+
+
 # --------------------------------------------------------------------------- #
 # Logging: the connection loss is visible without DEBUG                        #
 # --------------------------------------------------------------------------- #
@@ -364,9 +473,15 @@ async def test_offline_hub_takes_every_device_entity_unavailable(
     """A sustained outage marks devices unavailable, including never-expire ones.
 
     The door contact is event-driven, so its silence timeout is never-expire and
-    nothing about its own liveness would ever hide it. Its measurement sensor,
-    its event entity, and its Last-seen sensor must still go unavailable while
-    the hub is unreachable — and all come back on reconnect.
+    nothing about its own liveness would ever hide it. Its measurement sensor and
+    its Last-seen sensor must still go unavailable while the hub is unreachable —
+    and come back on reconnect.
+
+    Its ``event`` entity is the documented exception: an ``EventEntity``'s state
+    *is* its last-fired timestamp, so going unavailable would both break Home
+    Assistant's restore (which parses that state string) and re-fire plain
+    state-trigger automations with a stale timestamp on every reconnect. See
+    ``Rtl433Event.available``.
     """
     device_key = "Acurite-606TX-42"
     hub = await _setup_hub(
@@ -415,7 +530,8 @@ async def test_offline_hub_takes_every_device_entity_unavailable(
         async_fire_time_changed(hass, dt_util.utcnow())
         await hass.async_block_till_done()
         assert hass.states.get(temp_eid).state == "unavailable"
-        assert hass.states.get(button_eid).state == "unavailable"
+        # The event entity is exempt and keeps its last-fired timestamp.
+        assert hass.states.get(button_eid).state != "unavailable"
 
         # Reconnecting repaints them without waiting for a fresh transmission.
         _connect(coordinator)
@@ -629,12 +745,63 @@ async def test_offline_hub_takes_the_last_seen_sensor_unavailable(
         assert hass.states.get(last_seen_eid).state == "unavailable"
 
 
+async def test_value_survives_a_restart_taken_during_an_outage(hass, hub_entry_builder):
+    """A restart while the gate is closed still restores the device's value.
+
+    Home Assistant writes ``unavailable`` as the *state* whenever ``available``
+    is False, so the persisted state string is useless and the restore filters
+    drop it. The value rides along in the entity's extra restore data instead —
+    without which a never-expire door contact comes back ``unknown`` and stays
+    that way until it next transmits, possibly days later.
+    """
+    device_key = "Acurite-606TX-42"
+    restore_entity_id = "sensor.acurite_606tx_42_temperature"
+
+    mock_restore_cache_with_extra_data(
+        hass,
+        (
+            (
+                State(restore_entity_id, "unavailable"),
+                RestoredExtraData({"native_value": 19.9}).as_dict(),
+            ),
+        ),
+    )
+
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+    mark_hub_connected(_coordinator(hass, hub))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(restore_entity_id).state == "19.9"
+
+
 async def test_diagnostics_report_the_gate(hass, hub_entry_builder):
     """Diagnostics carry the gate and the outage start for support requests."""
     from custom_components.rtl_433.diagnostics import async_get_config_entry_diagnostics
 
-    hub = await _setup_hub(hass, hub_entry_builder)
+    device_key = "Acurite-606TX-42"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
     coordinator = _coordinator(hass, hub)
+    # This module opts out of the auto-connect fixture, so put the coordinator on
+    # a live connection by hand before exercising the outage.
+    mark_hub_connected(coordinator)
 
     diag = await async_get_config_entry_diagnostics(hass, hub)
     assert diag["hub_available"] is True
@@ -642,8 +809,20 @@ async def test_diagnostics_report_the_gate(hass, hub_entry_builder):
 
     start = dt_util.utcnow()
     with freeze_time(start):
+        _feed(
+            coordinator,
+            {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.0},
+        )
+        await hass.async_block_till_done()
         _drop(coordinator)
     with freeze_time(start + HUB_OFFLINE_GRACE):
         diag = await async_get_config_entry_diagnostics(hass, hub)
     assert diag["hub_available"] is False
     assert diag["disconnected_since"] == start.isoformat()
+
+    # The per-device table must agree with what the entities report: the gate
+    # short-circuits the silence verdict, which is reported separately so a dump
+    # still distinguishes "device fell silent" from "hub went away".
+    device_diag = diag["devices"][device_key]
+    assert device_diag["available"] is False
+    assert device_diag["silence_available"] is True

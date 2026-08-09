@@ -490,15 +490,36 @@ all?". End-user docs live in
 [docs/availability.md](docs/availability.md#hub-connection).
 
 - **`coordinator.hub_available`.** `True` while the client's socket is open;
-  `True` for `HUB_OFFLINE_GRACE` (60 s, `const.py`) after a drop, so the client's
-  1–60 s reconnect backoff rides out a blip without flapping every device; `False`
-  for as long as an outage outlives that window. Also `True` before
-  `async_start` — nothing has been attempted, so there is nothing to report.
+  `True` for `HUB_OFFLINE_GRACE` (90 s, `const.py`) after a drop, so the client's
+  reconnect attempts (t ≈ 1, 3, 7, 15, 31, 63 s) ride out a blip without flapping
+  every device; `False` for as long as an outage outlives that window. Also `True`
+  before `async_start` — nothing has been attempted, so there is nothing to
+  report. The 90 s is not arbitrary: it must clear the t ≈ 63 s reconnect attempt
+  (60 s expires three seconds short of it, so an ordinary server restart would
+  trip the gate and untrip it moments later), and it matches
+  `repairs._UNREACHABLE_GRACE` so the entities and the "server unreachable"
+  repair agree on when the hub is down. **Keep the two constants equal.**
+- **A flap is not a recovery.** A reconnect clears the outage clock only after it
+  has held for a full grace window; until then `_disconnected_since` keeps running
+  from the *first* drop. Otherwise a server in a crash-restart loop would reset
+  the window on every drop and hold the gate open forever while delivering
+  nothing. `_connected_since` is what distinguishes the two.
 - **Every device entity reads it.** `Rtl433Entity.available` short-circuits on it
-  *before* the silence check, and the two `available` overrides
-  (`Rtl433Event`, `Rtl433LastSeenSensor`) route through it too. **Never-expire
-  devices are not exempt** — that exemption is from *silence*, not from the
-  transport being gone.
+  *before* the silence check, and `Rtl433LastSeenSensor` routes through it too.
+  **Never-expire devices are not exempt** — that exemption is from *silence*, not
+  from the transport being gone.
+- **`Rtl433Event` is the one device-entity exception** — `available` is hardcoded
+  `True`. An `EventEntity`'s state *is* its last-fired timestamp, so gating it
+  breaks HA's restore (which parses that state string, turning a persisted
+  `unavailable` into no timestamp at all) and re-publishes the stale timestamp on
+  reconnect, re-firing plain `trigger: state` automations. Do not "fix" this by
+  routing it through `hub_available`.
+- **Values survive an unavailable restart.** `Rtl433Sensor`,
+  `Rtl433LastSeenSensor` and `Rtl433BinarySensor` persist their value through
+  `extra_restore_state_data`, because HA writes `unavailable` as the *state* when
+  `available` is False and the state string is then unrestorable. Without it a
+  restart during an outage strands every never-expire contact at `unknown` until
+  it next transmits — possibly days.
 - **The hub's own diagnostic sensors read it too.** `Rtl433HubSensor.available`
   returns `hub_available`: every value it renders is HTTP `/cmd`-sourced, so an
   outage freezes it with nothing on the entity to say so. A key missing from a
@@ -512,8 +533,11 @@ all?". End-user docs live in
   the grace window instead of leaving them available forever.
 - **Lazy gate, edge-driven repaint.** Entities evaluate `hub_available` on every
   state read, so it is always correct; the coordinator only *repaints*. The
-  disconnect edge arms a one-shot `async_call_later(HUB_OFFLINE_GRACE)`, the
-  connect edge cancels it, and each watchdog tick re-checks as a backstop. All
+  disconnect edge arms a one-shot `async_call_later` for what is left of the
+  window, the connect edge cancels it, and each watchdog tick re-checks as a
+  backstop. The timer runs on the loop's monotonic clock while the window is
+  measured against the wall clock, so it re-arms itself if it fires while the
+  window is somehow still open (a clock step). All
   three funnel into `_async_sync_hub_availability`, which dispatches
   `SIGNAL_HUB_AVAILABILITY` **once per flip** (a hub-wide signal, deliberately
   separate from `SIGNAL_HUB_UPDATE`, which also fires on every meta/stats refresh
@@ -525,12 +549,18 @@ all?". End-user docs live in
   invisible to anyone debugging the integration. The coordinator logs the loss
   and the recovery (with the outage duration) at **INFO**, and the moment the
   devices are marked unavailable at **WARNING** (naming the URL and the device
-  count). A teardown (`async_stop`) is not an outage and logs neither — the
-  `_started` guard in `_emit_hub_update` covers the socket close it performs.
-- **Tests must state the connection.** Feeding events straight into the client
-  leaves `connected` False, which the gate reads as one long outage; the shared
-  `tests/conftest.py::mark_hub_connected` helper is how a test says "the hub is
-  up" (and must be re-applied after a reload, which rebuilds the coordinator).
+  count — from the *persisted* device map, not the live-session one, which is
+  empty in the restart-while-down case the gate exists for). A teardown
+  (`async_stop`) is not an outage and logs neither — the `_started` guard in
+  `_emit_hub_update` covers the socket close it performs. A failed
+  `async_start` cancels the timer it armed, so an entry left in `setup_retry`
+  does not leak a repaint onto the coordinator the retry installs.
+- **Tests default to a connected hub.** Feeding events straight into the client
+  leaves `connected` False, which the gate reads as one long outage, so the
+  autouse `tests/conftest.py::hub_connected_by_default` fixture marks every
+  started coordinator connected (including after a reload, which rebuilds it).
+  Modules that exercise the outage side opt out with
+  `@pytest.mark.hub_disconnected` and drive the edges themselves.
 
 ## Hub SDR controls (HA-managed settings)
 

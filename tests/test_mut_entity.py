@@ -43,7 +43,6 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
-from tests.conftest import mark_hub_connected
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -72,17 +71,16 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
     """Set up a hub entry. Defaults availability_timeout=600 unless overridden.
 
-    Marks the hub connected so the per-device silence timeouts are what these
-    tests actually measure; without it the connection-backed gate would take
-    every device unavailable after ``HUB_OFFLINE_GRACE`` (see
-    :func:`tests.conftest.mark_hub_connected`).
+    The autouse ``hub_connected_by_default`` fixture leaves the coordinator
+    connected, so the per-device silence timeouts are what these tests actually
+    measure; without it the connection-backed gate would take every device
+    unavailable after ``HUB_OFFLINE_GRACE``.
     """
     kwargs.setdefault("availability_timeout", 600)
     hub = hub_entry_builder(devices=devices, **kwargs)
     hub.add_to_hass(hass)
     assert await hass.config_entries.async_setup(hub.entry_id)
     await hass.async_block_till_done()
-    mark_hub_connected(_coordinator(hass, hub))
     return hub
 
 

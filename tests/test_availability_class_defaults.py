@@ -47,7 +47,6 @@ from custom_components.rtl_433.mapping import FieldDescriptor, event_driven_fiel
 from custom_components.rtl_433.sensor import Rtl433Sensor
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from tests.conftest import mark_hub_connected
 
 # Event-driven field keys derived from the shipped library (no user mappings) —
 # the same set the production coordinator computes at setup.
@@ -77,15 +76,15 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
 async def _setup(hass, hub: MockConfigEntry) -> Rtl433Coordinator:
     """Run the real setup (wiring the production resolver) and return the coord.
 
-    The connect loop is stubbed out here, so the hub is marked connected by hand:
-    these tests are about the *per-device* silence timeouts, which only apply
-    while the hub connection itself is up (see :func:`mark_hub_connected`).
+    The connect loop is stubbed out here; the autouse
+    ``hub_connected_by_default`` fixture leaves the coordinator connected anyway,
+    because these tests are about the *per-device* silence timeouts, which only
+    apply while the hub connection itself is up.
     """
     hub.add_to_hass(hass)
     assert await hass.config_entries.async_setup(hub.entry_id)
     await hass.async_block_till_done()
     coordinator = _coordinator(hass, hub)
-    mark_hub_connected(coordinator)
     return coordinator
 
 

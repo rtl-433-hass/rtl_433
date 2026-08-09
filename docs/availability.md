@@ -25,32 +25,48 @@ Silence only means something while the integration is listening. If the
 connection to the rtl_433 server drops, no events can arrive for any device, so a
 device's last reading says nothing about whether the device is still there.
 
-When the WebSocket has been down for 60 seconds, every device behind that hub is
+When the WebSocket has been down for 90 seconds, every device behind that hub is
 marked `unavailable` regardless of its own timeout — including event-driven
-devices that never expire on silence, their event entities, and their **Last
-seen** sensors. This is the same behavior an MQTT device gets from an availability
-topic and a last-will message. The devices come back as soon as the connection is
-re-established; their values are the last ones received, and the usual silence
-timeouts resume from there.
+devices that never expire on silence, and their **Last seen** sensors. This is
+the same behavior an MQTT device gets from an availability topic and a last-will
+message. The devices come back as soon as the connection is re-established; their
+values are the last ones received, and the usual silence timeouts resume from
+there.
 
-Shorter drops are ignored. The client reconnects with a backoff of 1 to 60
-seconds, so a server restart or a brief network blip normally recovers well
-inside the 60 second window without flapping any device's availability.
+Shorter drops are ignored. The client retries roughly 1, 3, 7, 15, 31, and 63
+seconds after the drop, so a server restart or a brief network blip normally
+recovers inside the 90 second window without flapping any device's availability.
+A connection that keeps dropping faster than the window does *not* reset it: the
+clock runs from the first drop until the link has held for a full 90 seconds, so
+a server stuck in a restart loop still marks its devices unavailable.
 
-The hub's own diagnostic sensors (center frequency, sample rate, gain, frame
-counters, and the rest) go unavailable on the same 60 second window. Their values
-are fetched from the server over HTTP, so an outage freezes them at whatever was
-last read.
+The same 90 second window is what the **rtl_433 server unreachable** repair issue
+uses, so the entities and the repair agree on when the hub is down.
 
-The **Connectivity** binary sensor is the exception: it reports the socket state
-directly, flips to `off` the moment the connection drops — no grace window — and
-stays available throughout, because it is the entity that tells you the hub is
-down. The Home Assistant log records the drop, the moment the devices are marked
-unavailable, and the reconnect:
+Two kinds of entity are deliberately exempt:
+
+- **`event` entities** (buttons, doorbells, remotes) stay available. An event
+  entity's state *is* the timestamp of its last event, so marking it unavailable
+  would lose that timestamp across a restart and re-fire plain state-triggered
+  automations with a stale timestamp on every reconnect. Condition on the
+  **Connectivity** sensor if an automation must ignore events during an outage.
+- **The hub's SDR controls** (**Gain**, **Sample rate**, **Frequency
+  correction**, **Hop interval**, **Conversion mode**) stay available, because
+  they are settings you are writing rather than readings you are trusting. With
+  **Manage SDR settings** on — the default — these appear as `number`/`select`
+  entities. Turning it off replaces them with read-only diagnostic sensors, and
+  those *are* gated on the 90 second window along with the hub's other diagnostic
+  sensors (center frequency, frame counters, enabled decoders), whose values are
+  fetched over HTTP and would otherwise freeze at whatever was last read.
+
+The **Connectivity** binary sensor is the entity that reports the outage: it
+reads the socket state directly, flips to `off` the moment the connection drops —
+no grace window — and stays available throughout. The Home Assistant log records
+the drop, the moment the devices are marked unavailable, and the reconnect:
 
 ```text
 INFO  rtl_433 lost the connection to ws://rtl433.local:8433/ws; reconnecting, ...
-WARN  rtl_433 has had no connection to ws://rtl433.local:8433/ws for 60s; marking all 12 device(s) ...
+WARN  rtl_433 has had no connection to ws://rtl433.local:8433/ws for 90s; marking all 12 device(s) ...
 INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
 ```
 
