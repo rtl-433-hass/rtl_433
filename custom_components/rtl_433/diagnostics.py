@@ -99,9 +99,9 @@ async def async_get_config_entry_diagnostics(
         TO_REDACT | {"ws_url"},
     )
     diagnostics["connected"] = coordinator.connected
-    # The connection-backed availability gate: ``hub_available`` is False once an
-    # outage outlives HUB_OFFLINE_GRACE, which is what takes every device
-    # unavailable irrespective of the per-device ``available`` values below.
+    # The connection-backed availability gate: ``hub_available`` follows the
+    # socket with no grace window, and is what takes every device unavailable
+    # irrespective of the per-device silence verdicts below.
     diagnostics["hub_available"] = coordinator.hub_available
     diagnostics["disconnected_since"] = (
         since.isoformat()

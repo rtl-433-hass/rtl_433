@@ -492,11 +492,11 @@ class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
         """Available while the hub connection is up; a missing key reads ``unknown``.
 
         Every value here is read from the server over HTTP ``/cmd`` — the SDR
-        configuration and the since-start frame counters — so once the connection
-        has been down past ``HUB_OFFLINE_GRACE`` they are frozen at whatever was
-        last fetched, with nothing on the entity to say so. Gating them on the
-        same window as the device entities (see ``coordinator/_watchdog.py``)
-        makes a stale reading read as unavailable rather than as current.
+        configuration and the since-start frame counters — so the moment the
+        connection drops they are frozen at whatever was last fetched, with
+        nothing on the entity to say so. Gating them on the same connection as
+        the device entities (see ``coordinator/_watchdog.py``) makes a stale
+        reading read as unavailable rather than as current.
 
         Within the connection, a key the server does not report is still
         ``unknown`` (a ``None`` native value), not unavailable — that is a gap in

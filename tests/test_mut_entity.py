@@ -74,7 +74,7 @@ async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
     The autouse ``hub_connected_by_default`` fixture leaves the coordinator
     connected, so the per-device silence timeouts are what these tests actually
     measure; without it the connection-backed gate would take every device
-    unavailable after ``HUB_OFFLINE_GRACE``.
+    unavailable the moment the socket reads as down.
     """
     kwargs.setdefault("availability_timeout", 600)
     hub = hub_entry_builder(devices=devices, **kwargs)

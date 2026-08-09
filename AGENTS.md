@@ -489,21 +489,24 @@ integration is listening; this gate answers "is the integration listening at
 all?". End-user docs live in
 [docs/availability.md](docs/availability.md#hub-connection).
 
-- **`coordinator.hub_available`.** `True` while the client's socket is open;
-  `True` for `HUB_OFFLINE_GRACE` (90 s, `const.py`) after a drop, so the client's
-  reconnect attempts (t ≈ 1, 3, 7, 15, 31, 63 s) ride out a blip without flapping
-  every device; `False` for as long as an outage outlives that window. Also `True`
-  before `async_start` — nothing has been attempted, so there is nothing to
-  report. The 90 s is not arbitrary: it must clear the t ≈ 63 s reconnect attempt
-  (60 s expires three seconds short of it, so an ordinary server restart would
-  trip the gate and untrip it moments later), and it matches
-  `repairs._UNREACHABLE_GRACE` so the entities and the "server unreachable"
-  repair agree on when the hub is down. **Keep the two constants equal.**
-- **A flap is not a recovery.** A reconnect clears the outage clock only after it
-  has held for a full grace window; until then `_disconnected_since` keeps running
-  from the *first* drop. Otherwise a server in a crash-restart loop would reset
-  the window on every drop and hold the gate open forever while delivering
-  nothing. `_connected_since` is what distinguishes the two.
+- **`coordinator.hub_available` is exactly `self.connected`.** No grace window,
+  no debounce, no timer: the socket drops, every device behind the hub is
+  unavailable on the same tick. **Do not add a delay here.** It was tried and
+  removed deliberately — a delay presents readings as current while the
+  integration knows it cannot hear the radio, which is what the Silver-tier
+  `entity-unavailable` rule exists to prevent, and every Home Assistant
+  integration gating on a live connection flag (`mqtt`, `zwave_js`, `esphome`,
+  `deconz`, `unifi`, and newer arrivals like `harbor`) flips instantly. The
+  recent core additions that *do* debounce (roborock's `MIN_UNAVAILABLE_DURATION`,
+  netatmo's `UNAVAILABLE_AFTER_ERRORS`) sit in the coordinator poll-failure path,
+  tolerating transient API errors — not a transport known to be down.
+- **The debounce lives in `repairs.py`, not here.** `_UNREACHABLE_GRACE` (90 s)
+  delays the user-facing "server unreachable" *notification* so a routine server
+  restart does not raise one. Entities tell the truth immediately; the
+  notification waits until the outage looks real. That split is the design — do
+  not collapse it by moving the delay onto the entities.
+- **`_disconnected_since` is reporting only.** It feeds the reconnect log line's
+  outage duration and the diagnostics dump. Nothing about availability reads it.
 - **Every device entity reads it.** `Rtl433Entity.available` short-circuits on it
   *before* the silence check, and `Rtl433LastSeenSensor` routes through it too.
   **Never-expire devices are not exempt** — that exemption is from *silence*, not
@@ -526,25 +529,23 @@ all?". End-user docs live in
   *live* payload still reads `unknown` (a `None` native value), not unavailable.
   Two hub entities stay ungated: `Rtl433HubConnectivity` (it *is* the connection
   report — `available` is hardcoded `True` and it flips `off` on the drop with no
-  grace window) and `Rtl433HubControl` (availability is a capability gate on
+  grace window — same as the devices now) and `Rtl433HubControl` (availability is
+  a capability gate on
   `meta`).
 - **The clock starts at `async_start`,** not at the first drop, so a Home
   Assistant restart while the server is down expires the restored states after
-  the grace window instead of leaving them available forever.
+  at once instead of leaving them available forever.
 - **Lazy gate, edge-driven repaint.** Entities evaluate `hub_available` on every
   state read, so it is always correct; the coordinator only *repaints*. The
-  disconnect edge arms a one-shot `async_call_later` for what is left of the
-  window, the connect edge cancels it, and each watchdog tick re-checks as a
-  backstop. The timer runs on the loop's monotonic clock while the window is
-  measured against the wall clock, so it re-arms itself if it fires while the
-  window is somehow still open (a clock step). All
+  disconnect edge and the connect edge each call it, and each watchdog tick
+  re-checks as a cheap backstop in case an edge is ever missed. All
   three funnel into `_async_sync_hub_availability`, which dispatches
   `SIGNAL_HUB_AVAILABILITY` **once per flip** (a hub-wide signal, deliberately
   separate from `SIGNAL_HUB_UPDATE`, which also fires on every meta/stats refresh
   and would otherwise write state for every device entity on each poll). Both
   `Rtl433Entity` and `Rtl433HubEntity` subscribe: `SIGNAL_HUB_UPDATE` covers the
-  connect/disconnect edges but **not** the moment the grace window elapses, which
-  is exactly when a gated entity's `available` changes.
+  connect/disconnect edges, which is exactly when a gated entity's `available`
+  changes.
 - **Logging.** The library logs drops at DEBUG under its own logger, which is
   invisible to anyone debugging the integration. The coordinator logs the loss
   and the recovery (with the outage duration) at **INFO**, and the moment the
@@ -968,8 +969,8 @@ Full runbook:
   (`DEFAULT_PORT=8433`, `DEFAULT_PATH="/ws"`, `DEFAULT_AVAILABILITY_TIMEOUT=600`)
   and for the dispatcher signals (`SIGNAL_NEW_DEVICE`, `SIGNAL_HUB_UPDATE` — the
   latter fans connectivity/meta/stats changes out to the hub entities — and
-  `SIGNAL_HUB_AVAILABILITY`, the per-flip device repaint behind
-  `HUB_OFFLINE_GRACE`).
+  `SIGNAL_HUB_AVAILABILITY`, the per-flip device repaint behind the
+  hub-connection gate).
 - Always run `pytest tests/` before proposing a change, and follow the
   conventional-commit and lint rules in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Always open pull requests with a **conventional-commit-style title** that

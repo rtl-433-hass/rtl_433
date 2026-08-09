@@ -7,7 +7,6 @@ modules import from here, so names are intended to be stable.
 
 from __future__ import annotations
 
-from datetime import timedelta
 import logging
 from typing import Any, Final
 
@@ -185,28 +184,18 @@ LEGACY_DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
 # explicitly per device or, as an explicit hub default, for every non-overridden
 # device.
 AVAILABILITY_TIMEOUT_NEVER: Final = 0
-# How long the hub's WebSocket connection may stay down before every device
-# behind it is marked unavailable, regardless of its own silence timeout.
-#
-# The per-device timeouts above answer "has this radio transmitted recently?",
-# which is only meaningful while the integration is actually listening. Once the
-# socket is down the integration hears nothing, so a device's cached state says
-# nothing about the device -- exactly the situation an MQTT availability topic
-# covers with an LWT, and the gate ``zwave_js`` applies when its driver
-# connection drops. (Both of those flip instantly; the grace window below is this
-# integration's own choice, because the transport here is a WebSocket to an
-# rtl_433 process users restart routinely, not a supervised local daemon.)
-#
-# 90 s, not 60 s, because the client's reconnect attempts land at roughly
-# t = 1, 3, 7, 15, 31, 63 s (``_BACKOFF_MIN`` doubling to ``_BACKOFF_MAX``). A
-# 60 s window expires three seconds before the t~63 s attempt, so every outage in
-# the ~31-63 s band -- an rtl_433 server restart, the single most common cause --
-# would take every entity unavailable and hand it straight back, which is the
-# exact flap the window exists to prevent. 90 s clears that attempt, matches
-# ``repairs._UNREACHABLE_GRACE`` so the entities and the "server unreachable"
-# repair issue agree on when the hub is down, and is a multiple of the 30 s
-# watchdog tick that backstops the one-shot timer.
-HUB_OFFLINE_GRACE: Final = timedelta(seconds=90)
+# NOTE: there is deliberately no grace window on the hub-connection availability
+# gate. The per-device timeouts above answer "has this radio transmitted
+# recently?", which is only meaningful while the integration is listening; once
+# the socket is down every device behind the hub reads unavailable *immediately*
+# (see ``coordinator/_watchdog.py``). That is what every Home Assistant
+# integration gating on a live connection flag does -- ``mqtt``, ``zwave_js``,
+# ``esphome``, ``deconz``, ``unifi``, and the newest arrivals alike -- and it is
+# what the Silver-tier ``entity-unavailable`` quality-scale rule asks for: if we
+# cannot read the device, say so. A delay would only ever present stale readings
+# as current. The "rtl_433 server unreachable" repair issue is the debounced
+# half of this (``repairs._UNREACHABLE_GRACE``): the entities tell the truth at
+# once, the notification waits until the outage looks real.
 # Default seconds after which a motion/event binary_sensor auto-clears to "off"
 # when no explicit clear signal arrives. Overridable per device.
 DEFAULT_MOTION_CLEAR_DELAY: Final = 90
@@ -299,10 +288,10 @@ def signal_hub_update(hub_entry_id: str) -> str:
 
 
 # Hub-level "the connection-backed availability gate flipped" signal. The
-# coordinator dispatches this (no payload) only on an edge: when the socket has
-# been down for :data:`HUB_OFFLINE_GRACE` (every device behind the hub becomes
-# unavailable) and when it comes back. Every *device* entity subscribes, so one
-# dispatch repaints the whole hub. Kept separate from
+# coordinator dispatches this (no payload) only on an edge: when the socket drops
+# (every device behind the hub becomes unavailable) and when it comes back. Every
+# *device* entity subscribes, so one dispatch repaints the whole hub. Kept
+# separate from
 # :data:`SIGNAL_HUB_UPDATE` — which also fires on every meta/stats refresh — so
 # a routine hub poll never writes state for hundreds of device entities.
 SIGNAL_HUB_AVAILABILITY: Final = "rtl_433_hub_availability_{hub_entry_id}"

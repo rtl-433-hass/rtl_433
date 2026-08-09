@@ -36,11 +36,11 @@ not `/cmd`, these sensors degrade to `unknown` while the event stream and
 connectivity sensor keep working.
 
 Because those values come from the server, the diagnostic and statistics sensors
-go `unavailable` once the hub connection has been down for 90 seconds — the same
-window that applies to the devices, see
-[Availability](availability.md#hub-connection). Otherwise they would keep showing
-a frozen reading. The Connectivity sensor stays available throughout, and so do
-the SDR controls below: those are settings you write, not readings you trust.
+go `unavailable` as soon as the hub connection drops — the same gate that applies
+to the devices, see [Availability](availability.md#hub-connection). Otherwise they
+would keep showing a frozen reading. The Connectivity sensor stays available
+throughout, and so do the SDR controls below: those are settings you write, not
+readings you trust.
 
 ## Managing SDR Settings from Home Assistant
 

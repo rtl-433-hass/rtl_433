@@ -107,7 +107,7 @@ async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
 
     The autouse ``hub_connected_by_default`` fixture does the marking; without it
     the connection-backed availability gate reads the socket-less test run as an
-    outage and takes every device unavailable after ``HUB_OFFLINE_GRACE``.
+    outage and takes every device behind it unavailable.
     """
     hub = hub_entry_builder(availability_timeout=600, devices=devices, **kwargs)
     hub.add_to_hass(hass)

@@ -199,12 +199,12 @@ class Rtl433Entity(RestoreEntity):
 
         Two gates, both owned by the coordinator (see ``coordinator/_watchdog.py``):
 
-        * **Hub connection.** ``hub_available`` is ``False`` once the hub's
-          WebSocket has been down longer than ``HUB_OFFLINE_GRACE``. The
-          integration is then hearing nothing at all, so no device's cached state
-          means anything and every entity behind the hub reads unavailable —
-          including never-expire devices, whose exemption is from *silence*, not
-          from the transport being gone.
+        * **Hub connection.** ``hub_available`` is ``False`` the moment the
+          hub's WebSocket drops — no grace window. The integration is then
+          hearing nothing at all, so no device's cached state means anything and
+          every entity behind the hub reads unavailable — including never-expire
+          devices, whose exemption is from *silence*, not from the transport
+          being gone.
         * **Per-device silence.** Mirrors the coordinator's watchdog logic but
           evaluated lazily so the value is correct between watchdog ticks too. On
           startup the entity baselines ``last_seen`` to "now" (see
@@ -253,8 +253,8 @@ class Rtl433Entity(RestoreEntity):
         )
         # The hub-connection gate flips for every device at once and is not tied
         # to any device's event stream, so it gets its own hub-wide signal. It
-        # fires only on an edge (offline past the grace window / back), so this
-        # subscription costs one state write per entity per outage.
+        # fires only on a connection edge, so this subscription costs one state
+        # write per entity per outage.
         self._unsub_hub_availability = async_dispatcher_connect(
             self.hass,
             signal_hub_availability(self._hub_entry_id),
@@ -321,11 +321,10 @@ class Rtl433HubEntity(Entity):
     and re-read the coordinator's hub state on every ``signal_hub_update``.
 
     They also subscribe to ``signal_hub_availability``, which fires only when the
-    hub-connection gate flips (see ``coordinator/_watchdog.py``). ``signal_hub_update``
-    covers the connect/disconnect edges but not the moment ``HUB_OFFLINE_GRACE``
-    elapses, which is exactly when a connection-gated hub entity's ``available``
-    changes. Subclasses that do not read the gate (the connectivity sensor, the
-    SDR controls) simply re-write an unchanged state on that edge.
+    hub-connection gate flips (see ``coordinator/_watchdog.py``), so a
+    connection-gated hub entity repaints on exactly the edge where its
+    ``available`` changes. Subclasses that do not read the gate (the connectivity
+    sensor, the SDR controls) simply re-write an unchanged state on that edge.
     """
 
     _attr_has_entity_name = True
