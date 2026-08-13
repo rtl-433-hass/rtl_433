@@ -11,7 +11,7 @@
 ruff==0.16.2
 
 # Git hook framework
-pre-commit==4.6.1
+pre-commit==4.6.2
 
 # Spell checking (used by the codespell pre-commit hook)
 codespell==2.4.3
