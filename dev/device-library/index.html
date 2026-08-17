@@ -1108,7 +1108,7 @@ binary problem sensor:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">custom_field_C</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
 <span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span>
-<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;°C&quot;</span>
+<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">"°C"</span>
 <span class="w">  </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">measurement</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Custom Probe</span>
 <span class="w">  </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> round</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="w"> </span><span class="p p-Indicator">}</span>
@@ -1116,11 +1116,11 @@ binary problem sensor:</p>
 
 <span class="nt">battery_ok</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">binary_sensor</span>
-<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">battery</span><span class="w">     </span><span class="c1"># HA &quot;battery&quot;: on == problem (low)</span>
+<span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">battery</span><span class="w">     </span><span class="c1"># HA "battery": on == problem (low)</span>
 <span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
 <span class="w">  </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Battery</span>
-<span class="w">  </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> on</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0&quot;</span><span class="p p-Indicator">,</span><span class="nt"> off</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># battery_ok == 0 means low -&gt; problem</span>
+<span class="w">  </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> on</span><span class="p">:</span><span class="w"> </span><span class="s">"0"</span><span class="p p-Indicator">,</span><span class="nt"> off</span><span class="p">:</span><span class="w"> </span><span class="s">"1"</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># battery_ok == 0 means low -&gt; problem</span>
 <span class="w">  </span><span class="nt">entity_category</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">diagnostic</span>
 <span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B</span>
 </code></pre></div>
@@ -1137,7 +1137,7 @@ leaving every other model untouched:</p>
 <span class="w">    </span><span class="nt">temperature_C</span><span class="p">:</span>
 <span class="w">      </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
 <span class="w">      </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span>
-<span class="w">      </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;°C&quot;</span>
+<span class="w">      </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">"°C"</span>
 <span class="w">      </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">measurement</span>
 <span class="w">      </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Outdoor temperature</span>
 <span class="w">      </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> round</span><span class="p">:</span><span class="w"> </span><span class="nv">2</span><span class="w"> </span><span class="p p-Indicator">}</span>
@@ -1161,9 +1161,9 @@ a key that differs only in case silently never matches.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">temperature_C</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
 <span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span>
-<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;°C&quot;</span>
+<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">"°C"</span>
 <span class="w">  </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">measurement</span>
-<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">                  </span><span class="c1"># HA names it &quot;Temperature&quot; from device_class</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">null</span><span class="w">                  </span><span class="c1"># HA names it "Temperature" from device_class</span>
 <span class="w">  </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> round</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">T</span>
 </code></pre></div>
@@ -1285,7 +1285,7 @@ raw rtl_433 value to Home Assistant's on/off state:</p>
 <div class="highlight"><pre><span></span><code><span class="nt">detect_wet</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">binary_sensor</span>
 <span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">moisture</span>
-<span class="w">  </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> on</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span><span class="p p-Indicator">,</span><span class="nt"> off</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># 1 == wet == on</span>
+<span class="w">  </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> on</span><span class="p">:</span><span class="w"> </span><span class="s">"1"</span><span class="p p-Indicator">,</span><span class="nt"> off</span><span class="p">:</span><span class="w"> </span><span class="s">"0"</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># 1 == wet == on</span>
 </code></pre></div>
 <p>Note the direction matters for some fields. The upstream <code>closed</code> field is
 <strong>inverted</strong> — a value of <code>0</code> means the contact is open — so its payload is
@@ -1310,7 +1310,7 @@ timer rather than received:</p>
 <span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">binary_sensor</span>
 <span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">occupancy</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Motion</span>
-<span class="w">  </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> on</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;1&quot;</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># detect-only: no off token</span>
+<span class="w">  </span><span class="nt">payload</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> on</span><span class="p">:</span><span class="w"> </span><span class="s">"1"</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># detect-only: no off token</span>
 <span class="w">  </span><span class="nt">clear_delay</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">90</span><span class="w">        </span><span class="c1"># synthesize off 90 s after the last detection</span>
 <span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">motion</span>
 </code></pre></div>
@@ -1402,8 +1402,8 @@ standard:</p>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Doorbell</span>
 <span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">secret_knock</span>
 <span class="w">  </span><span class="nt">event_map</span><span class="p">:</span>
-<span class="w">    </span><span class="s">&quot;0&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ring</span><span class="w">          </span><span class="c1"># DoorbellEventType.RING — the HA standard type</span>
-<span class="w">    </span><span class="s">&quot;1&quot;</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">secret_knock</span><span class="w">  </span><span class="c1"># custom type for the 3x-rapid &quot;secret knock&quot;</span>
+<span class="w">    </span><span class="s">"0"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ring</span><span class="w">          </span><span class="c1"># DoorbellEventType.RING — the HA standard type</span>
+<span class="w">    </span><span class="s">"1"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">secret_knock</span><span class="w">  </span><span class="c1"># custom type for the 3x-rapid "secret knock"</span>
 </code></pre></div>
 <p>The shipped <code>events.yaml</code> has two examples:</p>
 <table>
@@ -1443,7 +1443,7 @@ as the global entries (<code>platform</code>, <code>device_class</code>, <code>u
 <span class="nt">temperature_C</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span>
 <span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span>
-<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;°C&quot;</span>
+<span class="w">  </span><span class="nt">unit_of_measurement</span><span class="p">:</span><span class="w"> </span><span class="s">"°C"</span>
 <span class="w">  </span><span class="nt">state_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">measurement</span>
 <span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Temperature</span>
 <span class="w">  </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> round</span><span class="p">:</span><span class="w"> </span><span class="nv">1</span><span class="w"> </span><span class="p p-Indicator">}</span>
@@ -1570,7 +1570,7 @@ specially by the loader and are not parsed as field-mapping tables.</p>
 <li>Choose a short, <strong>stable</strong> <code>object_suffix</code> that is unique among the fields
      a single device emits.</li>
 <li><strong>Validate</strong> the YAML:
-   <div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob(&#39;custom_components/rtl_433/device_library/*.yaml&#39;)]; print(&#39;ok&#39;)&quot;</span>
+   <div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('custom_components/rtl_433/device_library/*.yaml')]; print('ok')"</span>
 </code></pre></div></li>
 <li><strong>Add a fixture/test</strong> if you are contributing upstream (see the project test
    suite) and open a PR with a <code>feat:</code> conventional commit.</li>

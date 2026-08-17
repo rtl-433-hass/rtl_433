@@ -794,7 +794,7 @@ WebSocket <code>Upgrade</code> is handled as a WS connection regardless of path.
 <p>Example with <a href="https://github.com/vi/websocat"><code>websocat</code></a>:</p>
 <div class="highlight"><pre><span></span><code>websocat<span class="w"> </span>ws://127.0.0.1:8433/
 <span class="c1"># then type a command and press enter:</span>
-<span class="o">{</span><span class="s2">&quot;cmd&quot;</span>:<span class="s2">&quot;get_center_frequency&quot;</span><span class="o">}</span>
+<span class="o">{</span><span class="s2">"cmd"</span>:<span class="s2">"get_center_frequency"</span><span class="o">}</span>
 </code></pre></div>
 <h3 id="on-connect">On connect<a class="headerlink" href="#on-connect" title="Permanent link">&para;</a></h3>
 <p>Immediately after the handshake the server pushes, as text frames:</p>
@@ -808,7 +808,7 @@ WebSocket <code>Upgrade</code> is handled as a WS connection regardless of path.
 occurs. See <a href="#event-stream">Event stream</a>.</p>
 <h2 id="request-format-client-server">Request format (client → server)<a class="headerlink" href="#request-format-client-server" title="Permanent link">&para;</a></h2>
 <p>Each command is a single JSON object in one text frame:</p>
-<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;cmd&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;command&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;arg&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;string&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;val&quot;</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;i</span><span class="kc">nte</span><span class="err">ger&gt;</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"cmd"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;command&gt;"</span><span class="p">,</span><span class="w"> </span><span class="nt">"arg"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;string&gt;"</span><span class="p">,</span><span class="w"> </span><span class="nt">"val"</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;i</span><span class="kc">nte</span><span class="err">ger&gt;</span><span class="p">}</span>
 </code></pre></div>
 <table>
 <thead>
@@ -1131,23 +1131,23 @@ and <code>/stream</code> HTTP endpoints.</p>
 <h3 id="meta-object">meta object<a class="headerlink" href="#meta-object" title="Permanent link">&para;</a></h3>
 <p>Sent on connect and via <code>get_meta</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;frequencies&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;hop_times&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
-<span class="w">  </span><span class="nt">&quot;center_frequency&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">433920000</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;duration&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;samp_rate&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">250000</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;conversion_mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;fsk_pulse_detect_mode&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;after_successful_events_flag&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;report_meta&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;report_protocol&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;report_time&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;report_time_hires&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;report_time_tz&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;report_time_utc&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;report_description&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;report_stats&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;stats_interval&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span>
+<span class="w">  </span><span class="nt">"frequencies"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"hop_times"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"center_frequency"</span><span class="p">:</span><span class="w"> </span><span class="mi">433920000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"duration"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"samp_rate"</span><span class="p">:</span><span class="w"> </span><span class="mi">250000</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"conversion_mode"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"fsk_pulse_detect_mode"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"after_successful_events_flag"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"report_meta"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"report_protocol"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"report_time"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"report_time_hires"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"report_time_tz"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"report_time_utc"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"report_description"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"report_stats"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"stats_interval"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span>
 <span class="p">}</span>
 </code></pre></div>
 <p>The meta object carries neither gain nor ppm. Read those from <code>get_gain</code>
@@ -1155,10 +1155,10 @@ and <code>/stream</code> HTTP endpoints.</p>
 <h3 id="stats-object">stats object<a class="headerlink" href="#stats-object" title="Permanent link">&para;</a></h3>
 <p>Returned by <code>get_stats</code>, sent as a raw frame:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;enabled&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">234</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;since&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;2024-01-01T00:00:00&quot;</span><span class="p">,</span>
-<span class="w">  </span><span class="nt">&quot;frames&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;fsk&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;events&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;stats&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="cm">/* per-protocol stat entries */</span><span class="w"> </span><span class="p">]</span>
+<span class="w">  </span><span class="nt">"enabled"</span><span class="p">:</span><span class="w"> </span><span class="mi">234</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"since"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2024-01-01T00:00:00"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"frames"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"fsk"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w"> </span><span class="nt">"events"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"stats"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="cm">/* per-protocol stat entries */</span><span class="w"> </span><span class="p">]</span>
 <span class="p">}</span>
 </code></pre></div>
 <p><code>enabled</code> is the count of enabled decoders; <code>frames.count</code> is OOK frames,
