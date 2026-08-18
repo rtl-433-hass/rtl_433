@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.20.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.3...v0.20.0) (2026-08-18)
+
+
+### Features
+
+* **upstream:** phase 1 — fork, compatibility contract, upstream tracker ([f9a960d](https://github.com/rtl-433-hass/rtl_433/commit/f9a960de6d5c1b593b4cf93a3e75cd9b239081c8))
+
+
+### Bug Fixes
+
+* **calibration:** align ert_type nibble table with upstream rtl_433 ([c6d6e1c](https://github.com/rtl-433-hass/rtl_433/commit/c6d6e1cef6080bd54e36b5252206ab13c13572bc)), closes [#147](https://github.com/rtl-433-hass/rtl_433/issues/147)
+* **device-library:** key SCMplus consumption as `Consumption` ([db2609c](https://github.com/rtl-433-hass/rtl_433/commit/db2609cc1a6a4c4b7a20f503d6df69060d15c616))
+* **options:** pre-fill device settings from the selected device ([ca53803](https://github.com/rtl-433-hass/rtl_433/commit/ca5380349fd5f983c7cd714d421b0de537d23d36))
+
+
+### Performance Improvements
+
+* **tests:** run the suite in parallel with xdist by default ([2278ace](https://github.com/rtl-433-hass/rtl_433/commit/2278aced636754adf762f6f672c9c74c398d3a59))
+
+
+### Documentation
+
+* **agents:** note PEP 758 unparenthesized except tuples require 3.14 ([0c0d519](https://github.com/rtl-433-hass/rtl_433/commit/0c0d5191404a063b54c89b9830d06e299fd8839b))
+* **calibration:** add screenshots for the three-step calibration flow ([154449f](https://github.com/rtl-433-hass/rtl_433/commit/154449fb2640d48660ffce57ee4dee24e1215f89))
+* **calibration:** pin the ert_type reference to an upstream permalink ([6c3ae52](https://github.com/rtl-433-hass/rtl_433/commit/6c3ae529d528d82779a431eda07d67a31015f434))
+* **plan:** add plan 26 — upstream rtl_433 integration to HA core ([b7ee236](https://github.com/rtl-433-hass/rtl_433/commit/b7ee2368c0c9c910548755d2a376b8a85ffd0733))
+* recommend integration-first setup order for add-on discovery ([a63fdd9](https://github.com/rtl-433-hass/rtl_433/commit/a63fdd9b14e09415477101cdf25eea791ec7c501))
+* **upstream:** finalize plan 26 — validation, AGENTS note, archive ([427e313](https://github.com/rtl-433-hass/rtl_433/commit/427e31389c3f8b49a6f260c9d449d5144fde38d1))
+
 ## [0.19.3](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.2...v0.19.3) (2026-07-04)
 
 
