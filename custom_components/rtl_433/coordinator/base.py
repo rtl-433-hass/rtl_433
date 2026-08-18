@@ -126,6 +126,9 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         ``device_fields``: ``dict[str, set[str]]`` field keys seen per device.
         ``connected``: ``bool`` whether the client's socket is currently open
             (delegates to the client).
+        ``hub_available``: ``bool`` whether the integration can hear this hub —
+            the socket state, with no grace window, which takes every device
+            behind the hub unavailable the moment it drops (see ``_watchdog.py``).
         ``meta``: ``dict[str, Any]`` latest SDR/meta configuration (client-sourced).
         ``stats``: ``dict[str, Any]`` latest server-stats payload (client-sourced).
 
@@ -254,6 +257,18 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # the connect/disconnect edge (the client's ``on_hub_update`` also fires on
         # every meta/stats refresh, where connectivity is unchanged).
         self._was_connected = False
+        # --- Hub-connection availability gate (see ``_watchdog.py``) ---------
+        # UTC time the socket last dropped, or ``None`` while connected. The gate
+        # itself reads the socket directly and flips instantly, so this is purely
+        # reporting: the outage duration in the reconnect log line, and
+        # ``disconnected_since`` in a diagnostics dump.
+        self._disconnected_since: datetime | None = None
+        # Last gate state dispatched on ``signal_hub_availability``, so the
+        # repaint fires once per flip rather than on every check.
+        self._devices_offline = False
+        # Whether a connection has ever succeeded, so the first connect logs as a
+        # connect rather than as a recovery from the startup outage clock.
+        self._ever_connected = False
         # Last hub identity seen, so :meth:`_emit_hub_update` fires
         # ``hub_info_callback`` only when ``dev_info``/``dev_query`` actually change
         # (the client's ``refresh_dev_info`` fires ``on_hub_update`` on change, but
@@ -327,6 +342,17 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         return self._client.connected
 
     @property
+    def disconnected_since(self) -> datetime | None:
+        """UTC start of the current outage, or ``None`` while connected.
+
+        Set on the disconnect edge (and at ``async_start``, before the first
+        connect), cleared on the connect edge. The availability gate does not
+        read it — that follows the socket directly — but diagnostics report it so
+        an outage's age is visible in a support dump.
+        """
+        return self._disconnected_since
+
+    @property
     def meta(self) -> dict[str, Any]:
         """Latest SDR/meta configuration (client-sourced over HTTP ``/cmd``)."""
         return self._client.meta
@@ -354,6 +380,11 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         if self._started:
             return
         self._started = True
+        # Stamp the outage clock before the client can connect: until the first
+        # successful connect the hub *is* disconnected, so a server that is down
+        # at startup shows its devices unavailable rather than leaving restored
+        # states looking current. The connect edge clears it, normally at once.
+        self._async_note_disconnected()
         # Load the persisted desired state (or wipe it when management is off)
         # before the client can connect and the connect-edge adoption/enforcement
         # can run against it.
@@ -396,6 +427,14 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
         self._was_connected = False
         self._connection_time = None
+
+        # A deliberate stop (unload/reload) is not an outage. Closing the socket
+        # above fires the client's ``on_hub_update``, so reset the gate's
+        # reporting state *after* it has run: the ``_started`` guard in
+        # :meth:`_emit_hub_update` keeps that teardown edge from logging a loss.
+        self._disconnected_since = None
+        self._devices_offline = False
+        self._ever_connected = False
         LOGGER.debug("rtl_433 coordinator stopped for %s", self.ws_url)
 
     # ------------------------------------------------------------------ #
@@ -413,11 +452,14 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         """
         connected = self._client.connected
         if connected and not self._was_connected:
-            # (Re)connect edge: anchor the HA-side backlog gate and adopt/enforce
-            # the managed SDR settings. The library client refreshes meta/stats/
-            # dev_info on connect but owns none of the managed-SDR policy.
+            # (Re)connect edge: anchor the HA-side backlog gate, reopen the
+            # hub-offline gate (repainting the devices the outage had taken
+            # unavailable), and adopt/enforce the managed SDR settings. The
+            # library client refreshes meta/stats/dev_info on connect but owns
+            # none of the managed-SDR policy.
             self._was_connected = True
             self._connection_time = dt_util.utcnow()
+            self._async_note_connected()
             if self.manage_settings:
                 self.entry.async_create_background_task(
                     self.hass,
@@ -425,8 +467,14 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
                     name=f"rtl_433 sdr adopt {self.entry.entry_id}",
                 )
         elif not connected and self._was_connected:
+            # Disconnect edge: stamp the outage clock, log the loss, and repaint
+            # every device behind the hub as unavailable. Skipped once stopped,
+            # so the socket close that ``async_stop`` itself performs is not
+            # reported as an outage of a hub that is going away.
             self._was_connected = False
             self._connection_time = None
+            if self._started:
+                self._async_note_disconnected()
 
         self._maybe_refresh_hub_identity()
         async_dispatcher_send(self.hass, signal_hub_update(self.entry.entry_id))

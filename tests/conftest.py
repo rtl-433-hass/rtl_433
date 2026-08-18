@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -27,8 +28,18 @@ from custom_components.rtl_433.const import (
     DEFAULT_PORT,
     DOMAIN,
 )
+from custom_components.rtl_433.coordinator import Rtl433Coordinator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def pytest_configure(config):
+    """Register the suite's own markers."""
+    config.addinivalue_line(
+        "markers",
+        "hub_disconnected: do not auto-connect coordinators (see "
+        "hub_connected_by_default)",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -102,3 +113,59 @@ def build_hub_entry(
 def hub_entry_builder():
     """Expose :func:`build_hub_entry` as a fixture."""
     return build_hub_entry
+
+
+def mark_hub_connected(coordinator: Any) -> None:
+    """Put a coordinator in the state a live hub connection leaves behind.
+
+    Tests inject events straight into the client's frame handler instead of over
+    a real socket, so the client's ``connected`` flag stays False and the
+    coordinator's connection-backed availability gate reads the whole run as one
+    long outage: every device behind the hub is unavailable whatever its own
+    silence timeout says (see ``coordinator/_watchdog.py``). Any test that feeds
+    events is implicitly assuming the hub is connected, so it has to say so —
+    this is that statement.
+
+    Sets the connect-edge state directly rather than firing the client callback:
+    the callback path also triggers SDR adoption, which these tests do not want.
+    It does dispatch the availability repaint, because entities added while the
+    coordinator was still disconnected have already written ``unavailable`` and
+    would otherwise keep it until their next event.
+    """
+    coordinator._client.connected = True
+    coordinator._was_connected = True
+    coordinator._ever_connected = True
+    coordinator._disconnected_since = None
+    coordinator._async_sync_hub_availability()
+
+
+@pytest.fixture
+def hub_connected():
+    """Expose :func:`mark_hub_connected` as a fixture."""
+    return mark_hub_connected
+
+
+@pytest.fixture(autouse=True)
+def hub_connected_by_default(request):
+    """Leave every coordinator a test starts in the connected state.
+
+    A connected hub is what almost every test means, so it is the default rather
+    than an opt-in each setup site has to remember: forgetting it does not fail
+    where the hub is set up, it fails much later as an unrelated-looking device
+    timeout as soon as the test looks at an entity's state.
+
+    Tests that exercise the outage side opt out with
+    ``@pytest.mark.hub_disconnected`` and drive the edges themselves.
+    """
+    if "hub_disconnected" in request.keywords:
+        yield
+        return
+
+    original = Rtl433Coordinator.async_start
+
+    async def _async_start(self: Rtl433Coordinator) -> None:
+        await original(self)
+        mark_hub_connected(self)
+
+    with patch.object(Rtl433Coordinator, "async_start", _async_start):
+        yield

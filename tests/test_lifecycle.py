@@ -119,7 +119,16 @@ def _live(event: dict) -> dict:
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
-    """Set up a single hub entry (optionally pre-seeded) and return it."""
+    """Set up a single hub entry (optionally pre-seeded) and return it.
+
+    The coordinator comes back connected: the autouse
+    ``hub_connected_by_default`` fixture in ``tests/conftest.py`` leaves every
+    started coordinator on a live connection, because tests feed events straight
+    into the client's frame handler rather than over a socket and the
+    connection-backed availability gate would otherwise read the whole run as one
+    long outage. Modules that exercise the disconnected side opt out with
+    ``@pytest.mark.hub_disconnected``.
+    """
     hub = hub_entry_builder(availability_timeout=600, devices=devices, **kwargs)
     hub.add_to_hass(hass)
     assert await hass.config_entries.async_setup(hub.entry_id)
@@ -143,6 +152,7 @@ async def _enable_entity(hass, hub, entity_id):
         hass, dt_util.utcnow() + timedelta(seconds=RELOAD_AFTER_UPDATE_DELAY + 1)
     )
     await hass.async_block_till_done()
+    # The reload built a fresh coordinator, so re-assert the connected hub.
 
 
 def _ts(value):

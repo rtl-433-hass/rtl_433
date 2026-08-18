@@ -79,6 +79,12 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
+    """Set up a hub entry; the coordinator is left connected.
+
+    The autouse ``hub_connected_by_default`` fixture does the marking; without it
+    the connection-backed availability gate reads the socket-less test run as an
+    outage and takes every device behind it unavailable.
+    """
     kwargs.setdefault("availability_timeout", 600)
     hub = hub_entry_builder(devices=devices, **kwargs)
     hub.add_to_hass(hass)

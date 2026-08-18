@@ -219,9 +219,29 @@ class Rtl433Event(Rtl433Entity, EventEntity):
 
     @property
     def available(self) -> bool:
-        """Always available: events are momentary, so timeout-based
-        unavailability would hide the entity almost always (mirrors the
-        Last-seen sensor)."""
+        """Always available: neither the device timeout nor the hub gate applies.
+
+        Events are momentary, so timeout-based unavailability would hide the
+        entity almost always (mirrors the Last-seen sensor).
+
+        The hub-connection gate is deliberately *not* applied here either, unlike
+        every other device entity. An ``EventEntity``'s state *is* its last-fired
+        timestamp, which makes going unavailable actively harmful in two ways:
+
+        * Home Assistant's ``EventEntity.async_internal_added_to_hass`` restores
+          by parsing the stored state string, so a persisted ``unavailable``
+          parses to ``None`` and the entity silently loses its last-fired record
+          across a restart. (``_async_restore_state`` below is a no-op precisely
+          because that HA path owns the restore.)
+        * Coming back writes the *old* timestamp as a fresh state change, so a
+          plain ``trigger: state`` automation on a doorbell or remote button
+          re-fires on every hub reconnect, minutes or hours after the button was
+          actually pressed.
+
+        The hub's Connectivity binary sensor is the entity that reports the
+        outage; an automation that must not act on stale events can condition on
+        it.
+        """
         return True
 
     async def _async_restore_state(self) -> None:

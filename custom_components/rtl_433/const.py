@@ -184,6 +184,18 @@ LEGACY_DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
 # explicitly per device or, as an explicit hub default, for every non-overridden
 # device.
 AVAILABILITY_TIMEOUT_NEVER: Final = 0
+# NOTE: there is deliberately no grace window on the hub-connection availability
+# gate. The per-device timeouts above answer "has this radio transmitted
+# recently?", which is only meaningful while the integration is listening; once
+# the socket is down every device behind the hub reads unavailable *immediately*
+# (see ``coordinator/_watchdog.py``). That is what every Home Assistant
+# integration gating on a live connection flag does -- ``mqtt``, ``zwave_js``,
+# ``esphome``, ``deconz``, ``unifi``, and the newest arrivals alike -- and it is
+# what the Silver-tier ``entity-unavailable`` quality-scale rule asks for: if we
+# cannot read the device, say so. A delay would only ever present stale readings
+# as current. The "rtl_433 server unreachable" repair issue is the debounced
+# half of this (``repairs._UNREACHABLE_GRACE``): the entities tell the truth at
+# once, the notification waits until the outage looks real.
 # Default seconds after which a motion/event binary_sensor auto-clears to "off"
 # when no explicit clear signal arrives. Overridable per device.
 DEFAULT_MOTION_CLEAR_DELAY: Final = 90
@@ -273,3 +285,18 @@ SIGNAL_HUB_UPDATE: Final = "rtl_433_hub_update_{hub_entry_id}"
 def signal_hub_update(hub_entry_id: str) -> str:
     """Return the hub-level update dispatcher signal for one hub."""
     return SIGNAL_HUB_UPDATE.format(hub_entry_id=hub_entry_id)
+
+
+# Hub-level "the connection-backed availability gate flipped" signal. The
+# coordinator dispatches this (no payload) only on an edge: when the socket drops
+# (every device behind the hub becomes unavailable) and when it comes back. Every
+# *device* entity subscribes, so one dispatch repaints the whole hub. Kept
+# separate from
+# :data:`SIGNAL_HUB_UPDATE` — which also fires on every meta/stats refresh — so
+# a routine hub poll never writes state for hundreds of device entities.
+SIGNAL_HUB_AVAILABILITY: Final = "rtl_433_hub_availability_{hub_entry_id}"
+
+
+def signal_hub_availability(hub_entry_id: str) -> str:
+    """Return the hub-level availability-gate dispatcher signal for one hub."""
+    return SIGNAL_HUB_AVAILABILITY.format(hub_entry_id=hub_entry_id)
