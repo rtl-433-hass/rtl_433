@@ -30,6 +30,10 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     `_calibration_map`).
 - `docs/device-library.md` — **authoritative** device-library reference.
 - `tests/` — unit tests. `tests/integration/` — container/screenshot harness.
+  `tests/fixtures/generated/` — **do not hand-edit**: golden events decoded from
+  real `.cu8` captures by `scripts/regen_capture_fixtures.py` and diffed in CI,
+  so the device library is checked against rtl_433's real wire output rather
+  than a hand-transcribed guess. See that directory's `README.md`.
 
 ## Upstreaming to Home Assistant core (shared domain — frozen contract)
 
@@ -686,7 +690,12 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
    template. If the field is identity/noise, add it to `_skip_keys.yaml`
    instead.
 3. **Run the unit tests** (see below). They cover library loading and entity
-   creation, so a malformed entry fails fast.
+   creation, so a malformed entry fails fast. Add a fixture under
+   `tests/fixtures/` too: `tests/test_fixture_coverage.py` sweeps every fixture
+   and fails on any field with neither a descriptor nor a skip-key entry, which
+   is the only automated check that a key actually matches. Field names are
+   case-sensitive and a mismatch is **silent** — no entity, no warning, no error
+   (SCMplus emits `Consumption`, ERT-SCM emits `consumption_data`).
 4. **Read the diagnostics' unmatched keys.** The hub diagnostics export contains
    an `unmatched_field_keys` list — JSON keys that are neither skipped nor
    mapped. Download it from **Settings → Devices & Services → rtl_433 → ⋮ →
