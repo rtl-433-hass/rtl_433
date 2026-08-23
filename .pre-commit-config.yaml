@@ -10,7 +10,7 @@ repos:
     # Keep in sync with the ruff== pin in requirements_dev.txt so the Ruff and
     # pre-commit CI jobs cannot disagree. Renovate's "dev dependencies" group
     # covers both, so they arrive in the same PR.
-    rev: v0.16.3
+    rev: v0.16.4
     hooks:
       # Linter (with autofix)
       - id: ruff-check
