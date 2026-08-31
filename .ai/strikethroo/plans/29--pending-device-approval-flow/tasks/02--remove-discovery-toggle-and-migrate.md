@@ -2,7 +2,7 @@
 id: 2
 group: "coordinator"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-08-31
 skills:
   - home-assistant-integration

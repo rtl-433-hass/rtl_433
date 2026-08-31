@@ -31,7 +31,7 @@ library applied.
 ``__init__`` (``adopted``, ``ignored``, ``pending``, ``devices``, ``last_seen``,
 ``available``, ``seen_fields``, ``device_fields``, ``known_field_keys``,
 ``_connection_time``, ``_discovered``, ``_logged_unmapped``,
-``discovery_enabled``, ``new_device_callback``) plus ``_dispatch`` (base.py).
+``new_device_callback``) plus ``_dispatch`` (base.py).
 
 :class:`PendingDevice` lives here rather than in ``base.py`` because this is the
 module that builds one; ``base.py`` imports it (and re-exports it through the
@@ -252,12 +252,7 @@ class _EventProcessingMixin:
         live frame arrives). ``is_replay`` is passed through so the callback knows
         which of the two it is.
         """
-        if (
-            key in self._discovered
-            or is_backlog
-            or not self.discovery_enabled
-            or self.new_device_callback is None
-        ):
+        if key in self._discovered or is_backlog or self.new_device_callback is None:
             return
         self._discovered.add(key)
         try:

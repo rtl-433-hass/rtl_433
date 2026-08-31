@@ -108,7 +108,6 @@ async def async_get_config_entry_diagnostics(
         if (since := coordinator.disconnected_since) is not None
         else None
     )
-    diagnostics["discovery_enabled"] = coordinator.discovery_enabled
     diagnostics["availability_timeout"] = coordinator.availability_timeout
 
     diagnostics["devices"] = {

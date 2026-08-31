@@ -106,7 +106,6 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         ``skip_keys``: ``set[str]`` of keys excluded from measurement fields.
         ``event_driven_keys``: ``frozenset[str]`` of rtl_433 field keys that mark
             a device as event-driven (never-expire availability default).
-        ``discovery_enabled``: ``bool`` per-hub new-device discovery toggle.
         ``manage_settings``: ``bool`` per-hub toggle for adopting + enforcing the
             managed SDR settings. When ``True`` the coordinator adopts the
             server's current settings on first connect, persists the desired
@@ -164,7 +163,6 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         port: int = DEFAULT_PORT,
         path: str = DEFAULT_PATH,
         secure: bool = False,
-        discovery_enabled: bool = True,
         manage_settings: bool = True,
         availability_timeout: int = DEFAULT_AVAILABILITY_TIMEOUT,
         initial_center_frequency: float | None = None,
@@ -183,7 +181,6 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.secure = secure
 
         # --- Per-hub configuration (may be updated by the options flow) -------
-        self.discovery_enabled = discovery_enabled
         # Default ``True`` so every existing construction site (including tests
         # and pre-Task-3 wiring) keeps adopting + enforcing the SDR settings.
         self.manage_settings = manage_settings

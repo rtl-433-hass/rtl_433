@@ -11,13 +11,14 @@ coordinator's ``on_event`` callback), exactly as an incoming frame would.
 Covered:
 * nested-device + entity creation from a seeded devices map, with the right
   unique_ids / device_class / unit / state_class and ``via_device`` linkage;
-* dynamic add of a brand-new device with discovery ON (and NOT added with
-  discovery OFF);
+* a brand-new device staying out of Home Assistant until it is adopted, and
+  the nested device + entities appearing the moment it is;
 * a dynamic late field that creates a new entity and persists across a reload;
 * ``RestoreEntity`` restore of a previous value before any live event;
 * remove a nested device via ``async_remove_config_entry_device`` -> entities
   gone + ``device_key`` gone from the map + coordinator runtime state evicted ->
-  with discovery ON, feed the device again -> it re-appears (Clarification #4);
+  feed the device again -> it returns to the pending list rather than silently
+  re-appearing (Clarification #4);
 * the 0.1.0 -> nested migration: a v1 hub + two v1 device entries with
   pre-seeded registry devices/entities fold into the single hub with unchanged
   unique_ids / entity_ids and a populated devices map.
@@ -486,14 +487,14 @@ async def test_hub_diagnostic_sensors_unmanaged(hass, hub_entry_builder):
 
 
 # --------------------------------------------------------------------------- #
-# Dynamic add of a brand-new device, gated by the discovery toggle.            #
+# Dynamic add of a brand-new device, gated by explicit adoption.               #
 # --------------------------------------------------------------------------- #
 async def test_new_device_added_when_adopted(hass, hub_entry_builder, events):
     """An unseen device is only heard; adopting it creates the nested device."""
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
 
     _feed(coordinator, power_event)
@@ -519,26 +520,6 @@ async def test_new_device_added_when_adopted(hass, hub_entry_builder, events):
     assert "power_W" in hub.data[CONF_DEVICES][device_key][DEVICE_FIELDS]
 
 
-async def test_new_device_not_added_when_discovery_off(hass, hub_entry_builder, events):
-    """Feeding an unseen device with discovery off adds no device/entities."""
-    power_event = events("power_sensor.json")[0]
-    device_key = "EnergyMeter-2000-1234"
-
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=False)
-    coordinator = _coordinator(hass, hub)
-
-    _feed(coordinator, power_event)
-    await hass.async_block_till_done()
-
-    ent_reg = er.async_get(hass)
-    dev_reg = dr.async_get(hass)
-    prefix = f"{hub.entry_id}:{device_key}"
-
-    assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is None
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
-    assert device_key not in hub.data.get(CONF_DEVICES, {})
-
-
 # --------------------------------------------------------------------------- #
 # Dynamic late field creates an entity that persists across a reload.          #
 # --------------------------------------------------------------------------- #
@@ -550,7 +531,7 @@ async def test_late_field_creates_entity_and_persists_across_reload(
     first, second = _live(first), _live(second)
     device_key = "Acurite-606TX-42"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
 
     ent_reg = er.async_get(hass)
@@ -624,7 +605,7 @@ async def test_remove_device_then_re_add_after_adoption(
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
 
     _feed(coordinator, power_event)
@@ -918,7 +899,6 @@ async def test_last_seen_created_for_every_device(hass, hub_entry_builder):
     hub = await _setup_hub(
         hass,
         hub_entry_builder,
-        discovery_enabled=True,
         devices={
             mapped_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]},
             bare_key: {CONF_MODEL: "MysteryThing", DEVICE_FIELDS: []},
@@ -1602,7 +1582,6 @@ async def test_sensor_seeds_from_replay_but_event_does_not_fire(
     hub = await _setup_hub(
         hass,
         hub_entry_builder,
-        discovery_enabled=True,
         devices={
             device_key: {
                 CONF_MODEL: "Acurite-606TX",
@@ -1782,7 +1761,7 @@ async def test_newly_heard_device_raises_no_notification(
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
 
     with patch(_NOTIFY_TARGET) as notify:
@@ -1814,7 +1793,6 @@ async def test_known_device_wired_up_on_restart_without_notification(
     hub = await _setup_hub(
         hass,
         hub_entry_builder,
-        discovery_enabled=True,
         devices={
             device_key: {
                 CONF_MODEL: "EnergyMeter-2000",
@@ -1869,7 +1847,7 @@ async def test_reconnect_replay_frame_creates_nothing_for_unadopted_device(
         "power_W": 1450.5,
     }
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     assert device_key not in coordinator.devices
     assert device_key not in hub.data.get(CONF_DEVICES, {})
@@ -1903,7 +1881,6 @@ async def test_replay_frame_still_wires_up_an_adopted_device(hass, hub_entry_bui
     hub = await _setup_hub(
         hass,
         hub_entry_builder,
-        discovery_enabled=True,
         devices={
             device_key: {
                 CONF_MODEL: "EnergyMeter-2000",
@@ -1938,7 +1915,7 @@ async def test_delete_then_re_transmit_returns_device_to_pending(
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     dev_reg = dr.async_get(hass)
     prefix = f"{hub.entry_id}:{device_key}"
@@ -2104,7 +2081,7 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
 
     for hub in (hub_a, hub_b):
         assert await async_migrate_entry(hass, hub) is True
-        assert hub.minor_version == 7
+        assert hub.minor_version == 8
         overrides = hub.data[CONF_USER_MAPPINGS]
         # Each hub got its own normalized copy: payload bare on/off -> string keys.
         assert overrides["battery_low"]["payload"] == {"on": "0", "off": "1"}
@@ -2112,10 +2089,10 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
     # The legacy file is left on disk (never deleted by the migration).
     assert os.path.exists(mappings_path)
 
-    # A second migrate call is a no-op: already at minor 7, mappings unchanged.
+    # A second migrate call is a no-op: already at minor 8, mappings unchanged.
     snapshot = dict(hub_a.data[CONF_USER_MAPPINGS])
     assert await async_migrate_entry(hass, hub_a) is True
-    assert hub_a.minor_version == 7
+    assert hub_a.minor_version == 8
     assert hub_a.data[CONF_USER_MAPPINGS] == snapshot
 
 
@@ -2140,7 +2117,7 @@ async def test_migration_seeds_empty_mappings_when_file_missing(
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
     assert entry.data[CONF_USER_MAPPINGS] == {}
 
 
@@ -2202,7 +2179,7 @@ async def test_migration_disables_existing_last_seen_sensors(
     ).entity_id
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
 
     # The enabled Last-seen sensor is now disabled by the integration.
     assert (
@@ -2216,9 +2193,9 @@ async def test_migration_disables_existing_last_seen_sensors(
         ent_reg.async_get(already_disabled).disabled_by is er.RegistryEntryDisabler.USER
     )
 
-    # A second migrate call is a no-op: already at minor 7.
+    # A second migrate call is a no-op: already at minor 8.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
 
 
 # --------------------------------------------------------------------------- #
@@ -2258,12 +2235,12 @@ async def test_migration_drops_legacy_default_timeout(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
-    # A second migrate call is a no-op: already at minor 7.
+    # A second migrate call is a no-op: already at minor 8.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2284,7 +2261,7 @@ async def test_migration_minor6_drops_resaved_default_timeout(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2303,7 +2280,7 @@ async def test_migration_keeps_deliberate_timeout(hass, configured):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == configured
 
 
@@ -2315,7 +2292,7 @@ async def test_migration_timeout_no_option_just_bumps_version(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2330,11 +2307,11 @@ async def test_migration_timeout_minor2_through_to_current(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
 
 
 # --------------------------------------------------------------------------- #
@@ -2373,14 +2350,14 @@ async def test_migration_rewrites_persisted_doorbell_event_types(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
     persisted = entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]
     assert persisted["secret_knock"] == ["ring", "secret_knock"]
 
     # Re-running is a no-op: already-mapped values pass through unchanged.
     snapshot = persisted["secret_knock"]
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
     assert (
         entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]["secret_knock"]
         == snapshot
@@ -2441,7 +2418,7 @@ async def test_migration_reenables_last_seen_for_event_driven_devices(hass):
     user_ls = _register_last_seen(user_key, er.RegistryEntryDisabler.USER)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 7
+    assert entry.minor_version == 8
 
     # Event-driven + integration-disabled -> re-enabled.
     assert ent_reg.async_get(motion_ls).disabled_by is None

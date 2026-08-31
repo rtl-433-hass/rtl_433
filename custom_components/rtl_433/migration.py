@@ -6,16 +6,17 @@ lifecycle in ``__init__.py``:
 
 * :func:`async_migrate_entry` — the config-entry ``VERSION`` 1 → 2 migration (the
   0.1.0 per-device-entry model → the hub model) plus the minor-version bumps that
-  seed user mappings, disable legacy "Last seen" sensors, and drop the legacy
-  global availability timeout.
+  seed user mappings, disable legacy "Last seen" sensors, drop the legacy global
+  availability timeout, and strip the retired discovery toggle.
 * :func:`_migrate_hub_entry` / :func:`_rehome_device_objects` — fold legacy child
   device entries into the hub and re-home their registry objects first.
 * :func:`_cleanup_phantom_unknown_device` /
   :func:`_migrate_motion_event_to_binary_sensor` — idempotent cleanups driven from
   ``async_setup_entry`` on every startup (a pre-fix phantom ``unknown`` device and
   the pre-fix ``event.*_motion`` entity, respectively).
-* :func:`_disable_existing_last_seen_sensors` / :func:`_read_legacy_overrides` —
-  one-shot helpers used by the minor-version migration steps.
+* :func:`_disable_existing_last_seen_sensors` / :func:`_strip_discovery_toggle` /
+  :func:`_read_legacy_overrides` — one-shot helpers used by the minor-version
+  migration steps.
 """
 
 from __future__ import annotations
@@ -68,6 +69,12 @@ PHANTOM_DEVICE_KEY = "unknown"
 # migration sweep below to find the orphaned event entities and to drop the
 # matching ``DEVICE_EVENT_TYPES`` slot so the event platform never recreates it.
 _MOTION_OBJECT_SUFFIX = "motion"
+
+# The retired per-hub discovery toggle. Adoption is explicit now, so the key
+# gates nothing and is stripped from existing entries by the minor-7 → 8 step.
+# It is a literal (not a ``const.py`` export) because the constant no longer
+# exists: only entries written by older versions still carry the string.
+_RETIRED_DISCOVERY_KEY = "discovery_enabled"
 
 # The ``object_suffix`` (and unique-id tail) of the per-device "Last seen"
 # timestamp sensor. It now ships disabled-by-default; the one-time migration
@@ -298,6 +305,33 @@ async def _enable_last_seen_for_event_driven_devices(
             entity_registry.async_update_entity(entity_id, disabled_by=None)
 
 
+def _strip_discovery_toggle(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the retired ``discovery_enabled`` key from an existing entry.
+
+    Discovery is no longer a toggle. Every heard device is offered as a pending
+    candidate and nothing reaches the device registry without an explicit
+    adoption, so the key gates nothing; leaving it behind would present the value
+    in diagnostics and config-entry exports as though it still meant something.
+
+    Deliberately narrow: it rebuilds ``entry.data`` and ``entry.options`` without
+    that one key and touches nothing else, so ``CONF_DEVICES`` — every adopted
+    device, its per-device overrides and its calibration — survives the upgrade
+    byte-for-byte. Idempotent: an entry that never carried the key (or has already
+    been migrated) compares equal and is not written at all, which also keeps the
+    migration from firing the update listener for no reason.
+
+    The key is spelled as a literal here rather than imported from
+    :mod:`~custom_components.rtl_433.const`: the constant is gone, but entries
+    written by older versions still carry the string, and this is the one place
+    that has to keep recognizing it.
+    """
+    data = {k: v for k, v in entry.data.items() if k != _RETIRED_DISCOVERY_KEY}
+    options = {k: v for k, v in entry.options.items() if k != _RETIRED_DISCOVERY_KEY}
+    if data == dict(entry.data) and options == dict(entry.options):
+        return
+    hass.config_entries.async_update_entry(entry, data=data, options=options)
+
+
 def _read_legacy_overrides(path: str) -> dict:
     """Read + normalize the legacy ``rtl_433_mappings.yaml`` file (sync, executor).
 
@@ -440,7 +474,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     minor-4 cleanup: it drops a hub availability timeout still pinned to the legacy
     global default (600s) that the options flow re-persisted on save, which masked
     the device-class defaults again (expiring event-driven devices); the options
-    flow no longer writes that sentinel, so this heal is final.
+    flow no longer writes that sentinel, so this heal is final. Version 2 minor 8
+    strips the retired ``discovery_enabled`` key, which no longer gates anything
+    now that a device is only created once the user adopts it.
     """
     if entry.version > 2:
         # Downgrade from a future schema is unsupported.
@@ -550,5 +586,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(
             entry, options=new_options, version=2, minor_version=7
         )
+
+    if (entry.minor_version or 1) < 8:
+        # Discovery stopped being a toggle: every heard device waits in the
+        # coordinator's pending list until the user adopts it, so the per-hub
+        # ``discovery_enabled`` flag gates nothing. Strip it from both data and
+        # options so no stale value survives into diagnostics or a config-entry
+        # export. Adopted devices and their settings are untouched.
+        _strip_discovery_toggle(hass, entry)
+        hass.config_entries.async_update_entry(entry, version=2, minor_version=8)
 
     return True

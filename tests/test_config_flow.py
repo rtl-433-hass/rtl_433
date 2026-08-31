@@ -27,7 +27,6 @@ from custom_components.rtl_433.const import (
     COMMODITY_WATER,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
-    CONF_DISCOVERY_ENABLED,
     CONF_HOST,
     CONF_INITIAL_FREQUENCY,
     CONF_MANAGE_SETTINGS,
@@ -128,9 +127,9 @@ async def test_user_step_cannot_connect_shows_error(hass):
 # --------------------------------------------------------------------------- #
 # Options flow — hub step.                                                     #
 # --------------------------------------------------------------------------- #
-async def test_hub_options_step_persists_discovery_and_timeout(hass, hub_entry_builder):
-    """The hub options step persists the discovery toggle + timeout to options."""
-    entry = hub_entry_builder(discovery_enabled=True)
+async def test_hub_options_step_persists_timeout(hass, hub_entry_builder):
+    """The hub options step persists the availability timeout to options."""
+    entry = hub_entry_builder()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -146,10 +145,10 @@ async def test_hub_options_step_persists_discovery_and_timeout(hass, hub_entry_b
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {CONF_DISCOVERY_ENABLED: False, CONF_AVAILABILITY_TIMEOUT: 120},
+        {CONF_MANAGE_SETTINGS: False, CONF_AVAILABILITY_TIMEOUT: 120},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options[CONF_DISCOVERY_ENABLED] is False
+    assert entry.options[CONF_MANAGE_SETTINGS] is False
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == 120
 
 
@@ -163,7 +162,7 @@ async def test_hub_options_step_drops_default_timeout(hass, hub_entry_builder):
     event-driven devices (doorbells/motion/contacts), so the key is dropped — the
     entry carries no explicit hub timeout and the per-device-type defaults apply.
     """
-    entry = hub_entry_builder(discovery_enabled=True)
+    entry = hub_entry_builder()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -173,13 +172,13 @@ async def test_hub_options_step_drops_default_timeout(hass, hub_entry_builder):
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_DISCOVERY_ENABLED: False,
+            CONF_MANAGE_SETTINGS: False,
             CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     # The deliberately-changed toggle is persisted...
-    assert entry.options[CONF_DISCOVERY_ENABLED] is False
+    assert entry.options[CONF_MANAGE_SETTINGS] is False
     # ...but the untouched plain-default timeout is not, so class defaults apply.
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
@@ -987,7 +986,7 @@ async def test_mappings_step_valid_submit_writes_data_leaves_options_and_devices
         devices={
             device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
         },
-        options={CONF_DISCOVERY_ENABLED: True},
+        options={CONF_MANAGE_SETTINGS: True},
     )
     entry.add_to_hass(hass)
     options_snapshot = deepcopy(dict(entry.options))
@@ -1106,15 +1105,14 @@ async def test_hassio_discovery_happy_path_creates_entry(hass):
     assert entry.title == "rtl_433 (core-rtl433:8433)"
     # Exact data shape: connection params + the default toggles. Submitting the
     # empty confirm form applies the schema defaults (manage-settings default +
-    # discovery enabled True + the pre-filled 433.92 MHz initial frequency, which
-    # is persisted because manage-settings is on).
+    # the pre-filled 433.92 MHz initial frequency, which is persisted because
+    # manage-settings is on).
     assert entry.data == {
         CONF_HOST: "core-rtl433",
         CONF_PORT: 8433,
         CONF_PATH: "/ws",
         "secure": False,
         CONF_MANAGE_SETTINGS: DEFAULT_MANAGE_SETTINGS,
-        CONF_DISCOVERY_ENABLED: True,
         CONF_INITIAL_FREQUENCY: DEFAULT_INITIAL_FREQUENCY,
     }
 
@@ -1198,7 +1196,9 @@ async def test_hassio_discovery_missing_unique_id_aborts(hass):
 
 async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
     """Discovery of a manually-added host:port re-keys it to the radio id and aborts."""
-    entry = hub_entry_builder(host="core-rtl433", port=8433, path="/ws")
+    entry = hub_entry_builder(
+        host="core-rtl433", port=8433, path="/ws", availability_timeout=42
+    )
     entry.add_to_hass(hass)
     assert entry.unique_id == "hub:core-rtl433:8433"
 
@@ -1231,8 +1231,8 @@ async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
     # Connection data refreshed from discovery...
     assert adopted.data[CONF_PATH] == "/ws2"
     assert adopted.data["secure"] is True
-    # ...while pre-existing keys (the manual entry's discovery toggle) survive.
-    assert adopted.data[CONF_DISCOVERY_ENABLED] is True
+    # ...while pre-existing keys (the manual entry's hub timeout) survive.
+    assert adopted.data[CONF_AVAILABILITY_TIMEOUT] == 42
 
 
 async def test_hassio_readvertisement_reloads_running_hub(hass, no_socket, caplog):
@@ -1684,8 +1684,8 @@ async def test_hassio_confirm_cannot_connect_reshows_form(hass):
 # --------------------------------------------------------------------------- #
 # Setup toggles + initial frequency (manual user step and discovery confirm).  #
 # --------------------------------------------------------------------------- #
-async def test_user_step_persists_discovery_off_and_initial_frequency(hass):
-    """Managed add with discovery off + a frequency persists both into entry.data."""
+async def test_user_step_persists_initial_frequency(hass):
+    """A managed add with an explicit frequency persists it into entry.data."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
@@ -1699,7 +1699,6 @@ async def test_user_step_persists_discovery_off_and_initial_frequency(hass):
                 CONF_PATH: "/ws",
                 "secure": False,
                 CONF_MANAGE_SETTINGS: True,
-                CONF_DISCOVERY_ENABLED: False,
                 CONF_INITIAL_FREQUENCY: 868.3,
             },
         )
@@ -1707,7 +1706,6 @@ async def test_user_step_persists_discovery_off_and_initial_frequency(hass):
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
-    assert entry.data[CONF_DISCOVERY_ENABLED] is False
     # The frequency rides the managed path; persisted as a float (MHz).
     assert entry.data[CONF_INITIAL_FREQUENCY] == 868.3
 
@@ -1727,7 +1725,6 @@ async def test_user_step_applies_default_initial_frequency(hass):
                 CONF_PATH: "/ws",
                 "secure": False,
                 CONF_MANAGE_SETTINGS: True,
-                CONF_DISCOVERY_ENABLED: True,
             },
         )
         await hass.async_block_till_done()
@@ -1752,7 +1749,6 @@ async def test_user_step_drops_initial_frequency_when_unmanaged(hass):
                 CONF_PATH: "/ws",
                 "secure": False,
                 CONF_MANAGE_SETTINGS: False,
-                CONF_DISCOVERY_ENABLED: True,
                 CONF_INITIAL_FREQUENCY: 868.3,
             },
         )
@@ -1764,7 +1760,7 @@ async def test_user_step_drops_initial_frequency_when_unmanaged(hass):
 
 
 async def test_hassio_confirm_persists_toggles_and_frequency(hass):
-    """The discovery confirm form persists manage/discovery/frequency into entry.data."""
+    """The discovery confirm form persists manage-settings + frequency into entry.data."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_HASSIO}, data=_disc()
     )
@@ -1775,7 +1771,6 @@ async def test_hassio_confirm_persists_toggles_and_frequency(hass):
             result["flow_id"],
             {
                 CONF_MANAGE_SETTINGS: True,
-                CONF_DISCOVERY_ENABLED: False,
                 CONF_INITIAL_FREQUENCY: 915.0,
             },
         )
@@ -1784,7 +1779,6 @@ async def test_hassio_confirm_persists_toggles_and_frequency(hass):
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
     assert entry.data[CONF_MANAGE_SETTINGS] is True
-    assert entry.data[CONF_DISCOVERY_ENABLED] is False
     assert entry.data[CONF_INITIAL_FREQUENCY] == 915.0
 
 

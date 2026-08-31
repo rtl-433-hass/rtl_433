@@ -3,8 +3,8 @@
 A small menu offering a *hub* step, a *device* step, a *mappings* step, and a
 *replace* step:
 
-- **hub** persists the per-hub discovery toggle, the default availability
-  timeout, and the manage-settings toggle to ``entry.options``.
+- **hub** persists the default availability timeout and the manage-settings
+  toggle to ``entry.options``.
 - **device** picks a known device from the hub's ``entry.data["devices"]`` map,
   then **device_settings** sets/clears that device's availability-timeout
   override, an optional utility-meter calibration (advancing to the *calibration*
@@ -53,7 +53,6 @@ from .const import (
     COMMODITY_NONE,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
-    CONF_DISCOVERY_ENABLED,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_USER_MAPPINGS,
@@ -83,8 +82,8 @@ MAPPINGS_DOCS_URL = (
 class Rtl433OptionsFlow(OptionsFlow):
     """Hub options: a menu with a hub-settings step and a device-settings pair.
 
-    The hub step persists the discovery toggle and the default availability
-    timeout to ``entry.options``. The device picker chooses one device and the
+    The hub step persists the default availability timeout and the
+    manage-settings toggle to ``entry.options``. The device picker chooses one device and the
     device-settings step writes that device's availability-timeout override and
     an optional utility-meter calibration into ``entry.data["devices"]``.
     """
@@ -136,10 +135,6 @@ class Rtl433OptionsFlow(OptionsFlow):
             return self.async_create_entry(title="", data=options)
 
         entry = self.config_entry
-        discovery_default = entry.options.get(
-            CONF_DISCOVERY_ENABLED,
-            entry.data.get(CONF_DISCOVERY_ENABLED, True),
-        )
         timeout_default = entry.options.get(
             CONF_AVAILABILITY_TIMEOUT,
             entry.data.get(CONF_AVAILABILITY_TIMEOUT, DEFAULT_AVAILABILITY_TIMEOUT),
@@ -151,7 +146,6 @@ class Rtl433OptionsFlow(OptionsFlow):
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_DISCOVERY_ENABLED, default=discovery_default): bool,
                 vol.Required(
                     CONF_AVAILABILITY_TIMEOUT, default=timeout_default
                 ): vol.All(int, vol.Range(min=0)),
@@ -565,10 +559,10 @@ class Rtl433OptionsFlow(OptionsFlow):
         """Model for a replacement candidate: stored record, else last event.
 
         A candidate can legitimately have no record in ``entry.data["devices"]``
-        -- with discovery off the coordinator hears a device it never registers,
-        and that is exactly the device a replace has to offer -- so the model
-        falls back to the coordinator's last :class:`NormalizedEvent` for the key
-        and then to ``""``. Never raises: a missing record, a missing event and a
+        -- a device the coordinator has adopted this session is in its runtime
+        state before the devices-map upsert lands, and that is exactly the device
+        a replace has to offer -- so the model falls back to the coordinator's
+        last :class:`NormalizedEvent` for the key and then to ``""``. Never raises: a missing record, a missing event and a
         blank model all degrade to the bare key in the picker.
         """
         record: dict[str, Any] = devices.get(device_key, {})
@@ -580,10 +574,10 @@ class Rtl433OptionsFlow(OptionsFlow):
         """Pick the new identity to adopt onto the device kept on the previous step.
 
         Candidates are the **union** of the stored devices map and the
-        coordinator's seen-device keys, because the docs recommend turning
-        discovery off in urban areas: with discovery off the replacement never
-        gets a registered row, but the coordinator has still heard it and
-        :func:`async_replace_device` accepts an unregistered ``new_key``. The
+        coordinator's runtime device keys, because the two can legitimately
+        diverge: a device just adopted this session is in the coordinator's
+        runtime state before its devices-map upsert lands, and
+        :func:`async_replace_device` accepts a ``new_key`` with no stored record. The
         coordinator is reached the way :meth:`_device_commodity_default` reaches
         it and is guarded the same way -- the options flow can be opened while the
         entry is not loaded, and then the devices map alone is the candidate set.

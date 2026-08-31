@@ -486,9 +486,9 @@ modules and depend only on the finished implementation.
 **Parallel Tasks:**
 - ✔️ Task 001: Split observation from adoption in the coordinator — pending/adopted/ignored routing, the adopt/ignore API, notification removal, and delete-returns-to-pending
 
-### Phase 2: Retire the Discovery Toggle
+### ✅ Phase 2: Retire the Discovery Toggle
 **Parallel Tasks:**
-- Task 002: Remove `discovery_enabled` integration-wide and strip it from existing entries with a `MINOR_VERSION = 8` migration (depends on: 001)
+- ✔️ Task 002: Remove `discovery_enabled` integration-wide and strip it from existing entries with a `MINOR_VERSION = 8` migration (depends on: 001)
 
 ### Phase 3: Approval UI
 **Parallel Tasks:**

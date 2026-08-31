@@ -21,7 +21,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.rtl_433.const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
-    CONF_DISCOVERY_ENABLED,
     CONF_HOST,
     CONF_PATH,
     CONF_PORT,
@@ -70,7 +69,6 @@ def build_hub_entry(
     port: int = DEFAULT_PORT,
     path: str = DEFAULT_PATH,
     secure: bool = False,
-    discovery_enabled: bool = True,
     availability_timeout: int | None = None,
     devices: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
@@ -90,7 +88,6 @@ def build_hub_entry(
         CONF_PORT: port,
         CONF_PATH: path,
         "secure": secure,
-        CONF_DISCOVERY_ENABLED: discovery_enabled,
     }
     if availability_timeout is not None:
         data[CONF_AVAILABILITY_TIMEOUT] = availability_timeout

@@ -163,12 +163,11 @@ def test_offline_device_not_resurrected_by_replay(hass, coordinator):
 
 
 # --------------------------------------------------------------------------- #
-# Discovery-registration gate.                                                 #
+# Adopted-device registration.                                                 #
 # --------------------------------------------------------------------------- #
-def test_new_device_callback_fires_once_when_discovery_enabled(hass, coordinator):
+def test_new_device_callback_fires_once_per_process(hass, coordinator):
     """The new-device hook fires only on the first sighting of a device."""
     seen: list[tuple[str, str, bool]] = []
-    coordinator.discovery_enabled = True
     coordinator.new_device_callback = lambda key, model, is_replay: seen.append(
         (key, model, is_replay)
     )
@@ -180,17 +179,8 @@ def test_new_device_callback_fires_once_when_discovery_enabled(hass, coordinator
     assert seen == [("Acurite-606TX-42", "Acurite-606TX", False)]
 
 
-def test_no_callback_when_discovery_disabled_or_unset(hass, coordinator):
-    """No registration when discovery is off, and no crash when the hook is None."""
-    seen: list[str] = []
-    coordinator.discovery_enabled = False
-    coordinator.new_device_callback = lambda k, m, r: seen.append(k)
-    with patch(DISPATCH):
-        coordinator._on_client_event(_event())
-    assert seen == []
-
-    # Discovery on but no callback wired -> must not raise.
-    coordinator.discovery_enabled = True
+def test_no_crash_when_new_device_callback_unset(hass, coordinator):
+    """An adopted device with no callback wired is still tracked, without raising."""
     coordinator.new_device_callback = None
     with patch(DISPATCH):
         coordinator._on_client_event(_event())
@@ -200,7 +190,6 @@ def test_no_callback_when_discovery_disabled_or_unset(hass, coordinator):
 def test_backlog_event_seeds_state_but_does_not_register(hass, coordinator):
     """A pre-connection backlog frame seeds state without registering the device."""
     seen: list[str] = []
-    coordinator.discovery_enabled = True
     coordinator.new_device_callback = lambda k, m, r: seen.append(k)
     conn = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
     coordinator._connection_time = conn
@@ -223,7 +212,6 @@ def test_backlog_event_seeds_state_but_does_not_register(hass, coordinator):
 def test_registration_uses_discovery_backlog_grace_boundary(hass, coordinator):
     """A frame exactly at ``connection_time - grace`` still registers (open bound)."""
     seen: list[str] = []
-    coordinator.discovery_enabled = True
     coordinator.new_device_callback = lambda k, m, r: seen.append(k)
     conn = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
     coordinator._connection_time = conn
@@ -236,7 +224,6 @@ def test_registration_uses_discovery_backlog_grace_boundary(hass, coordinator):
 
 def test_callback_exception_does_not_break_ingest(hass, coordinator):
     """A throwing new_device_callback is caught; the device is still tracked."""
-    coordinator.discovery_enabled = True
     coordinator.new_device_callback = lambda k, m, r: (_ for _ in ()).throw(
         RuntimeError("boom")
     )
@@ -335,12 +322,11 @@ def test_forget_device_evicts_runtime_state(hass, coordinator):
 
 
 # --------------------------------------------------------------------------- #
-# Coordinator-side DEBUG traces (discovery + unmapped fields).                  #
+# Coordinator-side DEBUG traces (registration + unmapped fields).              #
 # --------------------------------------------------------------------------- #
-def test_discovery_logs_new_device_line_once(hass, coordinator, caplog):
+def test_registration_logs_new_device_line_once(hass, coordinator, caplog):
     """A first sighting logs the registration DEBUG line once, with via_replay."""
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
-    coordinator.discovery_enabled = True
     coordinator.new_device_callback = lambda key, model, is_replay: None
 
     with patch(DISPATCH):

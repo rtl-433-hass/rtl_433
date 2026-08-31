@@ -9,8 +9,8 @@ connection. Setting one up loads the shipped mapping library (cached once on
 so the entity platforms reuse it, instantiates the push
 :class:`~custom_components.rtl_433.coordinator.Rtl433Coordinator`, injects the
 skip-keys, the effective-timeout resolver, and the new-device callback, registers
-the hub device, starts the coordinator, registers an options-update listener so
-toggling discovery / the timeout takes effect live, and forwards the
+the hub device, starts the coordinator, registers an options-update listener so a
+changed availability timeout takes effect live, and forwards the
 ``sensor`` / ``binary_sensor`` platforms once on the hub entry.
 
 RF devices are represented as **device-registry devices nested under the hub
@@ -62,7 +62,6 @@ from .hub_settings import (
     _explicit_hub_timeout,
     _hub_availability_timeout,
     _hub_connection,
-    _hub_discovery_enabled,
     _hub_manage_settings,
     _hub_secure,
 )
@@ -173,7 +172,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port=entry.data[CONF_PORT],
         path=entry.data[CONF_PATH],
         secure=_hub_secure(entry),
-        discovery_enabled=_hub_discovery_enabled(entry),
         manage_settings=_hub_manage_settings(entry),
         availability_timeout=_hub_availability_timeout(entry),
         initial_center_frequency=entry.data.get(CONF_INITIAL_FREQUENCY),
@@ -278,10 +276,9 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     reconfigure, Supervisor-discovery and rebind paths only *write* the new
     target and this listener is the single place that reloads the hub.
 
-    Discovery-toggle and availability-timeout changes are applied live instead
-    (the coordinator reads ``discovery_enabled`` / ``availability_timeout`` on
-    every event and watchdog tick), so no reload is required for those and we
-    avoid the disruption of tearing the socket down.
+    An availability-timeout change is applied live instead (the coordinator
+    reads ``availability_timeout`` on every watchdog tick), so no reload is
+    required for it and we avoid the disruption of tearing the socket down.
     """
     coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
         entry.entry_id
@@ -316,12 +313,10 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
         await hass.config_entries.async_reload(entry.entry_id)
         return
 
-    coordinator.discovery_enabled = _hub_discovery_enabled(entry)
     coordinator.availability_timeout = _hub_availability_timeout(entry)
     LOGGER.debug(
-        "rtl_433 hub %s options updated (discovery=%s, timeout=%ss)",
+        "rtl_433 hub %s options updated (timeout=%ss)",
         entry.title,
-        coordinator.discovery_enabled,
         coordinator.availability_timeout,
     )
 

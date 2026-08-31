@@ -10,10 +10,10 @@ Targets every surviving mutant in diffs_binary_sensor.txt:
 - _effective_clear_delay: resolver exception path sets "" vs None
 
 Design notes:
-  - The dynamic-discovery path (discovery_enabled=True, no pre-seeded devices)
-    is the key scenario for __init__ and async_added_to_hass seeding: after
-    feeding an event the entity is created with coordinator.devices already
-    populated, so the seeding from coordinator in __init__ is exercised.
+  - The dynamic-adoption path (no pre-seeded devices, then ``adopt_device``)
+    is the key scenario for __init__ and async_added_to_hass seeding: adoption
+    creates the entity with coordinator.devices already populated, so the
+    seeding from coordinator in __init__ is exercised.
   - Door sensor (closed field): payload {on: "0", off: "1"}, device_class
     opening, no clear_delay. closed=0 -> opening on, closed=1 -> opening off.
   - Motion sensor: payload {on: "1"}, clear_delay=90, no off token.
@@ -190,10 +190,10 @@ async def test_init_force_update_motion_sensor(hass, hub_entry_builder):
 # __init__ mutmut_19: _apply_value(None) instead of actual field value.
 #
 # All four affect the seeding path: when an entity is dynamically created
-# (discovery) after an event, coordinator.devices[device_key] already holds
+# (by adoption) after an event, coordinator.devices[device_key] already holds
 # the event. The entity starts with is_on=True immediately (before async_added).
 #
-# Strategy: discovery_enabled=True, no pre-seeded devices. Feed motion event.
+# Strategy: no pre-seeded devices. Feed a motion event, then adopt the device.
 # The entity is created dynamically. Between the coordinator processing the
 # event (storing in devices) and the entity reaching hass, the seeding in
 # __init__ should kick in.
@@ -209,8 +209,8 @@ async def test_init_seeds_from_coordinator_devices_on_dynamic_add(
     the field_key guard is wrong (mutmut_18) or apply_value gets None (mutmut_19),
     the state after creation is unknown instead of on.
     """
-    # Discovery enabled, no pre-seeded devices.
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    # No pre-seeded devices; the device is adopted below.
+    hub = await _setup_hub(hass, hub_entry_builder)
     coord = _coordinator(hass, hub)
 
     # Feed motion event and adopt the device -> entity created dynamically.
@@ -363,8 +363,8 @@ async def test_apply_value_motion_true_timer_fires(hass, hub_entry_builder):
 # mutmut_4: is_on is False
 #
 # Timer starts ONLY when: clear_delay IS NOT None AND is_on IS True.
-# Test via dynamic discovery: motion event -> entity created -> seeded on ->
-# async_added_to_hass -> timer starts.
+# Test via dynamic adoption: motion event -> adopt -> entity created and
+# seeded on -> async_added_to_hass -> timer starts.
 # ===========================================================================
 
 
@@ -378,7 +378,7 @@ async def test_added_to_hass_starts_timer_when_seeded_on(hass, hub_entry_builder
     # Dynamic add: no pre-seeded devices. Feed motion and adopt -> entity created
     # with is_on=True seeded from coordinator.devices. async_added_to_hass
     # must then start the clear timer.
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coord = _coordinator(hass, hub)
 
     start = dt_util.utcnow()
@@ -557,7 +557,7 @@ async def test_restore_state_skipped_when_seeded_from_coordinator(
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "off"),))
 
     # No pre-seeded devices: the device arrives through adoption.
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coord = _coordinator(hass, hub)
 
     # Feed door open event and adopt -> entity created dynamically.

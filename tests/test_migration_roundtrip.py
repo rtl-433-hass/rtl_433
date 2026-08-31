@@ -12,10 +12,10 @@ isolation), these tests seed a full registry snapshot using the contract's exact
 ``unique_id`` and device ``identifiers`` templates, run ``async_migrate_entry``
 end-to-end, and compare the before/after identity sets:
 
-- **latest entry** (``version=2, minor_version=7``): migration is a no-op that
+- **latest entry** (``version=2, minor_version=8``): migration is a no-op that
   preserves every entity and device unchanged;
 - **legacy entry** (``version=1``): migration reaches ``version=2,
-  minor_version=7`` monotonically (never downgrading) while re-homing — not
+  minor_version=8`` monotonically (never downgrading) while re-homing — not
   destroying — the pre-existing registry objects.
 
 Contract templates encoded here (see COMPATIBILITY_CONTRACT.md §2, §3):
@@ -58,7 +58,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 # The current declared schema (COMPATIBILITY_CONTRACT.md §1).
 CONTRACT_VERSION = 2
-CONTRACT_MINOR_VERSION = 7
+CONTRACT_MINOR_VERSION = 8
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ async def test_latest_entry_roundtrip_preserves_registry_identity(hass):
 async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(hass):
     """A legacy v1 hub (with a v1 child device entry) migrates to v2/m7.
 
-    Asserts the terminal schema is exactly ``version=2, minor_version=7``, that
+    Asserts the terminal schema is exactly ``version=2, minor_version=8``, that
     the version never decreases along the path (monotonic, non-downgrading), and
     that every pre-existing registry device/entity survives — re-homed onto the
     hub, never destroyed or duplicated.

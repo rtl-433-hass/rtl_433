@@ -55,7 +55,6 @@ class _FakeCoordinator:
         # Connection-backed availability gate: connected, so no outage clock.
         self.hub_available = True
         self.disconnected_since = None
-        self.discovery_enabled = True
         self.availability_timeout = 600
         self.seen_fields: set[str] = {"temperature_C", "humidity", "made_up_field"}
         self.devices: dict = {}
@@ -413,24 +412,6 @@ async def test_diag_connected_false_value(
     _setup_hass_with_coordinator(hass, entry, coordinator)
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["connected"] is False
-
-
-async def test_diag_discovery_enabled_key_exact_name_and_value(
-    hass: HomeAssistant, hub_entry_builder
-) -> None:
-    """diagnostics['discovery_enabled'] must equal coordinator.discovery_enabled.
-
-    Kills mutmut_59 (value=None), mutmut_60 ('XXdiscovery_enabledXX'),
-    mutmut_61 ('DISCOVERY_ENABLED').
-    """
-    entry = hub_entry_builder()
-    entry.add_to_hass(hass)
-    coordinator = _FakeCoordinator()
-    coordinator.discovery_enabled = False
-    _setup_hass_with_coordinator(hass, entry, coordinator)
-    diag = await async_get_config_entry_diagnostics(hass, entry)
-    assert "discovery_enabled" in diag
-    assert diag["discovery_enabled"] is False
 
 
 async def test_diag_availability_timeout_key_exact_name_and_value(
@@ -860,7 +841,6 @@ async def test_diag_full_structure_coordinator_present(
     coordinator.path = "/ws"
     coordinator.secure = False
     coordinator.connected = True
-    coordinator.discovery_enabled = True
     coordinator.availability_timeout = 600
     coordinator.seen_fields = {"temperature_C", "humidity"}
     device_key = "Acurite-606TX-99"
@@ -882,7 +862,6 @@ async def test_diag_full_structure_coordinator_present(
     assert "entry" in diag
     assert "connection" in diag
     assert "connected" in diag
-    assert "discovery_enabled" in diag
     assert "availability_timeout" in diag
     assert "devices" in diag
     assert "seen_field_keys" in diag
@@ -902,7 +881,6 @@ async def test_diag_full_structure_coordinator_present(
 
     # runtime fields
     assert diag["connected"] is True
-    assert diag["discovery_enabled"] is True
     assert diag["availability_timeout"] == 600
 
     # devices block
