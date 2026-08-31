@@ -441,6 +441,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#hub-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hub Connection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#timeout-sources" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -654,6 +665,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#hub-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hub Connection
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#timeout-sources" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -737,6 +759,51 @@ availability timeout, its entities become <code>unavailable</code>.</p>
 </table>
 <p>Periodic devices use finite timeouts. Event-driven devices default to never
 expiring because a long silence is normal and does not imply failure.</p>
+<h2 id="hub-connection">Hub Connection<a class="headerlink" href="#hub-connection" title="Permanent link">&para;</a></h2>
+<p>Silence only means something while the integration is listening. If the
+connection to the rtl_433 server drops, no events can arrive for any device, so a
+device's last reading says nothing about whether the device is still there.</p>
+<p>When the connection to the rtl_433 server drops, every device behind that hub is
+marked <code>unavailable</code> straight away, regardless of its own timeout — including
+event-driven devices that never expire on silence, and their <strong>Last seen</strong>
+sensors. There is no grace period: while the socket is down the integration
+cannot hear the radio at all, so continuing to show the last reading would
+present stale data as current. This is the same behavior an MQTT device gets from
+an availability topic and a last-will message, and what Home Assistant
+integrations do generally when a connection to a hub is lost.</p>
+<p>The devices come back as soon as the connection is re-established; their values
+are the last ones received, and the usual silence timeouts resume from there. A
+brief drop therefore shows up as a brief <code>unavailable</code> — an honest one, because
+during it the integration genuinely was not listening.</p>
+<p>If you want an automation to tolerate short blips, condition it on the hub's
+<strong>Connectivity</strong> binary sensor with a <code>for:</code> delay rather than reacting to each
+device going unavailable.</p>
+<p>The separate <strong>rtl_433 server unreachable</strong> repair issue is debounced: it waits
+90 seconds before raising, so a routine server restart does not produce a
+notification even though the entities reported the outage immediately.</p>
+<p><code>event</code> entities (buttons, doorbells, remotes) go unavailable with everything
+else. This matches Zigbee2MQTT, whose event entities carry the bridge-state
+availability topic alongside the per-device one, and Home Assistant's own Shelly
+and ESPHome integrations. Use the <code>event.received</code> trigger rather than a plain
+state trigger: it ignores transitions out of <code>unavailable</code>, so a reconnect never
+replays a stale press.</p>
+<p>One kind of entity is deliberately exempt:</p>
+<ul>
+<li><strong>The hub's SDR controls</strong> (<strong>Gain</strong>, <strong>Sample rate</strong>, <strong>Frequency
+  correction</strong>, <strong>Hop interval</strong>, <strong>Conversion mode</strong>) stay available, because
+  they are settings you are writing rather than readings you are trusting. With
+  <strong>Manage SDR settings</strong> on — the default — these appear as <code>number</code>/<code>select</code>
+  entities. Turning it off replaces them with read-only diagnostic sensors, and
+  those <em>are</em> gated on the connection along with the hub's other diagnostic
+  sensors (center frequency, frame counters, enabled decoders), whose values are
+  fetched over HTTP and would otherwise freeze at whatever was last read.</li>
+</ul>
+<p>The <strong>Connectivity</strong> binary sensor is the entity that reports the outage: it
+reads the socket state directly and stays available throughout. The Home
+Assistant log records the drop and the reconnect:</p>
+<div class="highlight"><pre><span></span><code>INFO  rtl_433 lost the connection to ws://rtl433.local:8433/ws; reconnecting, and marking all 12 device(s) ...
+INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
+</code></pre></div>
 <h2 id="timeout-sources">Timeout Sources<a class="headerlink" href="#timeout-sources" title="Permanent link">&para;</a></h2>
 <p>The effective availability timeout is resolved in this order:</p>
 <ol>
@@ -759,7 +826,9 @@ restarts.</p>
 expire and the timestamp is their freshness signal. It is disabled by default for
 periodic devices, whose availability already conveys freshness.</p>
 <p>Unlike measurement sensors, Last seen stays available after the device falls
-silent, so it can drive staleness automations.</p>
+silent, so it can drive staleness automations. It does go unavailable while the
+hub connection is down, because the timestamp then only records when the
+integration stopped listening.</p>
 
 
 
