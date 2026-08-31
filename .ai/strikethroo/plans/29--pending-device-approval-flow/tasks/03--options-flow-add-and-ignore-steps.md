@@ -2,7 +2,7 @@
 id: 3
 group: "ui"
 dependencies: [2]
-status: "pending"
+status: "completed"
 created: 2026-08-31
 skills:
   - home-assistant-config-flow
@@ -37,8 +37,11 @@ ignores the ones they never want to see again — plus a second step to un-ignor
       persists it into `entry.data[CONF_DEVICES]`.
 - [ ] Submitting ignores each selected key through `coordinator.ignore_device`
       and persists it into `entry.data[CONF_IGNORED_DEVICES]`.
-- [ ] A key selected in both lists is ignored, not added, and the form reports
-      that conflict as an error rather than silently picking one.
+- [x] A key selected in both lists applies **nothing** and re-shows the form
+      with the `add_and_ignore_conflict` error. (The original wording said
+      "is ignored, not added"; that contradicts reporting an error, and applying
+      a side effect on a submit the flow rejects is worse. Task 005 tests the
+      apply-nothing behaviour.)
 - [ ] With no pending devices, the step aborts with a clear "nothing waiting"
       message instead of rendering an empty form.
 - [ ] `async_step_ignored_devices` lists the currently ignored keys and
@@ -286,3 +289,21 @@ following the structure already there for `hub` / `device` / `mappings`.
 Use the verb **Ignore** / **Ignored** throughout. "Reject" must not appear.
 
 </details>
+
+
+## Addendum: replace-step regression (added during execution)
+
+`async_step_replace_target` draws its candidate set from
+`entry.data[CONF_DEVICES]` union `coordinator.devices`. Under this plan a
+battery-swapped device transmits under a **new** key that is *pending*, so it
+appears in neither set and the replace flow can no longer offer the very device
+it exists to adopt. This is a regression introduced by plan 29, not a
+pre-existing gap, so it is fixed here rather than deferred:
+
+- [ ] `async_step_replace_target` also offers pending device keys as replacement
+      targets, labelled so a pending candidate is distinguishable from an
+      adopted one.
+- [ ] Choosing a pending key as the replacement target re-keys the kept device
+      onto it and clears it from `coordinator.pending`, so the user is not left
+      with both a re-keyed device and a stale pending candidate.
+- [ ] Task 005 covers this path.

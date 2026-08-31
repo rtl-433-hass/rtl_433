@@ -2,8 +2,9 @@
 
 Cheap 433 MHz sensors usually generate a fresh transmitter id when their batteries
 are pulled, so the same physical hardware starts arriving under a new
-``device_key`` — a brand-new device-registry row with brand-new entities and no
-history, while the original goes permanently unavailable. This module is the
+``device_key`` — normally as a *pending* candidate the user has not added (and,
+if they do add it, a brand-new device-registry row with brand-new entities and no
+history), while the original goes permanently unavailable. This module is the
 **only** sanctioned place that rewrites a nested device's identity: it re-points
 an existing device (and every entity hanging off it) from ``old_key`` onto
 ``new_key`` so ``entity_id`` — and therefore recorder history, statistics,
@@ -60,11 +61,13 @@ async def async_replace_device(
     ``identifiers`` onto ``new_key``, folds the stored per-device settings across,
     and reloads the entry so the platforms rebuild.
 
-    ``new_key`` need **not** already exist in ``entry.data[CONF_DEVICES]``: with
-    discovery disabled the coordinator hears the replacement without ever
-    registering it, and adopting such a key is a supported case (the fold treats
-    a missing record as an empty one). ``old_key``, by contrast, must exist —
-    there would otherwise be no settings, and no device, to carry across.
+    ``new_key`` need **not** already exist in ``entry.data[CONF_DEVICES]``: the
+    replacement is normally a *pending* device -- heard but never added, so it has
+    no stored record, no device row and no entities -- and re-keying onto such a
+    key is the ordinary battery-swap case, not an edge one (the fold treats a
+    missing record as an empty one, and steps 1-3 simply find nothing to free).
+    ``old_key``, by contrast, must exist — there would otherwise be no settings,
+    and no device, to carry across.
 
     Raises:
         DeviceReplaceError: when either key is empty, the keys are equal, or
@@ -147,8 +150,11 @@ async def async_replace_device(
 
     # Step 5 — reload so the platforms rebuild every entity from the updated
     # devices map and the coordinator's runtime dicts (``devices``, ``last_seen``,
-    # ``available``, ``_discovered``) are rebuilt from scratch — which is why no
-    # separate runtime-state transfer is needed. Kept even though
+    # ``available``, ``_discovered``, ``pending``) are rebuilt from scratch — which
+    # is why no separate runtime-state transfer is needed, and why re-keying onto
+    # a pending candidate needs no separate eviction: the whole in-memory pending
+    # list goes with the old coordinator, and ``new_key`` is in the stored devices
+    # map by now, so its next transmission is routed as an adopted device. Kept even though
     # ``async_update_entry`` may itself trigger the update listener: the reload is
     # idempotent and makes the helper correct when called from a context that
     # does not reload.

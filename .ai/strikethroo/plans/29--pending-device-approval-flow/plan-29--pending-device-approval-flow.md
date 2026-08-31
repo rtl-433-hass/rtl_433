@@ -490,9 +490,9 @@ modules and depend only on the finished implementation.
 **Parallel Tasks:**
 - ✔️ Task 002: Remove `discovery_enabled` integration-wide and strip it from existing entries with a `MINOR_VERSION = 8` migration (depends on: 001)
 
-### Phase 3: Approval UI
+### ✅ Phase 3: Approval UI
 **Parallel Tasks:**
-- Task 003: Add the "Add discovered devices" and "Ignored devices" options-flow steps, their translations, and live ignore-list updates (depends on: 002)
+- ✔️ Task 003: Add the "Add discovered devices" and "Ignored devices" options-flow steps, their translations, and live ignore-list updates (depends on: 002)
 
 ### Phase 4: Verification
 **Parallel Tasks:**

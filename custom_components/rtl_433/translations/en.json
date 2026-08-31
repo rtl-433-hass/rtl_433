@@ -85,10 +85,34 @@
         "title": "rtl_433 options",
         "description": "Choose what to configure.",
         "menu_options": {
+          "add_devices": "Add discovered devices",
+          "ignored_devices": "Ignored devices",
           "hub": "Hub settings",
           "device": "Device settings",
           "mappings": "Device mappings",
           "replace": "Replace device"
+        }
+      },
+      "add_devices": {
+        "title": "Add discovered devices",
+        "description": "These devices have been heard since Home Assistant last started but have not been added yet. Adding one creates it, with its entities, right away. Ignoring one hides it for good: it is never listed again, even after a restart, until you un-ignore it under \"Ignored devices\". Anything you leave unselected stays in this list and is offered again next time. Each entry shows how many times the device has been heard, its signal level when it reports one, and how long ago it last transmitted \u2014 a device heard once, weakly, is usually a bad decode or a neighbour's sensor.",
+        "data": {
+          "add": "Add these devices",
+          "ignore": "Ignore these devices"
+        },
+        "data_description": {
+          "add": "The devices to create in Home Assistant, with their entities.",
+          "ignore": "The devices to hide for good. They stay hidden until you un-ignore them."
+        }
+      },
+      "ignored_devices": {
+        "title": "Ignored devices",
+        "description": "These devices are hidden from the discovered-devices list. Select any you want offered again. Un-ignoring is not retroactive: a device reappears the next time it transmits, which for a door or motion sensor means the next time it is triggered.",
+        "data": {
+          "unignore": "Stop ignoring these devices"
+        },
+        "data_description": {
+          "unignore": "The devices to offer again the next time they transmit."
         }
       },
       "hub": {
@@ -158,20 +182,24 @@
       },
       "replace_target": {
         "title": "Replace device",
-        "description": "Pick the newly seen device that is really the same hardware as {device}. Its duplicate entities are removed and the device you kept takes over its id. Devices of the same model are listed first.",
+        "description": "Pick the newly seen device that is really the same hardware as {device}. Devices you have not added are listed too, marked \"not added yet\" with how often they have been heard — after a battery change the replacement is usually one of those. Any duplicate entities are removed and the device you kept takes over its id. Devices of the same model are listed first.",
         "data": {
           "device": "New device"
         },
         "data_description": {
-          "device": "The device that appeared after the batteries were changed."
+          "device": "The device that appeared after the batteries were changed. It does not need to be added first."
         }
       }
     },
     "abort": {
+      "hub_not_loaded": "This hub is not running, so its discovered devices are not available. Start or reload the hub, then try again.",
+      "no_pending_devices": "No new devices are waiting to be added. Devices appear here as they transmit, and the list starts empty after every restart, so a sensor that reports infrequently can take a while to show up.",
+      "no_ignored_devices": "No devices are ignored.",
       "no_devices": "No devices have been discovered yet.",
       "no_replacement_candidates": "There is no other device to replace this one with. Wait until the replacement has been heard from at least once, then try again."
     },
     "error": {
+      "add_and_ignore_conflict": "The same device cannot be both added and ignored. Remove it from one of the two lists, then submit again.",
       "invalid_mappings": "Invalid mappings: {problems}",
       "replace_failed": "That device could not be replaced. Go back and pick a different device: the two devices must be different, and the device to keep must still exist."
     }

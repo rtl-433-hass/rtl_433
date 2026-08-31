@@ -313,8 +313,9 @@ async def test_replace_rejects_a_hub_with_no_devices_map(
 ):
     """A hub that never stored a devices map has nothing to replace.
 
-    ``entry.data`` predates the key entirely on a hub that has only ever run with
-    discovery off, so the lookup must tolerate its absence rather than blow up.
+    ``entry.data`` carries no devices map at all on a hub where the user has
+    never added a device, so the lookup must tolerate its absence rather than
+    blow up.
     """
     hub = await _setup_hub(hass, hub_entry_builder, None)
     assert CONF_DEVICES not in hub.data

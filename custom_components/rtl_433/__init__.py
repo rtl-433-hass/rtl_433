@@ -285,12 +285,24 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     An availability-timeout change is applied live instead (the coordinator
     reads ``availability_timeout`` on every watchdog tick), so no reload is
     required for it and we avoid the disruption of tearing the socket down.
+
+    The hub's ignore list is applied live too, and *first*: ignoring or
+    un-ignoring a device changes nothing about the devices and entities that
+    exist, so tearing the WebSocket down for it would be gratuitous. Pushing it
+    before the reload comparisons also means the options flow's ignore-only write
+    can never fall through to one of them, and a change that does reload simply
+    re-seeds the set from ``entry.data`` at setup.
     """
     coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
         entry.entry_id
     )
     if coordinator is None:
         return
+
+    # Applied first, and unconditionally: ignoring a device must take effect on
+    # its very next transmission, and it is the one change here that never needs
+    # a reload, so it must not sit behind an early return below.
+    coordinator.ignored = set(entry.data.get(CONF_IGNORED_DEVICES, []))
 
     if _hub_connection(entry) != coordinator.connection_snapshot:
         # A reconfigure / re-advertised discovery / rebind re-pointed the hub at a
