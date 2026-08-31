@@ -25,6 +25,10 @@
 #   CAPTURE      absolute path to the .cu8 capture to replay (in the container)
 #   RATE         sample rate passed to rtl_433 (e.g. 250k) — match the capture
 #   EVENTS_FILE  JSON-lines output file in the shared volume the bridge tails
+#   LOG_FILE     rtl_433 log output file in the shared volume (Auto Level lines)
+#   NOISE_SECS   -M noise interval in seconds (periodic noise reports)
+#   SILENCE_BYTES  bytes of RF silence fed between capture passes (default 1MB
+#                  = 2s at 250k, cu8); 0 disables the silence gap
 #   FIFO         path of the named pipe (default /tmp/rtl.fifo)
 #   LOOP_SLEEP   seconds to pause between replay passes (default 1)
 
@@ -33,6 +37,10 @@ set -eu
 CAPTURE="${CAPTURE:-/data/capture.cu8}"
 RATE="${RATE:-250k}"
 EVENTS_FILE="${EVENTS_FILE:-/shared/events.jsonl}"
+LOG_FILE="${LOG_FILE:-/shared/rtl433.log}"
+NOISE_SECS="${NOISE_SECS:-10}"
+SILENCE_BYTES="${SILENCE_BYTES:-1000000}"
+SILENCE="${SILENCE:-/tmp/silence.cu8}"
 FIFO="${FIFO:-/tmp/rtl.fifo}"
 LOOP_SLEEP="${LOOP_SLEEP:-1}"
 
@@ -47,6 +55,16 @@ rm -f "$FIFO"
 mkfifo "$FIFO"
 mkdir -p "$(dirname "$EVENTS_FILE")"
 : > "$EVENTS_FILE"
+mkdir -p "$(dirname "$LOG_FILE")"
+: > "$LOG_FILE"
+
+# RF silence played between capture passes (see the writer loop). cu8 samples are
+# unsigned 8-bit I/Q pairs where 0x80 is zero amplitude, so a run of 0x80 bytes is
+# a genuinely quiet input rather than a fabricated log line.
+rm -f "$SILENCE"
+if [ "$SILENCE_BYTES" -gt 0 ]; then
+    head -c "$SILENCE_BYTES" /dev/zero | tr '\000' '\200' > "$SILENCE"
+fi
 
 echo "rtl433-entrypoint: replaying $CAPTURE at -s $RATE -> $EVENTS_FILE (JSON lines)"
 
@@ -54,8 +72,20 @@ echo "rtl433-entrypoint: replaying $CAPTURE at -s $RATE -> $EVENTS_FILE (JSON li
 #   -r cu8:<fifo>      read raw I/Q (unsigned 8-bit complex) from the FIFO
 #   -s <rate>          sample rate (required when reading a headerless pipe)
 #   -F json:<file>     append decoded events as JSON lines (bridge tails this)
+#   -F log:<file>      append rtl_433's own log messages ("<src>: <msg>" lines).
+#                      The decoded-event JSON output carries NO log messages, so
+#                      the pulse detector's "Auto Level" noise lines — the only
+#                      place rtl_433 exposes its noise floor, and the source of
+#                      the hub's noise sensors — are only visible here. The
+#                      ws-bridge tails this file and re-frames those lines the
+#                      way a real `-F http` server sends them (see ws-bridge.mjs).
 #   -M level           include signal-level metadata in events
-rtl_433 -r "cu8:${FIFO}" -s "$RATE" -F "json:${EVENTS_FILE}" -M level &
+#   -Y autolevel       auto-adjust the pulse detector's minimum level; logs
+#                      "Estimated noise level is X dB, adjusting minimum
+#                      detection level to Y dB" on every shift over 1 dB
+#   -M noise:<secs>    periodic noise report ("Current noise level ...")
+rtl_433 -r "cu8:${FIFO}" -s "$RATE" -F "json:${EVENTS_FILE}" -F "log:${LOG_FILE}" \
+    -M level -Y autolevel -M "noise:${NOISE_SECS}" &
 RTL_PID=$!
 
 # Open the FIFO for writing AFTER the reader exists, and hold the fd open across
@@ -65,10 +95,20 @@ exec 3>"$FIFO"
 # Clean shutdown.
 trap 'kill "$RTL_PID" 2>/dev/null || true; rm -f "$FIFO"; exit 0' INT TERM
 
-# Writer loop: re-feed the capture forever. If the decoder dies, stop so the
-# container exits and the orchestrator notices.
+# Writer loop: re-feed the capture forever, each pass followed by a stretch of RF
+# silence (cu8 zero-amplitude samples, byte 0x80). Back-to-back capture passes
+# would keep the receiver permanently "loud": the noise estimate creeps up to the
+# replayed burst level and settles, so `-Y autolevel` never sees a shift over
+# 1 dB and never logs an adjustment (the source of the hub's minimum-detection-
+# level sensor). The silence gap is also what a real receiver mostly hears — it
+# makes the noise floor genuinely move, so both "Auto Level" message forms are
+# emitted from real measurements. If the decoder dies, stop so the container
+# exits and the orchestrator notices.
 while kill -0 "$RTL_PID" 2>/dev/null; do
     cat "$CAPTURE" >&3
+    if [ -s "$SILENCE" ]; then
+        cat "$SILENCE" >&3
+    fi
     sleep "$LOOP_SLEEP"
 done
 

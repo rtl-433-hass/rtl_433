@@ -111,6 +111,15 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
         "mapping/_overrides.py",
         "mapping/_transform.py",
     ],
+    # The fixture mapping-coverage sweep: data-driven, and what it exercises in
+    # code is library loading plus descriptor resolution. It never calls
+    # ``apply_transform`` or the override path, so ``_transform.py`` /
+    # ``_overrides.py`` are deliberately absent.
+    "tests/test_fixture_coverage.py": [
+        "mapping/__init__.py",
+        "mapping/_loader.py",
+        "mapping/_model.py",
+    ],
     # Mutation-floor test files: their ``_floor`` suffix does not auto-resolve to
     # a source module via the naming convention, so each is mapped explicitly.
     "tests/test_mut_calibration_floor.py": ["calibration.py"],

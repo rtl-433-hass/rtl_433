@@ -96,6 +96,26 @@ def _device_display_name(model: str, device_key: str) -> str:
     return f"{model} {suffix}"
 
 
+def _device_identity(model: str, device_key: str) -> str | None:
+    """Return the identity suffix of ``device_key``: the decoded id and channel.
+
+    This is the same ``<id>[-ch..][-st..]`` suffix that
+    :func:`_device_display_name` folds into the device name, surfaced separately
+    so it can be published as a serial number that survives a user rename — the
+    name is the user's to change, the serial number stays the transmitter's.
+    Returns ``None`` rather than an empty string for a model-only device (the key
+    is just the model token, so nothing distinguishes one unit from another) and
+    when the model is unknown, so the caller can leave the field unset.
+    """
+    if not model:
+        return None
+    suffix = device_key.removeprefix(f"{_safe_token(model)}-")
+    if not suffix or suffix == device_key:
+        # Model-only device (key == model token), or an unexpected key shape.
+        return None
+    return suffix
+
+
 def _resolve_entity_category(value: str | None) -> EntityCategory | None:
     """Map a descriptor's ``entity_category`` string to the HA enum.
 
@@ -183,6 +203,7 @@ class Rtl433Entity(RestoreEntity):
             identifiers={(DOMAIN, f"{hub_entry_id}:{device_key}")},
             name=device_name,
             model=model or None,
+            serial_number=_device_identity(model, device_key),
             manufacturer=MANUFACTURER,
             via_device=(DOMAIN, hub_entry_id),
         )

@@ -1,0 +1,32 @@
+[
+  {
+    "time": "@0.048215s",
+    "model": "ERT-SCM",
+    "id": 54585868,
+    "physical_tamper": 3,
+    "ert_type": 12,
+    "encoder_tamper": 0,
+    "consumption_data": 562456,
+    "mic": "CRC",
+    "mod": "ASK",
+    "freq": 912.263,
+    "rssi": -9.398,
+    "snr": 7.975,
+    "noise": -17.373
+  },
+  {
+    "time": "@0.048488s",
+    "model": "ERT-SCM",
+    "id": 56355785,
+    "physical_tamper": 2,
+    "ert_type": 12,
+    "encoder_tamper": 0,
+    "consumption_data": 727018,
+    "mic": "CRC",
+    "mod": "ASK",
+    "freq": 912.597,
+    "rssi": 0.367,
+    "snr": 16.569,
+    "noise": -16.569
+  }
+]

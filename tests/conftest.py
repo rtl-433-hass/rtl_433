@@ -181,3 +181,27 @@ def hub_connected_by_default(request):
         patch.object(Rtl433Coordinator, "async_start", _async_start),
     ):
         yield
+
+
+@pytest.fixture
+def no_socket():
+    """Stub the transport's connect loop so no real WebSocket is ever opened.
+
+    Opt-in (not autouse): only the tests that drive a hub entry through the real
+    ``async_setup_entry`` need it. ``Rtl433Client.start`` is the single place the
+    socket is opened, so a no-op keeps ``coordinator.async_start`` intact while
+    leaving setup — and any later ``async_reload`` — offline. ``test_lifecycle``
+    keeps its own module-scoped copy; this one exists for the flow-level modules
+    that reload an entry mid-test.
+
+    ``hub_connected_by_default`` above already stubs the same method for every
+    test that does not opt out, so requesting this fixture is now a statement of
+    intent rather than the thing keeping the socket shut. It still matters for a
+    ``@pytest.mark.hub_disconnected`` test, which gets no stub of its own.
+    """
+
+    async def _noop(self) -> None:
+        return None
+
+    with patch.object(Rtl433Client, "start", _noop):
+        yield
