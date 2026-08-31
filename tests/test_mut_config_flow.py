@@ -590,7 +590,7 @@ async def test_reconfigure_same_host_port_does_not_collide_with_self(
 
 
 async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_builder):
-    """Options init step shows a menu with 'hub', 'device', and 'mappings'."""
+    """Options init shows 'hub', 'device', 'mappings' and 'replace'."""
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -599,7 +599,8 @@ async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_build
     assert "hub" in result["menu_options"]
     assert "device" in result["menu_options"]
     assert "mappings" in result["menu_options"]
-    assert len(result["menu_options"]) == 3
+    assert "replace" in result["menu_options"]
+    assert len(result["menu_options"]) == 4
 
 
 # ---------------------------------------------------------------------------
