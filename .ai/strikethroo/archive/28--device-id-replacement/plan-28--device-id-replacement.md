@@ -487,3 +487,88 @@ are safely parallel.
 ### Execution Summary
 - Total Phases: 3
 - Total Tasks: 5
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-08-31
+
+### Results
+
+All 5 tasks completed across 3 phases, on branch
+`worktree-issue-126-device-id-replace` in three commits:
+
+- `f0ebbd1` — `entity.py` publishes each nested device's identity suffix as
+  `DeviceInfo.serial_number`, and the new `device_replace.py` adds
+  `async_replace_device`: the single sanctioned re-key path (free the duplicate,
+  update survivors in place, re-point the device row, fold the stored record,
+  reload).
+- `4d9154e` — the options menu gains **Replace device** with two picker steps
+  (`replace` / `replace_target`) plus translations; candidates are the union of
+  the devices map and coordinator-seen keys, same-model first.
+- `170541c` — `tests/test_device_replace.py` (helper) and new options-flow tests,
+  the `docs/device-discovery.md` recovery section, and the `AGENTS.md` note.
+
+Suite: 1533 → **1551 passing**, exit 0. `ruff check` / `ruff format --check`
+clean. `mkdocs build --strict` clean. The frozen ABI held exactly as designed:
+`git diff origin/main` is **empty** for both `COMPATIBILITY_CONTRACT.md` and
+`tests/test_migration_roundtrip.py`, and no `VERSION` / `MINOR_VERSION` moved.
+
+Self Validation was executed against a live Home Assistant registry (a temporary
+probe, since deleted) rather than by re-running the tests. It confirmed directly
+that the two surviving entities kept **both** their `entity_id` and their
+immutable registry row id while their `unique_id`s moved
+`…:Acurite-986-1a2b:T` → `…:Acurite-986-9f3c:T`; that no rows remained on the old
+key; that the old identifiers stopped resolving while the new ones resolved to a
+single device with `serial_number='9f3c'`; and that the devices map folded to one
+record with `fields` unioned to `['battery_ok', 'temperature_C']` and the
+`timeout_override` and calibration intact.
+
+### Noteworthy Events
+
+- **Plan id 28, not the 27 the allocator returned.** The unmerged
+  `origin/claude/rtl433-device-dedup-ko9sbi` branch already carries
+  `plans/27--union-devices-across-receivers/` (issue #123). Two directories with
+  `id: 27` would break the `grep -l "^id: N$"` plan lookup in `STRIKETHROO.md`,
+  so the next free id was taken instead.
+- **The strikethroo `config/` directory is missing from `main`.** The repo's
+  unanchored `config/` gitignore rule (intended for the Home Assistant dev
+  runtime dir) also swallows `.ai/strikethroo/config/`, so the 14 hook and
+  template files the tracked `.init-metadata.json` references by sha256 have
+  never been committed. They were restored into the worktree from commit
+  `a75955e` on that same unmerged branch to let this workflow run, and left
+  git-ignored. **This plan did not adopt that gitignore fix** — it belongs to the
+  branch that already carries it.
+- **The documented test command does not work in a worktree.** `uv run pytest
+  tests/` creates an empty `.venv`, fails with "Failed to spawn: pytest", and
+  still **exits 0** — a silent false pass. Tests were run with the main
+  checkout's interpreter instead (it holds no editable install of the project, so
+  `custom_components.rtl_433` correctly resolves from the worktree).
+- **Phase 2 regressed the mutation floor and phase 3 caught it.** The new
+  options-flow steps initially scored 0.802 against the 0.843 baseline. Targeted
+  assertions (picker options and labels, description placeholders, the
+  `replace_failed` path, an ordering case where model priority differs from
+  alphabetical order, guard messages) brought it to 0.854. `device_replace.py`
+  scores 0.900. Mutation runs were **scoped** to the two changed modules; a full
+  run is ~164 minutes. `entity.py` was not re-measured — its change is
+  test-only additions there, so its score can only rise.
+- **A re-pointed entity id keeps spelling out the old transmitter id.** The self
+  validation showed `sensor.acurite_986_1a2b_temperature` surviving on a device
+  now tracking id `9f3c`. This is inherent to preserving history and is now
+  documented explicitly rather than left as a surprise.
+- One deliberate duplication remains: `test_lifecycle.py` keeps its own
+  module-scoped `no_socket` stub alongside the new shared conftest fixture.
+  Deduplicating would mean editing an unrelated test module for no functional
+  gain; the conftest docstring records why both exist.
+
+### Necessary follow-ups
+
+- The `config/` gitignore fix (`a75955e`) should be merged so a fresh clone or CI
+  run has the strikethroo hooks and templates. It is unrelated to this feature.
+- Optional, and deliberately out of scope here: an automatic detector that raises
+  a repair when a device goes stale while an unadopted device of the same model
+  appears — the "click-to-adopt" prompt issue #126 muses about. It layers onto
+  `async_replace_device` with no rework.
+- Plan 27 (union devices across receivers) proposes a location-scoped device
+  identity that would touch the same key derivation. Nothing here blocks it: this
+  plan added no indirection layer and did not change how `device_key` is derived.
