@@ -224,6 +224,15 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # never triggers a reload. Wired by the integration setup in ``__init__.py``.
         self.user_mappings_snapshot: dict[str, Any] = {}
 
+        # Connection-target + identity snapshot captured at setup:
+        # ``(host, port, path, secure, unique_id)``. The reconfigure / discovery /
+        # rebind flows write a new target into ``entry.data`` without reloading the
+        # entry themselves (Home Assistant forbids combining an update listener
+        # with the reloading config-flow helpers), so ``_async_update_listener``
+        # compares the live value against this snapshot and reloads the hub when it
+        # differs. Wired by the integration setup in ``__init__.py``.
+        self.connection_snapshot: tuple[Any, ...] = ()
+
         # Per-device removal callbacks registered by the entity platforms. When a
         # device is removed (async_remove_config_entry_device) each is called with
         # the device_key so the platforms can drop their per-device dedup cache and
