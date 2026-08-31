@@ -11,6 +11,33 @@ version = "0.19.3"   # Version is managed by release-please (also updates manife
 description = "Home Assistant custom integration for the rtl_433 WebSocket API"
 requires-python = ">=3.14"
 
+# Test dependencies, declared so `uv run pytest tests/` bootstraps itself in a
+# fresh clone or git worktree. Without this the project resolves to an empty
+# virtual environment and `uv run pytest` fails with "Failed to spawn: pytest"
+# while still exiting 0 -- a silent false pass. The group is named `dev` because
+# uv installs that group by default; a differently-named group would need an
+# explicit `--group` and would not fix the bare command.
+#
+# Keep these pins identical to requirements_test.txt, which CI and pip users
+# still install directly. A renovate packageRule groups the two into one PR so
+# they cannot drift apart (the same guard already used for ruff).
+[dependency-groups]
+dev = [
+    "pytest-homeassistant-custom-component==0.13.357",
+    "pyrtl_433==0.2.0",
+    "mutmut==3.7.0",
+]
+
+[tool.uv]
+# Resolve the lock only for the interpreters the test stack can actually run on.
+# `requires-python` above stays at >=3.14 because that is what the *integration*
+# needs (and it is the renovate-tracked Home Assistant Python requirement), but
+# the pinned test stack pulls in a homeassistant that requires >=3.14.2, so an
+# unrestricted resolution is unsatisfiable for 3.14.0/3.14.1. Constraining the
+# environment here keeps the project's declared support honest instead of
+# overstating it to satisfy a dev-only dependency.
+environments = ["python_full_version >= '3.14.2'"]
+
 [tool.setuptools]
 packages = ["custom_components.rtl_433"]
 

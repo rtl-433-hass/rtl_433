@@ -10,7 +10,7 @@ repos:
     # Keep in sync with the ruff== pin in requirements_dev.txt so the Ruff and
     # pre-commit CI jobs cannot disagree. Renovate's "dev dependencies" group
     # covers both, so they arrive in the same PR.
-    rev: v0.16.1
+    rev: v0.16.5
     hooks:
       # Linter (with autofix)
       - id: ruff-check
@@ -36,8 +36,18 @@ repos:
       - id: check-toml
       - id: check-added-large-files
       - id: check-merge-conflict
+      # The three hooks below rewrite file contents, so they must not touch
+      # .ai/strikethroo/config/. Those 14 files are vendored verbatim from
+      # `strikethroo init`, and .ai/strikethroo/.init-metadata.json records each
+      # one's sha256. Reformatting them (POST_PHASE.md ends with a blank line
+      # end-of-file-fixer wants to strip) changes those hashes, so strikethroo
+      # would report the files as locally modified on its next init/upgrade.
+      # Vendored, checksummed content is upstream's to format, not ours.
       - id: end-of-file-fixer
+        exclude: ^\.ai/strikethroo/config/
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
+        exclude: ^\.ai/strikethroo/config/
       - id: mixed-line-ending
         args: [--fix=lf]
+        exclude: ^\.ai/strikethroo/config/
