@@ -2,7 +2,7 @@
 id: 5
 group: "tests"
 dependencies: [3]
-status: "pending"
+status: "completed"
 created: 2026-08-31
 skills:
   - pytest
