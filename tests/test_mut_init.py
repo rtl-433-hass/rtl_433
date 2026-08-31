@@ -53,6 +53,7 @@ from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.hub_settings import (
     _calibration_map,
     _hub_availability_timeout,
+    _hub_connection,
     _hub_discovery_enabled,
     _hub_manage_settings,
     _hub_secure,
@@ -236,6 +237,57 @@ def test_hub_manage_settings_options_true_overrides_data_false():
         options={CONF_MANAGE_SETTINGS: True},
     )
     assert _hub_manage_settings(entry) is True
+
+
+# --- _hub_connection -------------------------------------------------------
+
+
+def _connection_entry(**overrides):
+    """Build an entry carrying a full connection target + stable radio id."""
+    data = {
+        CONF_HOST: "rtl433.local",
+        CONF_PORT: 8433,
+        CONF_PATH: "/ws",
+        "secure": False,
+    }
+    unique_id = overrides.pop("unique_id", "serial:0123")
+    data.update(overrides)
+    return MockConfigEntry(
+        domain=DOMAIN,
+        title="test hub",
+        data=data,
+        unique_id=unique_id,
+        version=2,
+    )
+
+
+def test_hub_connection_reports_the_stored_target():
+    """The tuple carries host, port, path, secure and the stable radio id."""
+    assert _hub_connection(_connection_entry()) == (
+        "rtl433.local",
+        8433,
+        "/ws",
+        False,
+        "serial:0123",
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {CONF_HOST: "other.local"},
+        {CONF_PORT: 9000},
+        {CONF_PATH: "/ws2"},
+        {"secure": True},
+        {"unique_id": "serial:9999"},
+    ],
+    ids=["host", "port", "path", "secure", "unique_id"],
+)
+def test_hub_connection_changes_with_every_component(overrides):
+    """Each component is part of the tuple, so changing any one is detectable."""
+    assert _hub_connection(_connection_entry(**overrides)) != _hub_connection(
+        _connection_entry()
+    )
 
 
 # ===========================================================================
@@ -1207,6 +1259,39 @@ async def test_update_listener_reloads_on_calibration_change(hass, hub_entry_bui
         hass.config_entries.async_update_entry(
             hub, data={**hub.data, CONF_DEVICES: devices}
         )
+        await hass.async_block_till_done()
+
+    reload_spy.assert_called_once_with(hub.entry_id)
+
+
+async def test_update_listener_reloads_on_connection_change(hass, hub_entry_builder):
+    """Re-pointing the hub at a new host reloads it.
+
+    The reconfigure / Supervisor-discovery / rebind paths only *write* the new
+    connection target — Home Assistant forbids pairing an update listener with the
+    reloading config-flow helpers — so the listener owns this reload.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder, host="old.local")
+
+    with patch.object(
+        hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
+    ) as reload_spy:
+        hass.config_entries.async_update_entry(
+            hub, data={**hub.data, CONF_HOST: "new.local"}
+        )
+        await hass.async_block_till_done()
+
+    reload_spy.assert_called_once_with(hub.entry_id)
+
+
+async def test_update_listener_reloads_on_unique_id_rebind(hass, hub_entry_builder):
+    """Rebinding the entry onto a new stable radio id reloads it."""
+    hub = await _setup_hub(hass, hub_entry_builder)
+
+    with patch.object(
+        hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
+    ) as reload_spy:
+        hass.config_entries.async_update_entry(hub, unique_id="serial:0123")
         await hass.async_block_till_done()
 
     reload_spy.assert_called_once_with(hub.entry_id)

@@ -58,6 +58,7 @@ from .hub_settings import (
     _calibration_map,
     _explicit_hub_timeout,
     _hub_availability_timeout,
+    _hub_connection,
     _hub_discovery_enabled,
     _hub_manage_settings,
     _hub_secure,
@@ -237,6 +238,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # mappings change (and reload to rebuild the merged library + entities) while
     # ignoring routine devices-map upserts.
     coordinator.user_mappings_snapshot = entry.data.get(CONF_USER_MAPPINGS) or {}
+    # Snapshot the connection target + stable identity so the update listener can
+    # reload the hub when a reconfigure / discovery / rebind re-points the entry:
+    # those flows write the new target into entry.data and leave the reload to
+    # this listener (see ``_async_update_listener``).
+    coordinator.connection_snapshot = _hub_connection(entry)
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
     await coordinator.async_start()
@@ -273,6 +279,15 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     (``async_upsert_device`` / ``async_upsert_event_types``), which leave the
     calibration sub-record untouched, never trigger a reload.
 
+    A changed connection target (host / port / path / secure) or stable radio
+    unique_id is detected the same way, against ``coordinator.connection_
+    snapshot``. Home Assistant forbids an integration from combining a
+    config-entry update listener with the reloading config-flow helpers
+    (``async_update_reload_and_abort`` / ``_abort_if_unique_id_configured(
+    reload_on_update=True)``) — that pair double-reloads and races — so the
+    reconfigure, Supervisor-discovery and rebind paths only *write* the new
+    target and this listener is the single place that reloads the hub.
+
     Discovery-toggle and availability-timeout changes are applied live instead
     (the coordinator reads ``discovery_enabled`` / ``availability_timeout`` on
     every event and watchdog tick), so no reload is required for those and we
@@ -282,6 +297,13 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
         entry.entry_id
     )
     if coordinator is None:
+        return
+
+    if _hub_connection(entry) != coordinator.connection_snapshot:
+        # A reconfigure / re-advertised discovery / rebind re-pointed the hub at a
+        # new server (or a new stable radio id); the socket is built at setup, so
+        # reload to reconnect against the new target.
+        await hass.config_entries.async_reload(entry.entry_id)
         return
 
     new_manage = _hub_manage_settings(entry)

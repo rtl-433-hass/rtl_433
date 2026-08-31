@@ -8,6 +8,8 @@ kept here so that wiring stays readable.
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.config_entries import ConfigEntry
 
 from .calibration import normalize_calibration
@@ -15,7 +17,10 @@ from .const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
     CONF_DISCOVERY_ENABLED,
+    CONF_HOST,
     CONF_MANAGE_SETTINGS,
+    CONF_PATH,
+    CONF_PORT,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
     DEVICE_CALIBRATION,
@@ -87,3 +92,24 @@ def _calibration_map(entry: ConfigEntry) -> dict[str, dict]:
         if calibration is not None:
             result[device_key] = calibration
     return result
+
+
+def _hub_connection(entry: ConfigEntry) -> tuple[Any, ...]:
+    """Return the hub's connection target and stable identity, as a tuple.
+
+    ``(host, port, path, secure, unique_id)`` — everything the coordinator's
+    WebSocket connection is built from, plus the stable radio id a rebind
+    re-points the entry at. Captured as the coordinator's setup snapshot so the
+    update listener can reload the hub when a reconfigure / discovery / rebind
+    writes a new target into ``entry.data``: those flows deliberately do not
+    reload the entry themselves, because Home Assistant forbids combining a
+    config-entry update listener with the reloading config-flow helpers. Only
+    ever compared for equality, so the raw stored values are returned as-is.
+    """
+    return (
+        entry.data.get(CONF_HOST),
+        entry.data.get(CONF_PORT),
+        entry.data.get(CONF_PATH),
+        _hub_secure(entry),
+        entry.unique_id,
+    )
