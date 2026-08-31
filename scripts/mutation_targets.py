@@ -122,7 +122,7 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
     "tests/test_migration_roundtrip.py": ["migration.py"],
     "tests/test_mut_repairs_floor.py": ["repairs.py"],
     # The connection-backed availability gate: the coordinator half (the outage
-    # clock, the grace timer, the repaint dispatch) plus every entity type that
+    # clock, the gate itself, the repaint dispatch) plus every entity type that
     # reads it. ``hub_availability`` has no module of its own to auto-resolve to.
     "tests/test_hub_availability.py": [
         "coordinator/_watchdog.py",

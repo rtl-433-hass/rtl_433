@@ -254,13 +254,15 @@ base `async_added_to_hass` baseline:
 Invariants that must survive refactors of `async_setup_hub_platform`, the
 coordinator watchdog, and the devices map:
 
-- **Identity-based watchdog dedupe.** It overrides `_handle_dispatch` to dedupe
-  the watchdog's re-dispatch by **object identity** (`event is
-  self._last_fired_event`), **not value-equality**. The watchdog re-sends the
-  *same cached* `NormalizedEvent` object when a device goes stale; a genuine
-  live repeat (even of the same value) is a *distinct* frozen `NormalizedEvent`
-  from `normalize()` that **must** fire (a doorbell pressed twice fires twice).
-  If this ever became `==`, genuine repeats would be silently dropped.
+- **Flag-based watchdog dedupe.** It overrides `_handle_dispatch` to suppress the
+  watchdog's re-dispatch on the frame's **classification** (`event.is_repaint`),
+  **never on value-equality**. The watchdog re-sends the device's cached last
+  event purely so entities re-read availability; a genuine live repeat (even of
+  the same value) is a distinct transmission that **must** fire (a doorbell
+  pressed twice fires twice). If this ever keyed off `==`, genuine repeats would
+  be silently dropped. `is_repaint` supersedes an earlier object-identity dedupe,
+  which was unreliable: a replay-seeded cache left the anchor unset after a
+  restart, and `_dispatch`'s flag rewrite mints a fresh object anyway.
 - **Auto-populated, persisted `event_types`.** Types are not declared in YAML;
   each newly seen `str(value)` is appended to `_attr_event_types` **before**
   firing (HA validates the fired type against the current list) and persisted
@@ -361,16 +363,23 @@ UI-pickable **device triggers**. Contracts that must survive refactors:
   filter, which early-returns on `old_value == new_value`, `triggers/state.py`.)
   The listener replicates the core trigger's `device`-platform payload + context
   by hand.
-- **No re-fire on the restore at startup.** The listener **ignores a `None`
-  `old_state`**. Across a restart HA's `EventEntity` restores its last
-  `event_type` + timestamp (for display), surfacing as a `state_changed` with
-  `old_state is None` carrying the old `event_type`; a raw listener would
-  re-deliver that stale event (e.g. a days-old doorbell `ring`) on **every** HA
-  restart. A momentary event never legitimately fires on the entity's first
-  appearance in the state machine, so the `None`-`old_state` restore/initial-add
-  is suppressed. (The base trigger previously delegated to the core `state`
-  trigger, which fires on a match_all `None`→state transition — the same
-  re-fire-on-restart bug, now closed for both paths.)
+- **No re-fire on a restore.** HA's `EventEntity` restores its last `event_type`
+  + timestamp (for display); a raw listener would re-deliver that stale event
+  (e.g. a days-old doorbell `ring`) as if it just happened. The listener
+  **ignores both restore shapes**, and dropping either one reopens the bug:
+  - `old_state is None` — an **HA restart**, the entity's first appearance in the
+    state machine. (The base trigger previously delegated to the core `state`
+    trigger, which fires on a match_all `None`→state transition — the same
+    re-fire-on-restart bug, now closed for both paths.)
+  - `old_state.state == STATE_UNAVAILABLE` — a **config-entry reload** *or* a
+    **hub outage**, either of which takes the entity
+    `<event>` → `unavailable` → restored `<event>` while the listener is still
+    attached. Since event entities are gated on the hub connection this is the
+    common case, not the rare one.
+
+  It also ignores a `new_state` that is `None`/`unavailable`/`unknown` (the
+  unload edge). An `old_state` of `unknown` is deliberately allowed: the very
+  first press rises from the never-fired `unknown` state and must fire.
 
 ## WebSocket frames & hub observability
 
@@ -407,8 +416,9 @@ because these are the contracts the integration relies on:
   reconnect and so must not re-fire. Any of the three outcomes
   **seeds sensor values** but must **NOT** fire `event` entities or refresh
   `last_seen` / `available`, so a genuinely-offline device is not resurrected by
-  the replay. A suppressed `event` transmission logs **once at
-  INFO** (`Rtl433Event._handle_dispatch`). The classification rides on the
+  the replay. A suppressed `event` transmission logs at **DEBUG**
+  (`Rtl433Event._handle_dispatch`) — it happens on every reconnect, so it is not
+  INFO-worthy. The classification rides on the
   dispatch carrier: `NormalizedEvent.is_replay` / `event_time` (stamped via
   `dataclasses.replace` after `normalize`; live is the default), so dispatch
   needs no extra signature. The **watchdog re-dispatch passes `is_replay=False`**
@@ -520,12 +530,19 @@ all?". End-user docs live in
   *before* the silence check, and `Rtl433LastSeenSensor` routes through it too.
   **Never-expire devices are not exempt** — that exemption is from *silence*, not
   from the transport being gone.
-- **`Rtl433Event` is the one device-entity exception** — `available` is hardcoded
-  `True`. An `EventEntity`'s state *is* its last-fired timestamp, so gating it
-  breaks HA's restore (which parses that state string, turning a persisted
-  `unavailable` into no timestamp at all) and re-publishes the stale timestamp on
-  reconnect, re-firing plain `trigger: state` automations. Do not "fix" this by
-  routing it through `hub_available`.
+- **`Rtl433Event` is not an exception** — it does **not** override `available`, so
+  event entities go unavailable with everything else. zigbee2mqtt does the same
+  (its `event` discovery payload carries the `bridge/state` topic plus the
+  per-device one, `availability_mode: all`), as do core's Shelly and ESPHome
+  event entities. Do not "fix" this by hardcoding `True`. Coming back does not
+  re-fire anything: the reconnect replay is `is_replay` so `_handle_dispatch`
+  returns before `_trigger_event` (the timestamp never advances), core's
+  `event.received` trigger sets `_excluded_from_states = {STATE_UNAVAILABLE}`,
+  and `device_trigger.py`'s listener returns on an `old_state` of `unavailable`.
+  The one accepted cost is HA's restore — `EventEntity.async_internal_added_to_hass`
+  parses the stored state string, so a shutdown *during* an outage persists
+  `unavailable` and loses the last-fired record. That is what every core event
+  integration already does.
 - **Values survive an unavailable restart.** `Rtl433Sensor`,
   `Rtl433LastSeenSensor` and `Rtl433BinarySensor` persist their value through
   `extra_restore_state_data`, because HA writes `unavailable` as the *state* when
@@ -542,8 +559,8 @@ all?". End-user docs live in
   a capability gate on
   `meta`).
 - **The clock starts at `async_start`,** not at the first drop, so a Home
-  Assistant restart while the server is down expires the restored states after
-  at once instead of leaving them available forever.
+  Assistant restart while the server is down expires the restored states at once
+  instead of leaving them available forever.
 - **Lazy gate, edge-driven repaint.** Entities evaluate `hub_available` on every
   state read, so it is always correct; the coordinator only *repaints*. The
   disconnect edge and the connect edge each call it, and each watchdog tick

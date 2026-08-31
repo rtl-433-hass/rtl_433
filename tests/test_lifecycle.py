@@ -1091,11 +1091,10 @@ async def test_event_single_value_momentary_fires_each_transmission(
     )
     assert doorbell_eid is not None
 
-    # Two genuine transmissions of the same value each fire (distinct objects).
-    # Freeze the clock at two distinct instants so the fire timestamp advances
-    # on the second transmission (a same-value repeat is a fresh ``normalize()``
-    # object, so the identity dedupe does NOT suppress it — a doorbell pressed
-    # twice fires twice).
+    # Two genuine transmissions of the same value each fire. Freeze the clock at
+    # two distinct instants so the fire timestamp advances on the second one
+    # (neither frame is ``is_repaint``/``is_replay``, and firing never keys off
+    # value-equality — a doorbell pressed twice fires twice).
     start = dt_util.utcnow()
     timestamps: list[str] = []
     for offset in (0, 5):

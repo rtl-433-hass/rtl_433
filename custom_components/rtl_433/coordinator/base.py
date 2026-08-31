@@ -551,9 +551,10 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         ``is_repaint=True`` (watchdog re-paint only) additionally marks the frame
         as an availability re-paint of the *cached* last event rather than a new
         transmission, so ``Rtl433Event`` skips (re-)firing regardless of the cached
-        value or object identity -- the identity dedupe alone is unreliable here
-        because a replay-seeded cache leaves the event entity's anchor unset after
-        a restart (and the ``is_replay`` rewrite below mints a fresh object).
+        value. An explicit flag rather than object identity: identity was
+        unreliable here because a replay-seeded cache leaves the event entity's
+        anchor unset after a restart, and the rewrite below mints a fresh object
+        anyway.
         """
         if (is_replay is not None and normalized.is_replay != is_replay) or (
             is_repaint and not normalized.is_repaint

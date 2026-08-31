@@ -296,8 +296,8 @@ class Rtl433Entity(RestoreEntity):
         """Repaint when the hub-connection availability gate flips.
 
         Values are untouched — only ``available`` changed — so this just re-reads
-        the entity state. Subclasses that override ``available`` (``Rtl433Event``,
-        the Last-seen sensor) are repainted by the same signal.
+        the entity state. The Last-seen sensor, the one device entity that
+        overrides ``available``, is repainted by the same signal.
         """
         self.async_write_ha_state()
 

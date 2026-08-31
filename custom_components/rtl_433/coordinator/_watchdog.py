@@ -28,8 +28,11 @@ the story is the *repair issue*: ``repairs._UNREACHABLE_GRACE`` waits before
 raising the user-facing "server unreachable" notification, so the entities tell
 the truth at once while the notification waits until the outage looks real.
 
-The one exception is ``event`` entities, whose state *is* their last-fired
-timestamp and which therefore stay available (see ``Rtl433Event.available``).
+No device entity is exempt, ``event`` entities included: they take the base gate
+unmodified, exactly as zigbee2mqtt's event entities carry its bridge-state
+availability topic. Nothing re-fires when the connection returns — the reconnect
+replay is flagged ``is_replay`` and ``Rtl433Event`` drops it before firing (see
+``event.py``).
 
 The gate is evaluated lazily by the entities (like the silence gate), so it is
 always correct. The coordinator only has to *repaint*: ``base.py`` calls
