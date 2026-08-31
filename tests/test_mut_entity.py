@@ -70,7 +70,13 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
-    """Set up a hub entry. Defaults availability_timeout=600 unless overridden."""
+    """Set up a hub entry. Defaults availability_timeout=600 unless overridden.
+
+    The autouse ``hub_connected_by_default`` fixture leaves the coordinator
+    connected, so the per-device silence timeouts are what these tests actually
+    measure; without it the connection-backed gate would take every device
+    unavailable the moment the socket reads as down.
+    """
     kwargs.setdefault("availability_timeout", 600)
     hub = hub_entry_builder(devices=devices, **kwargs)
     hub.add_to_hass(hass)

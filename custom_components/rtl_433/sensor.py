@@ -32,6 +32,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
 from homeassistant.util.enum import try_parse_enum
 
@@ -49,6 +50,17 @@ PLATFORM = "sensor"
 
 # States that should not overwrite a fresh value when restoring.
 _NON_RESTORABLE = (None, "unknown", "unavailable")
+
+# Value types that survive the restore store's JSON round-trip unchanged;
+# anything else is persisted as its string form, which is all the state-based
+# restore path below could ever recover anyway.
+_JSON_SCALARS = (str, int, float, bool)
+
+
+def _restorable_value(value: Any) -> Any:
+    """Return ``value`` in a form the restore store can persist."""
+    return value if isinstance(value, _JSON_SCALARS) else str(value)
+
 
 # Entity-registry option Home Assistant's sensor base writes to freeze a sensor's
 # previously-shown unit when the integration later reports a different one, so an
@@ -146,13 +158,40 @@ class Rtl433Sensor(Rtl433Entity, SensorEntity):
         """Transform and store a raw value as the sensor's native value."""
         self._attr_native_value = apply_transform(self._descriptor, raw_value)
 
+    @property
+    def extra_restore_state_data(self) -> RestoredExtraData | None:
+        """Persist the native value independently of ``available``.
+
+        Home Assistant writes ``unavailable`` as the *state* whenever
+        ``available`` is False, so the state string alone cannot carry a value
+        across a restart that happens while the entity is unavailable — which
+        both the hub-connection gate and a device's own silence timeout can
+        cause. Keeping the value in the restore entity's extra data means a
+        never-expire door contact (or any other device) comes back with its last
+        reading instead of ``unknown``.
+        """
+        if self._attr_native_value is None:
+            return None
+        return RestoredExtraData(
+            {"native_value": _restorable_value(self._attr_native_value)}
+        )
+
     async def _async_restore_state(self) -> None:
         """Restore the last known native value on startup.
 
         A live value already seeded from the coordinator's last event wins over a
-        restored one.
+        restored one. The availability-independent extra data is preferred over
+        the state string, which is ``unavailable``/``unknown`` (and so unusable)
+        whenever the entity was gated at shutdown.
         """
         if self._attr_native_value is not None:
+            return
+        extra = await self.async_get_last_extra_data()
+        if (
+            extra is not None
+            and (restored := extra.as_dict().get("native_value")) is not None
+        ):
+            self._attr_native_value = restored
             return
         last_state = await self.async_get_last_state()
         if last_state is not None and last_state.state not in _NON_RESTORABLE:
@@ -220,17 +259,36 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
     def _apply_value(self, raw_value: Any) -> None:
         """No-op: the sentinel field_key never appears in an event."""
 
+    @property
+    def extra_restore_state_data(self) -> RestoredExtraData | None:
+        """Persist the timestamp independently of ``available``.
+
+        Same reason as :attr:`Rtl433Sensor.extra_restore_state_data`: this sensor
+        reads unavailable while the hub gate is closed, and a persisted
+        ``unavailable`` state string carries no timestamp.
+        """
+        if self._attr_native_value is None:
+            return None
+        return RestoredExtraData({"last_seen": self._attr_native_value.isoformat()})
+
     async def _async_restore_state(self) -> None:
         """Restore the prior timestamp as a tz-aware datetime, if not seeded.
 
-        A live value seeded from a real event wins over a restored one.
+        A live value seeded from a real event wins over a restored one, and the
+        availability-independent extra data wins over the state string.
         """
         if self._attr_native_value is not None:
             return
-        last_state = await self.async_get_last_state()
-        if last_state is None or last_state.state in _NON_RESTORABLE:
-            return
-        restored = dt_util.parse_datetime(last_state.state)
+        stored: str | None = None
+        extra = await self.async_get_last_extra_data()
+        if extra is not None:
+            stored = extra.as_dict().get("last_seen")
+        if stored is None:
+            last_state = await self.async_get_last_state()
+            if last_state is None or last_state.state in _NON_RESTORABLE:
+                return
+            stored = last_state.state
+        restored = dt_util.parse_datetime(stored)
         if restored is not None:
             self._attr_native_value = restored
 
@@ -247,8 +305,15 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Available once a real/restored timestamp exists, ignoring the timeout."""
-        return self._attr_native_value is not None
+        """Available once a real/restored timestamp exists, ignoring the timeout.
+
+        The device's silence timeout is deliberately not applied (the whole point
+        of this sensor is to keep reporting how long the device has been quiet),
+        but the hub-connection gate is: with the socket down the timestamp is
+        frozen at whenever the integration stopped listening and would read as a
+        device that has just gone quiet, which is exactly the wrong conclusion.
+        """
+        return self._attr_native_value is not None and self._coordinator.hub_available
 
 
 # --------------------------------------------------------------------------- #
@@ -452,8 +517,21 @@ class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Always available: a missing value reads ``unknown``, not unavailable."""
-        return True
+        """Available while the hub connection is up; a missing key reads ``unknown``.
+
+        Every value here is read from the server over HTTP ``/cmd`` — the SDR
+        configuration and the since-start frame counters — so the moment the
+        connection drops they are frozen at whatever was last fetched, with
+        nothing on the entity to say so. Gating them on the same connection as
+        the device entities (see ``coordinator/_watchdog.py``) makes a stale
+        reading read as unavailable rather than as current.
+
+        Within the connection, a key the server does not report is still
+        ``unknown`` (a ``None`` native value), not unavailable — that is a gap in
+        the payload, not a dead hub. The hub's Connectivity binary sensor stays
+        available throughout: it is the entity that reports the outage.
+        """
+        return self._coordinator.hub_available
 
     @property
     def native_value(self) -> Any:

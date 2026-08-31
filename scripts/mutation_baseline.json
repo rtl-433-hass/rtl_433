@@ -6,9 +6,9 @@
       "total": 269
     },
     "custom_components/rtl_433/binary_sensor.py": {
-      "killed": 77,
-      "score": 0.905882,
-      "total": 85
+      "killed": 86,
+      "score": 0.914894,
+      "total": 94
     },
     "custom_components/rtl_433/calibration.py": {
       "killed": 56,

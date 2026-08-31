@@ -99,6 +99,15 @@ async def async_get_config_entry_diagnostics(
         TO_REDACT | {"ws_url"},
     )
     diagnostics["connected"] = coordinator.connected
+    # The connection-backed availability gate: ``hub_available`` follows the
+    # socket with no grace window, and is what takes every device unavailable
+    # irrespective of the per-device silence verdicts below.
+    diagnostics["hub_available"] = coordinator.hub_available
+    diagnostics["disconnected_since"] = (
+        since.isoformat()
+        if (since := coordinator.disconnected_since) is not None
+        else None
+    )
     diagnostics["discovery_enabled"] = coordinator.discovery_enabled
     diagnostics["availability_timeout"] = coordinator.availability_timeout
 
@@ -107,7 +116,15 @@ async def async_get_config_entry_diagnostics(
             "model": normalized.model,
             "identity": normalized.identity,
             "fields": sorted(coordinator.device_fields.get(device_key, set())),
-            "available": coordinator.available.get(device_key),
+            # What the entities actually report: the watchdog's per-device
+            # silence verdict *and* the hub gate, which short-circuits it. Both
+            # legs are kept separately so a dump distinguishes "the device fell
+            # silent" from "the hub went away and took everything with it".
+            "available": (
+                coordinator.hub_available
+                and bool(coordinator.available.get(device_key))
+            ),
+            "silence_available": coordinator.available.get(device_key),
             "last_seen": (
                 last_seen.isoformat()
                 if (last_seen := coordinator.last_seen.get(device_key)) is not None

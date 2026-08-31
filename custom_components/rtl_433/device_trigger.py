@@ -32,10 +32,12 @@ surfaces two ways, and the listener guards both:
 * **HA restart** — the restore is a ``state_changed`` with ``old_state is None``
   (the entity's first appearance in the state machine).
 * **Config-entry reload** (an options change, or the "server unreachable" repair
-  forcing a reconnect) — HA flips the always-available event entity
+  forcing a reconnect) **or a hub outage** — the entity goes
   value → ``unavailable`` → restored value *while the automation's listener is
   still attached* (a restart re-attaches it only after the restore), so the
   restore arrives as ``unavailable`` → ``<old event>`` rather than ``None`` →.
+  Event entities are gated on the hub connection like every other device entity
+  (see ``event.py``), so every socket drop produces this edge, not only a reload.
 
 A momentary event never legitimately fires from these, so the listener ignores
 any edge into/out of a non-event placeholder (``None`` / ``unavailable`` /
@@ -246,8 +248,8 @@ async def _async_attach_event_trigger(
         # * ``new_state`` is ``None`` (entity removed) or a non-event placeholder
         #   (``unavailable`` / ``unknown``) -- the unload edge, not a press.
         # * ``old_state`` is ``None`` (the entity's restore / initial add at an HA
-        #   restart) or ``unavailable``. The latter is the config-entry reload
-        #   case: a reload flips the always-available event entity
+        #   restart) or ``unavailable``. The latter covers both a config-entry
+        #   reload and a hub outage: either takes the entity
         #   value -> ``unavailable`` -> restored value *with this listener already
         #   attached* (a full restart re-attaches the listener only after restore,
         #   so it never sees that edge). Re-surfacing the restored last event from

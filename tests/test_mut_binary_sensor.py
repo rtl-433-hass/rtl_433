@@ -4,7 +4,8 @@ Targets every surviving mutant in diffs_binary_sensor.txt:
 - __init__: force_update, model arg, device_key seed, field_key guard, apply_value(None)
 - _apply_value: clear_delay / is_on / hass guard boolean mutations
 - async_added_to_hass: clear_delay / is_on boolean mutations (4 mutants)
-- _async_restore_state: all branches + string comparisons (10 mutants)
+- _async_restore_state: all branches + string comparisons, including the
+  extra-restore-data path taken after a restart during an outage (23 mutants)
 - _cancel_clear: _clear_unsub not reset to None after cancel
 - _effective_clear_delay: resolver exception path sets "" vs None
 
@@ -29,6 +30,7 @@ import pytest
 from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
     mock_restore_cache,
+    mock_restore_cache_with_extra_data,
 )
 
 from custom_components.rtl_433.const import (
@@ -42,6 +44,7 @@ from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
 
 # ---------------------------------------------------------------------------
@@ -79,6 +82,12 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
 
 
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
+    """Set up a hub entry; the coordinator is left connected.
+
+    The autouse ``hub_connected_by_default`` fixture does the marking; without it
+    the connection-backed availability gate reads the socket-less test run as an
+    outage and takes every device behind it unavailable.
+    """
     kwargs.setdefault("availability_timeout", 600)
     hub = hub_entry_builder(devices=devices, **kwargs)
     hub.add_to_hass(hass)
@@ -564,7 +573,7 @@ async def test_restore_state_skipped_when_seeded_from_coordinator(
 
 
 # ===========================================================================
-# _async_restore_state mutmut_3: last_state = None instead of get_last_state()
+# _async_restore_state mutmut_12: last_state = None instead of get_last_state()
 # Kill: if last_state forced to None, guard "last_state is None" returns early,
 # so is_on is never set -> state "unknown" instead of restored value.
 # ===========================================================================
@@ -573,7 +582,7 @@ async def test_restore_state_skipped_when_seeded_from_coordinator(
 async def test_restore_state_uses_get_last_state(hass, hub_entry_builder):
     """last_state is fetched from RestoreEntity.async_get_last_state, not None.
 
-    Kills mutmut_3: if last_state=None hardcoded, restore always returns early.
+    Kills mutmut_12: if last_state=None hardcoded, restore always returns early.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "on"),))
 
@@ -589,7 +598,7 @@ async def test_restore_state_uses_get_last_state(hass, hub_entry_builder):
 
 
 # ===========================================================================
-# _async_restore_state mutmut_6: "not in" instead of "in"
+# _async_restore_state mutmut_15: "not in" instead of "in"
 # Original: if last_state.state in (None, "unknown", "unavailable") -> return
 # Mutant: if last_state.state not in (...) -> return (skip when valid state!)
 # Kill: "on" must NOT trigger the guard; "unknown" MUST trigger it.
@@ -599,7 +608,7 @@ async def test_restore_state_uses_get_last_state(hass, hub_entry_builder):
 async def test_restore_state_valid_on_not_guarded(hass, hub_entry_builder):
     """Restored 'on' does not match guard -> is_on is set to True.
 
-    Kills mutmut_6: 'not in' would skip restore for valid states.
+    Kills mutmut_15: 'not in' would skip restore for valid states.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "on"),))
 
@@ -614,7 +623,7 @@ async def test_restore_state_valid_on_not_guarded(hass, hub_entry_builder):
 async def test_restore_state_guard_skips_unknown(hass, hub_entry_builder):
     """Restored 'unknown' triggers the guard -> is_on remains None (unknown).
 
-    Kills mutmut_6: 'not in' would skip restore for 'unknown' but apply for 'on'.
+    Kills mutmut_15: 'not in' would skip restore for 'unknown' but apply for 'on'.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "unknown"),))
 
@@ -630,8 +639,8 @@ async def test_restore_state_guard_skips_unknown(hass, hub_entry_builder):
 async def test_restore_state_guard_skips_unavailable(hass, hub_entry_builder):
     """Restored 'unavailable' triggers the guard -> state stays unknown.
 
-    Kills mutmut_6: 'not in' would incorrectly apply an unavailable state.
-    Also kills mutmut_9: 'XXunavailableXX' wouldn't match.
+    Kills mutmut_15: 'not in' would incorrectly apply an unavailable state.
+    Also kills mutmut_18: 'XXunavailableXX' wouldn't match.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "unavailable"),))
 
@@ -646,8 +655,8 @@ async def test_restore_state_guard_skips_unavailable(hass, hub_entry_builder):
 
 
 # ===========================================================================
-# _async_restore_state mutmut_7: "XXunknownXX" instead of "unknown"
-# _async_restore_state mutmut_8: "UNKNOWN" instead of "unknown"
+# _async_restore_state mutmut_16: "XXunknownXX" instead of "unknown"
+# _async_restore_state mutmut_17: "UNKNOWN" instead of "unknown"
 # Kill: only exact lowercase "unknown" triggers the guard.
 # With wrong string, "unknown" would NOT be guarded -> is_on set from "unknown".
 # is_on = ("unknown" == "on") = False -> state "off" instead of "unknown".
@@ -657,7 +666,7 @@ async def test_restore_state_guard_skips_unavailable(hass, hub_entry_builder):
 async def test_restore_state_unknown_exact_match(hass, hub_entry_builder):
     """Only exact lowercase 'unknown' triggers guard; wrong string does not.
 
-    Kills mutmut_7 (XXunknownXX) and mutmut_8 (UNKNOWN): if string is wrong,
+    Kills mutmut_16 (XXunknownXX) and mutmut_17 (UNKNOWN): if string is wrong,
     'unknown' state slips through -> is_on = False -> state 'off' instead of 'unknown'.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "unknown"),))
@@ -676,7 +685,7 @@ async def test_restore_state_unknown_exact_match(hass, hub_entry_builder):
 
 
 # ===========================================================================
-# _async_restore_state mutmut_10: "UNAVAILABLE" instead of "unavailable"
+# _async_restore_state mutmut_19: "UNAVAILABLE" instead of "unavailable"
 # Kill: only exact lowercase "unavailable" triggers guard.
 # If wrong: "unavailable" state => is_on = ("unavailable" == "on") = False -> "off"
 # ===========================================================================
@@ -685,7 +694,7 @@ async def test_restore_state_unknown_exact_match(hass, hub_entry_builder):
 async def test_restore_state_unavailable_exact_match(hass, hub_entry_builder):
     """Only exact lowercase 'unavailable' triggers guard.
 
-    Kills mutmut_10 (UNAVAILABLE): if uppercase, 'unavailable' state slips through
+    Kills mutmut_19 (UNAVAILABLE): if uppercase, 'unavailable' state slips through
     -> is_on = False -> state 'off' instead of 'unknown'.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "unavailable"),))
@@ -704,10 +713,10 @@ async def test_restore_state_unavailable_exact_match(hass, hub_entry_builder):
 
 
 # ===========================================================================
-# _async_restore_state mutmut_11: is_on = None
-# mutmut_12: is_on = (state != "on")
-# mutmut_13: is_on = (state == "XXonXX")
-# mutmut_14: is_on = (state == "ON")
+# _async_restore_state mutmut_20: is_on = None
+# mutmut_21: is_on = (state != "on")
+# mutmut_22: is_on = (state == "XXonXX")
+# mutmut_23: is_on = (state == "ON")
 #
 # The assignment is `self._attr_is_on = last_state.state == "on"`.
 # "on" -> True, "off" -> False.
@@ -718,8 +727,8 @@ async def test_restore_state_unavailable_exact_match(hass, hub_entry_builder):
 async def test_restore_state_on_produces_is_on_true(hass, hub_entry_builder):
     """Restored 'on' state -> is_on=True -> state 'on'.
 
-    Kills mutmut_11 (None -> unknown), mutmut_12 (!= -> False -> 'off'),
-    mutmut_13 (XXonXX -> False -> 'off'), mutmut_14 (ON -> False -> 'off').
+    Kills mutmut_20 (None -> unknown), mutmut_21 (!= -> False -> 'off'),
+    mutmut_22 (XXonXX -> False -> 'off'), mutmut_23 (ON -> False -> 'off').
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "on"),))
 
@@ -738,8 +747,8 @@ async def test_restore_state_on_produces_is_on_true(hass, hub_entry_builder):
 async def test_restore_state_off_produces_is_on_false(hass, hub_entry_builder):
     """Restored 'off' state -> is_on=False -> state 'off'.
 
-    Kills mutmut_12 (!= 'on' -> True -> 'on'), mutmut_11 (None -> 'unknown'),
-    mutmut_13/14 (wrong string -> False is correct but 'on' check wrong).
+    Kills mutmut_21 (!= 'on' -> True -> 'on'), mutmut_20 (None -> 'unknown'),
+    mutmut_22/23 (wrong string -> False is correct but 'on' check wrong).
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "off"),))
 
@@ -751,11 +760,84 @@ async def test_restore_state_off_produces_is_on_false(hass, hub_entry_builder):
     eid = _door_eid(hass, hub)
     state = hass.states.get(eid)
     # "off" == "on" -> False -> state "off"
-    # mutmut_12: "off" != "on" -> True -> state "on"  [kills it]
-    # mutmut_11: None -> state "unknown"  [kills it]
+    # mutmut_21: "off" != "on" -> True -> state "on"  [kills it]
+    # mutmut_20: None -> state "unknown"  [kills it]
     assert state.state == "off"
     assert state.state != "on"
     assert state.state != "unknown"
+
+
+# ===========================================================================
+# _async_restore_state mutmut_3-11: the extra-restore-data branch.
+#
+#     extra = await self.async_get_last_extra_data()
+#     if extra is not None and (restored := extra.as_dict().get("is_on")) is not None:
+#         self._attr_is_on = bool(restored)
+#         return
+#
+# This is the path that survives a restart taken while the entity was
+# unavailable: Home Assistant persists the *state* as "unavailable", which the
+# last_state filter below then drops, so the value only comes back if it rode
+# along in the extra data. Every mutant here (extra forced to None, a wrong
+# ``get`` key, the walrus guard inverted, the assignment nulled) degrades to
+# "fall through to the last_state path", so the tests below pin the extra data
+# against a persisted state that path could not produce.
+# ===========================================================================
+
+
+async def test_restore_state_extra_data_beats_unavailable_persisted_state(
+    hass, hub_entry_builder
+):
+    """A restart during an outage restores 'on' from the extra data alone.
+
+    The persisted state is "unavailable", which the last_state guard drops, so
+    "on" can only come from the extra data. Kills mutmut_3 (extra forced to
+    None), 6/7/8 (wrong ``get`` key) and 9 (walrus guard inverted) -- all of
+    which fall through to the dropped last_state and leave the sensor unknown --
+    plus 10 (is_on set to None -> unknown) and 11 (bool(None) -> "off").
+    """
+    mock_restore_cache_with_extra_data(
+        hass,
+        (
+            (
+                State(_DOOR_ENTITY_ID, "unavailable"),
+                RestoredExtraData({"is_on": True}).as_dict(),
+            ),
+        ),
+    )
+
+    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
+    hub.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(_door_eid(hass, hub)).state == "on"
+
+
+async def test_restore_state_extra_data_beats_persisted_state(hass, hub_entry_builder):
+    """Extra data wins over a usable persisted state, and carries False.
+
+    The extra data says off while the persisted state says on, so falling
+    through to the last_state path is visible as "on" -- which pins mutmut_3,
+    6, 7, 8 and 9 from the other side, where the previous test only sees them
+    as "unknown".
+    """
+    mock_restore_cache_with_extra_data(
+        hass,
+        (
+            (
+                State(_DOOR_ENTITY_ID, "on"),
+                RestoredExtraData({"is_on": False}).as_dict(),
+            ),
+        ),
+    )
+
+    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
+    hub.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(_door_eid(hass, hub)).state == "off"
 
 
 # ===========================================================================

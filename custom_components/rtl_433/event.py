@@ -13,10 +13,20 @@ the descriptor declares an ``event_map`` the raw value is mapped to a named
 type instead (e.g. a doorbell's ``0``/``1`` map to ``ring``/``secret_knock``).
 It seeds ``event_types`` from the declared map values, auto-populates further
 observed values, persists them, ignores the coordinator watchdog's availability
-re-paint (``is_repaint``) so a stale cached value never re-fires, stays always
-available, and does not replay the coordinator's last event on construction. A
-doorbell-class entity always advertises ``DoorbellEventType.RING`` to satisfy
-Home Assistant's doorbell standard.
+re-paint (``is_repaint``) so a stale cached value never re-fires, and does not
+replay the coordinator's last event on construction. A doorbell-class entity
+always advertises ``DoorbellEventType.RING`` to satisfy Home Assistant's
+doorbell standard.
+
+Availability is the shared :class:`~custom_components.rtl_433.entity.Rtl433Entity`
+gate, unmodified: the hub connection *and* the per-device silence timeout. That
+matches what zigbee2mqtt publishes for its own event entities (their discovery
+payload carries both the bridge-state and the per-device availability topics,
+``availability_mode: all``) and what core integrations do (Shelly's event
+entities inherit ``CoordinatorEntity.available``; ESPHome's follow the device
+connection). The silence timeout does not hide a button or doorbell in practice
+because such devices classify as event-driven and resolve to the never-expire
+class default.
 """
 
 from __future__ import annotations
@@ -52,12 +62,13 @@ class Rtl433Event(Rtl433Entity, EventEntity):
     Fires once per genuine transmission. The event type is ``str(value)`` unless
     the descriptor declares an ``event_map``, in which case the raw value is
     mapped to a named type (unmapped values still pass through as ``str(value)``).
-    Diverges from the base entity in five places: it overrides
+    Diverges from the base entity in four places: it overrides
     ``_handle_dispatch`` (ignore watchdog re-paints, suppress replays, then fire
-    the resolved type), ``available`` (always True), ``_async_restore_state``
-    (no-op; HA's ``EventEntity`` restores the last displayed event),
-    ``async_added_to_hass`` (also persists the declared ``event_map`` types), and
-    seeds ``_attr_event_types`` / ``_attr_device_class`` in ``__init__``.
+    the resolved type), ``_async_restore_state`` (no-op; HA's ``EventEntity``
+    restores the last displayed event), ``async_added_to_hass`` (also persists
+    the declared ``event_map`` types), and seeds ``_attr_event_types`` /
+    ``_attr_device_class`` in ``__init__``. ``available`` is deliberately *not*
+    overridden — see the module docstring.
     """
 
     def __init__(
@@ -140,9 +151,9 @@ class Rtl433Event(Rtl433Entity, EventEntity):
           ``secret_knock=0`` -> ``ring``), so firing it would emit a phantom event.
         * A replayed / stale frame (``event.is_replay``) is the reconnect-replay
           case: it must NOT fire, append to ``event_types``, or persist — but it
-          still writes state (which only re-reads ``available``, always ``True``
-          for events). A suppressed transmission that *would* have fired is logged
-          at DEBUG (it happens routinely on every reconnect).
+          still writes state so ``available`` is re-read on reconnect. A
+          suppressed transmission that *would* have fired is logged at DEBUG (it
+          happens routinely on every reconnect).
         """
         field_key = self._descriptor.field_key
         if event.is_repaint:
@@ -150,8 +161,8 @@ class Rtl433Event(Rtl433Entity, EventEntity):
             # frame purely to re-paint availability. The cached value is stale (it
             # is whatever the device last transmitted, e.g. a doorbell's last
             # ``secret_knock=0`` -> ``ring``), so firing it would emit a phantom
-            # event. Events are always available, so there is nothing to repaint --
-            # just re-read state and return without firing or persisting.
+            # event. Write state so the flipped ``available`` is picked up, then
+            # return without firing or persisting.
             LOGGER.debug(
                 "rtl_433 skipped watchdog re-paint for %s (no re-fire)",
                 self._device_key,
@@ -216,13 +227,6 @@ class Rtl433Event(Rtl433Entity, EventEntity):
                 )
             self._trigger_event(event_type)  # the type is the whole payload
         self.async_write_ha_state()
-
-    @property
-    def available(self) -> bool:
-        """Always available: events are momentary, so timeout-based
-        unavailability would hide the entity almost always (mirrors the
-        Last-seen sensor)."""
-        return True
 
     async def _async_restore_state(self) -> None:
         """No-op: HA's ``EventEntity.async_internal_added_to_hass`` restores the

@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from pyrtl_433 import Rtl433Client
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -28,9 +29,18 @@ from custom_components.rtl_433.const import (
     DEFAULT_PORT,
     DOMAIN,
 )
-from custom_components.rtl_433.coordinator.base import Rtl433Client
+from custom_components.rtl_433.coordinator import Rtl433Coordinator
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def pytest_configure(config):
+    """Register the suite's own markers."""
+    config.addinivalue_line(
+        "markers",
+        "hub_disconnected: do not auto-connect coordinators (see "
+        "hub_connected_by_default)",
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -106,6 +116,73 @@ def hub_entry_builder():
     return build_hub_entry
 
 
+def mark_hub_connected(coordinator: Any) -> None:
+    """Put a coordinator in the state a live hub connection leaves behind.
+
+    Tests inject events straight into the client's frame handler instead of over
+    a real socket, so the client's ``connected`` flag stays False and the
+    coordinator's connection-backed availability gate reads the whole run as one
+    long outage: every device behind the hub is unavailable whatever its own
+    silence timeout says (see ``coordinator/_watchdog.py``). Any test that feeds
+    events is implicitly assuming the hub is connected, so it has to say so —
+    this is that statement.
+
+    Sets the connect-edge state directly rather than firing the client callback:
+    the callback path also triggers SDR adoption, which these tests do not want.
+    It does dispatch the availability repaint, because entities added while the
+    coordinator was still disconnected have already written ``unavailable`` and
+    would otherwise keep it until their next event.
+    """
+    coordinator._client.connected = True
+    coordinator._was_connected = True
+    coordinator._ever_connected = True
+    coordinator._disconnected_since = None
+    coordinator._async_sync_hub_availability()
+
+
+@pytest.fixture
+def hub_connected():
+    """Expose :func:`mark_hub_connected` as a fixture."""
+    return mark_hub_connected
+
+
+@pytest.fixture(autouse=True)
+def hub_connected_by_default(request):
+    """Leave every coordinator a test starts in the connected state.
+
+    A connected hub is what almost every test means, so it is the default rather
+    than an opt-in each setup site has to remember: forgetting it does not fail
+    where the hub is set up, it fails much later as an unrelated-looking device
+    timeout as soon as the test looks at an entity's state.
+
+    Marking connected once at startup is not enough on its own: the real setup
+    also starts the library client's reconnect loop against a host that does not
+    resolve, and its failures flip ``connected`` back to False asynchronously,
+    part-way through whatever the test is doing. Every device entity is gated on
+    that flag, so the loop is stubbed out here too — otherwise "connected by
+    default" silently stops holding as soon as a test lets the event loop run.
+
+    Tests that exercise the outage side opt out with
+    ``@pytest.mark.hub_disconnected`` and drive the edges themselves.
+    """
+    if "hub_disconnected" in request.keywords:
+        yield
+        return
+
+    original = Rtl433Coordinator.async_start
+
+    async def _async_start(self: Rtl433Coordinator) -> None:
+        await original(self)
+        mark_hub_connected(self)
+
+    with (
+        patch.object(Rtl433Client, "start", new=AsyncMock()),
+        patch.object(Rtl433Client, "stop", new=AsyncMock()),
+        patch.object(Rtl433Coordinator, "async_start", _async_start),
+    ):
+        yield
+
+
 @pytest.fixture
 def no_socket():
     """Stub the transport's connect loop so no real WebSocket is ever opened.
@@ -116,6 +193,11 @@ def no_socket():
     leaving setup — and any later ``async_reload`` — offline. ``test_lifecycle``
     keeps its own module-scoped copy; this one exists for the flow-level modules
     that reload an entry mid-test.
+
+    ``hub_connected_by_default`` above already stubs the same method for every
+    test that does not opt out, so requesting this fixture is now a statement of
+    intent rather than the thing keeping the socket shut. It still matters for a
+    ``@pytest.mark.hub_disconnected`` test, which gets no stub of its own.
     """
 
     async def _noop(self) -> None:

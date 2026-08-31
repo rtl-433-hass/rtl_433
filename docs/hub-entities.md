@@ -70,6 +70,13 @@ configured WebSocket path. If a reverse proxy exposes only the WebSocket path an
 not `/cmd`, these sensors degrade to `unknown` while the event stream and
 connectivity sensor keep working.
 
+Because those values come from the server, the diagnostic and statistics sensors
+go `unavailable` as soon as the hub connection drops — the same gate that applies
+to the devices, see [Availability](availability.md#hub-connection). Otherwise they
+would keep showing a frozen reading. The Connectivity sensor stays available
+throughout, and so do the SDR controls below: those are settings you write, not
+readings you trust.
+
 ## Managing SDR Settings from Home Assistant
 
 By default a new hub adopts and manages the receiver's SDR settings. With
