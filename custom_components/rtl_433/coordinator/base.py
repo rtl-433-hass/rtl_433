@@ -16,8 +16,9 @@ single place every runtime attribute is declared:
 - ``_sdr.py`` (:class:`._sdr._SdrSettingsMixin`) — the managed-SDR desired-state
   Store, write path, adoption, and reconnect enforcement.
 - ``_events.py`` (:class:`._events._EventProcessingMixin`) — the HA side of event
-  fan-out: per-device state, discovery registration, and dispatch. Normalization
-  and replay classification are done by the client, not here.
+  fan-out: routing a frame to the adopted or the pending path, per-device state,
+  and dispatch. Normalization and replay classification are done by the client,
+  not here.
 - ``_watchdog.py`` (:class:`._watchdog._AvailabilityMixin`) — effective-timeout
   resolution and the silence-based availability watchdog.
 
@@ -35,11 +36,12 @@ accepts the pieces it needs as injectable attributes:
 - ``skip_keys`` — the set of event keys to drop from measurement fields. Defaults
   to a minimal identity set; the integration setup injects the library skip-keys.
 - ``new_device_callback`` — called with ``(device_key, model, is_replay)`` the
-  first time an unknown device is seen while discovery is enabled; ``is_replay``
-  flags a reconnect-replay/stale-gap frame so the callback can wire up entities
-  without raising a "new device" notification for a mere re-broadcast. The
-  integration setup wires this to the discovery flow; the coordinator never
-  imports the config flow.
+  first time an *adopted* device is seen this process, and by
+  :meth:`Rtl433Coordinator.adopt_device` when the user approves a pending one;
+  ``is_replay`` flags a reconnect-replay/stale-gap frame so the callback knows
+  the entities are seeding from a re-broadcast rather than a live transmission.
+  The integration setup wires this to the new-device dispatch; the coordinator
+  never imports the entity platforms.
 - ``effective_timeout_resolver`` — called with ``device_key`` to resolve the
   per-device availability timeout (override → hub default). The integration setup
   wires this; the fallback is the hub default.
@@ -64,7 +66,7 @@ from pyrtl_433 import CannotConnect as CannotConnect, Rtl433Client
 from pyrtl_433.normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
@@ -80,7 +82,7 @@ from ..const import (
     signal_device_update,
     signal_hub_update,
 )
-from ._events import _EventProcessingMixin
+from ._events import PendingDevice, _EventProcessingMixin
 from ._sdr import _SdrSettingsMixin, _SdrStore
 from ._watchdog import _WATCHDOG_INTERVAL, _AvailabilityMixin
 
@@ -118,7 +120,18 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             applies the device-class default from the device's latest payload.
         ``effective_clear_delay_resolver``: ``Callable[[str], int] | None``.
 
-    Runtime state (read by ``diagnostics.py``):
+    Observation vs adoption (a device is only ever created in Home Assistant
+    once the user approves it from the options flow):
+        ``adopted``: ``set[str]`` device keys the user has approved. Seeded from
+            ``entry.data[CONF_DEVICES]`` at construction and extended by
+            :meth:`adopt_device`. Only these keys reach the runtime state below.
+        ``ignored``: ``set[str]`` device keys the user never wants to see.
+            Seeded from ``entry.data[CONF_IGNORED_DEVICES]``.
+        ``pending``: ``dict[str, PendingDevice]`` devices heard this session that
+            are neither adopted nor ignored. In-memory only, so it is empty again
+            after a restart or reload.
+
+    Runtime state, describing adopted devices only (read by ``diagnostics.py``):
         ``devices``: ``dict[str, NormalizedEvent]`` last event per device key.
         ``last_seen``: ``dict[str, datetime]`` last-seen (UTC) per device key.
         ``available``: ``dict[str, bool]`` current availability per device key.
@@ -157,6 +170,8 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         initial_center_frequency: float | None = None,
         skip_keys: set[str] | frozenset[str] | None = None,
         event_driven_keys: frozenset[str] | None = None,
+        adopted_keys: set[str] | frozenset[str] | None = None,
+        ignored_keys: set[str] | frozenset[str] | None = None,
     ) -> None:
         """Initialize the coordinator with connection params and runtime state."""
         self.hass = hass
@@ -236,11 +251,27 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # Per-device removal callbacks registered by the entity platforms. When a
         # device is removed (async_remove_config_entry_device) each is called with
         # the device_key so the platforms can drop their per-device dedup cache and
-        # field listeners; without this the device could not re-appear on a later
-        # event while discovery is on.
+        # field listeners; without this the device could never be adopted again
+        # after the user deleted it.
         self.device_removers: list[Callable[[str], None]] = []
 
+        # --- Observation vs adoption -----------------------------------------
+        # ``adopted`` is the in-memory mirror of ``entry.data[CONF_DEVICES]``,
+        # the restart-safe record of every device the user has approved. It is
+        # the gate on the event path: only an adopted key reaches the runtime
+        # state below, so nothing the user has not asked for ever becomes a Home
+        # Assistant device. ``ignored`` mirrors ``entry.data[CONF_IGNORED_DEVICES]``
+        # and drops a key outright. ``pending`` is everything else heard since
+        # this coordinator started — deliberately *not* persisted, so an unwanted
+        # device never outlives the session that heard it.
+        self.adopted: set[str] = set(adopted_keys or ())
+        self.ignored: set[str] = set(ignored_keys or ())
+        self.pending: dict[str, PendingDevice] = {}
+
         # --- Runtime state, all scoped to this config entry ------------------
+        # Every map below describes *adopted* devices only, so the availability
+        # watchdog, diagnostics, and the entity platforms keep operating on
+        # exactly the set of devices that exists in Home Assistant.
         self.devices: dict[str, NormalizedEvent] = {}
         self.last_seen: dict[str, datetime] = {}
         self.available: dict[str, bool] = {}
@@ -424,19 +455,68 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         LOGGER.debug("rtl_433 coordinator started for %s", self.ws_url)
 
     def forget_device(self, device_key: str) -> None:
-        """Drop a device's runtime state so its next event is treated as new.
+        """Un-adopt a device, dropping it back to "heard but not approved".
 
         Called when a device is removed from its device page
-        (``async_remove_config_entry_device``). Without this eviction the device
-        would stay in ``devices`` and a later event would not be treated as new,
-        so a re-transmitting device could never re-appear while discovery is on.
+        (``async_remove_config_entry_device``). Discarding the key from
+        ``adopted`` is what makes deletion stick: the device's next transmission
+        is routed to the pending list instead of silently re-creating the device
+        the user just deleted. Its runtime state goes with it, so nothing in
+        ``devices`` / ``last_seen`` / ``available`` / ``device_fields`` describes
+        a device that no longer exists in Home Assistant.
         """
+        self.adopted.discard(device_key)
+        self.pending.pop(device_key, None)
         self.devices.pop(device_key, None)
         self.last_seen.pop(device_key, None)
         self.available.pop(device_key, None)
         self.device_fields.pop(device_key, None)
-        # Re-arm discovery so a later live event re-registers the device.
+        # Re-arm registration so re-adopting the device wires its entities up.
         self._discovered.discard(device_key)
+
+    @callback
+    def adopt_device(self, device_key: str) -> PendingDevice | None:
+        """Promote a pending device into adopted runtime state.
+
+        Seeds the same runtime state a live first sighting would have written,
+        then fires ``new_device_callback`` — the identical seam the auto-add path
+        used — so the entity platforms build the device and its entities exactly
+        as before. Seeding from the stored event rather than waiting for the next
+        transmission means an adopted device arrives with real values instead of
+        an unavailable placeholder.
+
+        Returns the promoted record, or ``None`` when the key is not pending
+        (the device stopped transmitting between the form render and the submit,
+        or another submit already adopted it).
+        """
+        record = self.pending.pop(device_key, None)
+        if record is None:
+            return None
+
+        event = record.event
+        self.adopted.add(device_key)
+        self._discovered.add(device_key)
+        self.devices[device_key] = event
+        self.last_seen[device_key] = record.last_seen
+        self.available[device_key] = True
+        field_keys = set(event.fields)
+        self.seen_fields |= field_keys
+        self.device_fields.setdefault(device_key, set()).update(field_keys)
+
+        if self.new_device_callback is not None:
+            self.new_device_callback(device_key, event.model, False)
+        return record
+
+    @callback
+    def ignore_device(self, device_key: str) -> None:
+        """Drop a pending device and stop recording it as a candidate.
+
+        The caller persists the key to ``entry.data[CONF_IGNORED_DEVICES]``;
+        adding it to ``ignored`` here is what makes the change take effect on the
+        device's very next transmission without a reload.
+        """
+        self.pending.pop(device_key, None)
+        self.ignored.add(device_key)
 
     async def async_stop(self) -> None:
         """Stop the client and cancel the watchdog (never close the HA session)."""

@@ -94,6 +94,12 @@ CONF_MODEL: Final = "model"
 # and their entities on startup, for the dynamic-add listeners, the options-flow
 # per-device override, and the 0.1.0 migration.
 CONF_DEVICES: Final = "devices"
+# Per-hub list of device keys the user has explicitly ignored. Ignored devices
+# never enter the coordinator's pending list, so they cannot be adopted by
+# accident and do not reappear after a restart. Mirrors Home Assistant's
+# "ignored discovered integrations": the user-facing verb is *Ignore*, never
+# "reject". Stored under ``entry.data`` as a list of device keys.
+CONF_IGNORED_DEVICES: Final = "ignored_devices"
 # Sub-keys inside one ``entry.data[CONF_DEVICES][device_key]`` record. The model
 # reuses ``CONF_MODEL`` ("model"); the others are defined here.
 DEVICE_FIELDS: Final = "fields"  # sorted list of observed mapped field keys

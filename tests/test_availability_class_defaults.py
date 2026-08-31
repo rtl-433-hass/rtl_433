@@ -559,7 +559,16 @@ async def test_watchdog_logs_finite_timeout_once(hass, hub_entry_builder, caplog
     """
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
     device_key = "Acurite-606TX-42"
-    hub = hub_entry_builder(availability_timeout=600)
+    hub = hub_entry_builder(
+        availability_timeout=600,
+        # Adopted, so the fed frame reaches the runtime state the watchdog reads.
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
     coordinator = await _setup(hass, hub)
 
     start = dt_util.utcnow()

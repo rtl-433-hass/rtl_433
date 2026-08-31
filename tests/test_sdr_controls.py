@@ -125,6 +125,9 @@ async def coordinator(hass, hub_entry_builder, aioclient_mock):
         host="rtl433.local",
         manage_settings=True,
         skip_keys={"model", "id", "channel", "subtype", "time", "mic"},
+        # Pre-adopted so the "the event stream is undisturbed" assertions see the
+        # frame land in the runtime state rather than the pending list.
+        adopted_keys={"Acurite-606TX-42"},
     )
 
 
