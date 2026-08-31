@@ -492,8 +492,8 @@ def _seen_models(hass, entry, models):
     """Stand a coordinator whose ``devices`` map reports a model per device key.
 
     ``_replacement_model`` falls back to the coordinator's last event when a key
-    has no stored record, which is the discovery-disabled case the replace step
-    exists to serve.
+    has no stored record (or one with a blank model), so the replace picker can
+    still name a device the devices map does not describe.
     """
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = SimpleNamespace(
         devices={key: SimpleNamespace(model=model) for key, model in models.items()}
@@ -621,13 +621,16 @@ async def test_replace_target_aborts_without_candidates(hass, hub_entry_builder)
 async def test_replace_target_offers_unregistered_devices_same_model_first(
     hass, hub_entry_builder
 ):
-    """Candidates union the devices map with what the coordinator has merely heard.
+    """Candidates union the devices map with the coordinator's own device keys.
 
-    With discovery off the replacement never gets a stored record, so a
-    coordinator-only key must still be offered — labelled from its last event —
-    and a battery swap keeps the model, so same-model candidates sort first even
-    when they sort last alphabetically. A candidate whose model is unknown from
-    both sources degrades to its bare key rather than an empty label.
+    The coordinator's runtime state is adopted-only, so the two normally agree —
+    but a device adopted this session is in that state before its devices-map
+    upsert lands, and the upsert is a no-op for a device whose event carried no
+    storable fields, so a coordinator-only key must still be offered, labelled
+    from its last event. A battery swap keeps the model, so same-model candidates
+    sort first even when they sort last alphabetically, and a candidate whose
+    model is unknown from both sources degrades to its bare key rather than an
+    empty label.
     """
     # Deliberately alphabetically *before* the same-model candidate, so the
     # model-first ordering is distinguishable from a plain sort.
@@ -641,7 +644,8 @@ async def test_replace_target_offers_unregistered_devices_same_model_first(
         }
     )
     entry.add_to_hass(hass)
-    # The replacement is heard but never registered (discovery off).
+    # The replacement is in the coordinator's runtime state without a stored
+    # record (adopted this session, upsert not yet landed).
     _seen_models(hass, entry, {REPLACE_NEW: REPLACE_MODEL})
 
     result = await hass.config_entries.options.async_init(entry.entry_id)

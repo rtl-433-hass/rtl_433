@@ -589,17 +589,26 @@ async def test_reconfigure_same_host_port_does_not_collide_with_self(
 
 
 async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_builder):
-    """Options init shows 'hub', 'device', 'mappings' and 'replace'."""
+    """Options init offers the approval pair first, then the settings steps.
+
+    The order is part of the contract: adding a heard device is the only way one
+    reaches Home Assistant, so it leads, with "ignored devices" beside it as the
+    place a user looks for a device that stopped being offered; 'replace' stays
+    last as the rarest and most consequential action.
+    """
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert "hub" in result["menu_options"]
-    assert "device" in result["menu_options"]
-    assert "mappings" in result["menu_options"]
-    assert "replace" in result["menu_options"]
-    assert len(result["menu_options"]) == 4
+    assert result["menu_options"] == [
+        "add_devices",
+        "ignored_devices",
+        "hub",
+        "device",
+        "mappings",
+        "replace",
+    ]
 
 
 # ---------------------------------------------------------------------------
