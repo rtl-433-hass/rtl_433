@@ -435,6 +435,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#replacing-a-device-that-changed-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Replacing a Device That Changed Id
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -664,6 +675,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#replacing-a-device-that-changed-id" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Replacing a Device That Changed Id
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -708,6 +730,38 @@ back on lets new and previously deleted devices appear again when they transmit.
 rtl_433 → the device → Delete</strong>.</p>
 <p>If unwanted devices keep registering, disable device discovery in the hub
 settings. This is highly recommended in urban areas!</p>
+<h2 id="replacing-a-device-that-changed-id">Replacing a Device That Changed Id<a class="headerlink" href="#replacing-a-device-that-changed-id" title="Permanent link">&para;</a></h2>
+<p>Many battery-powered sensors pick a new random transmitter id every time their
+batteries are changed. rtl_433 identifies a device by that id, so the sensor
+comes back as a brand-new device with new entities and no history, while the
+original stops updating and eventually goes unavailable.</p>
+<p>To move the original device onto its new id, open <strong>Settings → Devices &amp;
+Services → rtl_433 → Configure → Replace device</strong>. Pick the <strong>Device to keep</strong> —
+the existing device whose history you want to preserve — then pick the <strong>New
+device</strong>, the one that appeared after the batteries were changed. Devices of the
+same model are listed first, since a battery swap does not change the model.</p>
+<p>The device you keep takes over the new id, and the duplicate device and its
+entities are removed. The kept device's entity ids do not change, so its
+history, statistics, dashboards and automations carry straight through, and its
+calibration, availability timeout override, motion clear delay and event types
+come with it. Any field the replacement has already reported is added to the
+device's known fields. The short history the duplicate recorded before the
+replace is discarded along with it.</p>
+<p>Because those entity ids are kept exactly as they were, they still spell out the
+<em>old</em> id — an entity named <code>sensor.acurite_986_1a2b_temperature</code> keeps that name
+after being re-pointed at id <code>9f3c</code>. That is what preserves the history, so it is
+worth leaving alone. You can rename the entity if the stale id bothers you, but
+renaming it starts a new history under the new entity id.</p>
+<p>This works with device discovery turned off, which is recommended above for
+urban areas. The replacement only has to have been <em>heard</em> by the receiver at
+least once — it does not need to have been registered as a device. If the
+replacement is not in the list yet, wait until it transmits again and reopen the
+step.</p>
+<p>To confirm you are picking the right device, check the <strong>Serial number</strong> on the
+device info card: it is the id rtl_433 decoded for that device, plus its channel
+and subtype when it has them. Unlike the device name, the serial number is not
+affected by renaming the device, so it always shows the transmitter the device
+is currently tracking — the old id before a replace, the new one after.</p>
 
 
 
