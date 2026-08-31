@@ -4,26 +4,30 @@
 // up, HA onboarding is seeded (ha-onboard.mjs), and the WebSocket is emitting
 // JSON (verified with ws-probe.mjs).
 //
-// Captured shots: 06 (empty config-flow form), 09 (integration overview / docs
-// home hero), 02 (device page), 11 (doorbell event entity), 03 (options menu),
-// 07 (Hub settings form), 05 (Device mappings YAML), 08 (Device settings form),
-// 12 (calibration step), 10 (device page with the signal-diagnostic sensors
-// enabled and populated), 13 (the hub device's Diagnostic card with the
-// receiver-noise sensors), 04 (unavailable). The doorbell / energy meter / door
-// / leak devices come from ws-bridge replaying tests/fixtures.
+// Captured shots: 06 (empty config-flow form), 03 (options menu), 15 (the
+// populated "Add discovered devices" form), 16 (the "Ignored devices" step),
+// 09 (integration overview / docs home hero), 02 (device page), 11 (doorbell
+// event entity), 07 (Hub settings form), 05 (Device mappings YAML), 08 (Device
+// settings form), 12 (calibration step), 10 (device page with the
+// signal-diagnostic sensors enabled and populated), 14 (the hub device's
+// Diagnostic card with the receiver-noise sensors), 04 (unavailable). The
+// doorbell / energy meter / door / leak devices come from ws-bridge replaying
+// tests/fixtures.
 //
 // Stages (STAGE env var):
-//   add      - log in, add the rtl_433 hub via the config flow (host=wsbridge),
-//              then — in the new hub model — the RF device appears AUTOMATICALLY
-//              as a nested device (gated by the per-hub discovery toggle, which
-//              defaults on). There is NO discovery card to accept. Navigate to
-//              the integration's devices, open the nested device, and capture the
-//              device page; then open the options flow MENU (Hub settings /
-//              Device settings / Device mappings), capture it, open Hub settings,
-//              set a low availability timeout (15s) so the unavailable stage is
-//              fast, capture the hub-settings form too, then re-open the menu,
-//              open Device mappings, pre-fill the YAML editor with an example
-//              override and capture it.
+//   add      - log in, add the rtl_433 hub via the config flow (host=wsbridge).
+//              Nothing is added to Home Assistant automatically: the heard
+//              devices sit on the coordinator's in-memory pending list until
+//              they are added from the options flow, so the run captures the
+//              options MENU, the populated "Add discovered devices" form and the
+//              "Ignored devices" step, and adds the devices the later shots need
+//              (approveDevices). It then opens the nested device and captures
+//              the device page; opens Hub settings, sets a low availability
+//              timeout (15s) so the unavailable stage is fast and captures the
+//              form; then Device mappings with an example override, the Device
+//              settings pair, and the per-device signal diagnostics.
+//   approve  - re-capture only the options menu / add-devices / ignored-devices
+//              shots against an already-running harness; for iterating.
 //   unavail  - (after run-harness.sh stops the rtl433 replay and waits past the
 //              timeout) capture the device page with all entities Unavailable.
 //   device   - re-capture only the Device settings + calibration steps against
@@ -127,21 +131,26 @@ async function addHubAndCapture(page) {
   await page.getByRole("button", { name: /finish|close/i }).first().click({ timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(1500);
 
-  // --- Nested device page (NEW model) --------------------------------------
-  // There is no discovery card. With discovery on (default), the RF device shows
-  // up automatically as a nested device under the hub. Poll the integration's
-  // device list until it appears, then open it and capture the entities.
+  // --- Approve the heard devices -------------------------------------------
+  // Nothing is added automatically: every device the server decodes lands on the
+  // coordinator's in-memory pending list and reaches Home Assistant only when it
+  // is added from the options flow. This captures the options menu, the
+  // populated "Add discovered devices" form, and the "Ignored devices" step, and
+  // leaves the hub holding the devices the later shots need.
+  await approveDevices(page);
+
+  // --- Integration overview (docs home-page hero) --------------------------
   await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
   const device = page.locator("text=Acurite-Tower").last();
-  // The coordinator must observe an event and the platform must add the nested
-  // device + entities; bounded poll (~40s) on the device link appearing.
+  // The entity platforms build each adopted device from the same dispatcher
+  // signal a live first sighting used; bounded poll (~40s) on the device link.
   for (let i = 0; i < 20 && (await device.count()) === 0; i++) {
     await page.waitForTimeout(2000);
     await page.reload({ waitUntil: "domcontentloaded" });
   }
-  // Give the fixture-replayed devices (doorbell / energy meter / door / leak,
-  // emitted by ws-bridge every few seconds) a moment to register too, so the
-  // integration overview used as the docs home-page hero shows the full hub.
+  // Give the adopted fixture devices (doorbell / energy meter / door / leak) a
+  // moment to finish registering too, so the integration overview used as the
+  // docs home-page hero shows the full hub.
   await page.waitForTimeout(6000);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2000);
@@ -168,16 +177,14 @@ async function addHubAndCapture(page) {
     console.log("screenshot: doorbell device not present; skipping 11-event-entity.png");
   }
 
-  // --- Options flow MENU (Hub settings / Device settings / Device mappings) -
-  await openOptionsMenu(page);
-  await shot(page, "03-options-flow.png");
-
   // --- Hub settings form: lower the availability timeout, then submit -------
+  // (The options menu itself was captured as 03-options-flow.png during the
+  // approval stage, when its two approval entries had devices behind them.)
+  await openOptionsMenu(page);
   // Open Hub settings from the menu, set a low timeout (so the unavailable stage
-  // is fast), and submit. Capturing the menu above already satisfies the docs;
-  // this also exercises the live-options update path. The Hub-settings form has
-  // a discovery checkbox (input[type=checkbox]) and the availability-timeout
-  // field (input[type=number]); we only change the latter.
+  // is fast), and submit. This also exercises the live-options update path. The
+  // Hub-settings form carries the availability-timeout field (input[type=number])
+  // and the managed-settings checkbox; we only change the former.
   await page.locator("text=Hub settings").first().click({ timeout: 8000 }).catch(() => {});
   await page.waitForTimeout(2500);
   const tf = page.locator("ha-dialog input[type=number], dialog input[type=number]").first();
@@ -208,6 +215,196 @@ async function addHubAndCapture(page) {
   await enableAndCaptureDiagnostics(page);
   // The hub's receiver-noise capture is a separate step (STAGE=hubnoise): it
   // needs the orchestrator to restart the decoder first — see captureHubNoise.
+}
+
+// Tick rows in one of an approval step's multi-selects. A SelectSelector in
+// LIST + multiple mode renders each option as an <ha-checkbox> whose light-DOM
+// text is the option label, with the real <input type=checkbox> inside the
+// checkbox's shadow root; the whole form sits several shadow roots deep inside
+// the dialog. So the rows are found by walking the shadow trees from the
+// <ha-selector-select> whose `label` matches the field ("Add these devices",
+// "Ignore these devices", "Stop ignoring these devices") — scoping by field
+// rather than by ordinal, because the add-devices step renders every candidate
+// twice, once per action. Clicking the inner input is what fires the change
+// event the selector listens for; clicking the host does not.
+//
+// Rows are ticked ONE PER CALL with a pause between them (tickPendingRows).
+// The selector rebuilds its whole value from its previous value on every change,
+// and that value is only refreshed on the next render, so a burst of clicks in a
+// single synchronous pass would submit just the last one — the same reason a
+// person ticking boxes by hand never hits this.
+async function tickPendingRow(page, pattern, fieldLabel) {
+  return page.evaluate(
+    ({ pattern, fieldLabel }) => {
+      const deep = (root, out = []) => {
+        for (const el of root.querySelectorAll("*")) {
+          out.push(el);
+          if (el.shadowRoot) deep(el.shadowRoot, out);
+        }
+        return out;
+      };
+      const field = deep(document).find(
+        (el) =>
+          el.localName === "ha-selector-select" &&
+          String(el.label || "").includes(fieldLabel),
+      );
+      if (!field) return { error: `no field labelled ${fieldLabel}` };
+      const boxes = [...deep(field), ...(field.shadowRoot ? deep(field.shadowRoot) : [])].filter(
+        (el) => el.localName === "ha-checkbox",
+      );
+      const rows = boxes.map((el) => ({ el, label: el.textContent.trim() }));
+      const row = rows.find((candidate) => candidate.label.includes(pattern));
+      if (!row) return { error: `no row matching ${pattern}`, rows: rows.map((r) => r.label) };
+      const input = row.el.shadowRoot?.querySelector("input");
+      if (!input) return { error: `no checkbox input for ${pattern}` };
+      if (!input.checked) input.click();
+      return { ticked: row.label };
+    },
+    { pattern, fieldLabel },
+  );
+}
+
+// Read back which rows of a field are ticked, so a submit is never made on an
+// assumption: the selector rebuilds its value on every change, and a value that
+// did not stick shows up here as an unchecked row.
+async function checkedRows(page, fieldLabel) {
+  return page.evaluate(
+    ({ fieldLabel }) => {
+      const deep = (root, out = []) => {
+        for (const el of root.querySelectorAll("*")) {
+          out.push(el);
+          if (el.shadowRoot) deep(el.shadowRoot, out);
+        }
+        return out;
+      };
+      const field = deep(document).find(
+        (el) =>
+          el.localName === "ha-selector-select" &&
+          String(el.label || "").includes(fieldLabel),
+      );
+      if (!field) return { error: `no field labelled ${fieldLabel}` };
+      return [...deep(field), ...(field.shadowRoot ? deep(field.shadowRoot) : [])]
+        .filter((el) => el.localName === "ha-checkbox")
+        .filter((el) => el.shadowRoot?.querySelector("input")?.checked)
+        .map((el) => el.textContent.trim());
+    },
+    { fieldLabel },
+  );
+}
+
+async function tickPendingRows(page, patterns, fieldLabel) {
+  const results = [];
+  for (const pattern of patterns) {
+    results.push(await tickPendingRow(page, pattern, fieldLabel));
+    // Let the selector re-render with the new value before the next tick.
+    await page.waitForTimeout(700);
+  }
+  return results;
+}
+
+// Drive the two approval steps and capture them:
+//
+//   03-options-flow.png     the options menu, led by the two approval entries
+//   15-add-devices.png      the populated "Add discovered devices" form
+//   16-ignored-devices.png  the "Ignored devices" step
+//
+// Nothing reaches the Home Assistant device registry without this stage: the
+// coordinator records every device it hears into an in-memory pending list, and
+// the add-devices step is the only route out of it. The stage adds the devices
+// the later shots need, ignores the leak detector so the ignored-devices step
+// has something real to show, then un-ignores and adds it again — the documented
+// round trip, and it leaves the hub holding every replayed device.
+async function approveDevices(page) {
+  // The Acurite capture decodes continuously and ws-bridge re-emits the
+  // fixtures every 8s, so a short wait gives every candidate a realistic
+  // sighting count and signal level to render in its label.
+  await page.waitForTimeout(45000);
+
+  await openOptionsMenu(page);
+  await shot(page, "03-options-flow.png");
+
+  const opened = await openApprovalStep(page, "Add discovered devices", /add these devices/i);
+  if (!opened) {
+    console.log("screenshot: add-devices step did not render; skipping 15/16");
+    return;
+  }
+  // The form carries two full candidate lists, so it is taller than the
+  // documentation viewport. Grow the viewport for this capture only, so the shot
+  // shows both actions instead of the first list and a scrollbar.
+  await page.setViewportSize({ width: 1440, height: 1400 });
+  await page.waitForTimeout(1500);
+  await shot(page, "15-add-devices.png");
+
+  const adds = ["Acurite-Tower", "Honeywell-Doorbell", "EnergyMeter-2000", "SCMplus", "GenericDoor-X1"];
+  console.log(
+    "screenshot: add rows -> " + JSON.stringify(await tickPendingRows(page, adds, "Add these devices")),
+  );
+  console.log(
+    "screenshot: ignore rows -> " +
+      JSON.stringify(await tickPendingRows(page, ["LeakDetector-9"], "Ignore these devices")),
+  );
+  console.log(
+    "screenshot: ticked -> " +
+      JSON.stringify({
+        add: await checkedRows(page, "Add these devices"),
+        ignore: await checkedRows(page, "Ignore these devices"),
+      }),
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(500);
+  await submitDialog(page);
+  await page.waitForTimeout(4000);
+
+  // --- Ignored devices: capture it, then un-ignore the leak detector --------
+  if (await openApprovalStep(page, "Ignored devices", /stop ignoring these devices/i)) {
+    await shot(page, "16-ignored-devices.png");
+    console.log(
+      "screenshot: unignore rows -> " +
+        JSON.stringify(await tickPendingRows(page, ["LeakDetector-9"], "Stop ignoring these devices")),
+    );
+    await submitDialog(page);
+    await page.waitForTimeout(3000);
+  } else {
+    console.log("screenshot: ignored-devices step did not render; skipping 16");
+  }
+
+  // Un-ignoring is not retroactive, so the leak detector re-enters the pending
+  // list on its next transmission (the fixture replay, within 8s). Add it, so
+  // the hub in the overview shot holds every replayed device.
+  await page.waitForTimeout(12000);
+  if (await openApprovalStep(page, "Add discovered devices", /add these devices/i)) {
+    console.log(
+      "screenshot: re-add rows -> " +
+        JSON.stringify(await tickPendingRows(page, ["LeakDetector-9"], "Add these devices")),
+    );
+    await submitDialog(page);
+    await page.waitForTimeout(4000);
+  }
+}
+
+// Open one options-flow step from the menu and wait for a field of its form to
+// render. Menu items are list rows rather than buttons (see openOptionsMenu), so
+// they are clicked by text; `fieldText` is a label from the step's own form,
+// which is what distinguishes a rendered form from the menu it came from or from
+// an abort dialog ("no devices are waiting").
+async function openApprovalStep(page, menuText, fieldText) {
+  await openOptionsMenu(page);
+  await page.locator(`text=${menuText}`).first().click({ timeout: 8000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  return page
+    .getByText(fieldText)
+    .first()
+    .waitFor({ state: "visible", timeout: 8000 })
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function submitDialog(page) {
+  await page
+    .getByRole("button", { name: /^(submit|next|finish)$/i })
+    .first()
+    .click({ timeout: 8000 })
+    .catch(() => {});
 }
 
 // The hub device page carries the hub-level diagnostic sensors. Two of them —
@@ -516,6 +713,11 @@ async function run() {
       // Iterate only the hub device page / receiver-noise capture against an
       // already running harness (hub already added).
       await captureHubNoise(page);
+    } else if (STAGE === "approve") {
+      // Iterate only the options menu / add-devices / ignored-devices captures
+      // against an already running harness (hub already added, devices still
+      // pending). Not part of the full pipeline.
+      await approveDevices(page);
     } else if (STAGE === "diagnostics") {
       // Iterate only the enable-and-capture diagnostics step against an already
       // running harness (hub already added).

@@ -119,22 +119,39 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   entry**, *not* separate config entries. They are recreated on startup from the
   per-hub `entry.data["devices"]` map (the single source of truth: model,
   observed mapped fields, optional per-device timeout override) and added at
-  runtime via the new-device dispatcher signal — gated by the hub's discovery
-  toggle (the Quality-Scale `dynamic-devices` rule) **and by the post-connection
-  registration gate** (see the coordinator's replay/registration notes: a
-  previously-unknown device auto-registers only once a frame timestamped at/after
-  the connection is seen, so a server's pre-connection backlog never floods the
-  device list). `new_device_callback` (`__init__.py`) also raises a
-  `persistent_notification` with a stable per-device `notification_id`, gated on
-  `entry.data[CONF_DEVICES]` (not the coordinator's per-session discovery state)
-  so restarts/reloads don't re-notify; in-app only.
+  runtime via the new-device dispatcher signal (the Quality-Scale
+  `dynamic-devices` rule).
+- **Observation and adoption are separate states; nothing is ever auto-added.**
+  A frame whose `device_key` is not in the coordinator's `adopted` set (seeded
+  from `entry.data["devices"]`) is routed by `_record_pending`
+  (`coordinator/_events.py`) into the coordinator's in-memory `pending` map — a
+  `PendingDevice` per candidate (latest `NormalizedEvent`, sighting count,
+  first/last seen) — and goes **no further**: no registry device, no entities, no
+  dispatch, and none of the adopted-device runtime state (`devices`,
+  `last_seen`, `available`, `seen_fields`, `device_fields`) is touched, so the
+  availability watchdog, diagnostics and the entity platforms keep seeing exactly
+  the adopted set. Keys on `entry.data["ignored_devices"]` are dropped outright.
+  Replay and pre-connection **backlog** frames never create a candidate (a
+  reconnect must not repopulate the list), which is the post-connection
+  registration gate applied to candidacy — see the coordinator's
+  replay/registration notes. The pending map is **memory-only by design**: empty
+  after a restart or reload, refilled by live traffic. Do not add persistence, a
+  TTL, or an eviction policy.
+  A device becomes real only through `coordinator.adopt_device` (from the
+  options flow, below), which promotes the stored event into runtime state and
+  fires the **same** `new_device_callback` / `SIGNAL_NEW_DEVICE` seam a live
+  sighting used — one registration path, not two. There is **no** persistent
+  notification for a heard device (the per-device notification, and the per-hub
+  discovery toggle that used to gate auto-add, were both removed); the
+  `INFO` log line in `_record_pending` is the only signal.
 - `async_remove_config_entry_device` (`__init__.py`) backs the per-device
   **Delete** affordance (the `stale-devices` rule): it returns `False` for the
   hub device (so the hub can't be removed out from under its entry) and `True`
   for nested RF devices, dropping the device from the devices map and **evicting
-  its `device_key` from coordinator runtime state** (`coordinator.forget_device`)
-  so it can re-appear if it transmits again with discovery on. There is no
-  persistent ignore list.
+  its `device_key` from coordinator runtime state** (`coordinator.forget_device`,
+  which also drops it from `adopted`) so its next transmission makes it a
+  **pending candidate again** — deletion returns a device to the list rather than
+  silently recreating it. To make one go away for good the user ignores it.
 - A nested device's identity (`device_key`) is **re-pointable**: a battery swap
   usually makes a sensor draw a new transmitter id, and
   `async_replace_device` (`device_replace.py`, options `replace` →
@@ -149,10 +166,23 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   **seamless in-place upgrade from 0.1.0**: it re-homes the legacy per-device
   config entries' registry devices/entities onto the hub entry (preserving
   unique_ids, entity_ids, and history), folds their state into the hub's devices
-  map, and removes the obsolete per-device entries.
-- Per-device configuration lives in the **hub OptionsFlow** (`config_flow.py`):
-  a menu with a *Hub settings* step (discovery toggle + default timeout, written
-  to `entry.options`) and a *Device settings* pair — a `device` picker step
+  map, and removes the obsolete per-device entries. The minor-7 → 8 step
+  (`_strip_discovery_toggle`) drops the retired discovery key from `entry.data`
+  and `entry.options`; it never rewrites `entry.data["devices"]`, so every
+  already-adopted device, override and calibration is preserved untouched.
+- Adoption and per-device configuration live in the **hub OptionsFlow**
+  (`options_flow.py`): a menu led by the two approval steps — `add_devices`
+  (renders `coordinator.pending` newest-first, one row per candidate labelled
+  model, key, sighting count, signal level and relative last-seen, with two
+  independent multi-selects: *Add* → `adopt_device` + `async_upsert_device`,
+  *Ignore* → `entry.data["ignored_devices"]`; aborts `no_pending_devices` on an
+  empty list) and `ignored_devices` (un-ignores selected keys; not retroactive —
+  the device returns on its next transmission). The ignore list is applied
+  **live** through the update listener, never a reload. The user-facing verb is
+  **Ignore/Ignored**, matching HA's ignored-discovery vocabulary; "reject" must
+  not appear. The menu then carries a *Hub settings* step (default timeout +
+  managed-settings, written to `entry.options`) and a *Device settings* pair — a
+  `device` picker step
   followed by a `device_settings` step (per-device timeout override, commodity
   and motion clear-delay, written into `entry.data["devices"]`). The picker is a
   separate step so every default on `device_settings` is derived from the
@@ -220,10 +250,10 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   existing hubs it goes straight to `async_step_hassio_confirm` (a confirmation
   that revalidates
   connectivity before creating the entry and offers the same setup choices as the
-  manual flow — `manage_settings`, `discovery_enabled`, and an optional
-  `initial_frequency` in MHz); `async_step_user` likewise aborts
+  manual flow — `manage_settings` and an optional `initial_frequency` in MHz);
+  `async_step_user` likewise aborts
   `already_configured` if a `host:port` is already owned by a discovered entry.
-  Both add flows persist `discovery_enabled` and, when `manage_settings` is on and
+  Both add flows persist `manage_settings` and, when it is on and
   a frequency was entered, `initial_frequency` (MHz) into `entry.data`; the latter
   is applied to the managed desired state **exactly once** at first connect —
   authoritatively overriding the adopted/persisted center frequency (gated on a
@@ -738,7 +768,7 @@ keep this contributor-facing.
   `__init__.py`). The listener compares the new effective `manage_settings`
   against the running `coordinator.manage_settings` and **reloads the entry only
   when the toggle changed** (the entity set + adopt/enforce behaviour flips);
-  discovery-toggle and timeout changes are applied live with no reload. The same
+  timeout and ignore-list changes are applied live with no reload. The same
   listener also owns the reload for a changed connection target / stable radio id
   (see the config-flow section) — no flow reloads a hub itself.
 - **HA is the authority; no re-adopt action — by design.** Once managed, HA

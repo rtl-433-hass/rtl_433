@@ -4,7 +4,7 @@ The rtl_433 integration connects Home Assistant to
 [rtl_433](https://github.com/merbanan/rtl_433) so you can see weather stations,
 security sensors, and more, all as native Home Assistant devices and entities.
 
-![A single rtl_433 hub in Home Assistant with automatically discovered nested devices: a weather sensor, energy meter, door sensor, doorbell, and leak detector](images/09-home-hero.png)
+![A single rtl_433 hub in Home Assistant with its nested devices: a weather sensor, energy meter, door sensor, doorbell, leak detector, and utility meter](images/09-home-hero.png)
 
 rtl_433 receives 433 MHz and other ISM-band transmissions with a
 [software-defined radio (SDR)](https://en.wikipedia.org/wiki/Software-defined_radio)
@@ -27,8 +27,9 @@ integration can connect to any rtl_433 server with HTTP output enabled.
 - **Data-driven device library**: add support for additional devices by writing
   YAML snippets in the Home Assistant UI, without having to wait for a new
   version of the integration.
-- **Automatic device discovery**: newly observed devices are added automatically,
-  and discovery can be disabled to avoid adding unwanted devices.
+- **You choose which devices to add**: every device the receiver hears is listed
+  for you to add, so neighbours' sensors and bad decodes stay out of Home
+  Assistant. Unwanted devices can be ignored for good.
 - **Configurable availability**: silence-based availability with hub defaults,
   device overrides, and event-driven class defaults.
 - **Multiple servers**: add one hub per rtl_433 server; device identities are
@@ -44,7 +45,7 @@ integration can connect to any rtl_433 server with HTTP output enabled.
 
 - Install the integration with [Installation](installation.md).
 - Add a hub with [Configuration](configuration.md).
-- Learn how devices appear in [Device Discovery](device-discovery.md).
+- Choose which devices to add in [Device Discovery](device-discovery.md).
 - Tune timeouts in [Availability](availability.md).
 - Understand doorbells, remotes, and motion sensors in
   [Event-based Devices](event-based-devices.md).

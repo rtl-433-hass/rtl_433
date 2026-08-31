@@ -151,3 +151,6 @@ $RECYCLE.BIN/
 
 # Scheduled-tasks runtime lock
 .claude/scheduled_tasks.lock
+
+# MkDocs build output (`mkdocs build`); the published site is built in CI.
+site/

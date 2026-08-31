@@ -22,9 +22,10 @@ them, with no cloud dependency and no polling.
 - Device support is data-driven through a YAML
   [device library](docs/device-library.md), with per-hub user overrides available
   from the Home Assistant options flow.
-- Supports automatic device discovery, class-aware availability, Last seen
-  timestamps, momentary event entities, synthesized-off motion sensors, and
-  utility-meter calibration.
+- Every device the receiver hears is listed for you to add or ignore; nothing is
+  added to Home Assistant on its own.
+- Supports class-aware availability, Last seen timestamps, momentary event
+  entities, synthesized-off motion sensors, and utility-meter calibration.
 - Optional Home Assistant-managed SDR controls can adopt and re-apply receiver
   settings such as frequency, sample rate, gain, ppm, conversion mode, and hop
   interval.
