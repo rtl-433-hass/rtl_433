@@ -33,7 +33,8 @@ stream stops. Playwright captures these screenshots (see `../../screenshots/`):
 | `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
 | `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
-| `12-calibration.png` | The utility-meter **calibration** step for that gas meter (base unit + scale) |
+| `12-calibration.png` | The utility-meter **calibration** step (base unit + scale) |
+| `14-hub-noise.png` | The hub device's **Diagnostic** card with the receiver-noise sensors (Noise level / Minimum detection level) populated from real "Auto Level" log frames |
 
 Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
 `screenshots/` output directory itself is gitignored.
@@ -89,6 +90,7 @@ cd tests/integration
 ./run-harness.sh up        # start containers, poll WS-JSON + HA API readiness
 ./run-harness.sh onboard   # seed HA owner + token via the onboarding REST API
 ./run-harness.sh shots     # add the hub, capture discovery/device/options
+./run-harness.sh hubnoise  # restart the decoder, capture the hub noise sensors
 ./run-harness.sh unavailable  # stop replay, wait out the timeout, capture, resume
 ./run-harness.sh down      # tear everything down (removes the shared volume)
 ```
@@ -110,16 +112,47 @@ stream — alive (plan Clarification #13), `rtl433-entrypoint.sh`:
 
 1. Creates a named pipe: `mkfifo /tmp/rtl.fifo`.
 2. Starts **one** long-lived decoder reading the FIFO:
-   `rtl_433 -r cu8:/tmp/rtl.fifo -s 250k -F json:/shared/events.jsonl -M level`.
+   `rtl_433 -r cu8:/tmp/rtl.fifo -s 250k -F json:/shared/events.jsonl
+   -F log:/shared/rtl433.log -M level -Y autolevel -M noise:10`.
    The reader opens the FIFO **first** and blocks waiting for a writer.
 3. Opens the FIFO for writing on fd 3 (`exec 3>fifo`) **after** the reader
-   exists, then loops `cat <capture>.cu8 >&3; sleep 1` forever. Holding fd 3 open
-   across passes means the decoder never sees EOF, so it stays alive and keeps
-   decoding the same capture on repeat.
+   exists, then loops `cat <capture>.cu8 >&3; cat silence.cu8 >&3; sleep 1`
+   forever. Holding fd 3 open across passes means the decoder never sees EOF, so
+   it stays alive and keeps decoding the same capture on repeat. The silence is
+   1 MB of cu8 zero-amplitude samples (~2 s at 250k) — see "Receiver noise"
+   below for why the gap is there.
 
 The ordering matters: opening the FIFO for write *before* the reader exists
 deadlocks (a FIFO write-open blocks until a reader connects). Reader-first,
 writer-second is the working pattern.
+
+## Receiver noise ("Auto Level") data
+
+The hub's **Noise level** and **Minimum detection level** sensors have no getter
+in rtl_433's API: the receiver's noise floor surfaces only as pulse-detector log
+messages (log source `Auto Level`), which a real `-F http` server forwards to
+every WebSocket client as `{"time","src","lvl","msg"}` frames. The harness
+reproduces that end to end, with no synthesized values:
+
+- The decoder runs with `-Y autolevel` (logs an adjustment whenever its estimate
+  shifts by more than 1 dB) and `-M noise:10` (periodic noise report), and writes
+  its log messages to `/shared/rtl433.log` via `-F log:<file>`. The decoded-event
+  JSON output carries **no** log messages, so that file is the only source.
+- `ws-bridge.mjs` tails the log file and re-frames each `<src>: <msg>` line as
+  the structured log frame the HTTP server would push. The plain-text log drops
+  the numeric level, so it is restored per source (`Auto Level` is `LOG_WARNING`).
+- The writer loop feeds ~2 s of RF silence between capture passes. Back-to-back
+  passes keep the receiver permanently "loud": the noise estimate creeps up to
+  the replayed burst level and settles, so `-Y autolevel` never sees a shift over
+  1 dB and never logs an adjustment — leaving **Minimum detection level**
+  `unknown`. The silence gap makes the noise floor genuinely move, so both
+  message forms are emitted from real measurements.
+
+The other hub sensors (center frequency, sample rate, decoded events, …) are
+fetched over HTTP `/cmd`, which the bridge does not serve, so they read
+`unknown` in `14-hub-noise.png`. That is the documented WebSocket-only-proxy
+behaviour rather than a defect; populating them would mean inventing server
+state, so the harness leaves them alone.
 
 ## Known limitation — why the `ws-bridge` exists
 
@@ -171,8 +204,8 @@ battery indicator in one device.
 | File | Purpose |
 | --- | --- |
 | `docker-compose.yml` | The three services (rtl433, wsbridge, homeassistant), pinned by digest |
-| `rtl433-entrypoint.sh` | FIFO keep-alive replay + `-F json:<file>` output |
-| `ws-bridge.mjs` | Tails the JSON-lines file, serves `/ws` (see Known limitation) |
+| `rtl433-entrypoint.sh` | FIFO keep-alive replay (capture + silence) + `-F json:<file>` and `-F log:<file>` output |
+| `ws-bridge.mjs` | Tails the JSON-lines and log files, serves `/ws` (see Known limitation) |
 | `ws-probe.mjs` | Bounded readiness probe: connects to `/ws`, exits 0 on a decoded event |
 | `ha-config/configuration.yaml` | Minimal HA seed config (debug logging for the integration) |
 | `ha-onboard.mjs` | Seeds HA onboarding (owner + token) via the REST API |

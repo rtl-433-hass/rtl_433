@@ -22,7 +22,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import MATCH_ALL, UnitOfFrequency, UnitOfTemperature
+from homeassistant.const import (
+    MATCH_ALL,
+    SIGNAL_STRENGTH_DECIBELS,
+    UnitOfFrequency,
+    UnitOfTemperature,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
@@ -380,6 +385,29 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
         value=lambda c: c.stats.get("enabled"),
         # A current count of enabled decoders (a gauge that moves up/down as
         # decoders are toggled), not a running total -> MEASUREMENT.
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    # --- Receiver noise floor (from the server's "Auto Level" log frames) -- #
+    # rtl_433 has no structured noise getter; the pyrtl_433 client parses the
+    # pulse detector's "Auto Level" log frames into these snapshots. They stay
+    # ``unknown`` unless the server runs with ``-Y autolevel`` (adjustments)
+    # and/or ``-M noise[:secs]`` (periodic reports).
+    HubSensorDesc(
+        suffix="noise_level",
+        name="Noise level",
+        value=lambda c: c.noise_level,
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        native_unit=SIGNAL_STRENGTH_DECIBELS,
+        # A live gauge of the receiver's noise floor -> MEASUREMENT, so HA
+        # records long-term statistics ("is my noise creeping up?").
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    HubSensorDesc(
+        suffix="min_level",
+        name="Minimum detection level",
+        value=lambda c: c.min_level,
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        native_unit=SIGNAL_STRENGTH_DECIBELS,
         state_class=SensorStateClass.MEASUREMENT,
     ),
 )

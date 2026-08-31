@@ -346,6 +346,22 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         """The ``-d`` selector rtl_433 opened (client-sourced)."""
         return self._client.dev_query
 
+    @property
+    def noise_level(self) -> float | None:
+        """Estimated receiver noise level in dB (client-parsed "Auto Level" logs).
+
+        Socket-sourced: rtl_433 surfaces its noise floor only as "Auto Level"
+        log frames (requires ``-Y autolevel`` and/or ``-M noise`` server-side);
+        the client parses them into this snapshot. ``None`` until the first
+        such frame arrives.
+        """
+        return self._client.noise_level
+
+    @property
+    def min_level(self) -> float | None:
+        """Auto-adjusted minimum detection level in dB (requires ``-Y autolevel``)."""
+        return self._client.min_level
+
     # ------------------------------------------------------------------ #
     # Lifecycle                                                          #
     # ------------------------------------------------------------------ #

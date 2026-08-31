@@ -36,6 +36,11 @@ services:
       CAPTURE: /data/acurite-592txr-003.cu8
       RATE: 250k
       EVENTS_FILE: /shared/events.jsonl
+      # rtl_433's own log output. Decoded-event JSON carries no log messages, so
+      # this file is the only source of the "Auto Level" noise lines behind the
+      # hub's noise sensors; the bridge tails it (see ws-bridge.mjs).
+      LOG_FILE: /shared/rtl433.log
+      NOISE_SECS: "10"
       FIFO: /tmp/rtl.fifo
       LOOP_SLEEP: "1"
     volumes:
@@ -55,6 +60,9 @@ services:
     environment:
       WS_PORT: "8433"
       EVENTS_FILE: /shared/events.jsonl
+      # rtl_433's log output, re-framed as the structured log frames a real
+      # `-F http` server pushes to WebSocket clients (hub noise sensors).
+      LOG_FILE: /shared/rtl433.log
       # Replay project fixtures alongside the live Acurite capture so the
       # screenshot harness sees a doorbell event entity, an energy meter, a
       # SCMplus gas meter (for the calibration step, which needs a device whose

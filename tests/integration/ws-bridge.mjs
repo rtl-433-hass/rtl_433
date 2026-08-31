@@ -28,6 +28,9 @@ import { WebSocketServer } from "ws";
 const PORT = Number(process.env.WS_PORT || 8433);
 // File that rtl_433 appends JSON events to (shared volume). The bridge tails it.
 const EVENTS_FILE = process.env.EVENTS_FILE || "/shared/events.jsonl";
+// File that rtl_433 appends its own log messages to (`-F log:<file>`, shared
+// volume). Tailed and re-framed as structured log frames — see the log section.
+const LOG_FILE = process.env.LOG_FILE || "/shared/rtl433.log";
 
 // Optional: replay project-authored JSON fixtures alongside the live Acurite
 // capture so the screenshot harness sees more device types (a doorbell event
@@ -127,6 +130,51 @@ if (fixtureEvents.length) {
     `ws-bridge: replaying ${fixtureEvents.length} fixture event(s) every ${FIXTURE_INTERVAL_MS}ms\n`,
   );
 }
+
+// --- rtl_433 log frames -----------------------------------------------------
+// A real rtl_433 `-F http` server forwards its own log messages to every
+// connected WebSocket client as {"time","src","lvl","msg"} frames (>= 23.11).
+// That channel is the ONLY place rtl_433 exposes its receiver noise floor — the
+// pulse detector's "Auto Level" messages, which the integration parses into the
+// hub's noise-level / minimum-detection-level sensors. The decoded-event JSON
+// output carries no log messages at all, so the bridge tails rtl_433's
+// `-F log:<file>` output (plain "<src>: <msg>" lines) and re-frames each line
+// exactly as the HTTP server would, keeping the transport stand-in complete.
+//
+// The text log output drops the numeric level, so it is restored per source:
+// the "Auto Level" messages are emitted at LOG_WARNING, everything else the
+// harness produces is informational. Only src/msg are load-bearing downstream.
+const LOG_LINE_RE = /^([A-Z][\w /-]*): (.+)$/;
+const LOG_LEVEL_BY_SRC = { "Auto Level": 4 };
+const DEFAULT_LOG_LEVEL = 5;
+
+let logCount = 0;
+const logTail = spawn("tail", ["-n", "0", "-F", LOG_FILE]);
+const logRl = createInterface({ input: logTail.stdout });
+process.stderr.write(`ws-bridge: tailing ${LOG_FILE} for log frames\n`);
+logRl.on("line", (line) => {
+  const match = LOG_LINE_RE.exec(line.trim());
+  if (!match) return; // banner/continuation lines carry no "<src>: <msg>" shape
+  const [, src, msg] = match;
+  logCount++;
+  if (src === "Auto Level") {
+    process.stderr.write(`ws-bridge: log frame -> ${src}: ${msg}\n`);
+  }
+  broadcast(
+    JSON.stringify({
+      time: rtlTime(new Date()),
+      src,
+      lvl: LOG_LEVEL_BY_SRC[src] ?? DEFAULT_LOG_LEVEL,
+      msg,
+    }),
+  );
+});
+logTail.stderr.on("data", (d) => process.stderr.write(`tail(log): ${d}`));
+// Log frames are supplementary: if this tail dies the event stream is still
+// valid, so unlike the events tail it does not take the bridge down.
+logTail.on("exit", (code) =>
+  process.stderr.write(`ws-bridge: log tail exited (${code}) after ${logCount} frame(s)\n`),
+);
 
 tail.stderr.on("data", (d) => process.stderr.write(`tail: ${d}`));
 tail.on("exit", (code) => {
