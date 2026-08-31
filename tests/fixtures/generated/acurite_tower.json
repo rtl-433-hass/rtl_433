@@ -1,0 +1,47 @@
+[
+  {
+    "time": "@0.040188s",
+    "model": "Acurite-Tower",
+    "id": 12053,
+    "channel": "C",
+    "battery_ok": 1,
+    "temperature_C": 26.7,
+    "humidity": 74,
+    "mic": "CHECKSUM",
+    "mod": "ASK",
+    "freq": 434.003,
+    "rssi": 0.632,
+    "snr": 17.133,
+    "noise": -17.134
+  },
+  {
+    "time": "@0.040188s",
+    "model": "Acurite-Tower",
+    "id": 12053,
+    "channel": "C",
+    "battery_ok": 1,
+    "temperature_C": 26.7,
+    "humidity": 74,
+    "mic": "CHECKSUM",
+    "mod": "ASK",
+    "freq": 434.003,
+    "rssi": 0.632,
+    "snr": 17.133,
+    "noise": -17.134
+  },
+  {
+    "time": "@0.040188s",
+    "model": "Acurite-Tower",
+    "id": 12053,
+    "channel": "C",
+    "battery_ok": 1,
+    "temperature_C": 26.7,
+    "humidity": 74,
+    "mic": "CHECKSUM",
+    "mod": "ASK",
+    "freq": 434.003,
+    "rssi": 0.632,
+    "snr": 17.133,
+    "noise": -17.134
+  }
+]
