@@ -130,6 +130,16 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   its `device_key` from coordinator runtime state** (`coordinator.forget_device`)
   so it can re-appear if it transmits again with discovery on. There is no
   persistent ignore list.
+- A nested device's identity (`device_key`) is **re-pointable**: a battery swap
+  usually makes a sensor draw a new transmitter id, and
+  `async_replace_device` (`device_replace.py`, options `replace` →
+  `replace_target` steps) re-points an existing device and every entity under it
+  from the old key onto the new one, so `entity_id` — and therefore recorder
+  history, statistics, dashboards and automations — survives. That helper is the
+  **only** sanctioned place to rewrite a nested device's registry `identifiers`
+  or entity `unique_id`s; do not open-code a re-key elsewhere. It re-emits the
+  `COMPATIBILITY_CONTRACT.md` identifier/unique_id templates verbatim (only the
+  `device_key` value changes), so the contract is unaffected by a replace.
 - `async_migrate_entry` (`migration.py`, config-entry `VERSION` 1 → 2) performs a
   **seamless in-place upgrade from 0.1.0**: it re-homes the legacy per-device
   config entries' registry devices/entities onto the hub entry (preserving

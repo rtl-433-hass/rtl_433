@@ -2,7 +2,7 @@
 id: 4
 group: "quality"
 dependencies: [1, 2, 3]
-status: "pending"
+status: "completed"
 created: 2026-08-31
 skills:
   - pytest

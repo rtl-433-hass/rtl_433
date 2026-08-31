@@ -46,6 +46,7 @@ from custom_components.rtl_433.const import (
 from homeassistant.config_entries import SOURCE_HASSIO, SOURCE_USER
 from homeassistant.const import UnitOfVolume
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
 VALIDATE = "custom_components.rtl_433.config_flow.Rtl433Coordinator.validate_connection"
@@ -478,6 +479,237 @@ async def test_device_picker_labels_detected_commodity(hass, hub_entry_builder):
     }
     assert "gas detected" in labels[gas_key]
     assert "detected" not in labels[plain_key]
+
+
+# --------------------------------------------------------------------------- #
+# Options flow — replace step (battery-swap re-key).                           #
+# --------------------------------------------------------------------------- #
+REPLACE_MODEL = "Acurite-986"
+REPLACE_OLD = f"{REPLACE_MODEL}-1a2b"
+REPLACE_NEW = f"{REPLACE_MODEL}-9f3c"
+
+
+def _seen_models(hass, entry, models):
+    """Stand a coordinator whose ``devices`` map reports a model per device key.
+
+    ``_replacement_model`` falls back to the coordinator's last event when a key
+    has no stored record, which is the discovery-disabled case the replace step
+    exists to serve.
+    """
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = SimpleNamespace(
+        devices={key: SimpleNamespace(model=model) for key, model in models.items()}
+    )
+
+
+async def test_replace_options_flow_rekeys_device(hass, hub_entry_builder, no_socket):
+    """init -> replace -> replace_target re-keys the device and keeps entity_ids.
+
+    The end-to-end flow assertion: the survivor's ``entity_id`` is untouched (so
+    recorder history follows), the devices map is re-keyed with the fields
+    unioned, and the flow finishes without clobbering ``entry.options`` — the
+    helper has already written ``entry.data``.
+    """
+    entry = hub_entry_builder(
+        devices={
+            REPLACE_OLD: {
+                CONF_MODEL: REPLACE_MODEL,
+                DEVICE_FIELDS: ["temperature_C"],
+                DEVICE_TIMEOUT_OVERRIDE: 900,
+            },
+            REPLACE_NEW: {
+                CONF_MODEL: REPLACE_MODEL,
+                DEVICE_FIELDS: ["temperature_C", "battery_ok"],
+            },
+        },
+        options={CONF_MANAGE_SETTINGS: True},
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    survivor = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_OLD}:T"
+    )
+    assert survivor is not None
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "replace"}
+    )
+    assert result["step_id"] == "replace"
+    # Both known devices are offered, keyed and labelled from their own records.
+    assert _select_options(result, "device") == [
+        (REPLACE_OLD, f"{REPLACE_MODEL} ({REPLACE_OLD})"),
+        (REPLACE_NEW, f"{REPLACE_MODEL} ({REPLACE_NEW})"),
+    ]
+
+    # Picking the survivor advances to the target picker, which excludes it and
+    # names it in the prompt so the user can see which device they are keeping.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": REPLACE_OLD}
+    )
+    assert result["step_id"] == "replace_target"
+    assert [value for value, _ in _select_options(result, "device")] == [REPLACE_NEW]
+    assert result["description_placeholders"] == {
+        "device": f"{REPLACE_MODEL} ({REPLACE_OLD})"
+    }
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": REPLACE_NEW}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    # The row moved onto the new unique_id keeping its entity_id...
+    assert (
+        ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_NEW}:T"
+        )
+        == survivor
+    )
+    assert (
+        ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_OLD}:T"
+        )
+        is None
+    )
+    # ...the map is re-keyed with the settings carried and the fields unioned...
+    devices = entry.data[CONF_DEVICES]
+    assert REPLACE_OLD not in devices
+    assert devices[REPLACE_NEW][DEVICE_TIMEOUT_OVERRIDE] == 900
+    assert devices[REPLACE_NEW][DEVICE_FIELDS] == ["battery_ok", "temperature_C"]
+    # ...and options are handed back unchanged.
+    assert entry.options == {CONF_MANAGE_SETTINGS: True}
+
+
+async def test_replace_step_aborts_when_no_devices(hass, hub_entry_builder):
+    """With an empty devices map there is nothing to keep, so the step aborts."""
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "replace"}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "no_devices"
+
+
+async def test_replace_target_aborts_without_candidates(hass, hub_entry_builder):
+    """A single-device hub has nothing to adopt, so the target step aborts.
+
+    Better than a dead-end dropdown: the only known device is the one being kept.
+    """
+    entry = hub_entry_builder(
+        devices={
+            REPLACE_OLD: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]}
+        }
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "replace"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": REPLACE_OLD}
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "no_replacement_candidates"
+
+
+async def test_replace_target_offers_unregistered_devices_same_model_first(
+    hass, hub_entry_builder
+):
+    """Candidates union the devices map with what the coordinator has merely heard.
+
+    With discovery off the replacement never gets a stored record, so a
+    coordinator-only key must still be offered — labelled from its last event —
+    and a battery swap keeps the model, so same-model candidates sort first even
+    when they sort last alphabetically. A candidate whose model is unknown from
+    both sources degrades to its bare key rather than an empty label.
+    """
+    # Deliberately alphabetically *before* the same-model candidate, so the
+    # model-first ordering is distinguishable from a plain sort.
+    other_key = "Aaa-Sensor-1"
+    unknown_key = "Zz-Unknown-7"
+    entry = hub_entry_builder(
+        devices={
+            REPLACE_OLD: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]},
+            other_key: {CONF_MODEL: "Aaa-Sensor", DEVICE_FIELDS: ["temperature_C"]},
+            unknown_key: {CONF_MODEL: "", DEVICE_FIELDS: ["temperature_C"]},
+        }
+    )
+    entry.add_to_hass(hass)
+    # The replacement is heard but never registered (discovery off).
+    _seen_models(hass, entry, {REPLACE_NEW: REPLACE_MODEL})
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "replace"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": REPLACE_OLD}
+    )
+    assert result["step_id"] == "replace_target"
+
+    assert _select_options(result, "device") == [
+        (REPLACE_NEW, f"{REPLACE_MODEL} ({REPLACE_NEW})"),
+        (other_key, f"Aaa-Sensor ({other_key})"),
+        (unknown_key, unknown_key),
+    ]
+
+
+async def test_replace_target_shows_error_when_the_picker_goes_stale(
+    hass, hub_entry_builder
+):
+    """A replace that can no longer run re-shows the form with ``replace_failed``.
+
+    The options flow can sit open while the entry changes underneath it (another
+    session finishing a replace, a reload); the device being kept is then gone
+    from the map. That is a user-facing outcome, so it is rendered as a form
+    error rather than escaping as a traceback.
+    """
+    entry = hub_entry_builder(
+        devices={
+            REPLACE_OLD: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]},
+            REPLACE_NEW: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]},
+        }
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "replace"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": REPLACE_OLD}
+    )
+    assert result["step_id"] == "replace_target"
+
+    # The device being kept disappears from the map while the form is open.
+    hass.config_entries.async_update_entry(
+        entry,
+        data={
+            **entry.data,
+            CONF_DEVICES: {
+                k: v for k, v in entry.data[CONF_DEVICES].items() if k != REPLACE_OLD
+            },
+        },
+    )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": REPLACE_NEW}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "replace_target"
+    assert result["errors"] == {"base": "replace_failed"}
+    # Nothing was written, and the now-recordless device still names itself.
+    assert REPLACE_OLD not in entry.data[CONF_DEVICES]
+    assert result["description_placeholders"] == {
+        "device": f"{REPLACE_OLD} ({REPLACE_OLD})"
+    }
 
 
 # --------------------------------------------------------------------------- #

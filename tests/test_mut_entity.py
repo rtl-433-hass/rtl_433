@@ -456,6 +456,30 @@ def test_device_info_serial_number_none_for_model_only_device():
     assert entity.device_info["serial_number"] is None
 
 
+@pytest.mark.parametrize(
+    ("model", "device_key", "expected"),
+    [
+        pytest.param(
+            "Acurite-986",
+            "Acurite-986-1a2b-ch2",
+            "1a2b-ch2",
+            id="channel-kept-in-serial",
+        ),
+        pytest.param("", "Acurite-986-1a2b", None, id="unknown-model"),
+        pytest.param("Acurite-986", "Nexus-TH-77", None, id="key-not-under-model"),
+    ],
+)
+def test_device_info_serial_number_edge_cases(model, device_key, expected):
+    """The serial number is the whole id suffix, or unset when there isn't one.
+
+    The channel/state part is transmitter identity too, so it stays in the serial
+    number. A device whose model never decoded, and a key that is not shaped as
+    ``{model}-{suffix}``, both leave the field unset rather than publishing a
+    misleading serial.
+    """
+    assert _identity_entity(model, device_key).device_info["serial_number"] == expected
+
+
 async def test_device_name_with_model(hass, hub_entry_builder):
     """Device name is '{model} {id-suffix}' (no redundant model) when model set."""
     model = "EnergyMeter-2000"

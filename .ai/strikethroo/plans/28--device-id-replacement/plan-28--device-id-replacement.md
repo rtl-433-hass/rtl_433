@@ -467,10 +467,10 @@ are safely parallel.
 **Parallel Tasks:**
 - ✔️ Task 003: Options-flow "Replace device" step and translations (depends on: 002)
 
-### Phase 3: Verification and Documentation
+### ✅ Phase 3: Verification and Documentation
 **Parallel Tasks:**
-- Task 004: Tests for the re-key helper, the replace flow, and the serial number (depends on: 001, 002, 003)
-- Task 005: Document the replace flow and the device serial number (depends on: 003)
+- ✔️ Task 004: Tests for the re-key helper, the replace flow, and the serial number (depends on: 001, 002, 003)
+- ✔️ Task 005: Document the replace flow and the device serial number (depends on: 003)
 
 ### Post-phase Actions
 

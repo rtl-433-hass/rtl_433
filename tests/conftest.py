@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -27,6 +28,7 @@ from custom_components.rtl_433.const import (
     DEFAULT_PORT,
     DOMAIN,
 )
+from custom_components.rtl_433.coordinator.base import Rtl433Client
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -102,3 +104,22 @@ def build_hub_entry(
 def hub_entry_builder():
     """Expose :func:`build_hub_entry` as a fixture."""
     return build_hub_entry
+
+
+@pytest.fixture
+def no_socket():
+    """Stub the transport's connect loop so no real WebSocket is ever opened.
+
+    Opt-in (not autouse): only the tests that drive a hub entry through the real
+    ``async_setup_entry`` need it. ``Rtl433Client.start`` is the single place the
+    socket is opened, so a no-op keeps ``coordinator.async_start`` intact while
+    leaving setup — and any later ``async_reload`` — offline. ``test_lifecycle``
+    keeps its own module-scoped copy; this one exists for the flow-level modules
+    that reload an entry mid-test.
+    """
+
+    async def _noop(self) -> None:
+        return None
+
+    with patch.object(Rtl433Client, "start", _noop):
+        yield
