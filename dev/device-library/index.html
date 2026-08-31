@@ -1572,9 +1572,25 @@ specially by the loader and are not parsed as field-mapping tables.</p>
 <li><strong>Validate</strong> the YAML:
    <div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('custom_components/rtl_433/device_library/*.yaml')]; print('ok')"</span>
 </code></pre></div></li>
-<li><strong>Add a fixture/test</strong> if you are contributing upstream (see the project test
-   suite) and open a PR with a <code>feat:</code> conventional commit.</li>
+<li><strong>Add a fixture</strong> under <code>tests/fixtures/</code> with a real event from your device.
+   <code>tests/test_fixture_coverage.py</code> sweeps every fixture and fails if any field
+   in it has no descriptor and no skip-key entry, so a fixture is what proves
+   your mapping actually matches. Then open a PR with a <code>feat:</code> conventional
+   commit.</li>
 </ol>
+<div class="admonition warning">
+<p class="admonition-title">Field names are matched exactly, and a mismatch is silent</p>
+<p>A key that differs from the wire name by so much as its case produces no
+entity, no warning, and no error — the sensor simply never appears. SCMplus
+emits <code>Consumption</code> (CamelCase) while ERT-SCM emits <code>consumption_data</code>
+(snake_case); both decoders are in the same protocol family. Copy the name
+from the decoder's <code>data_make()</code> call, or better, from a real event.</p>
+<p>For the SCM family and Acurite this is checked against rtl_433's actual
+output: <code>tests/fixtures/generated/</code> holds events decoded from real <code>.cu8</code>
+captures by <code>scripts/regen_capture_fixtures.py</code>, and CI re-decodes and diffs
+them. See <code>tests/fixtures/generated/README.md</code> if you want to extend that
+to another protocol.</p>
+</div>
 <h2 id="notes-on-fields-that-cannot-be-expressed-declaratively">Notes on fields that cannot be expressed declaratively<a class="headerlink" href="#notes-on-fields-that-cannot-be-expressed-declaratively" title="Permanent link">&para;</a></h2>
 <p>The upstream <code>mappings</code> table includes two <code>device_automation</code> entries —
 <code>channel</code> and <code>button</code> — that publish MQTT <strong>device triggers</strong> (e.g.
