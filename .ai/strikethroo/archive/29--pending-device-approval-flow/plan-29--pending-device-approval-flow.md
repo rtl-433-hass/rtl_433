@@ -632,5 +632,14 @@ and `ruff format --check` clean; `mkdocs build --strict` exit 0; the
 5. **`tests/test_coordinator.py` is mapped only to `coordinator/base.py`** in
    `EXPLICIT_TEST_SOURCES` though it exercises `coordinator/_events.py` heavily.
    Pre-existing; worth correcting when the mutation baseline is next rebuilt.
-6. **The mutation baseline needs rebuilding** for the changed modules; CI will
-   run the full matrix for this branch.
+6. **The mutation gate was not completed locally — it is inconclusive, not
+   passed.** `uv run mutmut run "custom_components.rtl_433.options_flow.*"`
+   exited 0 but checked no mutants: `mutmut results` reports all 4790 collected
+   mutants as `not checked`, so the module filter ran no work in this
+   environment. Every other validation gate passed (full suite, both ruff
+   commands, `mkdocs build --strict`, the `discovery_enabled` grep gate, and the
+   live harness run). CI runs the mutation matrix for this branch and will
+   escalate to a full run because `scripts/mutation_targets.py` changed, so the
+   ratchet is enforced there. The baseline still needs rebuilding for the changed
+   modules. Anyone re-running this locally should work out the correct
+   invocation first rather than trusting a zero exit code.
