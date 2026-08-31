@@ -1,6 +1,7 @@
 """Options flow for the rtl_433 integration's hub config entry.
 
-A small menu offering a *hub* step, a *device* step, and a *mappings* step:
+A small menu offering a *hub* step, a *device* step, a *mappings* step, and a
+*replace* step:
 
 - **hub** persists the per-hub discovery toggle, the default availability
   timeout, and the manage-settings toggle to ``entry.options``.
@@ -11,6 +12,10 @@ A small menu offering a *hub* step, a *device* step, and a *mappings* step:
   its own step so every default on the settings form can be derived from the
   selected device.
 - **mappings** edits this hub's device-library overrides as YAML.
+- **replace** picks a device to keep, then **replace_target** picks the newly
+  seen device that is really the same hardware, and re-keys the survivor onto it
+  via :func:`~.device_replace.async_replace_device` (the battery-swap recovery).
+  It is last on the menu: the rarest action, and the most consequential.
 
 Split out of ``config_flow.py`` (which keeps the hub add/reconfigure/discovery
 flow); ``Rtl433ConfigFlow.async_get_options_flow`` returns this class.
@@ -62,6 +67,7 @@ from .const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
+from .device_replace import DeviceReplaceError, async_replace_device
 from .mapping import Registry, lookup, normalize_overrides, validate_user_mappings
 
 # Selector key for the device picker on the options device step.
@@ -93,6 +99,9 @@ class Rtl433OptionsFlow(OptionsFlow):
     # through the (optional) calibration step into the finish path. ``None`` means
     # "no value submitted" -> clear any prior override.
     _motion_clear_delay: int | None = None
+    # The device to keep, chosen on the replace step and carried into
+    # replace_target (whose candidate list and ordering are both derived from it).
+    _replace_old_key: str = ""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -100,7 +109,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         """Show the options menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["hub", "device", "mappings"],
+            menu_options=["hub", "device", "mappings", "replace"],
         )
 
     async def async_step_hub(
@@ -507,4 +516,146 @@ class Rtl433OptionsFlow(OptionsFlow):
             step_id="calibration",
             data_schema=schema,
             description_placeholders={"commodity": commodity},
+        )
+
+    async def async_step_replace(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick the device to keep -- the one whose history should survive.
+
+        Picker-only for the same reason :meth:`async_step_device` is: the next
+        form is derived entirely from this choice. The candidate list on
+        :meth:`async_step_replace_target` excludes this device and sorts
+        same-model candidates first, neither of which is possible while both
+        picks share one form. Only devices with a stored record are offered here
+        -- the survivor must have settings and a device row to carry across -- so
+        an empty map aborts with ``no_devices``, matching the device step.
+        """
+        devices: dict[str, Any] = dict(self.config_entry.data.get(CONF_DEVICES, {}))
+        if not devices:
+            return self.async_abort(reason="no_devices")
+
+        if user_input is not None:
+            self._replace_old_key = user_input[CONF_DEVICE]
+            return await self.async_step_replace_target()
+
+        options = [
+            SelectOptionDict(
+                value=device_key, label=self._device_label(device_key, record)
+            )
+            for device_key, record in sorted(devices.items())
+        ]
+        return self.async_show_form(
+            step_id="replace",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_DEVICE): SelectSelector(
+                        SelectSelectorConfig(
+                            options=options,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    )
+                }
+            ),
+        )
+
+    def _replacement_model(
+        self, device_key: str, devices: dict[str, Any], seen: dict[str, Any]
+    ) -> str:
+        """Model for a replacement candidate: stored record, else last event.
+
+        A candidate can legitimately have no record in ``entry.data["devices"]``
+        -- with discovery off the coordinator hears a device it never registers,
+        and that is exactly the device a replace has to offer -- so the model
+        falls back to the coordinator's last :class:`NormalizedEvent` for the key
+        and then to ``""``. Never raises: a missing record, a missing event and a
+        blank model all degrade to the bare key in the picker.
+        """
+        record: dict[str, Any] = devices.get(device_key, {})
+        return record.get(CONF_MODEL) or getattr(seen.get(device_key), "model", "")
+
+    async def async_step_replace_target(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick the new identity to adopt onto the device kept on the previous step.
+
+        Candidates are the **union** of the stored devices map and the
+        coordinator's seen-device keys, because the docs recommend turning
+        discovery off in urban areas: with discovery off the replacement never
+        gets a registered row, but the coordinator has still heard it and
+        :func:`async_replace_device` accepts an unregistered ``new_key``. The
+        coordinator is reached the way :meth:`_device_commodity_default` reaches
+        it and is guarded the same way -- the options flow can be opened while the
+        entry is not loaded, and then the devices map alone is the candidate set.
+        Same-model candidates sort first, since a battery swap keeps the model,
+        and an empty candidate set (a single-device hub) aborts rather than
+        showing a dead-end dropdown.
+
+        The finish path deliberately hands back ``entry.options`` unchanged: the
+        helper has already written ``entry.data`` and reloaded the entry, so (as
+        in :meth:`async_step_mappings`) this flow only has to close without
+        clobbering options. A :class:`DeviceReplaceError` is a user-facing
+        outcome -- a picker gone stale against a reloaded entry, say -- so it
+        re-shows this form as an error instead of escaping as a traceback.
+        """
+        old_key = self._replace_old_key
+        devices: dict[str, Any] = dict(self.config_entry.data.get(CONF_DEVICES, {}))
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                await async_replace_device(
+                    self.hass, self.config_entry, old_key, user_input[CONF_DEVICE]
+                )
+            except DeviceReplaceError:
+                errors["base"] = "replace_failed"
+            else:
+                return self.async_create_entry(
+                    title="", data=dict(self.config_entry.options)
+                )
+
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        seen: dict[str, Any] = getattr(coordinator, "devices", None) or {}
+
+        old_model = self._replacement_model(old_key, devices, seen)
+        candidates = sorted(
+            (set(devices) | set(seen)) - {old_key},
+            key=lambda key: (
+                0
+                if old_model
+                and self._replacement_model(key, devices, seen) == old_model
+                else 1,
+                key,
+            ),
+        )
+        if not candidates:
+            return self.async_abort(reason="no_replacement_candidates")
+
+        options = [
+            SelectOptionDict(
+                value=device_key,
+                label=(
+                    f"{model} ({device_key})"
+                    if (model := self._replacement_model(device_key, devices, seen))
+                    else device_key
+                ),
+            )
+            for device_key in candidates
+        ]
+        return self.async_show_form(
+            step_id="replace_target",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_DEVICE): SelectSelector(
+                        SelectSelectorConfig(
+                            options=options,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    )
+                }
+            ),
+            errors=errors,
+            description_placeholders={
+                "device": self._device_label(old_key, devices.get(old_key, {}))
+            },
         )

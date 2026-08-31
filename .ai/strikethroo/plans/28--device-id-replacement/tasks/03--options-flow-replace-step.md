@@ -2,7 +2,7 @@
 id: 3
 group: "user-interface"
 dependencies: [2]
-status: "pending"
+status: "completed"
 created: 2026-08-31
 skills:
   - home-assistant-config-flow

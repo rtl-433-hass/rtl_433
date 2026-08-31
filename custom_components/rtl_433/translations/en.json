@@ -91,7 +91,8 @@
         "menu_options": {
           "hub": "Hub settings",
           "device": "Device settings",
-          "mappings": "Device mappings"
+          "mappings": "Device mappings",
+          "replace": "Replace device"
         }
       },
       "hub": {
@@ -150,13 +151,35 @@
           "unit": "The unit one consumption count represents (before scale). Home Assistant converts between compatible units for display.",
           "scale": "Multiplier applied to the raw counter (for example 0.1 if each count is a tenth of a unit). Use 1 if each count is exactly one base unit."
         }
+      },
+      "replace": {
+        "title": "Replace device",
+        "description": "Some sensors draw a new transmitter id when their batteries are changed, so the same hardware turns up as a brand-new device. Pick the device you want to keep: its history, settings and automations are moved onto the new id.",
+        "data": {
+          "device": "Device to keep"
+        },
+        "data_description": {
+          "device": "The existing device whose history you want to preserve."
+        }
+      },
+      "replace_target": {
+        "title": "Replace device",
+        "description": "Pick the newly seen device that is really the same hardware as {device}. Its duplicate entities are removed and the device you kept takes over its id. Devices of the same model are listed first.",
+        "data": {
+          "device": "New device"
+        },
+        "data_description": {
+          "device": "The device that appeared after the batteries were changed."
+        }
       }
     },
     "abort": {
-      "no_devices": "No devices have been discovered yet."
+      "no_devices": "No devices have been discovered yet.",
+      "no_replacement_candidates": "There is no other device to replace this one with. Wait until the replacement has been heard from at least once, then try again."
     },
     "error": {
-      "invalid_mappings": "Invalid mappings: {problems}"
+      "invalid_mappings": "Invalid mappings: {problems}",
+      "replace_failed": "That device could not be replaced. Go back and pick a different device: the two devices must be different, and the device to keep must still exist."
     }
   },
   "selector": {

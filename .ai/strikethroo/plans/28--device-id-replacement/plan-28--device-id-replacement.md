@@ -463,9 +463,9 @@ No circular dependencies: the graph is a DAG rooted at 001 and 002.
 These touch disjoint files (`entity.py` vs. the new `device_replace.py`), so they
 are safely parallel.
 
-### Phase 2: User-Facing Flow
+### ✅ Phase 2: User-Facing Flow
 **Parallel Tasks:**
-- Task 003: Options-flow "Replace device" step and translations (depends on: 002)
+- ✔️ Task 003: Options-flow "Replace device" step and translations (depends on: 002)
 
 ### Phase 3: Verification and Documentation
 **Parallel Tasks:**
