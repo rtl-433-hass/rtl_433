@@ -533,6 +533,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#receiver-noise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Receiver Noise
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#server-statistics" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -693,6 +704,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#receiver-noise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Receiver Noise
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#server-statistics" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -781,6 +803,33 @@ shutdown instead of waiting for a silence timeout.</p>
 </ul>
 <p>The configured <code>frequencies</code> and <code>hop_times</code> arrays appear as attributes on the
 center-frequency sensor.</p>
+<h2 id="receiver-noise">Receiver Noise<a class="headerlink" href="#receiver-noise" title="Permanent link">&para;</a></h2>
+<p>Two diagnostic sensors track the receiver's noise floor, so you can graph RF
+noise over time and alert when it climbs high enough to drown out your devices:</p>
+<ul>
+<li><strong>Noise level</strong> — the receiver's estimated noise level in dB.</li>
+<li><strong>Minimum detection level</strong> — the auto-adjusted pulse-detection threshold in
+  dB; transmissions weaker than this are not decoded.</li>
+</ul>
+<p>rtl_433 only reports these when its auto-level feature is active, so run the
+server with <code>-Y autolevel</code> (updates on every shift greater than 1 dB) and
+optionally <code>-M noise:30</code> (a periodic report every 30 seconds). The config-file
+equivalents are:</p>
+<div class="highlight"><pre><span></span><code>pulse_detect autolevel
+report_meta noise:30
+</code></pre></div>
+<p>With the Home Assistant add-on, put those two lines in the radio's optional
+per-radio override file in the add-on config directory (see the add-on
+documentation). Without them the sensors stay <code>unknown</code>. Note that <code>autolevel</code>
+changes reception behavior by design: it continuously adapts the pulse
+detector's minimum level to the measured noise floor.</p>
+<p>Unlike the sensors below, this data arrives over the event stream itself
+(rtl_433 ≥ 23.11), so it works even when <code>/cmd</code> is proxied away behind a
+WebSocket-only proxy.</p>
+<p><img alt="The hub device's Diagnostic card: Noise level -36.4 dB and Minimum detection level -33.4 dB alongside Connectivity Connected, with the sensors fetched over /cmd reading Unknown" src="../images/14-hub-noise.png" /></p>
+<p>That capture is from a server reachable only over its WebSocket stream, which is
+why the two noise sensors report while the <code>/cmd</code>-sourced sensors described below
+read <code>unknown</code>.</p>
 <h2 id="server-statistics">Server Statistics<a class="headerlink" href="#server-statistics" title="Permanent link">&para;</a></h2>
 <p>Server statistics include cumulative decoded events, OOK frames, FSK frames, and
 enabled decoders. Per-protocol <code>stats[]</code> and the <code>since</code> timestamp appear as

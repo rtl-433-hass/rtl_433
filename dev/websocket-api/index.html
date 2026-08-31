@@ -1123,6 +1123,13 @@ frames:</p>
   plus device fields, such as
   <code>{"time":"...","model":"...","id":...,"temperature_C":...}</code>.</li>
 <li><strong>States</strong>: larger JSON objects emitted for periodic statistics/state.</li>
+<li><strong>Log frames</strong> (rtl_433 ≥ 23.11): the server's own log output, forwarded as
+  <code>{"time":"...","src":"&lt;subsystem&gt;","lvl":&lt;int&gt;,"msg":"&lt;text&gt;"}</code> objects. The
+  HTTP output consumes all log levels, but the server's global verbosity
+  (default <code>WARNING</code>; raise with <code>-v</code>) gates what is generated. Notably the
+  pulse detector's noise estimates (<code>src</code> <code>"Auto Level"</code>, from <code>-Y autolevel</code>
+  adjustments and <code>-M noise[:secs]</code> periodic reports) arrive this way — the
+  only place rtl_433 surfaces its noise floor; there is no structured getter.</li>
 </ul>
 <p>On server shutdown each WebSocket receives <code>{"shutdown":"goodbye"}</code>.</p>
 <p>WebSocket connections do not receive the CRLF keep-alive used by the <code>/events</code>
