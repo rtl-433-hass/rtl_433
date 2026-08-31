@@ -1,4 +1,5 @@
-# Power, energy and electrical field mappings.
+# Power, energy and electrical field mappings, plus the utility-meter
+# (SCM / ERT / SCMplus) consumption and identity fields.
 #
 # Ported from the upstream rtl_433 example `rtl_433_mqtt_hass.py` `mappings`
 # table. See docs/device-library.md for the schema reference.
@@ -71,7 +72,12 @@ consumption_data:
   value_transform: { int: true }
   object_suffix: consumption
 
-consumption:
+# SCMplus emits this field CamelCased as `Consumption`, alongside its other
+# CamelCased fields (`EndpointID`, `MeterType`, ...). rtl_433 field names are
+# case-sensitive, so the key must match the wire name exactly.
+#
+# https://github.com/merbanan/rtl_433/blob/90621a8cb56c79b766077cadce4dc37bc613c54c/src/devices/scmplus.c#L126
+Consumption:
   platform: sensor
   device_class: null
   unit_of_measurement: null
@@ -90,3 +96,116 @@ ext_power:
   payload: { on: "1", off: "0" }
   entity_category: diagnostic
   object_suffix: extpwr
+
+# --- Utility-meter identity / tamper diagnostics (SCMplus, ERT-SCM) ----------
+#
+# These are the remaining non-consumption fields the SCM-family decoders emit.
+# All are device metadata rather than measurements, so they are diagnostic; the
+# noisy ones are disabled by default. Field names are verbatim from the upstream
+# rtl_433 `data_make()` calls and are case-sensitive -- SCMplus uses CamelCase,
+# ERT-SCM lower_snake_case:
+#
+#   SCMplus: https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/scmplus.c#L141-L152
+#   ERT-SCM: https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/ert_scm.c#L83-L91
+#
+# Upstream links are pinned to a commit rather than `master` so the line ranges
+# keep pointing at the code they describe; re-check them when revisiting this
+# section.
+#
+# `EndpointID` and `PacketCRC` are on the skip list instead (see
+# `_skip_keys.yaml`): the former duplicates `id`, the latter is transport noise.
+
+# SCMplus: the decoded commodity, "Electric" / "Gas" / "Water" / "unknown".
+# rtl_433 derives it from the low nibble of the endpoint-type byte:
+# https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/scmplus.c#L107-L129
+# Enabled by default: this is what tells two otherwise-identical SCMplus meters
+# apart, and it is the hint the per-device calibration flow pre-fills the
+# commodity from.
+MeterType:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: null
+  name: Meter type
+  entity_category: diagnostic
+  icon: "mdi:meter-gas"
+  object_suffix: metertype
+
+# SCMplus: protocol identifier byte, formatted "0x%02X" upstream:
+# https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/scmplus.c#L82
+ProtocolID:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: null
+  name: Protocol ID
+  entity_category: diagnostic
+  enabled_by_default: false
+  object_suffix: protocolid
+
+# SCMplus: raw endpoint-type byte, "0x%02X". Its low nibble is what `MeterType`
+# is decoded from; surfaced raw for meters whose nibble upstream calls "unknown":
+# https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/scmplus.c#L85
+EndpointType:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: null
+  name: Endpoint type
+  entity_category: diagnostic
+  enabled_by_default: false
+  object_suffix: endpointtype
+
+# SCMplus: 16-bit physical tamper value, "0x%04X". Not a boolean, so this is a
+# raw string sensor rather than the `tamper` binary_sensor in binary_states.yaml
+# (that entry maps the lowercase `tamper` field other decoders emit):
+# https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/scmplus.c#L99
+Tamper:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: null
+  name: Tamper raw
+  entity_category: diagnostic
+  enabled_by_default: false
+  object_suffix: tamper_raw
+
+# ERT-SCM: 4-bit ERT endpoint type, `(b[3] >> 2) & 0x0F`. Drives the commodity
+# pre-fill for meters that report no `MeterType` (see calibration.py
+# `commodity_from_fields`). The bit extraction, alongside the two tamper
+# counters below:
+# https://github.com/merbanan/rtl_433/blob/65e26f518077cafb595f5984201b9f7c121406ef/src/devices/ert_scm.c#L76-L78
+ert_type:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: null
+  name: ERT type
+  value_transform: { int: true }
+  entity_category: diagnostic
+  enabled_by_default: false
+  object_suffix: erttype
+
+# ERT-SCM: 2-bit tamper counters (0-3), not booleans -- `(b[3] & 0xC0) >> 6` and
+# `b[3] & 0x03` respectively (see the ert_scm.c link above).
+physical_tamper:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: null
+  name: Physical tamper
+  value_transform: { int: true }
+  entity_category: diagnostic
+  enabled_by_default: false
+  object_suffix: phytamper
+
+encoder_tamper:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: null
+  name: Encoder tamper
+  value_transform: { int: true }
+  entity_category: diagnostic
+  enabled_by_default: false
+  object_suffix: enctamper

@@ -209,10 +209,16 @@ async def test_device_options_step_sets_and_clears_timeout_override(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "device"
 
+    # Pick the device -> the per-device settings form.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": device_key}
+    )
+    assert result["step_id"] == "device_settings"
+
     # Set an override; it lands in entry.data["devices"], not entry.options.
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"device": device_key, DEVICE_TIMEOUT_OVERRIDE: 90},
+        {DEVICE_TIMEOUT_OVERRIDE: 90},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.data[CONF_DEVICES][device_key][DEVICE_TIMEOUT_OVERRIDE] == 90
@@ -226,6 +232,7 @@ async def test_device_options_step_sets_and_clears_timeout_override(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"device": device_key}
     )
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert DEVICE_TIMEOUT_OVERRIDE not in entry.data[CONF_DEVICES][device_key]
 
@@ -273,10 +280,14 @@ async def test_calibration_round_trip_writes_into_device_record(
     )
     assert result["step_id"] == "device"
 
-    # Choose water -> advance to the calibration step (no record written yet).
+    # Pick the device, then choose water -> advance to the calibration step
+    # (no record written yet).
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": device_key}
+    )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"device": device_key, CALIBRATION_COMMODITY: COMMODITY_WATER},
+        {CALIBRATION_COMMODITY: COMMODITY_WATER},
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "calibration"
@@ -315,8 +326,11 @@ async def test_device_step_none_commodity_finishes_without_calibration(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"device": device_key, CALIBRATION_COMMODITY: COMMODITY_NONE},
+        {CALIBRATION_COMMODITY: COMMODITY_NONE},
     )
     # No calibration step; finishes immediately with no calibration sub-record.
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -326,23 +340,35 @@ async def test_device_step_none_commodity_finishes_without_calibration(
 # --------------------------------------------------------------------------- #
 # Options flow — commodity pre-fill from the device's last decoded event.      #
 # --------------------------------------------------------------------------- #
-def _seed_coordinator_last_event(hass, entry, device_key, fields):
-    """Stand a minimal coordinator with one device's last event into hass.data.
+def _seed_coordinator_last_event(hass, entry, fields_by_device):
+    """Stand a minimal coordinator with per-device last events into hass.data.
 
-    The device step reads ``coordinator.devices[device_key].fields`` to pre-fill
-    the commodity, so a SimpleNamespace coordinator with the right shape is enough
-    to exercise the pre-fill path without a full hub setup.
+    The device-settings step reads ``coordinator.devices[device_key].fields`` to
+    pre-fill the commodity, so a SimpleNamespace coordinator with the right shape
+    is enough to exercise the pre-fill path without a full hub setup.
     """
-    event = SimpleNamespace(fields=fields)
-    coordinator = SimpleNamespace(devices={device_key: event})
+    coordinator = SimpleNamespace(
+        devices={
+            key: SimpleNamespace(fields=fields)
+            for key, fields in fields_by_device.items()
+        }
+    )
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
 
 async def _open_device_step(hass, entry):
-    """Open the options device step and return the shown form result."""
+    """Open the options device picker step and return the shown form result."""
     result = await hass.config_entries.options.async_init(entry.entry_id)
     return await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
+    )
+
+
+async def _open_device_settings(hass, entry, device_key):
+    """Pick ``device_key`` and return the per-device settings form result."""
+    result = await _open_device_step(hass, entry)
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": device_key}
     )
 
 
@@ -353,10 +379,10 @@ async def test_commodity_prefill_from_meter_type_string(hass, hub_entry_builder)
         devices={device_key: {CONF_MODEL: "IDM", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
-    _seed_coordinator_last_event(hass, entry, device_key, {"MeterType": "Gas"})
+    _seed_coordinator_last_event(hass, entry, {device_key: {"MeterType": "Gas"}})
 
-    result = await _open_device_step(hass, entry)
-    assert result["step_id"] == "device"
+    result = await _open_device_settings(hass, entry, device_key)
+    assert result["step_id"] == "device_settings"
     assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_GAS
 
 
@@ -373,9 +399,9 @@ async def test_commodity_prefill_from_ert_type_low_nibble(hass, hub_entry_builde
         }
     )
     entry.add_to_hass(hass)
-    _seed_coordinator_last_event(hass, entry, device_key, {"ert_type": 0x12})
+    _seed_coordinator_last_event(hass, entry, {device_key: {"ert_type": 0x12}})
 
-    result = await _open_device_step(hass, entry)
+    result = await _open_device_settings(hass, entry, device_key)
     assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_GAS
 
 
@@ -388,10 +414,70 @@ async def test_commodity_prefill_defaults_to_none_without_hint(hass, hub_entry_b
         }
     )
     entry.add_to_hass(hass)
-    _seed_coordinator_last_event(hass, entry, device_key, {"consumption_data": 42})
+    _seed_coordinator_last_event(hass, entry, {device_key: {"consumption_data": 42}})
+
+    result = await _open_device_settings(hass, entry, device_key)
+    assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_NONE
+
+
+async def test_commodity_prefill_reflects_selected_device_on_multi_device_hub(
+    hass, hub_entry_builder
+):
+    """With several meters, the pre-fill follows the *selected* device.
+
+    Regression test: the commodity default used to be derived only when the hub
+    had exactly one device, so a hub with two SCMplus meters silently fell back
+    to ``none`` and the per-device calibration looked like it did not apply.
+    """
+    gas_key, water_key = "SCMplus-1", "SCMplus-2"
+    entry = hub_entry_builder(
+        devices={
+            gas_key: {CONF_MODEL: "SCMplus", DEVICE_FIELDS: ["Consumption"]},
+            water_key: {CONF_MODEL: "SCMplus", DEVICE_FIELDS: ["Consumption"]},
+        }
+    )
+    entry.add_to_hass(hass)
+    _seed_coordinator_last_event(
+        hass,
+        entry,
+        {
+            gas_key: {"MeterType": "Gas"},
+            water_key: {"MeterType": "Water"},
+        },
+    )
+
+    result = await _open_device_settings(hass, entry, gas_key)
+    assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_GAS
+
+    result = await _open_device_settings(hass, entry, water_key)
+    assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_WATER
+
+
+async def test_device_picker_labels_detected_commodity(hass, hub_entry_builder):
+    """The picker annotates a device whose commodity was detected from the signal.
+
+    This is what makes the per-device calibration discoverable before the user
+    has selected anything.
+    """
+    gas_key, plain_key = "SCMplus-1", "Acurite-1"
+    entry = hub_entry_builder(
+        devices={
+            gas_key: {CONF_MODEL: "SCMplus", DEVICE_FIELDS: ["Consumption"]},
+            plain_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]},
+        }
+    )
+    entry.add_to_hass(hass)
+    _seed_coordinator_last_event(
+        hass, entry, {gas_key: {"MeterType": "Gas"}, plain_key: {"temperature_C": 21}}
+    )
 
     result = await _open_device_step(hass, entry)
-    assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_NONE
+    labels = {
+        option["value"]: option["label"]
+        for option in result["data_schema"].schema["device"].config["options"]
+    }
+    assert "gas detected" in labels[gas_key]
+    assert "detected" not in labels[plain_key]
 
 
 # --------------------------------------------------------------------------- #

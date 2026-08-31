@@ -295,13 +295,107 @@ def test_binary_payload_mapping(library):
     assert apply_transform(wet, "maybe") is None
 
 
+def test_scm_meter_diagnostic_fields_resolve(library):
+    """The SCM-family identity / tamper fields resolve to diagnostic sensors.
+
+    Field names are verbatim from upstream rtl_433 and case-sensitive: SCMplus
+    emits CamelCase (``MeterType``), ERT-SCM lower_snake_case (``ert_type``).
+    """
+    registry, _ = library
+
+    for field_key, suffix in (
+        ("MeterType", "metertype"),
+        ("ProtocolID", "protocolid"),
+        ("EndpointType", "endpointtype"),
+        ("Tamper", "tamper_raw"),
+        ("ert_type", "erttype"),
+        ("physical_tamper", "phytamper"),
+        ("encoder_tamper", "enctamper"),
+    ):
+        descriptor = lookup(field_key, registry=registry)
+        assert descriptor is not None, field_key
+        assert descriptor.platform == "sensor", field_key
+        assert descriptor.entity_category == "diagnostic", field_key
+        # Metadata, not measurements: no device_class, unit, or state_class.
+        assert descriptor.device_class is None, field_key
+        assert descriptor.unit_of_measurement is None, field_key
+        assert descriptor.state_class is None, field_key
+        assert descriptor.object_suffix == suffix, field_key
+
+
+def test_meter_type_is_enabled_and_other_meter_diagnostics_are_not(library):
+    """``MeterType`` ships enabled; the noisier meter diagnostics do not.
+
+    ``MeterType`` is what distinguishes two otherwise-identical SCMplus meters
+    (gas vs water), so it is worth an entity by default.
+    """
+    registry, _ = library
+
+    assert lookup("MeterType", registry=registry).enabled_by_default is True
+    for field_key in (
+        "ProtocolID",
+        "EndpointType",
+        "Tamper",
+        "ert_type",
+        "physical_tamper",
+        "encoder_tamper",
+    ):
+        descriptor = lookup(field_key, registry=registry)
+        assert descriptor.enabled_by_default is False, field_key
+
+
+def test_scmplus_tamper_does_not_shadow_binary_tamper(library):
+    """``Tamper`` (SCMplus, hex string) is distinct from ``tamper`` (boolean).
+
+    Lookup is case-sensitive, so the two coexist. They must not collide on
+    ``object_suffix`` either, since that is what the entity unique_id is built
+    from and a device emitting both would otherwise lose one entity.
+    """
+    registry, _ = library
+
+    scmplus = lookup("Tamper", registry=registry)
+    binary = lookup("tamper", registry=registry)
+
+    assert scmplus.platform == "sensor"
+    assert binary.platform == "binary_sensor"
+    assert binary.device_class == "safety"
+    assert scmplus.object_suffix != binary.object_suffix
+
+
+def test_meter_tamper_counters_coerce_to_int(library):
+    """The ERT-SCM 2-bit tamper counters and ert_type coerce to ``int``."""
+    registry, _ = library
+
+    for field_key in ("physical_tamper", "encoder_tamper", "ert_type"):
+        descriptor = lookup(field_key, registry=registry)
+        value = apply_transform(descriptor, "3")
+        assert value == 3, field_key
+        assert isinstance(value, int), field_key
+
+
+def test_scmplus_string_diagnostics_pass_through_unchanged(library):
+    """The hex/string meter diagnostics are surfaced verbatim, not coerced."""
+    registry, _ = library
+
+    assert apply_transform(lookup("MeterType", registry=registry), "Water") == "Water"
+    assert apply_transform(lookup("Tamper", registry=registry), "0x0000") == "0x0000"
+    assert apply_transform(lookup("EndpointType", registry=registry), "0x1B") == "0x1B"
+
+
 def test_should_skip_excludes_skip_keys(library):
     """Identity / transport keys are skipped; measurement keys are not."""
-    _, skip_keys = library
+    registry, skip_keys = library
 
     # Identity / transport keys from the shipped _skip_keys.yaml.
     for key in ("model", "id", "channel", "subtype", "mic", "protocol", "freq1"):
         assert should_skip(key, skip_keys) is True
+
+    # SCMplus duplicate-identity / transport fields: EndpointID repeats ``id``
+    # and PacketCRC is the frame checksum. Skipped *and* unmapped, so they
+    # neither build an entity nor show up as unmatched in diagnostics.
+    for key in ("EndpointID", "PacketCRC"):
+        assert should_skip(key, skip_keys) is True
+        assert lookup(key, registry=registry) is None, key
 
     # Measurement keys (and ``time``, which the library maps to a timestamp
     # sensor, and ``freq``, mapped to a diagnostic Frequency sensor) must not be
@@ -681,8 +775,45 @@ def test_existing_themed_file_loads_identically(library, tmp_path):
     for field_key in (
         "power_W",
         "energy_kWh",
-        "consumption",
+        "Consumption",
         "consumption_data",
         "ext_power",
     ):
         assert reloaded.flat[field_key] == registry.flat[field_key]
+
+
+# --------------------------------------------------------------------------- #
+# SCMplus `Consumption` is CamelCased to match the wire name.                  #
+# --------------------------------------------------------------------------- #
+def test_scmplus_consumption_key_is_camelcase(library):
+    """``lookup("Consumption")`` resolves the SCMplus utility-meter descriptor.
+
+    rtl_433's SCMplus decoder emits the field as ``Consumption`` (CamelCase,
+    alongside ``MeterType`` / ``EndpointID``) and field matching is
+    case-sensitive, so the shipped library must key it that way. It previously
+    shipped as lowercase ``consumption``, which never matched a real event.
+    """
+    registry, _ = library
+
+    descriptor = lookup("Consumption")
+    assert descriptor is not None
+    assert descriptor.field_key == "Consumption"
+    assert descriptor.platform == "sensor"
+    # Ships unitless; a real device_class/unit comes from a per-device calibration.
+    assert descriptor.device_class is None
+    assert descriptor.unit_of_measurement is None
+    assert descriptor.state_class == "total_increasing"
+    # The entity's object id is unchanged by the rename.
+    assert descriptor.object_suffix == "consumption"
+    assert "Consumption" in registry.flat
+
+
+def test_lowercase_consumption_no_longer_ships():
+    """The old lowercase ``consumption`` key is gone from the shipped library.
+
+    Guards the rename: lookup is case-sensitive, so a stale lowercase entry would
+    silently shadow nothing and give SCMplus users an entity that never updates.
+    """
+    assert lookup("consumption") is None
+    # The SCM/ERT sibling keeps its own (genuinely lowercase) wire name.
+    assert lookup("consumption_data") is not None

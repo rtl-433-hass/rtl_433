@@ -16,28 +16,45 @@ jobs:
     runs-on: "ubuntu-latest"
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
+      # Bare `uvx ruff` floats to the newest release on every run, so a ruff
+      # release can turn this job red on an unchanged commit. Read the version
+      # from requirements_dev.txt so there is a single Renovate-managed pin.
+      - name: Resolve pinned Ruff version
+        id: ruff
+        run: |
+          version="$(grep -oP '^ruff==\K.*' requirements_dev.txt)"
+          if [ -z "$version" ]; then
+            echo "::error::No 'ruff==' pin found in requirements_dev.txt"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Ruff lint check
-        run: uvx ruff check .
+        env:
+          RUFF_VERSION: ${{ steps.ruff.outputs.version }}
+        run: uvx "ruff@${RUFF_VERSION}" check .
 
       - name: Ruff format check
-        run: uvx ruff format --check .
+        env:
+          RUFF_VERSION: ${{ steps.ruff.outputs.version }}
+        run: uvx "ruff@${RUFF_VERSION}" format --check .
 
   pre-commit:
     name: "pre-commit"
     runs-on: "ubuntu-latest"
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Python version comes from .python-version (tracks the Home Assistant
+      # requirement); uv reads it automatically.
       - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          python-version: "3.14"
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
 
       - name: Run pre-commit
         run: uvx pre-commit run --all-files --show-diff-on-failure --color=always

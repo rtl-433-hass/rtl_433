@@ -7,7 +7,10 @@
 # `uvx pre-commit run --all-files`.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.14
+    # Keep in sync with the ruff== pin in requirements_dev.txt so the Ruff and
+    # pre-commit CI jobs cannot disagree. Renovate's "dev dependencies" group
+    # covers both, so they arrive in the same PR.
+    rev: v0.16.5
     hooks:
       # Linter (with autofix)
       - id: ruff-check
@@ -16,7 +19,8 @@ repos:
       - id: ruff-format
 
   - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
+    # Keep in sync with the codespell== pin in requirements_dev.txt.
+    rev: v2.4.3
     hooks:
       - id: codespell
         args: ["--ignore-words-list=hass,keep-alives,retuned", "--quiet-level=2"]
@@ -25,15 +29,25 @@ repos:
         files: ^(custom_components/|tests/|scripts/|README\.md|CONTRIBUTING\.md|AGENTS\.md)
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: check-yaml
       - id: check-json
       - id: check-toml
       - id: check-added-large-files
       - id: check-merge-conflict
+      # The three hooks below rewrite file contents, so they must not touch
+      # .ai/strikethroo/config/. Those 14 files are vendored verbatim from
+      # `strikethroo init`, and .ai/strikethroo/.init-metadata.json records each
+      # one's sha256. Reformatting them (POST_PHASE.md ends with a blank line
+      # end-of-file-fixer wants to strip) changes those hashes, so strikethroo
+      # would report the files as locally modified on its next init/upgrade.
+      # Vendored, checksummed content is upstream's to format, not ours.
       - id: end-of-file-fixer
+        exclude: ^\.ai/strikethroo/config/
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
+        exclude: ^\.ai/strikethroo/config/
       - id: mixed-line-ending
         args: [--fix=lf]
+        exclude: ^\.ai/strikethroo/config/

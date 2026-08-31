@@ -28,16 +28,17 @@ stream stops. Playwright captures these screenshots (see `../../screenshots/`):
 | `05-mapping-overrides.png` | The **Device mappings** step: the YAML editor pre-filled with an example per-hub override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
 | `07-hub-settings.png` | The **Hub settings** step (discovery, default availability timeout, managed settings) |
-| `08-device-settings.png` | The **Device settings** step (device picker, timeout override, meter commodity) |
+| `13-device-picker.png` | The **Device settings** device picker, with the SCMplus meter labelled `— gas detected` from its `MeterType` |
+| `08-device-settings.png` | The per-device settings step for that meter (timeout override, meter commodity pre-filled to Gas) |
 | `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
 | `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
-| `12-calibration.png` | The utility-meter **calibration** step (base unit + scale) |
+| `12-calibration.png` | The utility-meter **calibration** step for that gas meter (base unit + scale) |
 
 Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
 `screenshots/` output directory itself is gitignored.
 
-The doorbell / energy meter / door / leak devices in the richer shots come from
+The doorbell / energy meter / SCMplus gas meter / door / leak devices in the richer shots come from
 `ws-bridge.mjs` replaying the project fixtures in `tests/fixtures/` (configured
 via `FIXTURE_FILES` in `docker-compose.yml`) alongside the live Acurite capture.
 
@@ -50,8 +51,12 @@ via `FIXTURE_FILES` in `docker-compose.yml`) alongside the live Acurite capture.
 One-time setup:
 
 ```bash
-# 1. Fetch the pinned, sparse test-capture submodule (only the Acurite dirs).
-git submodule update --init tests/integration/rtl_433_tests
+# 1. Fetch the pinned test captures (Acurite for this harness, SCMplus/ERT-SCM
+#    for the golden fixtures). Use the script, NOT `git submodule update`: the
+#    `sparse-checkout` key in .gitmodules is not a real git option and is
+#    silently ignored, so a plain init downloads all ~1.5 GB of the upstream
+#    repo. The script does a blobless sparse clone at the same pin (~13 MB).
+./scripts/fetch_captures.sh   # from the repository root
 
 # 2. Install Node deps (Playwright + ws) and the Chromium browser.
 cd tests/integration
@@ -67,8 +72,13 @@ sudo npx playwright install-deps chromium   # system libs (see note below)
 > ```bash
 > sudo apt-get install -y libatk1.0-0 libatk-bridge2.0-0 libatspi2.0-0 \
 >   libxdamage1 libxkbcommon0 libnss3 libcups2 libdrm2 libgbm1 \
->   libpango-1.0-0 libcairo2 libasound2
+>   libpango-1.0-0 libcairo2 libasound2 \
+>   libxcomposite1 libxfixes3 libxrandr2
 > ```
+>
+> Chromium reports missing libs in batches, so a first run can still fail after
+> installing the list above; the three `libx*` packages on the last line are the
+> ones it asks for second.
 
 ## Running
 
@@ -148,7 +158,7 @@ change and was out of scope for this harness.
 | rtl_433 image | `hertzg/rtl_433@sha256:bcfd12afa59efc1ae8316ac21757b5e4161d4a42baaa91f609b4bcca9525dcfd` (rtl_433 25.12, arm64) |
 | Home Assistant | `ghcr.io/home-assistant/home-assistant@sha256:ceb1202133a5a036e8b03e20a10eb113186cc2f871968323c6fc6c3fc4205716` (2026.5.4, arm64) |
 | Node (bridge) | `node@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920` (node:22-alpine, arm64) |
-| Captures submodule | `merbanan/rtl_433_tests` @ `1244ba1f79a9f1bd93fcd989dd2101b0f0c6cbc4`, sparse: `tests/acurite/Acurite_592TXR`, `tests/acurite/Acurite_606TX` |
+| Captures submodule | `merbanan/rtl_433_tests` @ `1244ba1f79a9f1bd93fcd989dd2101b0f0c6cbc4`, sparse: `tests/acurite/Acurite_592TXR`, `tests/acurite/Acurite_606TX`, `tests/scmplus/01`, `tests/ert/scm/01` (the SCM dirs feed the golden fixtures, not this harness — see `../fixtures/generated/README.md`) |
 | Playwright | `1.49.1` (see `package.json`) |
 
 The Acurite-592TXR capture (`acurite-592txr-003.cu8`, sampled at 250k) decodes as

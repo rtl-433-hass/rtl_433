@@ -21,9 +21,11 @@ Coverage targets:
 - _is_motion_bearing: True/False, model-scoped lookup
 - _write_device_record: override set/clear, calibration set/clear, motion_clear_delay
   set/clear, opt_record present/absent, options[CONF_DEVICES] written
-- async_step_device: no_devices abort, commodity=none finish, commodity!=none goto calibration,
-  device picker options, single-device commodity pre-fill, motion-bearing field shown/hidden,
-  clear_default single vs multi device, motion_clear_delay carried to calibration step
+- async_step_device: no_devices abort, device picker options
+- async_step_device_settings: commodity=none finish, commodity!=none goto calibration,
+  per-device commodity pre-fill (incl. on a multi-device hub), motion-bearing field
+  shown/hidden per selected device, clear_default read from the selected device's
+  record, motion_clear_delay carried to calibration step
 - async_step_calibration: form shown with correct step_id/placeholders, unit/scale persisted,
   existing-calibration pre-fill (matching commodity vs different commodity)
 """
@@ -801,8 +803,10 @@ async def test_device_step_sets_timeout_override(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, DEVICE_TIMEOUT_OVERRIDE: 77},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {DEVICE_TIMEOUT_OVERRIDE: 77}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.data[CONF_DEVICES][device_key][DEVICE_TIMEOUT_OVERRIDE] == 77
@@ -826,8 +830,11 @@ async def test_device_step_clears_timeout_override(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {CONF_DEVICE: device_key},  # no DEVICE_TIMEOUT_OVERRIDE -> clears
+        {},  # no DEVICE_TIMEOUT_OVERRIDE -> clears
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert DEVICE_TIMEOUT_OVERRIDE not in entry.data[CONF_DEVICES][device_key]
@@ -849,8 +856,10 @@ async def test_device_step_does_not_affect_other_devices_data(hass, hub_entry_bu
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_a, DEVICE_TIMEOUT_OVERRIDE: 55},
+        result["flow_id"], {CONF_DEVICE: device_a}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {DEVICE_TIMEOUT_OVERRIDE: 55}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.data[CONF_DEVICES][device_a][DEVICE_TIMEOUT_OVERRIDE] == 55
@@ -869,8 +878,10 @@ async def test_device_step_timeout_override_not_in_options(hass, hub_entry_build
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, DEVICE_TIMEOUT_OVERRIDE: 44},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {DEVICE_TIMEOUT_OVERRIDE: 44}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert DEVICE_TIMEOUT_OVERRIDE not in entry.options
@@ -905,8 +916,10 @@ async def test_device_step_none_commodity_clears_existing_calibration(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_NONE},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_NONE}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][device_key]
@@ -924,8 +937,10 @@ async def test_device_step_none_commodity_result_type(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_NONE},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_NONE}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
@@ -949,8 +964,10 @@ async def test_device_step_energy_commodity_advances_to_calibration(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_ENERGY},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_ENERGY}
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "calibration"
@@ -972,8 +989,10 @@ async def test_device_step_gas_commodity_advances_to_calibration(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_GAS},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "calibration"
@@ -995,8 +1014,10 @@ async def test_device_step_water_commodity_advances_to_calibration(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_WATER},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_WATER}
     )
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "calibration"
@@ -1019,8 +1040,10 @@ async def test_calibration_form_step_id(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_GAS},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
     )
     assert result["step_id"] == "calibration"
 
@@ -1039,8 +1062,10 @@ async def test_calibration_form_description_placeholder_commodity(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_WATER},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_WATER}
     )
     assert result["description_placeholders"] == {"commodity": COMMODITY_WATER}
 
@@ -1059,8 +1084,10 @@ async def test_calibration_gas_placeholder_is_gas(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_GAS},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
     )
     assert result["description_placeholders"]["commodity"] == COMMODITY_GAS
 
@@ -1077,8 +1104,10 @@ async def test_calibration_energy_write_exact_record(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_ENERGY},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_ENERGY}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -1105,8 +1134,10 @@ async def test_calibration_water_write_exact_record(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_WATER},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_WATER}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -1133,8 +1164,10 @@ async def test_calibration_gas_write_exact_record(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_GAS},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -1159,12 +1192,11 @@ async def test_calibration_also_sets_timeout_override(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {
-            CONF_DEVICE: device_key,
-            DEVICE_TIMEOUT_OVERRIDE: 33,
-            CALIBRATION_COMMODITY: COMMODITY_WATER,
-        },
+        {DEVICE_TIMEOUT_OVERRIDE: 33, CALIBRATION_COMMODITY: COMMODITY_WATER},
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -1201,8 +1233,10 @@ async def test_calibration_prefill_from_existing_same_commodity(
     )
     # Pick the same commodity as stored (gas)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_GAS},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
     )
     assert result["step_id"] == "calibration"
     # unit default should be pre-filled with the stored unit
@@ -1238,8 +1272,10 @@ async def test_calibration_prefill_unit_falls_back_when_commodity_differs(
     )
     # Pick water — different from stored gas
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_WATER},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_WATER}
     )
     assert result["step_id"] == "calibration"
     # unit default should be default_unit(water) not cubic feet
@@ -1260,8 +1296,10 @@ async def test_calibration_prefill_scale_is_one_when_no_existing(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_ENERGY},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_ENERGY}
     )
     assert _schema_default(result, CALIBRATION_SCALE) == pytest.approx(1.0)
 
@@ -1278,8 +1316,10 @@ async def test_calibration_prefill_unit_default_for_energy(hass, hub_entry_build
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_ENERGY},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_ENERGY}
     )
     expected_unit = COMMODITY_UNITS[COMMODITY_ENERGY][0]
     assert _schema_default(result, CALIBRATION_UNIT) == expected_unit
@@ -1307,8 +1347,10 @@ async def test_calibration_overwrites_existing_calibration(hass, hub_entry_build
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_ENERGY},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_ENERGY}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -1374,6 +1416,9 @@ async def test_device_step_motion_bearing_shows_clear_delay_field(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
     )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
     assert result["type"] is FlowResultType.FORM
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
 
@@ -1381,7 +1426,11 @@ async def test_device_step_motion_bearing_shows_clear_delay_field(
 async def test_device_step_clear_delay_default_is_constant_multi_device(
     hass, hub_entry_builder
 ):
-    """With multiple devices, clear-delay default is DEFAULT_MOTION_CLEAR_DELAY."""
+    """With several devices, a device storing no override still gets the DEFAULT.
+
+    The picker is its own step, so the default reflects the *selected* device;
+    ``dev_a`` has no stored override, so the constant is used.
+    """
     from custom_components.rtl_433.mapping import FieldDescriptor, Registry
 
     field_key = "motion"
@@ -1390,7 +1439,11 @@ async def test_device_step_clear_delay_default_is_constant_multi_device(
     entry = hub_entry_builder(
         devices={
             dev_a: {CONF_MODEL: "MotionDev", DEVICE_FIELDS: [field_key]},
-            dev_b: {CONF_MODEL: "MotionDev2", DEVICE_FIELDS: [field_key]},
+            dev_b: {
+                CONF_MODEL: "MotionDev2",
+                DEVICE_FIELDS: [field_key],
+                DEVICE_MOTION_CLEAR_DELAY: 22,
+            },
         }
     )
     entry.add_to_hass(hass)
@@ -1407,6 +1460,9 @@ async def test_device_step_clear_delay_default_is_constant_multi_device(
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: dev_a}
     )
     assert result["type"] is FlowResultType.FORM
     assert (
@@ -1447,6 +1503,9 @@ async def test_device_step_clear_delay_prefill_from_single_device_record(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
     )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
     assert result["type"] is FlowResultType.FORM
     assert _schema_default(result, DEVICE_MOTION_CLEAR_DELAY) == stored_delay
 
@@ -1481,6 +1540,9 @@ async def test_device_step_clear_delay_prefill_default_when_no_stored(
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
     )
     assert result["type"] is FlowResultType.FORM
     assert (
@@ -1518,8 +1580,10 @@ async def test_write_device_record_motion_delay_set_in_options(hass, hub_entry_b
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, DEVICE_MOTION_CLEAR_DELAY: 60},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {DEVICE_MOTION_CLEAR_DELAY: 60}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     opt_record = entry.options.get(CONF_DEVICES, {}).get(device_key, {})
@@ -1553,8 +1617,10 @@ async def test_write_device_record_motion_delay_not_in_entry_data(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, DEVICE_MOTION_CLEAR_DELAY: 99},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {DEVICE_MOTION_CLEAR_DELAY: 99}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     # motion_clear_delay must NOT be in entry.data[devices][device_key]
@@ -1580,8 +1646,11 @@ async def test_write_device_record_motion_delay_cleared_removes_opt_record(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {CONF_DEVICE: device_key},  # no DEVICE_MOTION_CLEAR_DELAY -> None -> cleared
+        {},  # no DEVICE_MOTION_CLEAR_DELAY -> None -> cleared
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     # opt_record should be empty, so device_key should not appear in opt_devices
@@ -1617,8 +1686,10 @@ async def test_write_device_record_options_devices_key_written(hass, hub_entry_b
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, DEVICE_MOTION_CLEAR_DELAY: 55},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {DEVICE_MOTION_CLEAR_DELAY: 55}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert CONF_DEVICES in entry.options
@@ -1663,12 +1734,11 @@ async def test_calibration_step_motion_delay_carried_and_written(
     )
     # Submit device step with both commodity and motion delay
     result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {
-            CONF_DEVICE: device_key,
-            CALIBRATION_COMMODITY: COMMODITY_WATER,
-            DEVICE_MOTION_CLEAR_DELAY: 120,
-        },
+        {CALIBRATION_COMMODITY: COMMODITY_WATER, DEVICE_MOTION_CLEAR_DELAY: 120},
     )
     assert result["step_id"] == "calibration"
     result = await hass.config_entries.options.async_configure(
@@ -1711,8 +1781,10 @@ async def test_write_device_record_preserves_other_devices_in_data(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: dev_b, DEVICE_TIMEOUT_OVERRIDE: 50},
+        result["flow_id"], {CONF_DEVICE: dev_b}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {DEVICE_TIMEOUT_OVERRIDE: 50}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     # dev_a is untouched
@@ -1741,8 +1813,10 @@ async def test_write_device_record_no_motion_delay_no_conf_devices_key(
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, DEVICE_TIMEOUT_OVERRIDE: 30},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {DEVICE_TIMEOUT_OVERRIDE: 30}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     # options[CONF_DEVICES] should be there but the device should not have motion key
@@ -1760,7 +1834,12 @@ async def test_write_device_record_no_motion_delay_no_conf_devices_key(
 async def test_device_step_commodity_default_is_none_for_multi_device(
     hass, hub_entry_builder
 ):
-    """With multiple devices, commodity default is 'none' regardless of coordinator hint."""
+    """On a multi-device hub the commodity still pre-fills from the picked device.
+
+    The pre-fill used to be skipped entirely unless the hub had exactly one
+    device; now the picker is its own step, so ``dev_b``'s gas hint is honoured
+    even though the hub has two devices.
+    """
     from types import SimpleNamespace
 
     dev_a = "Dev-Multi-A"
@@ -1772,16 +1851,22 @@ async def test_device_step_commodity_default_is_none_for_multi_device(
         }
     )
     entry.add_to_hass(hass)
-    # Even if coordinator hints gas, multi-device defaults to none
-    event = SimpleNamespace(fields={"MeterType": "Gas"})
-    coordinator = SimpleNamespace(devices={dev_a: event, dev_b: event})
+    coordinator = SimpleNamespace(
+        devices={
+            dev_a: SimpleNamespace(fields={"temperature_C": 21}),
+            dev_b: SimpleNamespace(fields={"MeterType": "Gas"}),
+        }
+    )
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
     )
-    assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_NONE
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: dev_b}
+    )
+    assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_GAS
 
 
 async def test_device_step_commodity_prefill_single_device_from_coordinator(
@@ -1802,6 +1887,9 @@ async def test_device_step_commodity_prefill_single_device_from_coordinator(
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
     )
     assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_GAS
 
@@ -1826,6 +1914,9 @@ async def test_device_step_commodity_prefill_water_from_ert_type(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
     )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
     assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_WATER
 
 
@@ -1845,6 +1936,9 @@ async def test_device_step_commodity_prefill_energy_from_electric_meter_type(
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
     )
     assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_ENERGY
 
@@ -1880,6 +1974,9 @@ async def test_is_motion_bearing_model_scoped_descriptor(hass, hub_entry_builder
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
     )
     # The clear-delay field should appear since the device is motion-bearing via model scope
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
@@ -2037,8 +2134,10 @@ async def test_calibration_step_result_title_is_empty(hass, hub_entry_builder):
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, CALIBRATION_COMMODITY: COMMODITY_GAS},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -2190,6 +2289,9 @@ async def test_pr34_registry_returns_registry_makes_field_appear(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
     )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
     assert result["type"] is FlowResultType.FORM
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
 
@@ -2218,6 +2320,9 @@ async def test_pr34_registry_keyed_by_entry_id(hass, hub_entry_builder):
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
     )
     assert result["type"] is FlowResultType.FORM
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
@@ -2249,6 +2354,9 @@ async def test_pr34_motion_bearing_model_scoped_via_entry_cache(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
     )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
     assert result["type"] is FlowResultType.FORM
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
 
@@ -2274,6 +2382,9 @@ async def test_pr34_motion_bearing_uses_entry_registry_arg(hass, hub_entry_build
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
     )
     assert result["type"] is FlowResultType.FORM
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
@@ -2312,9 +2423,9 @@ async def test_pr34_motion_bearing_only_inspects_listed_fields(hass, hub_entry_b
 async def test_pr34_motion_bearing_reads_named_device_record(hass, hub_entry_builder):
     """_is_motion_bearing reads the SELECTED device's record (model + fields).
 
-    Two devices: a motion one and a plain one. With the motion device present
-    the knob appears; this exercises the record/model/fields read on a record
-    that actually exists. Kills __mutmut_3 (``.get(device_key, None)``),
+    Two devices: a motion one and a plain one. The knob appears for the motion
+    device and is absent for the plain one, exercising the record/model/fields
+    read on a record that actually exists. Kills __mutmut_3 (``.get(device_key, None)``),
     __mutmut_5 (drops the ``{}`` record default), __mutmut_7
     (``.get(CONF_DEVICES, None)``) and __mutmut_9 (drops the CONF_DEVICES
     default) -- each crashes or mis-reads the per-device record.
@@ -2340,9 +2451,22 @@ async def test_pr34_motion_bearing_reads_named_device_record(hass, hub_entry_bui
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
     )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: motion_key}
+    )
     assert result["type"] is FlowResultType.FORM
-    # The hub has a motion-bearing device, so the knob is offered.
+    # The selected device is motion-bearing, so the knob is offered.
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
+
+    # ... and it is not offered for the plain device on the same hub.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: plain_key}
+    )
+    assert DEVICE_MOTION_CLEAR_DELAY not in _schema_keys(result)
 
 
 # --------------------------------------------------------------------------- #
@@ -2351,11 +2475,10 @@ async def test_pr34_motion_bearing_reads_named_device_record(hass, hub_entry_bui
 async def test_pr34_clear_delay_default_constant_when_multi_motion(
     hass, hub_entry_builder
 ):
-    """Two motion devices -> clear-delay default is the constant (not stored, not None).
+    """Two motion devices, each storing a different override -> the picked one wins.
 
-    Exercises the ``len(devices) == 1`` inner guard being False and the default
-    falling back to DEFAULT_MOTION_CLEAR_DELAY even though each device stores a
-    different override.
+    The default is read from the *selected* device's record, so ``dev_a``'s 11
+    is shown rather than ``dev_b``'s 22 or the DEFAULT constant.
     """
     field_key = "motion"
     dev_a = "PR34-Multi-A"
@@ -2382,10 +2505,11 @@ async def test_pr34_clear_delay_default_constant_when_multi_motion(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
     )
-    assert result["type"] is FlowResultType.FORM
-    assert _schema_default(result, DEVICE_MOTION_CLEAR_DELAY) == (
-        DEFAULT_MOTION_CLEAR_DELAY
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: dev_a}
     )
+    assert result["type"] is FlowResultType.FORM
+    assert _schema_default(result, DEVICE_MOTION_CLEAR_DELAY) == 11
 
 
 async def test_pr34_clear_delay_default_single_reads_stored(hass, hub_entry_builder):
@@ -2408,6 +2532,9 @@ async def test_pr34_clear_delay_default_single_reads_stored(hass, hub_entry_buil
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEVICE: device_key}
     )
     assert result["type"] is FlowResultType.FORM
     assert _schema_default(result, DEVICE_MOTION_CLEAR_DELAY) == 73
@@ -2459,8 +2586,10 @@ async def test_pr34_write_record_merges_into_existing_record(hass, hub_entry_bui
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: device_key, DEVICE_TIMEOUT_OVERRIDE: 88},
+        result["flow_id"], {CONF_DEVICE: device_key}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {DEVICE_TIMEOUT_OVERRIDE: 88}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     record = entry.data[CONF_DEVICES][device_key]
@@ -2500,6 +2629,7 @@ async def test_pr34_write_record_opt_record_keyed_per_device(hass, hub_entry_bui
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {CONF_DEVICE: edited}
     )
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     opt_devices = entry.options[CONF_DEVICES]
     assert edited not in opt_devices
@@ -2548,8 +2678,10 @@ async def test_pr34_calibration_prefill_reads_selected_device(hass, hub_entry_bu
         result["flow_id"], {"next_step_id": "device"}
     )
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {CONF_DEVICE: target, CALIBRATION_COMMODITY: COMMODITY_WATER},
+        result["flow_id"], {CONF_DEVICE: target}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_WATER}
     )
     assert result["step_id"] == "calibration"
     assert _schema_default(result, CALIBRATION_UNIT) == UnitOfVolume.GALLONS

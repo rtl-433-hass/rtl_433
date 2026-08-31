@@ -1655,6 +1655,82 @@ async def test_calibration_applied_to_consumption_sensor(hass, hub_entry_builder
     assert float(state.state) == pytest.approx(100.0)
 
 
+async def test_calibration_applied_to_scmplus_consumption_sensor(
+    hass, hub_entry_builder
+):
+    """The overlay fires for SCMplus's CamelCased ``Consumption`` field.
+
+    ``Consumption`` is in ``CONSUMPTION_FIELD_KEYS``, so a gas calibration turns
+    the unitless counter into an Energy-dashboard-eligible sensor exactly as it
+    does for SCM/ERT's ``consumption_data``. Before the rename this field key was
+    lowercase in the shipped library and never matched a real SCMplus event.
+    """
+    device_key = "SCMplus-1234"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "SCMplus",
+                DEVICE_FIELDS: ["Consumption"],
+                DEVICE_CALIBRATION: {
+                    CALIBRATION_COMMODITY: COMMODITY_GAS,
+                    CALIBRATION_UNIT: "m³",
+                    CALIBRATION_SCALE: 0.01,
+                },
+            }
+        },
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    consumption_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:consumption"
+    )
+    assert consumption_eid is not None
+
+    _feed(coordinator, {"model": "SCMplus", "id": 1234, "Consumption": 5000})
+    await hass.async_block_till_done()
+
+    state = hass.states.get(consumption_eid)
+    assert state.attributes["device_class"] == "gas"
+    assert state.attributes["unit_of_measurement"] == "m³"
+    assert state.attributes["state_class"] == "total_increasing"
+    # 5000 * 0.01 = 50.0
+    assert float(state.state) == pytest.approx(50.0)
+
+
+async def test_uncalibrated_scmplus_consumption_is_a_unitless_counter(
+    hass, hub_entry_builder
+):
+    """With no calibration, ``Consumption`` still yields a working unitless sensor.
+
+    This is the zero-yaml path: the entity appears and tracks the raw counter
+    with no device_class or unit, which only works if the shipped library key
+    matches the wire name exactly.
+    """
+    device_key = "SCMplus-4321"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={device_key: {CONF_MODEL: "SCMplus", DEVICE_FIELDS: ["Consumption"]}},
+    )
+    coordinator = _coordinator(hass, hub)
+    ent_reg = er.async_get(hass)
+    consumption_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:consumption"
+    )
+    assert consumption_eid is not None
+
+    _feed(coordinator, {"model": "SCMplus", "id": 4321, "Consumption": 5000})
+    await hass.async_block_till_done()
+
+    state = hass.states.get(consumption_eid)
+    assert state.state == "5000"
+    assert "device_class" not in state.attributes
+    assert "unit_of_measurement" not in state.attributes
+    assert state.attributes["state_class"] == "total_increasing"
+
+
 async def test_calibration_not_applied_to_non_consumption_field(
     hass, hub_entry_builder
 ):

@@ -30,6 +30,10 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     `_calibration_map`).
 - `docs/device-library.md` — **authoritative** device-library reference.
 - `tests/` — unit tests. `tests/integration/` — container/screenshot harness.
+  `tests/fixtures/generated/` — **do not hand-edit**: golden events decoded from
+  real `.cu8` captures by `scripts/regen_capture_fixtures.py` and diffed in CI,
+  so the device library is checked against rtl_433's real wire output rather
+  than a hand-transcribed guess. See that directory's `README.md`.
 
 ## Upstreaming to Home Assistant core (shared domain — frozen contract)
 
@@ -137,9 +141,12 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   map, and removes the obsolete per-device entries.
 - Per-device configuration lives in the **hub OptionsFlow** (`config_flow.py`):
   a menu with a *Hub settings* step (discovery toggle + default timeout, written
-  to `entry.options`) and a *Device settings* step (per-device timeout override,
-  written into `entry.data["devices"]`).
-- **Utility-meter calibration** (`calibration.py`, options `Device settings` →
+  to `entry.options`) and a *Device settings* pair — a `device` picker step
+  followed by a `device_settings` step (per-device timeout override, commodity
+  and motion clear-delay, written into `entry.data["devices"]`). The picker is a
+  separate step so every default on `device_settings` is derived from the
+  **selected** device; the picker labels devices whose commodity was detected.
+- **Utility-meter calibration** (`calibration.py`, options `device_settings` →
   `calibration` step) writes a `DEVICE_CALIBRATION` sub-record (`{commodity,
   unit, scale}`) into `entry.data[CONF_DEVICES][device_key]` next to
   `timeout_override`. It overlays the consumption descriptor (the
@@ -683,7 +690,12 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
    template. If the field is identity/noise, add it to `_skip_keys.yaml`
    instead.
 3. **Run the unit tests** (see below). They cover library loading and entity
-   creation, so a malformed entry fails fast.
+   creation, so a malformed entry fails fast. Add a fixture under
+   `tests/fixtures/` too: `tests/test_fixture_coverage.py` sweeps every fixture
+   and fails on any field with neither a descriptor nor a skip-key entry, which
+   is the only automated check that a key actually matches. Field names are
+   case-sensitive and a mismatch is **silent** — no entity, no warning, no error
+   (SCMplus emits `Consumption`, ERT-SCM emits `consumption_data`).
 4. **Read the diagnostics' unmatched keys.** The hub diagnostics export contains
    an `unmatched_field_keys` list — JSON keys that are neither skipped nor
    mapped. Download it from **Settings → Devices & Services → rtl_433 → ⋮ →
@@ -699,13 +711,36 @@ hub's *Device mappings* options step instead of editing the shipped library (see
 
 Dependencies and tools are managed with [uv](https://docs.astral.sh/uv/), the
 same as CI. Install uv with `curl -LsSf https://astral.sh/uv/install.sh | sh`,
-then:
+then just run:
 
 ```bash
-uv venv
-uv pip install -r requirements_test.txt
 uv run pytest tests/
 ```
+
+That works from a **fresh clone or a git worktree** with no setup: the test
+dependencies are declared in the `dev` dependency group in `pyproject.toml`,
+which uv installs by default, so `uv run` resolves them and populates `.venv` on
+first use (a minute or two; instant thereafter). `uv.lock` is generated locally
+and is **not** committed — it stays in `.gitignore` with the other dependency
+locks and caches.
+
+`[tool.uv] environments` pins the resolution to `python_full_version >= 3.14.2`.
+That is deliberate and load-bearing: `requires-python` is `>=3.14` (what the
+*integration* needs, tracked against Home Assistant), but the pinned test stack
+pulls in a `homeassistant` requiring `>=3.14.2`, so an unrestricted resolution is
+unsatisfiable. Constraining the environment keeps the project's declared support
+honest rather than tightening it to satisfy a dev-only dependency.
+
+> **If you see `Failed to spawn: pytest`**, the `dev` group is missing or
+> resolution failed. Note this failure mode is **silent**: uv creates an empty
+> environment, fails to find pytest, and **still exits 0**, so a green-looking
+> run has actually executed nothing. Always confirm a real pass/fail count before
+> trusting an exit code — this bit a worktree session before the `dev` group
+> existed.
+
+The pins are duplicated in `requirements_test.txt`, which CI and pip users
+install directly (`uv pip install -r requirements_test.txt`); a renovate
+packageRule groups the two so they are bumped in one PR and cannot drift.
 
 `requirements_test.txt` pins `pytest-homeassistant-custom-component`, which pulls
 in the matching Home Assistant version and the full pytest stack (asyncio, cov,
@@ -715,7 +750,35 @@ timeout, xdist, freezegun). To match CI, include coverage:
 uv run pytest --cov=custom_components/rtl_433 tests/
 ```
 
-CI runs on Python 3.14 (the minimum Home Assistant 2026.4 supports).
+`addopts` in `pyproject.toml` passes `-n auto`, so the suite runs across all CPUs
+via xdist (~80s to ~18s on 8 cores). Pass `-n0` to force a serial run:
+
+```bash
+uv run pytest -n0 tests/test_coordinator.py   # single file: ~4s serial, ~9s under xdist
+uv run pytest -n0 --pdb tests/                # xdist swallows --pdb and -s
+```
+
+Prefer `-n0` when selecting one file or a handful of tests -- xdist spends about
+four seconds starting an interpreter and importing Home Assistant *per worker*,
+which costs more than it saves below roughly a hundred tests. Mutation runs pin
+`-n0` themselves; see `[tool.mutmut]` in `pyproject.toml`.
+
+CI runs on Python 3.14 (the minimum Home Assistant 2026.4 supports), and
+`pyproject.toml` sets `requires-python = ">=3.14"`. **The codebase uses 3.14-only
+syntax and will not parse on an older interpreter.** In particular it relies on
+[PEP 758](https://peps.python.org/pep-0758/), which allows unparenthesized
+exception tuples:
+
+```python
+except OSError, yaml.YAMLError:   # valid on 3.14+, SyntaxError on <= 3.13
+```
+
+This appears in `calibration.py`, `coordinator/_sdr.py`, `mapping/_loader.py`,
+`mapping/_transform.py`, `migration.py`, and `sensor.py`. Running `python -m
+compileall`, a linter, or a type checker under 3.13 or earlier reports
+`SyntaxError: multiple exception types must be parenthesized` on these files.
+That is a stale interpreter, **not** a defect — check `python --version` before
+concluding the tree is broken, and do not "fix" it by adding parentheses.
 
 ## Mutation testing (mutmut)
 

@@ -70,16 +70,17 @@ jobs:
         shard: [0, 1, 2, 3, 4, 5]
     steps:
       - name: Checkout the repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Need history back to the base branch to diff a PR's changed files;
           # harmless (and quick) on push/schedule, which ignore it.
           fetch-depth: 0
 
+      # Python version comes from .python-version (tracks the Home Assistant
+      # requirement); uv reads it automatically.
       - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          python-version: "3.14"
           enable-cache: true
 
       - name: Install requirements
@@ -91,7 +92,12 @@ jobs:
         id: scope
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            # Checkout above already fetched every head at full depth, so this
+            # only refreshes the base. Do NOT add --depth: a shallow fetch grafts
+            # the base tip as parentless, and once the base branch has moved past
+            # this PR's base commit the real merge base sits behind that graft,
+            # so the three-dot diff below dies with "no merge base".
+            git fetch --no-tags origin "${{ github.base_ref }}"
             changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
             echo "Changed files:"; echo "$changed"
             uv run python scripts/mutation_targets.py $changed > targets.txt
