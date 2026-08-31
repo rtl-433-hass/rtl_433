@@ -5,28 +5,44 @@ each frame against the reconnect replay — now lives in ``pyrtl_433.Rtl433Clien
 (see ``base.py``). The client hands the coordinator a fully-formed, already
 replay-classified :class:`~pyrtl_433.normalizer.NormalizedEvent` (``is_replay``
 and ``event_time`` pre-computed) through its ``on_event`` callback. This module
-holds only the *Home Assistant side* of the old ``_process_event`` path: it
-updates per-device runtime state, registers newly-discovered devices, and hands
-the result to ``base.py``'s ``_dispatch`` to fan out to the device's entities.
+holds only the *Home Assistant side* of the old ``_process_event`` path.
+
+Its first job is the routing decision that keeps observation and adoption apart.
+A frame for a device the user has approved (``adopted``) follows the full path —
+per-device runtime state, then ``base.py``'s ``_dispatch`` to fan out to the
+device's entities. A frame for anything else is recorded as a *pending
+candidate* by :meth:`_EventProcessingMixin._record_pending` and goes no further,
+so nothing reaches the device registry without an explicit user action. Because
+the pending path touches none of the runtime state, every consumer of that state
+— the availability watchdog, diagnostics, the entity platforms — keeps seeing
+exactly the set of devices that exists in Home Assistant.
 
 No normalization or replay classification happens here — doing it a second time
 would double-classify what the client already decided. The one verdict the
 library does not carry on the event object is ``is_backlog`` (the
-pre-connection-backlog flag that gates device registration), so it is re-derived
-here from the event's ``event_time`` and the coordinator's connect-edge anchor
-(``_connection_time``, set in ``base.py``'s ``_emit_hub_update``) using the same
-:data:`DISCOVERY_BACKLOG_GRACE` boundary the library applied.
+pre-connection-backlog flag that keeps a reconnect re-broadcast out of the
+pending list), so it is re-derived here from the event's ``event_time`` and the
+coordinator's connect-edge anchor (``_connection_time``, set in ``base.py``'s
+``_emit_hub_update``) using the same :data:`DISCOVERY_BACKLOG_GRACE` boundary the
+library applied.
 
 :class:`_EventProcessingMixin` is mixed into ``Rtl433Coordinator`` (see
 ``base.py``) and relies on the runtime state declared in that class's
-``__init__`` (``devices``, ``last_seen``, ``available``, ``seen_fields``,
-``device_fields``, ``known_field_keys``, ``_connection_time``, ``_discovered``,
-``_logged_unmapped``, ``_evict_floor``, ``discovery_enabled``,
-``new_device_callback``) plus ``entry``, ``_dispatch`` and ``forget_device``
-(base.py).
+``__init__`` (``adopted``, ``ignored``, ``pending``, ``devices``, ``last_seen``,
+``available``, ``seen_fields``, ``device_fields``, ``known_field_keys``,
+``_connection_time``, ``_discovered``, ``_logged_unmapped``, ``_evict_floor``,
+``discovery_enabled``, ``new_device_callback``) plus ``entry``, ``_dispatch``
+and ``forget_device`` (base.py).
+
+:class:`PendingDevice` lives here rather than in ``base.py`` because this is the
+module that builds one; ``base.py`` imports it (and re-exports it through the
+package) the same way it imports ``_SdrStore`` from ``_sdr.py``.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
 
 from pyrtl_433.normalizer import NormalizedEvent
 from pyrtl_433.replay import DISCOVERY_BACKLOG_GRACE
@@ -56,21 +72,46 @@ from ..const import CONF_DEVICES, LOGGER
 _MAX_TRACKED_DEVICE_STATES = 512
 
 
+@dataclass(slots=True)
+class PendingDevice:
+    """One device heard but not yet adopted into Home Assistant.
+
+    Held in memory only: the pending list is rebuilt from live traffic after
+    every restart or reload by design, so an unwanted device never outlives the
+    session that heard it. ``event`` is the most recent frame, kept so adoption
+    can seed the device's entities from real data instead of leaving them
+    unavailable until the next transmission, and so the approval UI can show what
+    the device actually reports before the user commits to it. ``count`` and the
+    two timestamps are the discriminators the user judges by: a real sensor
+    checks in repeatedly, a bad decode is heard once.
+    """
+
+    key: str
+    model: str
+    event: NormalizedEvent
+    count: int
+    first_seen: datetime
+    last_seen: datetime
+
+
 class _EventProcessingMixin:
     """Fan one already-normalized, replay-classified rtl_433 event out to HA."""
 
     def _on_client_event(self, normalized: NormalizedEvent) -> None:
-        """Ingest one event from the client and dispatch it to the entities.
+        """Ingest one event from the client and route it by adoption state.
 
         The client delivers ``normalized`` fully classified: ``is_replay`` and
         ``event_time`` are already stamped, so this method never re-normalizes or
-        re-classifies. It only applies the verdict to HA-side runtime state and
-        the discovery gate.
+        re-classifies. It only applies the verdict to HA-side runtime state.
+
+        A frame for a device the user has not adopted goes to
+        :meth:`_record_pending` and stops there, so everything below that branch
+        — runtime state, field tracking, liveness, dispatch — runs for adopted
+        devices only.
 
         Replays and stale gap events (``is_replay=True``) still seed sensor values
-        but must NOT refresh ``last_seen`` / ``available`` or raise a "new device"
-        notification, so a genuinely-offline device is not resurrected by the
-        reconnect replay.
+        but must NOT refresh ``last_seen`` / ``available``, so a genuinely-offline
+        device is not resurrected by the reconnect replay.
         """
         key = normalized.device_key
         is_replay = normalized.is_replay
@@ -87,6 +128,12 @@ class _EventProcessingMixin:
             and normalized.event_time is not None
             and normalized.event_time < conn - DISCOVERY_BACKLOG_GRACE
         )
+
+        if key not in self.adopted:
+            self._record_pending(
+                key, normalized, is_replay=is_replay, is_backlog=is_backlog
+            )
+            return
 
         now = dt_util.utcnow()
 
@@ -192,6 +239,63 @@ class _EventProcessingMixin:
                 sorted(fresh),
             )
 
+    def _record_pending(
+        self,
+        key: str,
+        normalized: NormalizedEvent,
+        *,
+        is_replay: bool,
+        is_backlog: bool,
+    ) -> None:
+        """Record a device the user has not adopted as a pending candidate.
+
+        Deliberately touches none of the adopted-device runtime state
+        (``devices``, ``last_seen``, ``available``, ``seen_fields``,
+        ``device_fields``) and never dispatches: a pending device has no Home
+        Assistant device and no entities, so letting it into that state would
+        have the availability watchdog reporting on devices that do not exist and
+        diagnostics presenting them as real.
+
+        Replays and pre-connection backlog frames are re-broadcasts of already
+        transmitted events, never a device's first live transmission, so they
+        must not create a candidate -- otherwise every reconnect would repopulate
+        the list with stale entries. A key on the hub's ignore list is dropped
+        outright; that is what makes ignoring a neighbour's sensor stick.
+        """
+        if is_replay or is_backlog:
+            return
+        if key in self.ignored:
+            LOGGER.debug("rtl_433 ignoring device %s (on the hub's ignore list)", key)
+            return
+
+        now = dt_util.utcnow()
+        existing = self.pending.get(key)
+        if existing is None:
+            self.pending[key] = PendingDevice(
+                key=key,
+                model=normalized.model,
+                event=normalized,
+                count=1,
+                first_seen=now,
+                last_seen=now,
+            )
+            LOGGER.info(
+                "rtl_433 heard a new device %s (model %s); add it from the hub's "
+                "options to create it in Home Assistant",
+                key,
+                normalized.model,
+            )
+            return
+
+        # A repeat sighting sharpens the existing candidate instead of creating a
+        # second one. The newest frame is what adoption seeds the entities from,
+        # and the count plus last-seen are how the user tells a sensor that keeps
+        # checking in apart from a one-off bad decode.
+        existing.event = normalized
+        existing.model = normalized.model or existing.model
+        existing.count += 1
+        existing.last_seen = now
+
     def _maybe_register_device(
         self,
         key: str,
@@ -200,22 +304,30 @@ class _EventProcessingMixin:
         is_replay: bool,
         is_backlog: bool,
     ) -> None:
-        """Offer a not-yet-discovered device to ``new_device_callback`` once.
+        """Offer an adopted device to ``new_device_callback`` once per process.
 
-        Registration is gated to post-connection messages: a pre-connection
-        backlog frame (``is_backlog``) belongs to the server's reconnect replay
-        and must seed runtime state without creating a device. A frame with no
-        parseable ``time`` is treated as post-connection ("never drop a real
-        one"), as is any frame once disconnected (``_connection_time is None``) --
-        both leave ``is_backlog`` False. The gate keys off ``self._discovered``
-        (not "is new") so a device first seen in the backlog still registers on
-        its first true live event.
+        Only reached for adopted devices, so this no longer decides *whether* a
+        device may exist in Home Assistant -- the ``adopted`` check in
+        :meth:`_on_client_event` does. What it still does is wire a device the
+        user approved in an earlier session back up on its first frame of this
+        one: ``_discovered`` starts empty each process, while ``adopted`` is
+        seeded from the persisted devices map.
+        :meth:`~.base.Rtl433Coordinator.adopt_device` fires the same callback for
+        a device adopted mid-session, so both routes build the device identically.
 
-        The callback still fires for a replay-discovered device so its entities
-        exist and can seed; its availability stays governed by liveness (it reads
-        unavailable until a live frame arrives). The ``is_replay`` flag lets the
-        callback wire up the device without raising a "new device" notification
-        for a reconnect re-broadcast (never a genuine first-time live discovery).
+        Registration is still held back for a pre-connection backlog frame
+        (``is_backlog``), which belongs to the server's reconnect replay and only
+        seeds runtime state. A frame with no parseable ``time`` is treated as
+        post-connection ("never drop a real one"), as is any frame once
+        disconnected (``_connection_time is None``) -- both leave ``is_backlog``
+        False -- so a device first seen in the backlog still registers on its
+        first true live event.
+
+        The callback fires for a replay frame too, so a device whose first frame
+        after a reconnect is a re-broadcast still gets its entities and can seed;
+        its availability stays governed by liveness (it reads unavailable until a
+        live frame arrives). ``is_replay`` is passed through so the callback knows
+        which of the two it is.
         """
         if (
             key in self._discovered
@@ -228,12 +340,10 @@ class _EventProcessingMixin:
         try:
             self.new_device_callback(key, normalized.model, is_replay)
         except Exception:  # noqa: BLE001 - a bad hook must not kill the loop
-            LOGGER.exception(
-                "rtl_433 failed to register a newly discovered device (%s)", key
-            )
+            LOGGER.exception("rtl_433 failed to register an adopted device (%s)", key)
         else:
             LOGGER.debug(
-                "rtl_433 discovered new device %s (model %s, via_replay=%s)",
+                "rtl_433 registered adopted device %s (model %s, via_replay=%s)",
                 key,
                 normalized.model,
                 is_replay,

@@ -482,9 +482,9 @@ overlapping them would produce conflicting edits rather than useful parallelism.
 Parallelism is taken where it is real — the two test tasks touch disjoint test
 modules and depend only on the finished implementation.
 
-### Phase 1: Coordinator Core
+### ✅ Phase 1: Coordinator Core
 **Parallel Tasks:**
-- Task 001: Split observation from adoption in the coordinator — pending/adopted/ignored routing, the adopt/ignore API, notification removal, and delete-returns-to-pending
+- ✔️ Task 001: Split observation from adoption in the coordinator — pending/adopted/ignored routing, the adopt/ignore API, notification removal, and delete-returns-to-pending
 
 ### Phase 2: Retire the Discovery Toggle
 **Parallel Tasks:**

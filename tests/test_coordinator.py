@@ -5,8 +5,10 @@ replay classification, and the HTTP ``/cmd`` getters/setters — now lives in
 :class:`pyrtl_433.Rtl433Client` and is tested upstream in the library. This file
 covers only what the *coordinator* still owns: applying a client-delivered,
 already-classified :class:`~pyrtl_433.normalizer.NormalizedEvent` to per-device
-runtime state, the discovery-registration gate, the availability watchdog, the
-per-device effective-timeout resolution, and the device-update dispatch.
+runtime state, the registration of an adopted device, the availability watchdog,
+the per-device effective-timeout resolution, and the device-update dispatch.
+Every test here works on an *adopted* device (see the ``coordinator`` fixture);
+the pending/ignored routing for unadopted devices is its own contract.
 
 Events are injected the way the client would deliver them: by invoking the
 coordinator's ``on_event`` callback (``_on_client_event``) with a crafted
@@ -34,6 +36,8 @@ from homeassistant.util import dt as dt_util
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
 _TRACE_LOGGER = "custom_components.rtl_433"
+# The device key every ``_event()`` carries, and the one the fixture adopts.
+_KEY = "Acurite-606TX-42"
 
 
 def _run(hass, coro):
@@ -48,6 +52,11 @@ async def coordinator(hass, hub_entry_builder):
     Async so construction runs inside the event loop: the coordinator now builds
     its :class:`pyrtl_433.Rtl433Client` in ``__init__`` (injecting HA's shared
     aiohttp session), which requires a running loop.
+
+    ``_KEY`` is pre-adopted because these tests cover what the coordinator does
+    with an *adopted* device's frames — runtime state, registration, the
+    watchdog, dispatch. A device the user has not adopted never reaches any of
+    that; it lands in the pending list instead, which is a separate contract.
     """
     entry = hub_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
@@ -57,6 +66,7 @@ async def coordinator(hass, hub_entry_builder):
         host="rtl433.local",
         availability_timeout=600,
         skip_keys={"model", "id", "channel", "subtype", "time", "mic"},
+        adopted_keys={_KEY},
     )
 
 
@@ -298,7 +308,7 @@ def test_effective_timeout_falls_back_on_resolver_error(hass, coordinator):
 # forget_device eviction.                                                       #
 # --------------------------------------------------------------------------- #
 def test_forget_device_evicts_runtime_state(hass, coordinator):
-    """forget_device clears the device from every runtime dict and re-arms discovery."""
+    """forget_device un-adopts the device and clears every runtime dict."""
     key = "Acurite-606TX-42"
     with patch(DISPATCH):
         coordinator._on_client_event(_event())
@@ -308,6 +318,14 @@ def test_forget_device_evicts_runtime_state(hass, coordinator):
     assert key not in coordinator._discovered
     _assert_nothing_tracks(coordinator, key)
 
+    # Un-adopted, so the next transmission makes it a pending candidate again
+    # rather than silently re-creating the device the user deleted.
+    with patch(DISPATCH) as dispatch:
+        coordinator._on_client_event(_event())
+    assert key not in coordinator.devices
+    assert coordinator.pending[key].count == 1
+    dispatch.assert_not_called()
+
     # forget on an unknown key is a safe no-op.
     coordinator.forget_device("nonexistent-key")
 
@@ -316,7 +334,7 @@ def test_forget_device_evicts_runtime_state(hass, coordinator):
 # Coordinator-side DEBUG traces (discovery + unmapped fields).                  #
 # --------------------------------------------------------------------------- #
 def test_discovery_logs_new_device_line_once(hass, coordinator, caplog):
-    """A first sighting logs the discovery DEBUG line once, with via_replay."""
+    """A first sighting logs the registration DEBUG line once, with via_replay."""
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
     coordinator.discovery_enabled = True
     coordinator.new_device_callback = lambda key, model, is_replay: None
@@ -326,7 +344,7 @@ def test_discovery_logs_new_device_line_once(hass, coordinator, caplog):
         coordinator._on_client_event(_event())  # second sighting: no re-log
 
     lines = [
-        m for m in caplog.messages if m.startswith("rtl_433 discovered new device")
+        m for m in caplog.messages if m.startswith("rtl_433 registered adopted device")
     ]
     assert len(lines) == 1
     assert "Acurite-606TX-42" in lines[0]

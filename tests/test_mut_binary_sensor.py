@@ -213,9 +213,10 @@ async def test_init_seeds_from_coordinator_devices_on_dynamic_add(
     hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
     coord = _coordinator(hass, hub)
 
-    # Feed motion event -> new device discovered -> entity created dynamically.
+    # Feed motion event and adopt the device -> entity created dynamically.
     # At entity creation time, coordinator.devices[_DEVICE_KEY] is already set.
     _feed(coord, _MOTION_EVENT)
+    coord.adopt_device(_DEVICE_KEY)
     await hass.async_block_till_done()
 
     eid = _motion_eid(hass, hub)
@@ -374,7 +375,7 @@ async def test_added_to_hass_starts_timer_when_seeded_on(hass, hub_entry_builder
     Kills mutmut_3/4 (is_on wrong check): timer starts even when off/none.
     Kills mutmut_1 (or): timer starts even when clear_delay is None (door sensor).
     """
-    # Dynamic discovery: no pre-seeded devices. Feed motion -> entity created
+    # Dynamic add: no pre-seeded devices. Feed motion and adopt -> entity created
     # with is_on=True seeded from coordinator.devices. async_added_to_hass
     # must then start the clear timer.
     hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
@@ -383,6 +384,7 @@ async def test_added_to_hass_starts_timer_when_seeded_on(hass, hub_entry_builder
     start = dt_util.utcnow()
     with freeze_time(start) as frozen:
         _feed(coord, _MOTION_EVENT)
+        coord.adopt_device(_DEVICE_KEY)
         await hass.async_block_till_done()
 
         eid = _motion_eid(hass, hub)
@@ -547,22 +549,23 @@ async def test_restore_state_skipped_when_seeded_from_coordinator(
     """When is_on is already set (seeded from coordinator), restore cache is NOT applied.
 
     Kills mutmut_2: if guard is inverted, the seeded value would be overwritten.
-    The dynamic add path: discovery=True, feed an event -> entity created with
+    The dynamic add path: feed an event and adopt -> entity created with
     coordinator.devices[key] populated -> is_on seeded to True. Restore cache
     has "off". Seeded "on" should win over restore "off".
     """
     # Pre-set restore cache with "off".
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "off"),))
 
-    # Discovery mode: no pre-seeded devices.
+    # No pre-seeded devices: the device arrives through adoption.
     hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
     coord = _coordinator(hass, hub)
 
-    # Feed door open event -> entity created dynamically.
+    # Feed door open event and adopt -> entity created dynamically.
     # In __init__, coordinator.devices[_DOOR_KEY].fields["closed"] = 0 -> is_on=True.
     # In async_added_to_hass, _async_restore_state is called, but since
     # is_on is not None (already True), the "is_on is not None -> return" guard fires.
     _feed(coord, _DOOR_EVENT_OPEN)
+    coord.adopt_device(_DOOR_KEY)
     await hass.async_block_till_done()
 
     eid = _door_eid(hass, hub)
