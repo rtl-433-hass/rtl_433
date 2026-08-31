@@ -187,6 +187,19 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   (the duplicate Supervisor discovery may auto-create on a new `host:port`). The
   same helper backs the discovery `hassio_replace` step and the rebind form
   embedded in the `server_unreachable` repair fix flow (`repairs.py`).
+- **The update listener is the *only* place that reloads a hub entry.** Home
+  Assistant deprecated pairing a config-entry update listener with the reloading
+  config-flow helpers in 2026.6 (it double-reloads and races; it becomes an error
+  in 2026.12 — issue #168), so every flow that re-points a hub only **writes**:
+  `async_step_reconfigure` uses `async_update_and_abort` (not
+  `async_update_reload_and_abort`), the Supervisor discovery step passes
+  `reload_on_update=False` to `_abort_if_unique_id_configured`, and
+  `async_rebind_hub` does not reload either. `_async_update_listener` then
+  compares `(host, port, path, secure, unique_id)` (`_hub_connection`,
+  `hub_settings.py`) against `coordinator.connection_snapshot` and reloads once
+  when it differs — the same snapshot-vs-live pattern as `manage_settings` /
+  `calibration_snapshot` / `user_mappings_snapshot`. Never reintroduce a
+  flow-side reload.
 - **Config-flow sources and dual identity scheme.** `Rtl433ConfigFlow` supports
   `user` (manual add), `reconfigure`, and `hassio` (Supervisor add-on discovery),
   plus the options flow above. Two `unique_id` schemes coexist:
@@ -609,7 +622,9 @@ keep this contributor-facing.
   `__init__.py`). The listener compares the new effective `manage_settings`
   against the running `coordinator.manage_settings` and **reloads the entry only
   when the toggle changed** (the entity set + adopt/enforce behaviour flips);
-  discovery-toggle and timeout changes are applied live with no reload.
+  discovery-toggle and timeout changes are applied live with no reload. The same
+  listener also owns the reload for a changed connection target / stable radio id
+  (see the config-flow section) — no flow reloads a hub itself.
 - **HA is the authority; no re-adopt action — by design.** Once managed, HA
   re-applies its stored values on reconnect and **overrides later direct edits**
   to the rtl_433 config. There is deliberately **no re-adopt button/service**.

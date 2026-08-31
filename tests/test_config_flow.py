@@ -900,14 +900,28 @@ async def test_reconfigure_collision_aborts_and_mutates_neither(
     assert entry_b.unique_id == b_unique_id_snapshot
 
 
-async def test_reconfigure_reloads_entry_exactly_once(hass, hub_entry_builder):
-    """A successful reconfigure schedules exactly one reload (no double teardown)."""
+async def test_reconfigure_reloads_entry_exactly_once(
+    hass, hub_entry_builder, no_socket, caplog
+):
+    """A successful reconfigure reloads the running hub exactly once.
+
+    The flow deliberately uses the *non*-reloading ``async_update_and_abort``:
+    Home Assistant deprecated combining a config-entry update listener with the
+    reloading flow helpers (it double-reloads and races; breaks in 2026.12). The
+    write alone re-points the hub — ``_async_update_listener`` sees the changed
+    connection target and performs the single reload — and no deprecation report
+    is logged.
+    """
     entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
 
     with (
         patch(VALIDATE, return_value=True),
-        patch.object(hass.config_entries, "async_schedule_reload") as reload_spy,
+        patch.object(
+            hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
+        ) as reload_spy,
     ):
         result = await entry.start_reconfigure_flow(hass)
         result = await hass.config_entries.flow.async_configure(
@@ -924,6 +938,9 @@ async def test_reconfigure_reloads_entry_exactly_once(hass, hub_entry_builder):
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     reload_spy.assert_called_once_with(entry.entry_id)
+    assert entry.data[CONF_HOST] == "new.local"
+    assert entry.data[CONF_PORT] == 9000
+    assert "should use it for scheduling a reload" not in caplog.text
 
 
 # --------------------------------------------------------------------------- #
@@ -1216,6 +1233,36 @@ async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
     assert adopted.data["secure"] is True
     # ...while pre-existing keys (the manual entry's discovery toggle) survive.
     assert adopted.data[CONF_DISCOVERY_ENABLED] is True
+
+
+async def test_hassio_readvertisement_reloads_running_hub(hass, no_socket, caplog):
+    """A re-advertised radio on a new host reloads the running hub, once.
+
+    The discovery step passes ``reload_on_update=False`` (core scheduling a reload
+    here *and* an update listener is the deprecated combination), so the reload is
+    the update listener's, driven by the changed connection target.
+    """
+    entry = _radio_entry(host="core-rtl433", port=8433)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    with patch.object(
+        hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
+    ) as reload_spy:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN,
+            context={"source": SOURCE_HASSIO},
+            data=_disc(host="core-rtl433-2", port=8500),
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert entry.data[CONF_HOST] == "core-rtl433-2"
+    assert entry.data[CONF_PORT] == 8500
+    reload_spy.assert_called_once_with(entry.entry_id)
+    assert "should use it for scheduling a reload" not in caplog.text
 
 
 async def test_hassio_discovery_does_not_rekey_populated_different_radio(hass):

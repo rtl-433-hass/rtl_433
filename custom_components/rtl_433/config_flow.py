@@ -82,6 +82,11 @@ async def async_rebind_hub(
     change nothing; if it is an empty orphan (e.g. a duplicate auto-created by
     discovery on a new host:port) it is removed and the rebind proceeds.
     Returns ``"ok"`` on success.
+
+    The write alone re-points the hub: ``_async_update_listener`` sees the changed
+    connection target / unique_id and reloads the entry. Reloading here as well is
+    what Home Assistant deprecated in 2026.6 (an update listener combined with a
+    flow-side reload double-reloads and races), so this function never reloads.
     """
     for other in hass.config_entries.async_entries(DOMAIN):
         if other.entry_id == entry.entry_id:
@@ -98,7 +103,6 @@ async def async_rebind_hub(
     if title is not None:
         updates["title"] = title
     hass.config_entries.async_update_entry(entry, **updates)
-    await hass.config_entries.async_reload(entry.entry_id)
     return "ok"
 
 
@@ -250,8 +254,12 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
         Validates the new host/port/path/secure, recomputes the host:port
         unique_id (guarding against collision with a *different* configured
         hub), then merges the new connection params into the entry via
-        ``data_updates=`` and reloads it in place — preserving the entry_id,
-        ``entry.data["devices"]``, and ``manage_settings``.
+        ``data_updates=`` — preserving the entry_id, ``entry.data["devices"]``,
+        and ``manage_settings``. The write alone re-points the hub:
+        ``_async_update_listener`` sees the changed connection target and reloads
+        the entry, so this step uses the *non*-reloading
+        ``async_update_and_abort`` (Home Assistant deprecated combining an update
+        listener with the reloading flow helpers).
         """
         entry = self._get_reconfigure_entry()
         errors: dict[str, str] = {}
@@ -283,7 +291,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                             and other.entry_id != entry.entry_id
                         ):
                             return self.async_abort(reason="already_configured")
-                    return self.async_update_reload_and_abort(
+                    return self.async_update_and_abort(
                         entry,
                         unique_id=new_unique_id,
                         title=f"rtl_433 ({host})",
@@ -311,7 +319,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                     if status == "already_configured":
                         return self.async_abort(reason="already_configured")
                     return self.async_abort(reason="reconfigure_successful")
-                return self.async_update_reload_and_abort(
+                return self.async_update_and_abort(
                     entry,
                     title=f"rtl_433 ({host})",
                     data_updates=conn,
@@ -393,7 +401,11 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_PORT: port,
                 CONF_PATH: path,
                 CONF_SECURE: secure,
-            }
+            },
+            # The update listener reloads the entry when the target actually
+            # changed; letting core schedule a reload here too is deprecated
+            # (an update listener plus a reloading flow helper double-reloads).
+            reload_on_update=False,
         )
 
         self._discovery = {
