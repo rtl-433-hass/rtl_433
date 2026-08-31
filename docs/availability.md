@@ -47,12 +47,15 @@ The separate **rtl_433 server unreachable** repair issue is debounced: it waits
 90 seconds before raising, so a routine server restart does not produce a
 notification even though the entities reported the outage immediately.
 
-Two kinds of entity are deliberately exempt:
+`event` entities (buttons, doorbells, remotes) go unavailable with everything
+else. This matches Zigbee2MQTT, whose event entities carry the bridge-state
+availability topic alongside the per-device one, and Home Assistant's own Shelly
+and ESPHome integrations. Use the `event.received` trigger rather than a plain
+state trigger: it ignores transitions out of `unavailable`, so a reconnect never
+replays a stale press.
 
-- **`event` entities** (buttons, doorbells, remotes) stay available. An event
-  entity's state *is* the timestamp of its last event, so marking it unavailable
-  would lose that timestamp across a restart and re-fire plain state-triggered
-  automations with a stale timestamp on every reconnect.
+One kind of entity is deliberately exempt:
+
 - **The hub's SDR controls** (**Gain**, **Sample rate**, **Frequency
   correction**, **Hop interval**, **Conversion mode**) stay available, because
   they are settings you are writing rather than readings you are trusting. With

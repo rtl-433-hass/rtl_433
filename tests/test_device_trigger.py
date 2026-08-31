@@ -333,6 +333,97 @@ async def test_triggers_do_not_fire_on_config_entry_reload(hass, hub_entry_build
 
 
 # --------------------------------------------------------------------------- #
+# Neither trigger re-fires when the hub reconnects after an outage.            #
+# --------------------------------------------------------------------------- #
+async def test_triggers_do_not_fire_on_hub_reconnect(hass, hub_entry_builder):
+    """A hub outage + reconnect must not re-fire the last press.
+
+    Event entities are gated on the hub connection like every other device
+    entity, so an outage drives the same ``<event> -> unavailable -> restored
+    <event>`` round trip a config-entry reload does — now on every socket drop,
+    not just a reload. Two independent guards have to hold:
+
+    * the listener ignores an ``old_state`` of ``unavailable`` (the repaint back
+      to the restored timestamp), and
+    * ``Rtl433Event._handle_dispatch`` returns before ``_trigger_event`` for the
+      reconnect replay the server sends on every new connection, so the state
+      timestamp does not advance at all.
+
+    A genuine live press after the reconnect must still fire both.
+    """
+    hub = await _setup_button_hub(hass, hub_entry_builder)
+    device_id = _resolve_device_id(hass, hub.entry_id)
+    coordinator = _coordinator(hass, hub)
+
+    ent_reg = er.async_get(hass)
+    entity_id = ent_reg.async_get_entity_id(
+        "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+    )
+
+    await _feed_presses(hass, coordinator, ["A"])
+    fired_at = hass.states.get(entity_id).state
+    assert fired_at not in ("unknown", "unavailable")
+
+    triggers = await async_get_triggers(hass, device_id)
+    base = next(t for t in triggers if t[CONF_TYPE] == TRIGGER_TYPE_TRIGGERED)
+    subtype_a = next(
+        t
+        for t in triggers
+        if t[CONF_TYPE] == TRIGGER_TYPE_TRIGGERED_SUBTYPE and t[CONF_SUBTYPE] == "A"
+    )
+    # Attach BEFORE the outage, like a real automation that lives across it.
+    base_calls, remove_base = await _attach(hass, base)
+    sub_calls, remove_sub = await _attach(hass, subtype_a)
+
+    seen_states: list[str] = []
+
+    @callback
+    def _spy(event):
+        new_state = event.data["new_state"]
+        seen_states.append(None if new_state is None else new_state.state)
+
+    unsub_spy = async_track_state_change_event(hass, [entity_id], _spy)
+
+    # Drop the socket: the event entity goes unavailable with the rest of the hub.
+    coordinator._client.connected = False
+    coordinator._emit_hub_update()
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == "unavailable"
+
+    # Reconnect, then let the server replay its recent buffer (an old ``time``
+    # classifies the frame as a replay) exactly as it does on every connection.
+    coordinator._client.connected = True
+    coordinator._emit_hub_update()
+    await hass.async_block_till_done()
+    _feed(
+        coordinator,
+        {
+            "time": "2020-01-01T00:00:00Z",
+            "model": MODEL,
+            "id": DEVICE_ID,
+            "button": "A",
+        },
+    )
+    await hass.async_block_till_done()
+    unsub_spy()
+
+    # The outage genuinely passed the entity through ``unavailable`` and back to
+    # the same last-fired timestamp -- the replay did not stamp a new one.
+    assert "unavailable" in seen_states
+    assert hass.states.get(entity_id).state == fired_at
+    assert base_calls == []
+    assert sub_calls == []
+
+    # A genuine press after the reconnect still fires both.
+    await _feed_presses(hass, coordinator, ["A"])
+    assert len(base_calls) == 1
+    assert len(sub_calls) == 1
+
+    remove_base()
+    remove_sub()
+
+
+# --------------------------------------------------------------------------- #
 # Subtyped trigger stays silent for a non-matching event_type.                 #
 # --------------------------------------------------------------------------- #
 async def test_subtype_trigger_silent_for_non_matching_type(hass, hub_entry_builder):

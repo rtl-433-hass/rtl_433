@@ -11,9 +11,8 @@ it follows the socket with no grace window: the moment the connection drops,
 The first half drives the coordinator seam directly (the client's
 ``on_hub_update`` callback, the watchdog tick, the log lines); the second half
 asserts the user-visible end of it through real entities: a never-expire
-event-driven device and the Last-seen sensor go unavailable while the hub is down
-and come back when it reconnects, while the ``event`` entity stays available
-because its state *is* its last-fired timestamp.
+event-driven device, its ``event`` entity and the Last-seen sensor all go
+unavailable while the hub is down and come back when it reconnects.
 """
 
 from __future__ import annotations
@@ -389,15 +388,12 @@ async def test_offline_hub_takes_every_device_entity_unavailable(
     """A sustained outage marks devices unavailable, including never-expire ones.
 
     The door contact is event-driven, so its silence timeout is never-expire and
-    nothing about its own liveness would ever hide it. Its measurement sensor and
-    its Last-seen sensor must still go unavailable while the hub is unreachable —
-    and come back on reconnect.
-
-    Its ``event`` entity is the documented exception: an ``EventEntity``'s state
-    *is* its last-fired timestamp, so going unavailable would both break Home
-    Assistant's restore (which parses that state string) and re-fire plain
-    state-trigger automations with a stale timestamp on every reconnect. See
-    ``Rtl433Event.available``.
+    nothing about its own liveness would ever hide it. Its measurement sensor,
+    its ``event`` entity and its Last-seen sensor must still go unavailable while
+    the hub is unreachable — and come back on reconnect. There is no exception
+    for ``event``: zigbee2mqtt publishes the bridge-state availability topic on
+    its own event entities, and core's Shelly/ESPHome event entities follow the
+    device connection.
     """
     device_key = "Acurite-606TX-42"
     hub = await _setup_hub(
@@ -443,8 +439,7 @@ async def test_offline_hub_takes_every_device_entity_unavailable(
         _drop(coordinator)
         await hass.async_block_till_done()
         assert hass.states.get(temp_eid).state == "unavailable"
-        # The event entity is exempt and keeps its last-fired timestamp.
-        assert hass.states.get(button_eid).state != "unavailable"
+        assert hass.states.get(button_eid).state == "unavailable"
 
         # Reconnecting repaints them without waiting for a fresh transmission.
         _connect(coordinator)

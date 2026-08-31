@@ -66,10 +66,11 @@ from custom_components.rtl_433.const import (
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
 from homeassistant.const import MATCH_ALL
-from homeassistant.core import HomeAssistant, State
+from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 LEGACY_OBSERVED_FIELDS = "observed_fields"
@@ -1260,16 +1261,19 @@ async def test_event_rebuilds_event_types_from_persisted(hass, hub_entry_builder
     assert state.attributes["event_type"] is None
 
 
-async def test_event_always_available_and_no_double_fire_on_watchdog(
+async def test_event_expires_with_its_device_and_no_double_fire_on_watchdog(
     hass, hub_entry_builder
 ):
-    """An event entity stays available past the timeout and does not re-fire.
+    """An event entity expires with its device and never re-fires on the way out.
 
-    A sibling measurement sensor on the same device goes ``unavailable`` once the
-    silence timeout elapses, but the event entity (always-available) does not.
-    The watchdog re-dispatches the cached last event by the same object, so the
-    event entity's identity dedupe suppresses a re-fire: its last-fire state and
-    timestamp are unchanged across the watchdog tick.
+    The event entity takes the base availability gate unmodified, so it goes
+    ``unavailable`` alongside its sibling measurement sensor once the silence
+    timeout elapses (the same thing zigbee2mqtt's event entities do). The
+    watchdog re-dispatches the cached last event to make entities re-read
+    availability; ``is_repaint`` must stop that stale value being re-fired, so
+    the only state the entity writes across the tick is the outage marker — the
+    last-fire timestamp never advances. A genuine transmission afterwards brings
+    it back and fires normally.
     """
     device_key = "Acurite-606TX-42"
     hub = await _setup_hub(
@@ -1310,19 +1314,39 @@ async def test_event_always_available_and_no_double_fire_on_watchdog(
     assert fired.attributes["event_type"] == "A"
     fired_at = fired.state  # ISO timestamp of the fire
 
+    seen_states: list[str | None] = []
+
+    @callback
+    def _spy(event):
+        new_state = event.data["new_state"]
+        seen_states.append(None if new_state is None else new_state.state)
+
+    unsub_spy = async_track_state_change_event(hass, [button_eid], _spy)
+
     # Advance past the 600s timeout and run the watchdog, which re-dispatches the
-    # cached last event (same NormalizedEvent object) for the now-stale device.
+    # cached last event (flagged ``is_repaint``) for the now-stale device.
     with freeze_time(start + timedelta(seconds=601)):
         await coordinator._async_watchdog(dt_util.utcnow())
         await hass.async_block_till_done()
+    unsub_spy()
 
-    # The measurement sensor flips unavailable; the event entity does not.
+    # Both flip unavailable -- the event entity is gated like every other one.
     assert hass.states.get(temp_eid).state == "unavailable"
-    after = hass.states.get(button_eid)
-    assert after.state != "unavailable"
-    # Identity dedupe suppressed a re-fire: last-fire state/type are unchanged.
-    assert after.state == fired_at
-    assert after.attributes["event_type"] == "A"
+    assert hass.states.get(button_eid).state == "unavailable"
+    # The re-paint wrote nothing but the outage marker: no fresh timestamp, so
+    # the stale cached "A" was never re-fired.
+    assert set(seen_states) <= {"unavailable", fired_at}
+
+    # A genuine transmission brings it back and fires for real.
+    with freeze_time(start + timedelta(seconds=602)):
+        _feed(
+            coordinator,
+            {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.0, "button": "A"},
+        )
+        await hass.async_block_till_done()
+    back = hass.states.get(button_eid)
+    assert back.state not in ("unavailable", fired_at)
+    assert back.attributes["event_type"] == "A"
 
 
 async def test_event_restores_last_fire_across_reload(hass, hub_entry_builder):

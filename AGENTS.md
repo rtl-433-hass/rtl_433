@@ -278,11 +278,20 @@ coordinator watchdog, and the devices map:
 - **Type-only fired event.** `_trigger_event(event_type)` is called with **no
   extra attributes** (the type is the whole payload); there is **no `payload`
   and no `value_transform`** — the raw value is stringified directly.
-- **Always available; no construction-time replay.** `available` ignores the
-  silence timeout (events are momentary; a timeout would hide the entity almost
-  always) and tracks `coordinator.hub_available` instead — while there is no
-  socket the device's events cannot arrive at all (see
-  [Hub-connection availability gate](#hub-connection-availability-gate)).
+- **Unmodified availability; no construction-time replay.** `available` is **not**
+  overridden — the entity takes the base gate whole: the hub connection *and* the
+  per-device silence timeout (see
+  [Hub-connection availability gate](#hub-connection-availability-gate)). This
+  matches zigbee2mqtt (its `event` discovery payload carries the bridge-state and
+  per-device availability topics, `availability_mode: all`) and core (Shelly's
+  event entities inherit `CoordinatorEntity.available`; ESPHome's follow the
+  device connection). The silence timeout is harmless in practice because
+  button/doorbell/motion/contact devices classify as event-driven and resolve to
+  the never-expire class default. **Nothing re-fires on the way back:** the
+  reconnect replay is `is_replay` so `_handle_dispatch` returns before
+  `_trigger_event` (the timestamp never advances), core's `event.received`
+  trigger sets `_excluded_from_states = {STATE_UNAVAILABLE}`, and
+  `device_trigger.py`'s listener returns on an `old_state` of `unavailable`.
   `_async_restore_state` is a **no-op** — HA's
   `EventEntity.async_internal_added_to_hass` restores the last displayed event.
   The entity does **not** seed/replay `coordinator.devices[key]` on construction

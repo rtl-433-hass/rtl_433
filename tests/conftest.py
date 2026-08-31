@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from pyrtl_433 import Rtl433Client
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -154,6 +155,13 @@ def hub_connected_by_default(request):
     where the hub is set up, it fails much later as an unrelated-looking device
     timeout as soon as the test looks at an entity's state.
 
+    Marking connected once at startup is not enough on its own: the real setup
+    also starts the library client's reconnect loop against a host that does not
+    resolve, and its failures flip ``connected`` back to False asynchronously,
+    part-way through whatever the test is doing. Every device entity is gated on
+    that flag, so the loop is stubbed out here too — otherwise "connected by
+    default" silently stops holding as soon as a test lets the event loop run.
+
     Tests that exercise the outage side opt out with
     ``@pytest.mark.hub_disconnected`` and drive the edges themselves.
     """
@@ -167,5 +175,9 @@ def hub_connected_by_default(request):
         await original(self)
         mark_hub_connected(self)
 
-    with patch.object(Rtl433Coordinator, "async_start", _async_start):
+    with (
+        patch.object(Rtl433Client, "start", new=AsyncMock()),
+        patch.object(Rtl433Client, "stop", new=AsyncMock()),
+        patch.object(Rtl433Coordinator, "async_start", _async_start),
+    ):
         yield
