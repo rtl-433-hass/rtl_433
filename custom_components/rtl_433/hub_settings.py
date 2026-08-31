@@ -16,7 +16,6 @@ from .calibration import normalize_calibration
 from .const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
-    CONF_DISCOVERY_ENABLED,
     CONF_HOST,
     CONF_MANAGE_SETTINGS,
     CONF_PATH,
@@ -30,16 +29,6 @@ from .const import (
 def _hub_secure(entry: ConfigEntry) -> bool:
     """Return the hub entry's ``secure`` (wss) flag, defaulting to False."""
     return bool(entry.data.get("secure", False))
-
-
-def _hub_discovery_enabled(entry: ConfigEntry) -> bool:
-    """Resolve the hub's discovery toggle (options override data, default on)."""
-    return bool(
-        entry.options.get(
-            CONF_DISCOVERY_ENABLED,
-            entry.data.get(CONF_DISCOVERY_ENABLED, True),
-        )
-    )
 
 
 def _explicit_hub_timeout(entry: ConfigEntry) -> int | None:

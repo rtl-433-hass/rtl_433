@@ -2204,10 +2204,10 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         assert entry.version == 2
-        assert entry.minor_version == 7
+        assert entry.minor_version == 8
 
-    async def test_v2_minor_4_goes_through_steps_4_to_7(self, hass):
-        """Version 2, minor 4 skips steps 2 and 3, does 4, 5, 6, 7."""
+    async def test_v2_minor_4_goes_through_steps_4_to_8(self, hass):
+        """Version 2, minor 4 skips steps 2 and 3, does 4, 5, 6, 7, 8."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             title="hub",
@@ -2229,7 +2229,7 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         mock_read.assert_not_called()
-        assert entry.minor_version == 7
+        assert entry.minor_version == 8
 
     async def test_v1_device_without_hub_id_still_returns_true(self, hass):
         """A v1 device entry with no CONF_HUB_ENTRY_ID still returns True."""
@@ -3487,9 +3487,9 @@ class TestKillSurvivingMutants:
         ):
             await async_migrate_entry(hass, entry)
 
-        # Final result: version=2, minor_version=7
+        # Final result: version=2, minor_version=8
         assert entry.version == 2
-        assert entry.minor_version == 7
+        assert entry.minor_version == 8
 
         # Check the first update call (for minor 2) had correct version/minor
         calls = update_spy.call_args_list
@@ -3797,7 +3797,7 @@ class TestKillSurvivingMutants:
         # Step 4 skipped: no update call bumped the entry to minor 4. If <= 4 or
         # < 5 were used, the step would re-run and emit a minor-4 bump.
         assert [u for u in updates if u.get("minor_version") == 4] == []
-        assert entry.minor_version == 7
+        assert entry.minor_version == 8
 
     async def test_migrate_entry_minor_5_skipped_when_at_5(self, hass):
         """Minor 5 step is skipped when minor_version is already 5.

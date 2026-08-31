@@ -42,7 +42,6 @@ from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 
 from .const import (
     CONF_DEVICES,
-    CONF_DISCOVERY_ENABLED,
     CONF_HOST,
     CONF_INITIAL_FREQUENCY,
     CONF_MANAGE_SETTINGS,
@@ -130,7 +129,6 @@ STEP_USER_SCHEMA = vol.Schema(
         vol.Optional(
             CONF_INITIAL_FREQUENCY, default=DEFAULT_INITIAL_FREQUENCY
         ): _FREQUENCY_SELECTOR,
-        vol.Optional(CONF_DISCOVERY_ENABLED, default=True): bool,
     }
 )
 
@@ -139,7 +137,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle setup of an rtl_433 hub (one config entry per server)."""
 
     VERSION = 2
-    MINOR_VERSION = 7
+    MINOR_VERSION = 8
 
     # Connection params carried from ``async_step_hassio`` into the confirm step.
     _discovery: dict[str, Any] | None = None
@@ -201,7 +199,6 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_PATH: path,
                     CONF_SECURE: secure,
                     CONF_MANAGE_SETTINGS: manage_settings,
-                    CONF_DISCOVERY_ENABLED: user_input[CONF_DISCOVERY_ENABLED],
                 }
                 # The initial frequency rides the managed desired-state path, so
                 # it is only meaningful (and only persisted) when managing settings.
@@ -448,7 +445,6 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(
                     CONF_INITIAL_FREQUENCY, default=DEFAULT_INITIAL_FREQUENCY
                 ): _FREQUENCY_SELECTOR,
-                vol.Optional(CONF_DISCOVERY_ENABLED, default=True): bool,
             }
         )
 
@@ -475,7 +471,6 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_PATH: disc[CONF_PATH],
                 CONF_SECURE: disc[CONF_SECURE],
                 CONF_MANAGE_SETTINGS: manage_settings,
-                CONF_DISCOVERY_ENABLED: user_input[CONF_DISCOVERY_ENABLED],
             }
             # As in the manual flow, the initial frequency only applies (and is
             # only persisted) when settings are managed.

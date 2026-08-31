@@ -25,7 +25,6 @@ from custom_components.rtl_433.const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICE_KEY,
     CONF_DEVICES,
-    CONF_DISCOVERY_ENABLED,
     CONF_ENTRY_TYPE,
     CONF_HOST,
     CONF_HUB_ENTRY_ID,
@@ -54,7 +53,6 @@ from custom_components.rtl_433.hub_settings import (
     _calibration_map,
     _hub_availability_timeout,
     _hub_connection,
-    _hub_discovery_enabled,
     _hub_manage_settings,
     _hub_secure,
 )
@@ -113,8 +111,8 @@ async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
 
 
 # ===========================================================================
-# Pure helper functions — _hub_secure / _hub_discovery_enabled /
-# _hub_availability_timeout / _hub_manage_settings
+# Pure helper functions — _hub_secure / _hub_availability_timeout /
+# _hub_manage_settings
 # ===========================================================================
 
 
@@ -145,41 +143,6 @@ def test_hub_secure_true_when_set():
 def test_hub_secure_false_when_explicit_false():
     entry = _make_entry(data={"secure": False})
     assert _hub_secure(entry) is False
-
-
-# --- _hub_discovery_enabled ------------------------------------------------
-
-
-def test_hub_discovery_enabled_defaults_true():
-    entry = _make_entry(data={})
-    assert _hub_discovery_enabled(entry) is True
-
-
-def test_hub_discovery_enabled_data_false():
-    entry = _make_entry(data={CONF_DISCOVERY_ENABLED: False})
-    assert _hub_discovery_enabled(entry) is False
-
-
-def test_hub_discovery_enabled_data_true():
-    entry = _make_entry(data={CONF_DISCOVERY_ENABLED: True})
-    assert _hub_discovery_enabled(entry) is True
-
-
-def test_hub_discovery_options_overrides_data_false():
-    """options takes precedence over data."""
-    entry = _make_entry(
-        data={CONF_DISCOVERY_ENABLED: True},
-        options={CONF_DISCOVERY_ENABLED: False},
-    )
-    assert _hub_discovery_enabled(entry) is False
-
-
-def test_hub_discovery_options_overrides_data_true():
-    entry = _make_entry(
-        data={CONF_DISCOVERY_ENABLED: False},
-        options={CONF_DISCOVERY_ENABLED: True},
-    )
-    assert _hub_discovery_enabled(entry) is True
 
 
 # --- _hub_availability_timeout ---------------------------------------------
@@ -708,18 +671,6 @@ async def test_setup_entry_coordinator_gets_correct_host_port(hass, hub_entry_bu
     assert coordinator.port == DEFAULT_PORT
 
 
-async def test_setup_entry_coordinator_discovery_enabled(hass, hub_entry_builder):
-    """discovery_enabled is propagated from the entry to the coordinator."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
-    assert _coordinator(hass, hub).discovery_enabled is True
-
-
-async def test_setup_entry_coordinator_discovery_disabled(hass, hub_entry_builder):
-    """discovery_enabled=False is propagated to the coordinator."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=False)
-    assert _coordinator(hass, hub).discovery_enabled is False
-
-
 async def test_setup_entry_coordinator_manages_settings_default(
     hass, hub_entry_builder
 ):
@@ -921,7 +872,7 @@ async def test_new_device_callback_dispatches_signal(hass, hub_entry_builder, ev
     from custom_components.rtl_433.const import signal_new_device
 
     power_event = _live(events("power_sensor.json")[0])
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
 
     received: list[tuple] = []
@@ -1041,7 +992,7 @@ async def test_remove_nested_device_returns_true(hass, hub_entry_builder, events
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
     coordinator.adopt_device(device_key)
@@ -1063,7 +1014,7 @@ async def test_remove_nested_device_drops_from_devices_map(
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
     coordinator.adopt_device(device_key)
@@ -1086,7 +1037,7 @@ async def test_remove_nested_device_calls_forget_device(
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
     coordinator.adopt_device(device_key)
@@ -1111,7 +1062,7 @@ async def test_remove_nested_device_calls_device_removers(
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
     coordinator.adopt_device(device_key)
@@ -1140,7 +1091,7 @@ async def test_remove_device_coordinator_none_branch(hass, hub_entry_builder, ev
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
     coordinator.adopt_device(device_key)
@@ -1252,33 +1203,22 @@ async def test_update_listener_reloads_on_unique_id_rebind(hass, hub_entry_build
 
 
 async def test_update_listener_no_reload_for_unrelated_change(hass, hub_entry_builder):
-    """An unrelated options change (e.g. discovery toggle) does not reload."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    """An options change the coordinator can absorb live (the timeout) does not reload."""
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
-    assert coordinator.discovery_enabled is True
+    assert coordinator.availability_timeout == 600
 
     with patch.object(
         hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
     ) as reload_spy:
         hass.config_entries.async_update_entry(
-            hub, options={CONF_DISCOVERY_ENABLED: False}
+            hub, options={CONF_AVAILABILITY_TIMEOUT: 120}
         )
         await hass.async_block_till_done()
 
     reload_spy.assert_not_called()
-    # The coordinator's discovery_enabled was updated live
-    assert coordinator.discovery_enabled is False
-
-
-async def test_update_listener_updates_discovery_live(hass, hub_entry_builder):
-    """Toggling discovery is applied live without reload."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
-    coordinator = _coordinator(hass, hub)
-
-    hass.config_entries.async_update_entry(hub, options={CONF_DISCOVERY_ENABLED: False})
-    await hass.async_block_till_done()
-
-    assert coordinator.discovery_enabled is False
+    # The coordinator's availability_timeout was updated live instead.
+    assert coordinator.availability_timeout == 120
 
 
 async def test_update_listener_updates_availability_timeout_live(
