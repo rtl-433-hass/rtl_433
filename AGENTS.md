@@ -792,13 +792,36 @@ hub's *Device mappings* options step instead of editing the shipped library (see
 
 Dependencies and tools are managed with [uv](https://docs.astral.sh/uv/), the
 same as CI. Install uv with `curl -LsSf https://astral.sh/uv/install.sh | sh`,
-then:
+then just run:
 
 ```bash
-uv venv
-uv pip install -r requirements_test.txt
 uv run pytest tests/
 ```
+
+That works from a **fresh clone or a git worktree** with no setup: the test
+dependencies are declared in the `dev` dependency group in `pyproject.toml`,
+which uv installs by default, so `uv run` resolves them and populates `.venv` on
+first use (a minute or two; instant thereafter). `uv.lock` is generated locally
+and is **not** committed — it stays in `.gitignore` with the other dependency
+locks and caches.
+
+`[tool.uv] environments` pins the resolution to `python_full_version >= 3.14.2`.
+That is deliberate and load-bearing: `requires-python` is `>=3.14` (what the
+*integration* needs, tracked against Home Assistant), but the pinned test stack
+pulls in a `homeassistant` requiring `>=3.14.2`, so an unrestricted resolution is
+unsatisfiable. Constraining the environment keeps the project's declared support
+honest rather than tightening it to satisfy a dev-only dependency.
+
+> **If you see `Failed to spawn: pytest`**, the `dev` group is missing or
+> resolution failed. Note this failure mode is **silent**: uv creates an empty
+> environment, fails to find pytest, and **still exits 0**, so a green-looking
+> run has actually executed nothing. Always confirm a real pass/fail count before
+> trusting an exit code — this bit a worktree session before the `dev` group
+> existed.
+
+The pins are duplicated in `requirements_test.txt`, which CI and pip users
+install directly (`uv pip install -r requirements_test.txt`); a renovate
+packageRule groups the two so they are bumped in one PR and cannot drift.
 
 `requirements_test.txt` pins `pytest-homeassistant-custom-component`, which pulls
 in the matching Home Assistant version and the full pytest stack (asyncio, cov,

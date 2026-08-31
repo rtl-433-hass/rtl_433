@@ -93,10 +93,14 @@ For a one-off run without installing, use
 ## Tests
 
 ```bash
-uv venv
-uv pip install -r requirements_test.txt
 uv run pytest tests/
 ```
+
+No setup step is needed, including in a fresh clone or a git worktree: the test
+dependencies are declared in the `dev` dependency group in `pyproject.toml`,
+which uv installs by default, so `uv run` populates `.venv` on first use (a
+minute or two; instant thereafter). Those pins are mirrored in
+`requirements_test.txt` for CI and pip users; renovate bumps both together.
 
 To match CI's coverage invocation:
 
