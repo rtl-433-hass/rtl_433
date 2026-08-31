@@ -51,6 +51,15 @@
       "description": "Group developer tooling updates into a single PR"
     },
     {
+      "matchPackageNames": [
+        "pytest-homeassistant-custom-component",
+        "pyrtl_433",
+        "mutmut"
+      ],
+      "groupName": "test dependencies",
+      "description": "The test pins live in both requirements_test.txt (CI, pip users) and the pyproject dependency-groups dev group (so a bare `uv run pytest` bootstraps itself). Sharing one group keeps both in a single PR so they cannot drift apart"
+    },
+    {
       "matchManagers": ["pre-commit"],
       "groupName": "dev dependencies",
       "description": "Hook revs are developer tooling. Sharing the group above keeps the ruff== pin in requirements_dev.txt and the ruff-pre-commit rev in one PR, so the two cannot drift apart"

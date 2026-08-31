@@ -527,8 +527,25 @@ specially by the loader and are not parsed as field-mapping tables.
    ```bash
    python3 -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('custom_components/rtl_433/device_library/*.yaml')]; print('ok')"
    ```
-5. **Add a fixture/test** if you are contributing upstream (see the project test
-   suite) and open a PR with a `feat:` conventional commit.
+5. **Add a fixture** under `tests/fixtures/` with a real event from your device.
+   `tests/test_fixture_coverage.py` sweeps every fixture and fails if any field
+   in it has no descriptor and no skip-key entry, so a fixture is what proves
+   your mapping actually matches. Then open a PR with a `feat:` conventional
+   commit.
+
+!!! warning "Field names are matched exactly, and a mismatch is silent"
+
+    A key that differs from the wire name by so much as its case produces no
+    entity, no warning, and no error — the sensor simply never appears. SCMplus
+    emits `Consumption` (CamelCase) while ERT-SCM emits `consumption_data`
+    (snake_case); both decoders are in the same protocol family. Copy the name
+    from the decoder's `data_make()` call, or better, from a real event.
+
+    For the SCM family and Acurite this is checked against rtl_433's actual
+    output: `tests/fixtures/generated/` holds events decoded from real `.cu8`
+    captures by `scripts/regen_capture_fixtures.py`, and CI re-decodes and diffs
+    them. See `tests/fixtures/generated/README.md` if you want to extend that
+    to another protocol.
 
 [hadc]: https://www.home-assistant.io/integrations/sensor/#device-class
 
