@@ -8,7 +8,7 @@ removed statements, and negated conditions.
 from __future__ import annotations
 
 from datetime import timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from freezegun import freeze_time
 import pytest
@@ -32,6 +32,7 @@ from custom_components.rtl_433.const import (
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.entity import (
+    Rtl433Entity,
     _apply_calibration,
     _resolve_entity_category,
     async_upsert_device,
@@ -427,6 +428,32 @@ async def test_device_info_manufacturer(hass, hub_entry_builder):
     )
     assert device_entry is not None
     assert device_entry.manufacturer == "rtl_433"
+
+
+def _identity_entity(model: str, device_key: str) -> Rtl433Entity:
+    """Build a bare Rtl433Entity (mock coordinator) for device-info assertions."""
+    descriptor = FieldDescriptor(
+        field_key="temperature_C",
+        platform="sensor",
+        name=None,
+        object_suffix="C",
+        device_class="temperature",
+        unit_of_measurement="°C",
+        state_class="measurement",
+    )
+    return Rtl433Entity(MagicMock(), "hub", device_key, model, descriptor)
+
+
+def test_device_info_serial_number_is_identity_suffix():
+    """DeviceInfo.serial_number carries the id suffix, model prefix stripped."""
+    entity = _identity_entity("Fineoffset-WH51", "Fineoffset-WH51-00c50f")
+    assert entity.device_info["serial_number"] == "00c50f"
+
+
+def test_device_info_serial_number_none_for_model_only_device():
+    """A model-only device (key == model token) publishes no serial number."""
+    entity = _identity_entity("Fineoffset-WH51", "Fineoffset-WH51")
+    assert entity.device_info["serial_number"] is None
 
 
 async def test_device_name_with_model(hass, hub_entry_builder):
