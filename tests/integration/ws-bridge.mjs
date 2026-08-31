@@ -45,6 +45,14 @@ const FIXTURE_FILES = (process.env.FIXTURE_FILES || "")
   .map((s) => s.trim())
   .filter(Boolean);
 const FIXTURE_INTERVAL_MS = Number(process.env.FIXTURE_INTERVAL_MS || 8000);
+// Gap between the individual events of one fixture round. The events MUST NOT
+// share a timestamp: the client library classifies a frame stamped at or before
+// its high-water mark as an already-seen replay, and a replayed frame is never a
+// device's first live sighting — so a whole round emitted in one burst would
+// leave only its first device visible to Home Assistant. Real transmitters are
+// independent, so spacing the round out is also the more faithful replay.
+// Keep FIXTURE_STEP_MS * events < FIXTURE_INTERVAL_MS so rounds do not overlap.
+const FIXTURE_STEP_MS = Number(process.env.FIXTURE_STEP_MS || 1200);
 
 const httpServer = createServer((req, res) => {
   // A trivial UI/health endpoint so curl and HA reachability checks see a 200.
@@ -100,9 +108,11 @@ rl.on("line", (line) => {
 });
 // --- Optional fixture replay ------------------------------------------------
 // Load the configured fixtures once, flatten their arrays into a flat event
-// list, and re-broadcast the whole set on an interval. Each emit restamps the
-// event's `time` to "now" so HA treats successive doorbell presses as fresh
-// events (an event entity keys on the timestamp) and availability stays live.
+// list, and re-broadcast the whole set on an interval, one event every
+// FIXTURE_STEP_MS. Each emit restamps the event's `time` to "now" so HA treats
+// successive doorbell presses as fresh events (an event entity keys on the
+// timestamp), availability stays live, and no two events of a round share a
+// timestamp (see FIXTURE_STEP_MS).
 const pad = (n) => String(n).padStart(2, "0");
 const rtlTime = (d) =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
@@ -121,13 +131,18 @@ for (const name of FIXTURE_FILES) {
 }
 if (fixtureEvents.length) {
   setInterval(() => {
-    const stamp = rtlTime(new Date());
-    for (const ev of fixtureEvents) {
-      broadcast(JSON.stringify({ ...ev, time: stamp }));
-    }
+    fixtureEvents.forEach((ev, index) => {
+      // Stamped at emit time, not round time, so every event of the round
+      // carries a distinct, strictly increasing timestamp.
+      setTimeout(
+        () => broadcast(JSON.stringify({ ...ev, time: rtlTime(new Date()) })),
+        index * FIXTURE_STEP_MS,
+      );
+    });
   }, FIXTURE_INTERVAL_MS);
   process.stderr.write(
-    `ws-bridge: replaying ${fixtureEvents.length} fixture event(s) every ${FIXTURE_INTERVAL_MS}ms\n`,
+    `ws-bridge: replaying ${fixtureEvents.length} fixture event(s) every ` +
+      `${FIXTURE_INTERVAL_MS}ms, ${FIXTURE_STEP_MS}ms apart\n`,
   );
 }
 

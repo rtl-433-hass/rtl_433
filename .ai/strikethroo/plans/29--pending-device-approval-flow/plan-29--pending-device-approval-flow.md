@@ -499,9 +499,9 @@ modules and depend only on the finished implementation.
 - ✔️ Task 004: Test the observation/adoption routing contract (depends on: 003)
 - ✔️ Task 005: Test the add/ignore options flow and the toggle-stripping migration (depends on: 003)
 
-### Phase 5: Documentation
+### ✅ Phase 5: Documentation
 **Parallel Tasks:**
-- Task 006: Rewrite the discovery docs, capture screenshots of the new flow from the container harness, and update `AGENTS.md` (depends on: 004, 005)
+- ✔️ Task 006: Rewrite the discovery docs, capture screenshots of the new flow from the container harness, and update `AGENTS.md` (depends on: 004, 005)
 
 ### Post-phase Actions
 
@@ -512,3 +512,125 @@ and a conventional-commit commit describing the phase.
 ### Execution Summary
 - Total Phases: 5
 - Total Tasks: 6
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-08-31
+
+### Results
+
+All six tasks completed across five phases, each committed separately on
+`feat/pending-device-approval-flow`:
+
+- **Coordinator** (`69d5ff7`) — observation and adoption are now separate states.
+  `adopted` / `ignored` / `pending` live on the coordinator; `_on_client_event`
+  routes on `adopted` before touching any runtime state, so `devices`,
+  `last_seen`, `available`, `seen_fields`, and `device_fields` continue to
+  describe exactly the devices that exist in Home Assistant and the availability
+  watchdog, diagnostics, and entity platforms needed no changes. `adopt_device`
+  promotes a candidate through the same `new_device_callback` seam the auto-add
+  path used. The per-device persistent notification is gone. Deleting a device
+  un-adopts it, so it returns to pending instead of silently recreating itself.
+- **Toggle removal** (`e320df7`) — `discovery_enabled` deleted from every layer,
+  with a `MINOR_VERSION = 8` migration stripping it from `entry.data` and
+  `entry.options` without rewriting the devices map.
+- **Approval UI** (`de758c8`) — `add_devices` and `ignored_devices` options-flow
+  steps, newest-first rows labelled with model, key, sighting count, signal
+  level, and last-seen; two multi-selects add and ignore in one submit. Ignores
+  persist to `entry.data[CONF_IGNORED_DEVICES]` and apply live via the update
+  listener.
+- **Tests** (`51232fb`) — 1585 passing. `test_pending_devices.py` parametrises
+  the live/replay/backlog/ignored/adopted routing matrix; the key test stands two
+  hubs up in one Home Assistant and asserts an adopted device is identical to a
+  pre-seeded one across device metadata and per-entity device class, unit, state
+  class, and state. `test_config_flow.py` drives the flow as a user would;
+  `test_migration_roundtrip.py` proves the devices map survives byte-identical;
+  `test_translations.py` (new) AST-walks both flow modules and asserts every
+  abort reason, error key, step id, and menu option exists in `en.json`.
+- **Docs** — `docs/device-discovery.md` rewritten around observe-then-approve,
+  plus corrections to `configuration.md`, `index.md`, `installation.md`,
+  `diagnostics.md`, `README.md`, and `AGENTS.md`. Fifteen screenshots captured
+  live from the container harness, including two new ones
+  (`15-add-devices.png`, `16-ignored-devices.png`).
+
+Validation gates: `uv run pytest tests/` exit 0 with zero failures; `ruff check`
+and `ruff format --check` clean; `mkdocs build --strict` exit 0; the
+`discovery_enabled` grep gate returns only the migration and its test.
+
+### Noteworthy Events
+
+- **ZHA code could not be reused, contrary to the work order's hope.** ZHA's
+  add-device experience is a bespoke page in the `home-assistant/frontend`
+  repository, wired to a `zha`-specific config-panel route and the
+  `zha/devices/permit` websocket command in
+  `homeassistant/components/zha/websocket_api.py`. Neither is a public API a
+  custom integration can call or render. What was reused instead is the
+  supported custom-integration surface — `OptionsFlow`, `SelectSelector`, the
+  config-entry data store, the migration pattern — plus ZHA's *interaction
+  model*, which is what the user actually wanted. This was established before
+  planning and confirmed against the installed core.
+- **The user amended the work order mid-planning**, replacing the ZHA-style
+  time-limited "permit join" with always-on observation and a memory-only
+  pending list. This removed the timer, the persistence, and the eviction policy
+  the original framing would have required.
+- **A regression this plan introduced was found and fixed during execution.**
+  The device *replace* step exists to re-key a device whose transmitter id
+  changed, and under the new model that new id is always *pending* — so the step
+  could no longer offer the very device it exists to adopt. Its candidate set now
+  spans the devices map, adopted runtime state, and the pending list, with
+  pending entries marked "not added yet". Recorded as an addendum on task 003 and
+  covered by task 005.
+- **Two harness bugs were found and fixed** while capturing screenshots, both
+  blockers. `ws-bridge.mjs` broadcast every fixture event of a round with one
+  shared timestamp, so the replay classifier treated all but the first device as
+  already-seen and only one device ever became a candidate; events are now spaced
+  1200 ms apart. `screenshot.mjs` ticked several checkboxes in one synchronous
+  pass, which submitted only the last, so the first run adopted 1 of 5 devices.
+- **The `MINOR_VERSION` bump broke 17 existing migration assertions** that were
+  not anticipated by the task file; terminal-state assertions were updated to 8
+  and step-specific ones left at 7.
+- **Both new test modules required registration in `scripts/mutation_targets.py`**
+  — an existing meta-test fails for any test file without a 1:1 source mapping.
+  This puts the file in `FULL_RUN_TRIGGERS`, so CI will escalate to a full
+  mutation run for this branch, which is correct.
+- **Conflict semantics were clarified against the original acceptance criteria.**
+  The plan said a key selected to both add and ignore "is ignored, not added",
+  which contradicts also reporting an error. The implemented behaviour applies
+  **nothing** and re-shows the form with `add_and_ignore_conflict`; acting on a
+  submit the flow rejects would be worse. The task file was corrected and the
+  tests assert the apply-nothing behaviour.
+- Task 005 verified its own tests are not vacuous by deliberately breaking six
+  behaviours (the pending sort order, the conflict branch, the replace-step
+  union, the migration's options strip and its early return, and the translation
+  keys) and confirming each produced a failure before reverting.
+
+### Necessary follow-ups
+
+1. **First-sighting delay from the replay high-water mark (product decision).**
+   `pyrtl_433` classifies a frame at or before the replay high-water mark as a
+   replay, and a replay never creates a pending candidate. With rtl_433's
+   second-resolution timestamps, two devices decoding in the same second can mean
+   the second one is not offered until its next transmission. Under auto-add the
+   device registered anyway, so this is a behaviour change. It is a short delay
+   for a sensor that reports periodically, but a doorbell or motion sensor that
+   transmits only when triggered may need a second trigger. The trade-off is
+   against repopulating the list on every reconnect, so it needs a product call
+   rather than an unilateral fix.
+2. **`async_upsert_device` writes nothing when a device's event carries zero
+   storable fields**, so such a device would be adopted in memory but not
+   persisted and would return to pending after a restart. Pre-existing (the old
+   live-add path had the same hole) and near-unreachable in practice, since
+   `snr`/`rssi`/measurements almost always supply a field.
+3. **The add form renders every pending device twice**, once under Add and once
+   under Ignore. With the 77 devices from issue #128 that is a 154-row form.
+   Worth revisiting the UI shape if users report it.
+4. **Picker label markers are composed in Python** (`— not added yet`), following
+   the existing `— {commodity} detected` precedent, so they are not translatable.
+   Making them translatable needs a placeholder-based redesign of the whole
+   picker-label approach.
+5. **`tests/test_coordinator.py` is mapped only to `coordinator/base.py`** in
+   `EXPLICIT_TEST_SOURCES` though it exercises `coordinator/_events.py` heavily.
+   Pre-existing; worth correcting when the mutation baseline is next rebuilt.
+6. **The mutation baseline needs rebuilding** for the changed modules; CI will
+   run the full matrix for this branch.

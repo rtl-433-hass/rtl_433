@@ -27,7 +27,7 @@ or has a unique serial.
 
 Add a hub from **Settings → Devices & Services → Add Integration → rtl_433**.
 
-![The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings and discovery toggles, and initial frequency](images/06-config-user.png)
+![The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings toggle, and initial frequency](images/06-config-user.png)
 
 | Field | Default | Description |
 | --- | --- | --- |
@@ -36,7 +36,6 @@ Add a hub from **Settings → Devices & Services → Add Integration → rtl_433
 | **Path** | `/ws` | The WebSocket path on the rtl_433 HTTP server. |
 | **Secure** | off | Connect with `wss://` instead of `ws://`. |
 | **Manage rtl_433 settings from Home Assistant** | on | Expose SDR controls and let Home Assistant adopt and enforce receiver settings. |
-| **Discover new devices** | on | Add newly observed devices automatically. |
 | **Initial frequency (MHz)** | `433.92` | Center frequency to apply once on first connect when managed settings are enabled. |
 
 The integration validates that the WebSocket can be reached before creating the
@@ -106,18 +105,23 @@ host, port, path, or secure mode. Devices and their history are preserved.
 
 Use **Configure** for hub options:
 
-- **Hub settings**: discovery toggle, default availability timeout, and the
-  managed-settings toggle.
+- **Add discovered devices**: add heard devices to Home Assistant, or ignore
+  them. Nothing is added without this step — see
+  [Device Discovery](device-discovery.md).
+- **Ignored devices**: offer previously ignored devices again.
+- **Hub settings**: default availability timeout and the managed-settings toggle.
 - **Device settings**: per-device availability timeout, motion clear delay, and
   utility-meter calibration.
 - **Device mappings**: per-hub mapping overrides.
+- **Replace device**: move a device onto the new id it drew after a battery
+  change.
 
-![Hub options flow menu showing Hub settings, Device settings, and Device mappings](images/03-options-flow.png)
+![Hub options flow menu showing Add discovered devices, Ignored devices, Hub settings, Device settings, Device mappings, and Replace device](images/03-options-flow.png)
 
-The **Hub settings** step configures discovery and the default availability
-timeout for every device on the hub:
+The **Hub settings** step configures the default availability timeout for every
+device on the hub, and whether Home Assistant manages the server's SDR settings:
 
-![Hub settings step with the discovery toggle, default availability timeout, and managed-settings toggle](images/07-hub-settings.png)
+![Hub settings step with the default availability timeout and the managed-settings toggle](images/07-hub-settings.png)
 
 The **Device settings** step targets one device for a timeout override, motion
 clear delay, or utility-meter calibration. You pick the device first, then
@@ -129,8 +133,8 @@ non-motion device) are hidden:
 
 ![Device settings step with the availability timeout override and meter commodity selector](images/08-device-settings.png)
 
-Changing discovery or timeout options applies live. Changing the managed-settings
-toggle reloads the hub because the entity set changes.
+Changing timeout options applies live. Changing the managed-settings toggle
+reloads the hub because the entity set changes.
 
 ## ws, wss, and Authentication
 
