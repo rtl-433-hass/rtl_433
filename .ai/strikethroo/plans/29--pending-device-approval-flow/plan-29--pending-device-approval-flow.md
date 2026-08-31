@@ -494,10 +494,10 @@ modules and depend only on the finished implementation.
 **Parallel Tasks:**
 - ✔️ Task 003: Add the "Add discovered devices" and "Ignored devices" options-flow steps, their translations, and live ignore-list updates (depends on: 002)
 
-### Phase 4: Verification
+### ✅ Phase 4: Verification
 **Parallel Tasks:**
-- Task 004: Test the observation/adoption routing contract (depends on: 003)
-- Task 005: Test the add/ignore options flow and the toggle-stripping migration (depends on: 003)
+- ✔️ Task 004: Test the observation/adoption routing contract (depends on: 003)
+- ✔️ Task 005: Test the add/ignore options flow and the toggle-stripping migration (depends on: 003)
 
 ### Phase 5: Documentation
 **Parallel Tasks:**

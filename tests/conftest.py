@@ -22,6 +22,7 @@ from custom_components.rtl_433.const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
     CONF_HOST,
+    CONF_IGNORED_DEVICES,
     CONF_PATH,
     CONF_PORT,
     DEFAULT_PATH,
@@ -71,6 +72,7 @@ def build_hub_entry(
     secure: bool = False,
     availability_timeout: int | None = None,
     devices: dict[str, Any] | None = None,
+    ignored_devices: list[str] | None = None,
     options: dict[str, Any] | None = None,
     entry_id: str | None = None,
     version: int = 2,
@@ -79,7 +81,10 @@ def build_hub_entry(
 
     ``devices`` (when given) is placed at ``data["devices"]`` — the single source
     of truth for nested-device state, keyed by ``device_key`` with each value
-    carrying ``model`` / ``fields`` / optional ``timeout_override``. The entry
+    carrying ``model`` / ``fields`` / optional ``timeout_override``.
+    ``ignored_devices`` (when given) is placed at ``data["ignored_devices"]`` --
+    the persistent hub ignore list the coordinator seeds ``ignored`` from, so a
+    test can start with devices already hidden from the approval step. The entry
     defaults to ``version=2`` so normal lifecycle setup does not trigger the
     1 -> 2 migration; the migration test builds its v1 entries directly.
     """
@@ -93,6 +98,8 @@ def build_hub_entry(
         data[CONF_AVAILABILITY_TIMEOUT] = availability_timeout
     if devices is not None:
         data[CONF_DEVICES] = devices
+    if ignored_devices is not None:
+        data[CONF_IGNORED_DEVICES] = ignored_devices
 
     kwargs: dict[str, Any] = {
         "domain": DOMAIN,

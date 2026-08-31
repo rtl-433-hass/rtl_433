@@ -72,9 +72,20 @@ FULL_RUN_TRIGGERS = {
 # baseline), so it is a delayed catch, never a silent floor blind spot.
 EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
     "tests/test_coordinator.py": ["coordinator/base.py"],
+    # The observation-vs-adoption routing contract: the pending/ignored
+    # branch lives in ``coordinator/_events.py`` and the adopt/ignore/forget
+    # API it feeds lives in ``coordinator/base.py``.
+    "tests/test_pending_devices.py": [
+        "coordinator/base.py",
+        "coordinator/_events.py",
+    ],
     "tests/test_mut_init.py": ["__init__.py", "migration.py", "hub_settings.py"],
     "tests/test_config_flow.py": ["config_flow.py", "options_flow.py"],
     "tests/test_mut_config_flow.py": ["config_flow.py", "options_flow.py"],
+    # Static guard: reads both flow modules' source for the translation keys
+    # they can render, so a mutated abort reason / error key / step id is caught
+    # by it as surely as by a flow-driving test.
+    "tests/test_translations.py": ["config_flow.py", "options_flow.py"],
     "tests/test_binary_sensor_motion.py": ["binary_sensor.py", "event.py"],
     "tests/test_event_trace.py": ["event.py"],
     "tests/test_diagnostics_repairs.py": ["diagnostics.py", "repairs.py"],

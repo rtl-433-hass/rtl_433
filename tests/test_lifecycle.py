@@ -19,6 +19,10 @@ Covered:
   gone + ``device_key`` gone from the map + coordinator runtime state evicted ->
   feed the device again -> it returns to the pending list rather than silently
   re-appearing (Clarification #4);
+* an adopted device matching, entity for entity, the device a pre-seeded
+  ``entry.data[CONF_DEVICES]`` map produces;
+* the pending list clearing on reload while a persisted ignore is honoured at
+  setup;
 * the 0.1.0 -> nested migration: a v1 hub + two v1 device entries with
   pre-seeded registry devices/entities fold into the single hub with unchanged
   unique_ids / entity_ids and a populated devices map.
@@ -1938,6 +1942,162 @@ async def test_delete_then_re_transmit_returns_device_to_pending(
     await hass.async_block_till_done()
     assert device_key in coordinator.pending
     assert device_key not in hub.data.get(CONF_DEVICES, {})
+    assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
+
+
+# --------------------------------------------------------------------------- #
+# Adoption produces the same device the pre-change auto-add path produced.     #
+# --------------------------------------------------------------------------- #
+async def test_adopted_device_matches_a_seeded_device(hass, hub_entry_builder, events):
+    """Adopting a pending device yields exactly the device a seeded map yields.
+
+    The highest-value guard in this area. Adoption runs from the options flow,
+    outside the event callback that used to be the only way a device was ever
+    created, so it would be easy for it to seed a subtly different device — a
+    missing field, no ``via_device`` link, a different model string — and for
+    nobody to notice until a user's automations broke after upgrading.
+
+    Two hubs are set up in the same Home Assistant: one hears the device and has
+    it adopted, the other is pre-seeded with it in ``entry.data[CONF_DEVICES]``
+    (the restart path, which is behaviourally what auto-add used to leave
+    behind). The device-registry entries and the entity sets they produce must
+    match. Entity *ids* are deliberately not compared: the second hub's collide
+    with the first's and get a suffix, which says nothing about the contract.
+    """
+    power_event = _live(events("power_sensor.json")[0])
+    device_key = "EnergyMeter-2000-1234"
+    fields = ["power_W", "energy_kWh", "voltage_V", "current_A"]
+
+    # Hub 1: heard, then explicitly adopted.
+    adopted_hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, adopted_hub)
+    _feed(coordinator, power_event)
+    assert coordinator.adopt_device(device_key) is not None
+    await hass.async_block_till_done()
+
+    # Hub 2: already in the devices map at setup, then fed the same frame.
+    seeded_hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        host="rtl433-seeded.local",
+        devices={device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: fields}},
+    )
+    _feed(_coordinator(hass, seeded_hub), power_event)
+    await hass.async_block_till_done()
+
+    # Adoption recorded the same observed field set the seeded hub was given.
+    recorded = adopted_hub.data[CONF_DEVICES][device_key][DEVICE_FIELDS]
+    assert sorted(recorded) == sorted(fields)
+
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+
+    def _entities(hub):
+        """Map each of the device's entities to its comparable identity."""
+        prefix = f"{hub.entry_id}:{device_key}:"
+        result = {}
+        for entry in er.async_entries_for_config_entry(ent_reg, hub.entry_id):
+            if not entry.unique_id.startswith(prefix):
+                continue
+            state = hass.states.get(entry.entity_id)
+            attrs = {} if state is None else state.attributes
+            result[(entry.domain, entry.unique_id.removeprefix(prefix))] = (
+                entry.disabled_by is not None,
+                attrs.get("device_class"),
+                attrs.get("unit_of_measurement"),
+                attrs.get("state_class"),
+                # A timestamp entity holds a wall-clock reading that
+                # legitimately differs between the two hubs; only its metadata
+                # is comparable.
+                None
+                if state is None or attrs.get("device_class") == "timestamp"
+                else state.state,
+            )
+        return result
+
+    adopted_entities = _entities(adopted_hub)
+    assert adopted_entities  # a comparison of two empty sets proves nothing
+    assert adopted_entities == _entities(seeded_hub)
+
+    def _device(hub):
+        return dev_reg.async_get_device(
+            identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+        )
+
+    adopted_device, seeded_device = _device(adopted_hub), _device(seeded_hub)
+    assert adopted_device is not None
+    assert seeded_device is not None
+    assert (adopted_device.name, adopted_device.model, adopted_device.manufacturer) == (
+        seeded_device.name,
+        seeded_device.model,
+        seeded_device.manufacturer,
+    )
+    # Each nests under its own hub, so an adopted device is not left orphaned.
+    for hub, device in ((adopted_hub, adopted_device), (seeded_hub, seeded_device)):
+        hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+        assert device.via_device_id == hub_device.id
+
+
+# --------------------------------------------------------------------------- #
+# The pending list is in-memory: a reload wipes it, the ignore list survives.  #
+# --------------------------------------------------------------------------- #
+async def test_pending_list_is_empty_after_a_reload(hass, hub_entry_builder, events):
+    """Reloading the hub clears every unapproved candidate.
+
+    Pending state is deliberately held only in coordinator memory: a device the
+    user never approved must not outlive the session that heard it, which is what
+    keeps the list free of yesterday's bad decodes without any eviction policy or
+    TTL. This test is the guard against someone later "improving" that by
+    persisting it — the list is rebuilt from live traffic, and nothing that was
+    merely heard is carried across.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+
+    _feed(coordinator, _live(events("power_sensor.json")[0]))
+    _feed(coordinator, _live(events("acurite_temp_humidity.json")[0]))
+    await hass.async_block_till_done()
+    keys = {"EnergyMeter-2000-1234", "Acurite-606TX-42"}
+    assert set(coordinator.pending) == keys
+
+    assert await hass.config_entries.async_reload(hub.entry_id)
+    await hass.async_block_till_done()
+
+    reloaded = _coordinator(hass, hub)
+    assert reloaded is not coordinator
+    assert reloaded.pending == {}
+    # Nothing was quietly promoted on the way out, either.
+    assert hub.data.get(CONF_DEVICES, {}) == {}
+    dev_reg = dr.async_get(hass)
+    for key in keys:
+        prefix = f"{hub.entry_id}:{key}"
+        assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
+
+
+async def test_ignored_key_from_entry_data_never_becomes_pending(
+    hass, hub_entry_builder, events
+):
+    """A key stored in ``entry.data[CONF_IGNORED_DEVICES]`` is dropped at setup.
+
+    Unlike the pending list, the ignore list *is* persistent — that is the whole
+    point of ignoring a neighbour's sensor rather than deleting its device. This
+    covers the wiring that carries the stored list into the coordinator on setup
+    (``ignored_keys``), which is what makes an ignore survive the restart it was
+    made to survive.
+    """
+    device_key = "EnergyMeter-2000-1234"
+    hub = await _setup_hub(hass, hub_entry_builder, ignored_devices=[device_key])
+    coordinator = _coordinator(hass, hub)
+    assert coordinator.ignored == {device_key}
+
+    _feed(coordinator, _live(events("power_sensor.json")[0]))
+    await hass.async_block_till_done()
+
+    assert coordinator.pending == {}
+    assert device_key not in coordinator.devices
+    assert device_key not in hub.data.get(CONF_DEVICES, {})
+    dev_reg = dr.async_get(hass)
+    prefix = f"{hub.entry_id}:{device_key}"
     assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
 
 
