@@ -30,7 +30,7 @@ integration can connect to any rtl_433 server with HTTP output enabled.
   [`pyrtl_433`](https://github.com/rtl-433-hass/pyrtl_433).
 - **You choose which devices to add**: every device the receiver hears is listed
   for you to add, so neighbours' sensors and bad decodes stay out of Home
-  Assistant. Unwanted devices can be ignored for good.
+  Assistant. Unwanted devices can be ignored until you want them back.
 - **Configurable availability**: silence-based availability with hub defaults,
   device overrides, and event-driven class defaults.
 - **Multiple servers**: add one hub per rtl_433 server; device identities are
