@@ -317,15 +317,64 @@ async def test_pending_readings_preview_the_entities_adoption_would_create(
     assert old["humidity"]["name"] == "Humidity"
     assert old["humidity"]["unit"] == "%"
 
+    # ``display`` is the entity's state string, not a number the panel would
+    # re-format: the humidity transform floats an integer, and a device page
+    # shows that as "55.0". Rendering the same value in JavaScript would say
+    # "55" and quietly disagree with the page the user lands on next.
+    assert old["humidity"]["value"] == 55.0
+    assert old["humidity"]["display"] == "55.0"
+
+    # The icon is Home Assistant's own, resolved from the device class through
+    # core's ``icons.json`` rather than from a table maintained here.
+    assert old["temperature_C"]["icon"] == "mdi:thermometer"
+    assert old["humidity"]["icon"] == "mdi:water-percent"
+
     mid = {reading["key"]: reading for reading in rows[_MID_KEY]["readings"]}
     # ``closed: 0`` is a binary field: it arrives as a bool, not as the 0 the
     # radio sent nor as a string this module chose to render.
     assert mid["closed"]["platform"] == "binary_sensor"
     assert isinstance(mid["closed"]["value"], bool)
+    assert mid["closed"]["display"] is None
+    # A binary device class has one icon per state, which is what makes an open
+    # door look different from a shut one.
+    assert mid["closed"]["icon"] in ("mdi:square", "mdi:square-outline")
     # Disabled by default in the library, so never previewed -- even though both
     # resolve to a descriptor and one of them is in this very frame.
     assert "rssi" not in mid
     assert "snr" not in mid
+
+
+async def test_readings_are_ordered_like_a_device_page(hass, hub, hass_ws_client):
+    """Readings first, diagnostics last, alphabetical within each group.
+
+    A device page puts the readings a user came for above the diagnostics, and
+    the card is meant to be recognisable as that page. The ordering is settled
+    in the payload rather than in the panel so the rule lives with the module
+    that knows each field's entity category.
+
+    ``battery_ok`` is the case worth pinning: it is a genuine reading a user
+    judges a candidate by, but Home Assistant files it under diagnostics, so it
+    must sort *after* a humidity that is alphabetically later than it.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {
+            "model": "Ordered-1",
+            "id": 3,
+            "temperature_C": 20.0,
+            "battery_ok": 1,
+            "humidity": 40,
+        },
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    names = [reading["name"] for reading in rows["Ordered-1-3"]["readings"]]
+
+    assert names == ["Humidity", "Temperature", "Battery"]
 
 
 async def test_a_field_with_no_library_mapping_is_not_previewed(

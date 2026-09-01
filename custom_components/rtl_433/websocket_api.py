@@ -43,6 +43,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
+import logging
 from typing import Any, Final
 
 import voluptuous as vol
@@ -52,6 +53,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.icon import async_get_icons
 
 from .adoption import (
     AdoptionResult,
@@ -62,6 +64,7 @@ from .adoption import (
 from .const import (
     CONF_DEVICES,
     CONF_MODEL,
+    DATA_ENTITY_ICONS,
     DATA_ENTRY_LIBRARY,
     DOMAIN,
     signal_pending_update,
@@ -69,6 +72,8 @@ from .const import (
 from .coordinator import Rtl433Coordinator
 from .hub_settings import _hub_ignored_devices
 from .mapping import FieldDescriptor, Registry, apply_transform, lookup
+
+_LOGGER = logging.getLogger(__name__)
 
 # How often an open subscription re-renders its payload to catch changes that
 # fire no signal: the sighting count and last-seen of a candidate already on the
@@ -142,6 +147,94 @@ def _async_get_coordinator(
     return entry, coordinator
 
 
+async def async_preload_entity_icons(hass: HomeAssistant) -> None:
+    """Warm Home Assistant's device-class icon map for the discovery payload.
+
+    Core keeps the icon for each device class in the platform's own
+    ``icons.json`` -- the same table the frontend renders entities from -- so
+    reading it is how the panel shows a candidate's readings with the icons they
+    will actually have, rather than with a second-guessed set maintained here.
+
+    Loaded once during hub setup because ``async_get_icons`` reads files on
+    first use; it caches in ``hass.data``, so the repeated calls from a second
+    hub (or a reload) cost nothing. Failure is not fatal: icons are decoration,
+    and a panel with no icons is much better than a hub that will not set up.
+    """
+    if DATA_ENTITY_ICONS in hass.data.setdefault(DOMAIN, {}):
+        return
+    try:
+        icons = await async_get_icons(
+            hass, "entity_component", ["sensor", "binary_sensor"]
+        )
+    except Exception:  # noqa: BLE001 - decoration must never fail a setup
+        _LOGGER.debug("Could not load entity icons; the panel will show none")
+        icons = {}
+    hass.data[DOMAIN][DATA_ENTITY_ICONS] = icons
+
+
+def _reading_icon(
+    descriptor: FieldDescriptor, value: Any, icons: dict[str, Any]
+) -> str | None:
+    """The icon Home Assistant would give this field's entity, or ``None``.
+
+    Resolved the way core resolves it, in core's own order of precedence:
+
+    * an ``icon`` on the library descriptor wins outright, because that is this
+      repository deliberately overriding the device class;
+    * a binary field takes the device class's ``state`` icon for ``on`` when it
+      is true, which is what makes an open door and a closed one look different;
+    * a numeric field whose device class declares ``range`` takes the band its
+      value falls in -- this is why a battery at 1% shows an empty battery and
+      one at 90% shows a full one;
+    * otherwise the device class's ``default``.
+
+    A field with no device class, or one core does not describe, gets ``None``
+    and the panel leaves the space empty rather than inventing a glyph.
+    """
+    if descriptor.icon:
+        return descriptor.icon
+    if not descriptor.device_class:
+        return None
+    entry = icons.get(descriptor.platform, {}).get(descriptor.device_class)
+    if not entry:
+        return None
+
+    if isinstance(value, bool):
+        if value:
+            return entry.get("state", {}).get("on") or entry.get("default")
+        return entry.get("default")
+
+    ranges = entry.get("range")
+    if ranges and isinstance(value, (int, float)):
+        # Core's bands are keyed by their lower bound as a string; the icon is
+        # the highest band the value reaches.
+        chosen = None
+        for threshold, icon in sorted(ranges.items(), key=lambda kv: float(kv[0])):
+            if value >= float(threshold):
+                chosen = icon
+        if chosen:
+            return chosen
+    return entry.get("default")
+
+
+def _reading_display(value: Any) -> str | None:
+    """The value as the entity's state string, or ``None`` for a binary field.
+
+    Home Assistant renders a sensor from its state, which is ``str()`` of the
+    value the entity holds -- which is why a humidity of ``float(99)`` shows as
+    "99.0" and a battery rounded to a whole number shows as "1". Formatting the
+    number again in JavaScript would quietly disagree with the device page the
+    user lands on a moment later, so the string is built here, from the same
+    value the entity will take.
+
+    Binary fields return ``None``: they have no numeric state, and the panel
+    owns the on/off vocabulary.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    return str(value)
+
+
 @callback
 def _entry_registry(hass: HomeAssistant, entry: ConfigEntry) -> Registry | None:
     """This hub's merged library (shipped + its own overrides), or ``None``.
@@ -181,7 +274,10 @@ def _reading_name(descriptor: FieldDescriptor) -> str:
 
 @callback
 def _readings(
-    fields: dict[str, Any], model: str, registry: Registry | None
+    fields: dict[str, Any],
+    model: str,
+    registry: Registry | None,
+    icons: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Preview a frame as the entities adopting it would create.
 
@@ -200,9 +296,12 @@ def _readings(
     rendered by the panel, not stringified here, so the panel keeps the choice
     of vocabulary.
 
-    Order follows the frame, which is the device's own field order and stable
-    between transmissions -- sorting by name would reshuffle a card whenever a
-    device dropped an optional field from one frame.
+    Ordered the way Home Assistant orders a device page: the readings proper
+    first, then the diagnostics, each group alphabetical. Sorting here rather
+    than in the panel keeps "what the device page will look like" a property of
+    the one module that resolves descriptors. It is also stable -- following the
+    frame's own field order would reshuffle a card whenever a device dropped an
+    optional field from one transmission.
     """
     if registry is None:
         return []
@@ -211,15 +310,21 @@ def _readings(
         descriptor = lookup(field_key, model or None, registry)
         if descriptor is None or not descriptor.enabled_by_default:
             continue
+        value = apply_transform(descriptor, raw)
         readings.append(
             {
                 "key": field_key,
                 "name": _reading_name(descriptor),
-                "value": apply_transform(descriptor, raw),
+                "value": value,
+                "display": _reading_display(value),
                 "unit": descriptor.unit_of_measurement,
                 "platform": descriptor.platform,
+                "entity_category": descriptor.entity_category,
+                "icon": _reading_icon(descriptor, value, icons),
             }
         )
+    # Diagnostics last, alphabetical within each group.
+    readings.sort(key=lambda r: (r["entity_category"] == "diagnostic", r["name"]))
     return readings
 
 
@@ -245,6 +350,7 @@ def _pending_payload(
     """
     stored: dict[str, Any] = entry.data.get(CONF_DEVICES, {})
     registry = _entry_registry(hass, entry)
+    icons: dict[str, Any] = hass.data.get(DOMAIN, {}).get(DATA_ENTITY_ICONS, {})
     return {
         "pending": [
             {
@@ -254,7 +360,9 @@ def _pending_payload(
                 "signal": record.signal,
                 "first_seen": record.first_seen.isoformat(),
                 "last_seen": record.last_seen.isoformat(),
-                "readings": _readings(record.event.fields, record.model, registry),
+                "readings": _readings(
+                    record.event.fields, record.model, registry, icons
+                ),
             }
             for record in coordinator.pending_candidates()
         ],
