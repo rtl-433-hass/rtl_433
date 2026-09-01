@@ -216,6 +216,12 @@ escalate_paths = [
 # in ``coordinator/_events.py`` and the adopt/ignore/forget API it feeds lives in
 # ``coordinator/base.py``.
 "tests/test_pending_devices.py" = ["coordinator/base.py", "coordinator/_events.py"]
+# The discovery WebSocket API end to end. It drives the commands, so it covers
+# ``websocket_api.py`` and the shared ``adoption.py`` service they delegate to;
+# it also asserts the panel + static-path registration that lives in
+# ``__init__.py``. The stem would auto-resolve to ``websocket_api.py`` alone,
+# which would under-scope the other two.
+"tests/test_websocket_api.py" = ["websocket_api.py", "adoption.py", "__init__.py"]
 # Static guard: reads both flow modules' source for the translation keys they can
 # render, so a mutated abort reason / error key / step id is caught by it as
 # surely as by a flow-driving test.

@@ -116,6 +116,15 @@ async def async_ignore_devices(
     ``entry.data``), but nothing is persisted a second time and the caller can
     tell the user the device was already ignored. An empty request short-circuits
     before touching the entry at all, so "ignore nothing" never writes.
+
+    The dispatch at the end is not redundant with the one
+    :meth:`~.coordinator.Rtl433Coordinator.ignore_device` already fires. That one
+    happens *before* ``entry.data`` is written, so a subscriber rendering on it
+    sees the device gone from the pending list and not yet on the ignored one --
+    a half-applied view of a single user action. Announcing again after the write
+    is what makes the ignored list a subscriber sees agree with the reply the
+    caller just got, and it mirrors what
+    :func:`async_unignore_devices` does for the same reason.
     """
     result = AdoptionResult()
     keys = list(device_keys)
@@ -134,6 +143,7 @@ async def async_ignore_devices(
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_IGNORED_DEVICES: ignored}
     )
+    async_dispatcher_send(hass, signal_pending_update(entry.entry_id))
     return result
 
 
