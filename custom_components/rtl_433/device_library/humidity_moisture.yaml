@@ -49,6 +49,7 @@ detect_wet:
   payload: { on: "1", off: "0" }
   force_update: true
   object_suffix: moisture
+  event_driven: true
 
 # Depth measurement (e.g. snow/water depth sensors).
 depth_cm:
