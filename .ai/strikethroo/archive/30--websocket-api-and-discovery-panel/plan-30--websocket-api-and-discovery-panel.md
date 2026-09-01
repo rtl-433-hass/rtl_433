@@ -318,3 +318,97 @@ conventional-commit commit.
 ### Execution Summary
 - Total Phases: 4
 - Total Tasks: 4
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-09-01
+
+### Results
+
+Four tasks, four phases, each committed separately:
+
+- **WebSocket API** (`b30e89a`) — `adoption.py` became the single implementation
+  of adopt / ignore / un-ignore, with the options flow reduced to a caller. Six
+  admin-gated commands sit on it. The subscription pushes immediately on
+  membership change and coalesces repeat sightings behind a 5s interval, both
+  funnelled through one `_push_if_changed` that diffs against the last payload,
+  so an idle receiver costs nothing and a busy one cannot saturate the socket.
+- **Panel** (`4a8a96b`) — one hand-written ES module, zero imports, no `ha-*`
+  element, no build step. Live sortable table, per-row Add / Ignore, ignored list
+  with Un-ignore, hub picker, theme-aware.
+- **Tests** (`a5307c3`) — 19 cases through a real WebSocket client, including the
+  flooding guard (20 frames must not become 20 pushes, asserted as a bound) and
+  an HTTP fetch of the panel module, which is the only thing that catches the
+  asset failing to ship.
+- **Docs + screenshot** (`e25e214`) — the panel documented as the primary route,
+  all six commands with real payloads, and `17-discovery-panel.png` captured live.
+
+Gates: `uv run pytest tests/` exit 0 (1645 tests), ruff check and format clean,
+`mkdocs build --strict` exit 0.
+
+### Noteworthy Events
+
+- **`config_panel_domain` silently removed the options flow from the UI.** Set
+  during task 002 on the plan's own instruction, it turned the config entry's
+  Configure control into a link to the panel — and nothing else opens the options
+  flow, so Hub settings, Device settings, Device mappings, calibration, Replace
+  device and Ignored devices all lost their only entry point while continuing to
+  exist and pass every test. Found in a real browser during task 004, not by any
+  Python test. Resolved by dropping the argument: `knx`, the one core integration
+  shipping both a panel and an options flow, omits it for the same reason, while
+  `dynalite` and `insteon` pass it and have no options flow to lose. The
+  registration test now asserts `config_panel_domain is None`.
+- **A half-applied ignore was found by task 003's coverage.**
+  `async_ignore_devices` dispatched `SIGNAL_PENDING_UPDATE` (via
+  `coordinator.ignore_device`, per key) *before* writing `entry.data`, so a
+  subscriber's immediate push showed the device gone from pending but not yet
+  ignored. Its sibling already dispatched after its write with a docstring
+  explaining why, so this was an oversight; the pair is now symmetric.
+- **Declaring `panel_custom` pulled in a new test dependency.** The chain is
+  `rtl_433 → panel_custom → frontend`, and `frontend` requires
+  `home-assistant-frontend`, which `pytest-homeassistant-custom-component` does
+  not install. Without it the whole suite collapsed (449 failures). Pinned in the
+  dev group and `requirements_test.txt`, grouped in renovate so the pins cannot
+  drift. It is structural, not a workaround — in production `frontend` ships with
+  core.
+- **Two aiohttp warning filters were needed and then tightened.** Core's `http`
+  stores state under plain string keys, which this repo's `filterwarnings =
+  ["error"]` makes fatal. The ignores were initially matched by message alone,
+  which would also have swallowed the identical warning from our own code; they
+  are now pinned to `homeassistant.components.http.*`, verified non-vacuous by
+  confirming a deliberately wrong module pattern surfaces the warnings as errors.
+- **Three pending-path assertions were sharpened rather than relaxed.**
+  `dispatch.assert_not_called()` could not distinguish a device fan-out from the
+  new pending-update signal, so each now asserts the exact list of dispatched
+  signal names — strictly stronger than what it replaced. The implementing agent
+  stopped and reported rather than editing them unilaterally, which is what
+  surfaced the distinction.
+- **The panel had no real-browser verification until task 004.** There is no JS
+  test infrastructure in this repository. The harness run confirmed Home
+  Assistant loads the module and hands the element `hass`, that the table updates
+  with no reload (an Acurite's count moved 30 → 90 across a 20s wait), and that
+  both themes are legible.
+- A CSS bug was fixed in passing: the receiver picker stayed visible with a
+  single hub because an author `display: flex` beats the user agent's
+  `[hidden] { display: none }` rule.
+
+### Necessary follow-ups
+
+1. **The panel ignores the `?config_entry=<entry_id>` the frontend passes it** and
+   always opens on the first loaded hub. With two receivers, arriving from either
+   one lands on the same hub until the user switches with the picker.
+2. **No JS test infrastructure exists.** The panel's logic is covered only by the
+   Python registration/serving test and by the harness screenshot. If the panel
+   grows beyond one table, this is the gap to close first — and doing so is the
+   point at which the no-build-step decision should be revisited deliberately
+   rather than drifted past.
+3. **The screenshot is captured at a 1680px viewport**; at 1440 the actions column
+   scrolls out of frame. The table scrolls horizontally so nothing is
+   unreachable, but narrow-viewport and mobile layout are unverified.
+4. **`pyproject.toml`'s `[tool.setuptools] packages` is vestigial** — there is no
+   `[build-system]`, and the shipped `translations/*.json`, `device_library/*.yaml`
+   and `brand/*.png` are equally undeclared. HACS ships the tree regardless. Worth
+   either removing or completing, but not as part of this plan.
+5. **The mutation baseline needs rebuilding** for the new modules; CI escalates to
+   a full run because `scripts/mutation_targets.py` changed.
