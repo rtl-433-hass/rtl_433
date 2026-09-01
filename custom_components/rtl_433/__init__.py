@@ -54,7 +54,6 @@ from . import repairs
 from .const import (
     CONF_DEVICES,
     CONF_HOST,
-    CONF_IGNORED_DEVICES,
     CONF_INITIAL_FREQUENCY,
     CONF_PATH,
     CONF_PORT,
@@ -75,6 +74,7 @@ from .hub_settings import (
     _explicit_hub_timeout,
     _hub_availability_timeout,
     _hub_connection,
+    _hub_ignored_devices,
     _hub_manage_settings,
     _hub_secure,
 )
@@ -274,7 +274,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # has approved, so it is what tells the coordinator which frames may
         # reach Home Assistant; everything else is heard into the pending list.
         adopted_keys=set(entry.data.get(CONF_DEVICES, {})),
-        ignored_keys=set(entry.data.get(CONF_IGNORED_DEVICES, [])),
+        ignored_keys=set(_hub_ignored_devices(entry)),
     )
 
     @callback
@@ -389,7 +389,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     # Applied first, and unconditionally: ignoring a device must take effect on
     # its very next transmission, and it is the one change here that never needs
     # a reload, so it must not sit behind an early return below.
-    coordinator.ignored = set(entry.data.get(CONF_IGNORED_DEVICES, []))
+    coordinator.ignored = set(_hub_ignored_devices(entry))
 
     if _hub_connection(entry) != coordinator.connection_snapshot:
         # A reconfigure / re-advertised discovery / rebind re-pointed the hub at a

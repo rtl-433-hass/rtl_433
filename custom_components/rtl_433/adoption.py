@@ -30,10 +30,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from .const import CONF_IGNORED_DEVICES, signal_pending_update
+from .const import CONF_IGNORED_DEVICES
 from .entity import async_upsert_device
+from .hub_settings import _hub_ignored_devices
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -77,6 +77,12 @@ async def async_adopt_devices(
     candidate between the render and the call, or a second caller already took it
     -- and is reported as skipped rather than storing a record for a device the
     coordinator knows nothing about.
+
+    The one announcement is made here, after the loop, rather than by
+    ``adopt_device`` per key: a batch is one user action, and until each device's
+    record is written it is only half adopted. Announcing per key would push a
+    full list down every open socket once per device -- forty pushes to adopt
+    forty candidates, thirty-nine of them immediately superseded.
     """
     result = AdoptionResult()
 
@@ -94,6 +100,8 @@ async def async_adopt_devices(
         )
         result.applied.append(device_key)
 
+    if result.applied:
+        coordinator.emit_pending_update()
     return result
 
 
@@ -117,21 +125,18 @@ async def async_ignore_devices(
     tell the user the device was already ignored. An empty request short-circuits
     before touching the entry at all, so "ignore nothing" never writes.
 
-    The dispatch at the end is not redundant with the one
-    :meth:`~.coordinator.Rtl433Coordinator.ignore_device` already fires. That one
-    happens *before* ``entry.data`` is written, so a subscriber rendering on it
-    sees the device gone from the pending list and not yet on the ignored one --
-    a half-applied view of a single user action. Announcing again after the write
-    is what makes the ignored list a subscriber sees agree with the reply the
-    caller just got, and it mirrors what
-    :func:`async_unignore_devices` does for the same reason.
+    The single announcement comes after the write, for the reason
+    :meth:`~.coordinator.Rtl433Coordinator.ignore_device` stays silent: dispatched
+    from the loop it would fire once per device, and each of those would render a
+    subscriber a half-applied view -- the device gone from the pending list and
+    not yet on the ignored one. One dispatch, once both halves are true.
     """
     result = AdoptionResult()
     keys = list(device_keys)
     if not keys:
         return result
 
-    ignored: list[str] = list(entry.data.get(CONF_IGNORED_DEVICES, []))
+    ignored = _hub_ignored_devices(entry)
     for device_key in keys:
         coordinator.ignore_device(device_key)
         if device_key in ignored:
@@ -143,7 +148,7 @@ async def async_ignore_devices(
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_IGNORED_DEVICES: ignored}
     )
-    async_dispatcher_send(hass, signal_pending_update(entry.entry_id))
+    coordinator.emit_pending_update()
     return result
 
 
@@ -166,26 +171,29 @@ async def async_unignore_devices(
     that is what un-ignores the device on its next transmission instead of only
     after a reload. A key that is not on the stored list is reported as skipped.
 
-    The pending map's membership does not change here, so the coordinator fires
-    nothing -- but every subscriber's view of the *ignored* list just did, and
-    that list is part of what the discovery panel renders. Dispatching from the
-    service rather than from one surface means an un-ignore from the options flow
-    updates an open panel too, which is the whole point of both surfaces sharing
-    this module.
+    The pending map's membership does not change here -- but every subscriber's
+    view of the *ignored* list just did, and that list is part of what the
+    discovery panel renders, so the one announcement is still made. Announcing
+    from the service rather than from one surface means an un-ignore from the
+    options flow updates an open panel too, which is the whole point of both
+    surfaces sharing this module. An empty request short-circuits before touching
+    the entry, as in :func:`async_ignore_devices`: the options form's picker
+    defaults to selecting nothing, so submitting it unchanged must not write.
     """
     result = AdoptionResult()
     keys = list(device_keys)
-    ignored: list[str] = list(entry.data.get(CONF_IGNORED_DEVICES, []))
-    stored = set(ignored)
+    if not keys:
+        return result
 
+    ignored = _hub_ignored_devices(entry)
+    selected = set(keys)
     for device_key in keys:
         coordinator.ignored.discard(device_key)
-        if device_key in stored:
+        if device_key in ignored:
             result.applied.append(device_key)
         else:
             result.skipped.append(device_key)
 
-    selected = set(keys)
     hass.config_entries.async_update_entry(
         entry,
         data={
@@ -193,5 +201,5 @@ async def async_unignore_devices(
             CONF_IGNORED_DEVICES: [key for key in ignored if key not in selected],
         },
     )
-    async_dispatcher_send(hass, signal_pending_update(entry.entry_id))
+    coordinator.emit_pending_update()
     return result

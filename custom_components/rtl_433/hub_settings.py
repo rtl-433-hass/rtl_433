@@ -17,6 +17,7 @@ from .const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
     CONF_HOST,
+    CONF_IGNORED_DEVICES,
     CONF_MANAGE_SETTINGS,
     CONF_PATH,
     CONF_PORT,
@@ -29,6 +30,24 @@ from .const import (
 def _hub_secure(entry: ConfigEntry) -> bool:
     """Return the hub entry's ``secure`` (wss) flag, defaulting to False."""
     return bool(entry.data.get("secure", False))
+
+
+def _hub_ignored_devices(entry: ConfigEntry) -> list[str]:
+    """Return the hub's persisted ignore list, as a list of device keys.
+
+    Read from ``entry.data`` alone -- unlike the timeout and manage-settings
+    resolvers there is no options-level override, because ignoring a device is
+    not a hub setting the user tunes on a form but a record the approval surfaces
+    append to. A copy is returned so a caller can append to it without mutating
+    the entry's stored list in place.
+
+    It lives here, with the other "read a hub setting off the entry" accessors,
+    because five callers across four modules need it -- the coordinator seed and
+    the update listener in ``__init__``, both approval surfaces, and the shared
+    adoption service -- and each of them spelling out the ``.get`` with its own
+    default is how one of them ends up defaulting differently.
+    """
+    return list(entry.data.get(CONF_IGNORED_DEVICES, []))
 
 
 def _explicit_hub_timeout(entry: ConfigEntry) -> int | None:

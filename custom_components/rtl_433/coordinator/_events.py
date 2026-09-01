@@ -31,7 +31,7 @@ library applied.
 ``__init__`` (``adopted``, ``ignored``, ``pending``, ``devices``, ``last_seen``,
 ``available``, ``seen_fields``, ``device_fields``, ``known_field_keys``,
 ``_connection_time``, ``_discovered``, ``_logged_unmapped``,
-``new_device_callback``) plus ``_dispatch`` and ``_emit_pending_update``
+``new_device_callback``) plus ``_dispatch`` and ``emit_pending_update``
 (base.py).
 
 :class:`PendingDevice` lives here rather than in ``base.py`` because this is the
@@ -72,6 +72,28 @@ class PendingDevice:
     count: int
     first_seen: datetime
     last_seen: datetime
+
+    @property
+    def signal(self) -> float | None:
+        """The latest frame's signal level in dB, preferring SNR over RSSI.
+
+        SNR is preferred because it is the figure that tracks decodability, which
+        is what a user judging a marginal candidate actually wants to know. A
+        receiver started without ``-M level`` reports neither, and that yields
+        ``None`` rather than a zero that would render as a real (and terrible)
+        reading. A non-numeric value -- a bool included, since ``bool`` is an
+        ``int`` -- is treated the same way, so a caller never has to type-check.
+
+        Lives on the record rather than in either UI so the options form's
+        picker label and the WebSocket payload cannot disagree about what a
+        device's signal is.
+        """
+        level = self.event.fields.get("snr")
+        if level is None:
+            level = self.event.fields.get("rssi")
+        if isinstance(level, bool) or not isinstance(level, (int, float)):
+            return None
+        return float(level)
 
 
 class _EventProcessingMixin:
@@ -212,8 +234,8 @@ class _EventProcessingMixin:
             # A candidate appearing is a membership change, so any open discovery
             # panel is told at once. This is the only branch that dispatches: the
             # repeat-sighting branch below deliberately stays silent (see
-            # ``_emit_pending_update``).
-            self._emit_pending_update()
+            # ``emit_pending_update``).
+            self.emit_pending_update()
             return
 
         # A repeat sighting sharpens the existing candidate instead of creating a

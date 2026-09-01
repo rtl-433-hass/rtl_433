@@ -477,7 +477,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.device_fields.pop(device_key, None)
         # Re-arm registration so re-adopting the device wires its entities up.
         self._discovered.discard(device_key)
-        self._emit_pending_update()
+        self.emit_pending_update()
 
     @callback
     def adopt_device(self, device_key: str) -> PendingDevice | None:
@@ -493,6 +493,11 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         Returns the promoted record, or ``None`` when the key is not pending
         (the device stopped transmitting between the form render and the submit,
         or another submit already adopted it).
+
+        Announces nothing. Adoption is a batch the user submits as one action and
+        it is only half-applied until ``entry.data`` is written, so the single
+        announcement is made by :mod:`~custom_components.rtl_433.adoption` once
+        the whole batch has landed -- see :meth:`emit_pending_update`.
         """
         record = self.pending.pop(device_key, None)
         if record is None:
@@ -510,7 +515,6 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
         if self.new_device_callback is not None:
             self.new_device_callback(device_key, event.model, False)
-        self._emit_pending_update()
         return record
 
     @callback
@@ -520,10 +524,13 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         The caller persists the key to ``entry.data[CONF_IGNORED_DEVICES]``;
         adding it to ``ignored`` here is what makes the change take effect on the
         device's very next transmission without a reload.
+
+        Announces nothing, for the reason :meth:`adopt_device` gives: the caller
+        is working through a batch and the change is not fully applied until the
+        persisted list is written, so it makes the one announcement afterwards.
         """
         self.pending.pop(device_key, None)
         self.ignored.add(device_key)
-        self._emit_pending_update()
 
     async def async_stop(self) -> None:
         """Stop the client and cancel the watchdog (never close the HA session)."""
@@ -640,13 +647,25 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
                 LOGGER.debug("rtl_433 hub_info_callback failed: %s", err)
 
     @callback
-    def _emit_pending_update(self) -> None:
+    def emit_pending_update(self) -> None:
         """Announce that the pending map's *membership* changed.
 
-        The single seam every membership change goes through -- a candidate first
-        heard (``_record_pending``), one adopted, ignored, or forgotten -- so the
-        discovery panel's WebSocket subscription has exactly one thing to listen
-        to and this class has exactly one place that knows the signal's name.
+        The single seam every membership change goes through, and the only place
+        in this integration that knows the signal's name -- so the discovery
+        panel's WebSocket subscription has exactly one thing to listen to. Public
+        because the callers are not all in this class: the coordinator announces
+        the changes it *originates* (a candidate first heard in
+        ``_record_pending``, a device un-adopted from its device page via
+        :meth:`forget_device`), while a batch the user submits is announced once,
+        by :mod:`~custom_components.rtl_433.adoption`, after both the runtime sets
+        and ``entry.data`` have been written.
+
+        That division is the reason :meth:`adopt_device` and
+        :meth:`ignore_device` stay silent. Announcing per key would push a full
+        list down every open socket once per device in a batch -- forty pushes to
+        adopt forty candidates -- and every one of them would render a
+        half-applied view, the runtime set already changed and the persisted list
+        not yet written.
 
         Nothing calls this for a repeat sighting of a candidate already on the
         list. That is the whole point of the signal: a busy receiver decodes
@@ -656,6 +675,19 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         this class a pure state holder that never learns a UI exists.
         """
         async_dispatcher_send(self.hass, signal_pending_update(self.entry.entry_id))
+
+    @callback
+    def pending_candidates(self) -> list[PendingDevice]:
+        """Return the pending candidates, most recently heard first.
+
+        The order a user is offered candidates in is one decision, so it is made
+        here rather than separately by each surface: the options form's picker
+        and the WebSocket payload both render this list, and a long list worked
+        from the top has to put the same device first in both. Most-recently-heard
+        leads because the device the user just triggered to make it transmit is
+        the one they came here for.
+        """
+        return sorted(self.pending.values(), key=lambda r: r.last_seen, reverse=True)
 
     def _dispatch(
         self,

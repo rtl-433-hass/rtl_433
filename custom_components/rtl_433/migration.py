@@ -14,12 +14,13 @@ lifecycle in ``__init__.py``:
   :func:`_migrate_motion_event_to_binary_sensor` — idempotent cleanups driven from
   ``async_setup_entry`` on every startup (a pre-fix phantom ``unknown`` device and
   the pre-fix ``event.*_motion`` entity, respectively).
-* :func:`_disable_existing_last_seen_sensors` / :func:`_strip_discovery_toggle` /
-  :func:`_read_legacy_overrides` — one-shot helpers used by the minor-version
-  migration steps.
+* :func:`_disable_existing_last_seen_sensors` / :func:`_read_legacy_overrides` —
+  one-shot helpers used by the minor-version migration steps.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 import yaml
 
@@ -305,33 +306,6 @@ async def _enable_last_seen_for_event_driven_devices(
             entity_registry.async_update_entity(entity_id, disabled_by=None)
 
 
-def _strip_discovery_toggle(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Drop the retired ``discovery_enabled`` key from an existing entry.
-
-    Discovery is no longer a toggle. Every heard device is offered as a pending
-    candidate and nothing reaches the device registry without an explicit
-    adoption, so the key gates nothing; leaving it behind would present the value
-    in diagnostics and config-entry exports as though it still meant something.
-
-    Deliberately narrow: it rebuilds ``entry.data`` and ``entry.options`` without
-    that one key and touches nothing else, so ``CONF_DEVICES`` — every adopted
-    device, its per-device overrides and its calibration — survives the upgrade
-    byte-for-byte. Idempotent: an entry that never carried the key (or has already
-    been migrated) compares equal and is not written at all, which also keeps the
-    migration from firing the update listener for no reason.
-
-    The key is spelled as a literal here rather than imported from
-    :mod:`~custom_components.rtl_433.const`: the constant is gone, but entries
-    written by older versions still carry the string, and this is the one place
-    that has to keep recognizing it.
-    """
-    data = {k: v for k, v in entry.data.items() if k != _RETIRED_DISCOVERY_KEY}
-    options = {k: v for k, v in entry.options.items() if k != _RETIRED_DISCOVERY_KEY}
-    if data == dict(entry.data) and options == dict(entry.options):
-        return
-    hass.config_entries.async_update_entry(entry, data=data, options=options)
-
-
 def _read_legacy_overrides(path: str) -> dict:
     """Read + normalize the legacy ``rtl_433_mappings.yaml`` file (sync, executor).
 
@@ -593,7 +567,29 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # ``discovery_enabled`` flag gates nothing. Strip it from both data and
         # options so no stale value survives into diagnostics or a config-entry
         # export. Adopted devices and their settings are untouched.
-        _strip_discovery_toggle(hass, entry)
-        hass.config_entries.async_update_entry(entry, version=2, minor_version=8)
+        #
+        # Deliberately narrow: the rebuilt mappings drop that one key and
+        # nothing else, so ``CONF_DEVICES`` -- every adopted device, its
+        # per-device overrides and its calibration -- survives byte-for-byte.
+        #
+        # The strip and the version bump are one migration, so they are one
+        # write, as in the minor-4 and minor-7 steps above. ``data`` / ``options``
+        # are passed only when the key was actually there: the vast majority of
+        # entries reaching this step never carried it (it was optional, and
+        # every entry gets the bump), and rewriting mappings that did not change
+        # fires the update listener with a fresh ``entry.data`` for nothing --
+        # which on a loaded hub is a chance to reload for nothing.
+        changes: dict[str, Any] = {}
+        if _RETIRED_DISCOVERY_KEY in entry.data:
+            changes["data"] = {
+                k: v for k, v in entry.data.items() if k != _RETIRED_DISCOVERY_KEY
+            }
+        if _RETIRED_DISCOVERY_KEY in entry.options:
+            changes["options"] = {
+                k: v for k, v in entry.options.items() if k != _RETIRED_DISCOVERY_KEY
+            }
+        hass.config_entries.async_update_entry(
+            entry, **changes, version=2, minor_version=8
+        )
 
     return True
