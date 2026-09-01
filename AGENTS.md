@@ -136,7 +136,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   so it can re-appear if it transmits again with discovery on. There is no
   persistent ignore list.
 - A nested device's identity (`device_key`) is **re-pointable**: a battery swap
-  usually makes a sensor draw a new transmitter id, and
+  usually makes a sensor generate a new transmitter id, and
   `async_replace_device` (`device_replace.py`, options `replace` →
   `replace_target` steps) re-points an existing device and every entity under it
   from the old key onto the new one, so `entity_id` — and therefore recorder

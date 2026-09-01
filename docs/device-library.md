@@ -191,7 +191,7 @@ example. Supported keys (applied in this order):
 | `round`  | Round to N decimal places (the value of the key). | `\|round(N)` |
 
 Keys combine. The application order is: coerce (`float`/`int`) → `scale` →
-`offset` → `round`. Examples drawn from the shipped library:
+`offset` → `round`. Examples taken from the shipped library:
 
 | rtl_433 field   | Upstream `value_template`                       | `value_transform`                  |
 |-----------------|-------------------------------------------------|------------------------------------|

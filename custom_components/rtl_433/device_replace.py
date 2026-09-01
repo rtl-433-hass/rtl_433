@@ -1,6 +1,6 @@
 """In-place re-key of a nested device onto a new ``device_key``.
 
-Cheap 433 MHz sensors usually draw a fresh transmitter id when their batteries
+Cheap 433 MHz sensors usually generate a fresh transmitter id when their batteries
 are pulled, so the same physical hardware starts arriving under a new
 ``device_key`` — a brand-new device-registry row with brand-new entities and no
 history, while the original goes permanently unavailable. This module is the
