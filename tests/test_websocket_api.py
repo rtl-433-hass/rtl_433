@@ -317,12 +317,14 @@ async def test_pending_readings_preview_the_entities_adoption_would_create(
     assert old["humidity"]["name"] == "Humidity"
     assert old["humidity"]["unit"] == "%"
 
-    # ``display`` is the entity's state string, not a number the panel would
-    # re-format: the humidity transform floats an integer, and a device page
-    # shows that as "55.0". Rendering the same value in JavaScript would say
-    # "55" and quietly disagree with the page the user lands on next.
+    # ``display`` is the finished state string, unit and all, so the panel
+    # prints it rather than re-deriving it: the humidity transform floats an
+    # integer, and a device page shows that as "55.0%" -- JavaScript rendering
+    # the same value would say "55" and drop the unit's spacing rule.
     assert old["humidity"]["value"] == 55.0
-    assert old["humidity"]["display"] == "55.0"
+    assert old["humidity"]["display"] == "55.0%"
+    # A percentage joins its unit; everything else is spaced from it.
+    assert old["temperature_C"]["display"] == "21.4 °C"
 
     # The icon is Home Assistant's own, resolved from the device class through
     # core's ``icons.json`` rather than from a table maintained here.
@@ -334,7 +336,12 @@ async def test_pending_readings_preview_the_entities_adoption_would_create(
     # radio sent nor as a string this module chose to render.
     assert mid["closed"]["platform"] == "binary_sensor"
     assert isinstance(mid["closed"]["value"], bool)
-    assert mid["closed"]["display"] is None
+    # A binary state is a *word*, and which word is core's to say: an
+    # ``opening`` sensor reads Open/Closed, never On/Off. The library maps this
+    # field ``payload: {on: "0"}``, so the ``closed: 0`` in the frame is an open
+    # contact and the entity reads "Open" -- exactly the pair of translations a
+    # hand-written On/Off could not have produced.
+    assert mid["closed"]["display"] == "Open"
     # A binary device class has one icon per state, which is what makes an open
     # door look different from a shut one.
     assert mid["closed"]["icon"] in ("mdi:square", "mdi:square-outline")
@@ -342,6 +349,86 @@ async def test_pending_readings_preview_the_entities_adoption_would_create(
     # resolve to a descriptor and one of them is in this very frame.
     assert "rssi" not in mid
     assert "snr" not in mid
+
+
+async def test_binary_readings_use_the_device_class_vocabulary(
+    hass, hub, hass_ws_client
+):
+    """Safety reads Safe/Unsafe and moisture Dry/Wet, not On/Off.
+
+    Home Assistant names a binary entity's states from its device class, and
+    this library leans on that: the leak detector is ``moisture`` and the tamper
+    contact is ``safety``. A card that renders every binary field as On/Off
+    previews a word the device page will never show, which is the one thing the
+    preview exists not to do.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {"model": "Wet-1", "id": 9, "detect_wet": 1, "tamper": 0},
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    readings = {r["key"]: r for r in rows["Wet-1-9"]["readings"]}
+
+    assert readings["detect_wet"]["display"] == "Wet"
+    assert readings["tamper"]["display"] == "Safe"
+
+
+async def test_an_event_field_previews_its_mapped_event_type(hass, hub, hass_ws_client):
+    """A doorbell previews the event type its entity will fire, not the raw code.
+
+    An ``event`` descriptor does not become a sensor: its entity's state is the
+    mapped event type from the library's ``event_map``. Treating it like a
+    numeric field showed the digit off the wire -- a value the created entity
+    never holds.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {"model": "Honeywell-Doorbell", "id": 77, "secret_knock": 0},
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    readings = {r["key"]: r for r in rows["Honeywell-Doorbell-77"]["readings"]}
+
+    knock = readings["secret_knock"]
+    assert knock["platform"] == "event"
+    # The library maps this field's ``0`` to a named event type, and that name
+    # is the entity's state -- not the digit that arrived on the wire.
+    assert knock["display"] == "ring"
+    assert knock["value"] == "ring"
+
+
+async def test_a_device_class_name_comes_from_core_not_from_spelling(
+    hass, hub, hass_ws_client
+):
+    """Names are looked up in core's table, not derived from the class string.
+
+    ``pm25`` is "PM2.5" to Home Assistant; no underscore-replacing rule produces
+    that. Pinning one such class keeps the lookup from quietly regressing to a
+    spelling heuristic, which would also silently drop translation.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {"model": "Air-1", "id": 4, "pm2_5_ug_m3": 12.0, "temperature_C": 18.0},
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    readings = {r["key"]: r for r in rows["Air-1-4"]["readings"]}
+
+    # Temperature carries no library ``name``, so this is core's table talking.
+    assert readings["temperature_C"]["name"] == "Temperature"
 
 
 async def test_readings_are_ordered_like_a_device_page(hass, hub, hass_ws_client):

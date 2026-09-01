@@ -104,37 +104,20 @@ function formatExact(iso) {
 }
 
 /**
- * Render one reading's value the way its entity's state will read.
+ * Render one reading's state.
  *
- * The number itself is `display`, built in the payload as `str()` of the value
- * the entity will hold -- which is the entity's state, and so exactly what the
- * device page shows a moment after adoption. Formatting it again here would
- * quietly disagree with that page: `float(99)` is the state "99.0", and
- * JavaScript would render the same number as "99".
- *
- * A binary field has no numeric state and arrives as a real boolean, so the
- * on/off vocabulary is applied here rather than in the payload.
- *
- * The unit is spaced the way Home Assistant spaces it: joined to a percentage,
- * separated from everything else. That is the difference between "99.0%" and
- * "24.0 °C" on a real device page.
+ * There is nothing to format: `display` arrives finished, built in the payload
+ * from the same descriptor, the same unit and the same translated vocabulary
+ * the entity itself will use. That is deliberate. Every formatting rule this
+ * function used to hold was a rule invented here because the payload did not
+ * carry one, and each was wrong in a way only a real device page revealed --
+ * "On" where core says "Wet", "99" where the state is "99.0", a unit spaced
+ * where core joins it.
  */
 function formatReadingValue(reading) {
-  const value = reading.value;
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  if (typeof value === "boolean") {
-    return value ? "On" : "Off";
-  }
-  const shown =
-    reading.display === null || reading.display === undefined
-      ? String(value)
-      : reading.display;
-  if (!reading.unit) {
-    return shown;
-  }
-  return reading.unit === "%" ? `${shown}${reading.unit}` : `${shown} ${reading.unit}`;
+  return reading.display === null || reading.display === undefined
+    ? "—"
+    : reading.display;
 }
 
 /**
@@ -224,7 +207,8 @@ class Rtl433Panel extends HTMLElement {
     this._banner = null;
     this._status = "";
 
-    // Devices adopted from this panel, in this session: `key -> row snapshot`.
+    // Devices adopted from this panel, in this session:
+    // `key -> {row, deviceId}`.
     //
     // An adopted device leaves the pending list immediately, so without this
     // its card would simply vanish at the moment of the click -- the one moment
@@ -233,12 +217,6 @@ class Rtl433Panel extends HTMLElement {
     // the card stay exactly where it was and turn green, which is also what
     // makes "you added these five" readable at a glance.
     this._added = new Map();
-
-    // `key -> area_id` chosen on a card that has not been added yet. Held here
-    // rather than read off the `<select>` at click time so a live push, which
-    // may reorder or re-render the card, cannot silently discard a choice made
-    // seconds earlier.
-    this._areaChoice = new Map();
 
     // `key -> area_id` for adds whose area has not been applied yet.
     //
@@ -255,9 +233,10 @@ class Rtl433Panel extends HTMLElement {
     this._deviceCards = new Map();
     this._ignoredCards = new Map();
 
-    // The area ids the selects were last built from, so they are only rebuilt
-    // when the area registry actually changes rather than on every render.
-    this._areaSignature = "";
+    // The `hass.areas` object the pickers were last handed. The frontend
+    // replaces it only when the registry changes, so comparing by identity is
+    // both cheaper and more accurate than rebuilding a signature per render.
+    this._lastAreas = null;
   }
 
   /**
@@ -396,7 +375,11 @@ class Rtl433Panel extends HTMLElement {
     // The green cards describe adoptions made against *this* hub, so they are
     // meaningless once the panel is pointed at another one.
     this._added.clear();
-    this._areaChoice.clear();
+    // Left behind, a queued key can never drain: `_deviceFor` builds its
+    // identifier from the *current* entry, so an entry from the old hub would
+    // never match, and the `hass` setter would scan the whole device registry
+    // on every state change in the instance for the life of the page.
+    this._pendingAreas.clear();
     this._status = "Loading…";
     this._render();
 
@@ -465,17 +448,6 @@ class Rtl433Panel extends HTMLElement {
       }
     }
     return null;
-  }
-
-  /** Areas as `[{id, name}]`, sorted by name for a stable, readable dropdown. */
-  _areas() {
-    const areas = this._hass && this._hass.areas;
-    if (!areas) {
-      return [];
-    }
-    return Object.values(areas)
-      .map((area) => ({ id: area.area_id, name: area.name || area.area_id }))
-      .sort((left, right) => left.name.localeCompare(right.name));
   }
 
   /**
@@ -559,8 +531,8 @@ class Rtl433Panel extends HTMLElement {
       () => {
         // Snapshot the row: it is about to leave the pending list, and this is
         // the only copy of what the card should keep showing.
-        this._added.set(row.key, row);
-        const areaId = this._areaChoice.get(row.key);
+        this._added.set(row.key, { row, deviceId: null });
+        const areaId = this._areaChoiceFor(row.key);
         if (areaId) {
           this._pendingAreas.set(row.key, areaId);
           this._applyPendingAreas();
@@ -589,12 +561,16 @@ class Rtl433Panel extends HTMLElement {
     for (const row of pending) {
       cards.set(row.key, { key: row.key, row, added: false });
     }
-    for (const [key, row] of this._added) {
-      cards.set(key, { key, row, added: true });
+    for (const [key, added] of this._added) {
+      cards.set(key, { key, row: added.row, added: true });
+    }
+    // Decorated before the sort so each timestamp is parsed once rather than
+    // once per comparison.
+    for (const card of cards.values()) {
+      card.firstSeen = Date.parse(card.row.first_seen) || 0;
     }
     return [...cards.values()].sort((left, right) => {
-      const delta =
-        Date.parse(right.row.first_seen) - Date.parse(left.row.first_seen);
+      const delta = right.firstSeen - left.firstSeen;
       if (delta) {
         return delta;
       }
@@ -745,10 +721,12 @@ class Rtl433Panel extends HTMLElement {
     this._el.status.textContent = this._status;
     this._el.status.hidden = !this._status;
 
-    const areas = this._areas();
-    const signature = areas.map((area) => `${area.id}:${area.name}`).join("|");
-    const areasChanged = signature !== this._areaSignature;
-    this._areaSignature = signature;
+    // The frontend swaps this object only when the area registry changes, so
+    // an identity compare answers "did areas move?" without touching its
+    // contents on every push, banner change and clock tick.
+    const areas = this._hass ? this._hass.areas : null;
+    const areasChanged = areas !== this._lastAreas;
+    this._lastAreas = areas;
 
     const cards = this._cards();
     const loaded = this._data !== null;
@@ -760,8 +738,7 @@ class Rtl433Panel extends HTMLElement {
       cards,
       this._deviceCards,
       (card) => this._createDeviceCard(card),
-      (element, card) =>
-        this._updateDeviceCard(element, card, now, areas, areasChanged)
+      (element, card) => this._updateDeviceCard(element, card, now, areasChanged)
     );
 
     const ignored = this._data && this._data.ignored ? this._data.ignored : [];
@@ -864,7 +841,6 @@ class Rtl433Panel extends HTMLElement {
       );
 
     const parts = {
-      head: element.querySelector(".device-head"),
       model: element.querySelector(".device-model"),
       key: element.querySelector(".device-key"),
       count: element.querySelector(".stat-count"),
@@ -875,6 +851,9 @@ class Rtl433Panel extends HTMLElement {
       link: element.querySelector(".device-link"),
       add: element.querySelector(".add"),
       ignore: element.querySelector(".ignore"),
+      // Keyed like `_deviceCards`, so the readings reconcile through the same
+      // helper the cards do rather than through a second implementation.
+      readingRows: new Map(),
     };
     element.parts = parts;
     // `_cards()` builds a fresh descriptor object every render, so the handlers
@@ -884,7 +863,7 @@ class Rtl433Panel extends HTMLElement {
     // signal and set of readings minutes out of date.
     element.card = card;
 
-    this._buildAreaControl(parts, element);
+    this._buildAreaControl(parts);
     parts.add.addEventListener("click", () => this._addDevice(element.card.row));
     parts.ignore.addEventListener("click", () =>
       this._act(
@@ -896,7 +875,7 @@ class Rtl433Panel extends HTMLElement {
     return element;
   }
 
-  _updateDeviceCard(element, card, now, areas, areasChanged) {
+  _updateDeviceCard(element, card, now, areasChanged) {
     const parts = element.parts;
     const row = card.row;
     element.card = card;
@@ -919,7 +898,7 @@ class Rtl433Panel extends HTMLElement {
       )}`
     );
 
-    this._renderReadings(parts.readings, row.readings || []);
+    this._renderReadings(parts, row.readings || []);
 
     // `areasChanged` alone would only ever populate the cards that existed on
     // the render the area registry last changed on. A candidate heard while the
@@ -929,10 +908,21 @@ class Rtl433Panel extends HTMLElement {
     // therefore always (re)built: `_renderAreaOptions` writes "No area" first,
     // so a populated one is never empty, even with no areas configured.
     if (areasChanged) {
-      this._refreshAreaControl(parts, areas, card.key);
+      this._refreshAreaControl(parts);
     }
 
-    const device = card.added ? this._deviceFor(card.key) : null;
+    // Resolved once and kept on the snapshot: a device id never changes, and
+    // re-scanning the registry for every green card on every render is a lot of
+    // work to rebuild an href that is already known.
+    let device = null;
+    if (card.added) {
+      const added = this._added.get(card.key);
+      if (added && added.deviceId) {
+        device = { id: added.deviceId };
+      } else if ((device = this._deviceFor(card.key)) && added) {
+        added.deviceId = device.id;
+      }
+    }
     // Once the device exists it owns its own area, and the card's picker would
     // be a second control claiming to set the same thing while actually only
     // recording an intent that has already been carried out.
@@ -969,50 +959,44 @@ class Rtl433Panel extends HTMLElement {
    * reports the same six fields every thirty seconds should update six values,
    * not rebuild six rows.
    */
-  _renderReadings(container, readings) {
-    const seen = new Set();
-    let previous = null;
-    for (const reading of readings) {
-      seen.add(reading.key);
-      let row = container.querySelector(
-        `[data-reading="${CSS.escape(reading.key)}"]`
-      );
-      if (!row) {
-        row = document.createElement("div");
-        row.className = "reading";
-        row.dataset.reading = reading.key;
-        // `ha-icon` is created by tag name and never imported. If the frontend
-        // has not registered it yet the browser upgrades the element when it
-        // does, and if it never does the element stays inert at its reserved
-        // size -- a row with a blank icon column rather than a broken layout.
-        row.innerHTML = `<ha-icon class="reading-icon"></ha-icon><span class="reading-name"></span><span class="reading-value"></span>`;
-        row.iconEl = row.querySelector(".reading-icon");
-        row.nameEl = row.querySelector(".reading-name");
-        row.valueEl = row.querySelector(".reading-value");
+  _renderReadings(parts, readings) {
+    this._reconcile(
+      parts.readings,
+      readings,
+      parts.readingRows,
+      () => this._createReadingRow(),
+      (element, reading) => this._updateReadingRow(element, reading)
+    );
+  }
+
+  /** One entity row: icon, name, value. */
+  _createReadingRow() {
+    const row = document.createElement("div");
+    row.className = "reading";
+    // `ha-icon` is created by tag name and never imported. If the frontend has
+    // not registered it yet the browser upgrades the element when it does, and
+    // if it never does the element stays inert at its reserved size -- a row
+    // with a blank icon column rather than a broken layout.
+    row.innerHTML = `<ha-icon class="reading-icon"></ha-icon><span class="reading-name"></span><span class="reading-value"></span>`;
+    row.iconEl = row.querySelector(".reading-icon");
+    row.nameEl = row.querySelector(".reading-name");
+    row.valueEl = row.querySelector(".reading-value");
+    return row;
+  }
+
+  _updateReadingRow(row, reading) {
+    // The icon is set as an attribute, not a property: an element that has not
+    // been upgraded yet has no property to set, but the attribute is read
+    // whenever it is.
+    if (reading.icon) {
+      if (row.iconEl.getAttribute("icon") !== reading.icon) {
+        row.iconEl.setAttribute("icon", reading.icon);
       }
-      // Set as an attribute, not a property: an element that has not been
-      // upgraded yet has no property to set, but the attribute is read whenever
-      // it is.
-      if (reading.icon) {
-        if (row.iconEl.getAttribute("icon") !== reading.icon) {
-          row.iconEl.setAttribute("icon", reading.icon);
-        }
-      } else {
-        row.iconEl.removeAttribute("icon");
-      }
-      this._text(row.nameEl, reading.name);
-      this._text(row.valueEl, formatReadingValue(reading));
-      const expected = previous ? previous.nextSibling : container.firstChild;
-      if (expected !== row) {
-        container.insertBefore(row, expected);
-      }
-      previous = row;
+    } else {
+      row.iconEl.removeAttribute("icon");
     }
-    for (const row of [...container.children]) {
-      if (!seen.has(row.dataset.reading)) {
-        row.remove();
-      }
-    }
+    this._text(row.nameEl, reading.name);
+    this._text(row.valueEl, formatReadingValue(reading));
   }
 
   /**
@@ -1030,77 +1014,53 @@ class Rtl433Panel extends HTMLElement {
    * empty box, and this file's whole posture is that frontend internals may move
    * and the page should degrade rather than break.
    */
-  _buildAreaControl(parts, element) {
-    const label = document.createElement("span");
-    label.className = "area-label";
-    label.textContent = "Area";
-
-    if (customElements.get("ha-area-picker")) {
-      const picker = document.createElement("ha-area-picker");
-      picker.hass = this._hass;
-      picker.label = "Area";
-      picker.addEventListener("value-changed", (event) => {
-        const value = event.detail ? event.detail.value : null;
-        if (value) {
-          this._areaChoice.set(element.card.key, value);
-        } else {
-          this._areaChoice.delete(element.card.key);
-        }
-      });
-      parts.area.append(picker);
-      parts.areaControl = picker;
-      parts.areaKind = "picker";
-      return;
-    }
-
-    const select = document.createElement("select");
-    select.className = "area-select";
-    select.addEventListener("change", () => {
-      if (select.value) {
-        this._areaChoice.set(element.card.key, select.value);
-      } else {
-        this._areaChoice.delete(element.card.key);
-      }
-    });
-    parts.area.append(label, select);
-    parts.areaControl = select;
-    parts.areaKind = "select";
-    this._fillAreaSelect(select, this._areas(), element.card.key);
+  /**
+   * Build one card's area field.
+   *
+   * `ha-area-picker` is the control Home Assistant's own device page uses to
+   * set an area, so borrowing it is what makes this field look and behave like
+   * the one the user meets a minute later -- the same search, the same "add a
+   * new area", the same outlined field. It is used *by tag name* and never
+   * imported: nothing here reaches into a frontend module path.
+   *
+   * Creating it before the frontend has registered it is safe. An unknown
+   * element is inert until the definition arrives and the browser then upgrades
+   * it in place, and Lit re-applies properties set beforehand -- so the picker
+   * fills itself in whenever it becomes available. If it never does, the card
+   * keeps a blank field and the rest of it still works.
+   */
+  _buildAreaControl(parts) {
+    const picker = document.createElement("ha-area-picker");
+    picker.hass = this._hass;
+    picker.label = "Area";
+    parts.area.append(picker);
+    parts.areaControl = picker;
   }
 
   /**
-   * Bring an existing area control in line with the current area registry.
+   * Hand an existing picker a fresh `hass` so it sees a changed registry.
    *
-   * The picker reads the registry off `hass` itself, so it only needs a fresh
-   * `hass` -- and only when the registry actually moved, because assigning that
-   * property is a Lit update and this runs for every card.
+   * Only when the registry actually moved: assigning the property schedules a
+   * Lit update, and this runs for every card on screen.
    */
-  _refreshAreaControl(parts, areas, key) {
-    if (!parts.areaControl) {
-      return;
-    }
-    if (parts.areaKind === "picker") {
+  _refreshAreaControl(parts) {
+    if (parts.areaControl) {
       parts.areaControl.hass = this._hass;
-      return;
     }
-    this._fillAreaSelect(parts.areaControl, areas, key);
   }
 
-  /** Populate the fallback `<select>`, preserving any choice already made. */
-  _fillAreaSelect(select, areas, key) {
-    const chosen = this._areaChoice.get(key) || "";
-    select.textContent = "";
-    const none = document.createElement("option");
-    none.value = "";
-    none.textContent = "No area";
-    select.append(none);
-    for (const area of areas) {
-      const option = document.createElement("option");
-      option.value = area.id;
-      option.textContent = area.name;
-      select.append(option);
-    }
-    select.value = chosen;
+  /**
+   * The area chosen on one card, or `undefined`.
+   *
+   * Read off the control at the moment of the click rather than mirrored into a
+   * Map as it changes: the control already holds this fact, and cards are
+   * reconciled rather than recreated, so it survives every live push. A second
+   * copy could only ever be a way for the two to disagree.
+   */
+  _areaChoiceFor(key) {
+    const element = this._deviceCards.get(key);
+    const control = element && element.parts.areaControl;
+    return control ? control.value : undefined;
   }
 
   _createIgnoredCard(row) {
@@ -1224,12 +1184,13 @@ const STYLES = `
    */
   .hub-picker[hidden] { display: none; }
   /*
-   * Only the native fallbacks are styled here. ha-select and ha-area-picker
-   * arrive with Home Assistant's own field -- floating label, 56px height,
-   * theme colours -- and restyling those from outside would be this panel
-   * disagreeing with the rest of Settings about what a field looks like.
+   * Only the native fallback is styled here. ha-select arrives with Home
+   * Assistant's own field -- floating label, 56px height, theme colours -- and
+   * restyling it from outside would be this panel disagreeing with the rest of
+   * Settings about what a field looks like.
    */
-  select.hub-select, select.area-select {    font: inherit;
+  select.hub-select {
+    font: inherit;
     font-size: 14px;
     padding: 6px 8px;
     color: var(--primary-text-color, #212121);
@@ -1352,17 +1313,9 @@ const STYLES = `
   .area { display: block; margin-top: auto; }
   .area[hidden] { display: none; }
   /*
-   * ha-area-picker brings its own 56px outlined field, so it needs no styling
-   * here -- only the room to use it. The fallback select is given the label the
-   * picker draws for itself.
+   * ha-area-picker brings its own label and its own 56px outlined field, so it
+   * needs no styling here -- only the room to use it.
    */
-  .area-label {
-    display: block;
-    margin-bottom: 4px;
-    font-size: 12px;
-    color: var(--secondary-text-color, #727272);
-  }
-  .area-select { width: 100%; }
 
   .device-actions {
     display: flex;
@@ -1404,7 +1357,7 @@ const STYLES = `
     color: var(--primary-color, #03a9f4);
     border-color: var(--divider-color, #e0e0e0);
   }
-  button:focus-visible, .area-select:focus-visible {
+  button:focus-visible {
     outline: 2px solid var(--primary-color, #03a9f4);
     outline-offset: 2px;
   }
