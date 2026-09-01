@@ -125,6 +125,16 @@ async def async_ignore_devices(
     tell the user the device was already ignored. An empty request short-circuits
     before touching the entry at all, so "ignore nothing" never writes.
 
+    An *adopted* key is skipped without being touched at all. Ignoring only ever
+    means "stop offering this as a candidate", and an adopted device is not a
+    candidate -- the event path checks ``adopted`` first, so adding the key to
+    ``ignored`` would change nothing about the device while leaving it listed as
+    ignored in a panel that also shows it working, and un-ignoring it would then
+    appear to do nothing. Both surfaces only offer Ignore on a pending row, so
+    this is reached by a script or by losing the race to another admin's Add;
+    either way the honest answer is "skipped", not a persisted contradiction.
+    Removing an adopted device is a separate action, from its device page.
+
     The single announcement comes after the write, for the reason
     :meth:`~.coordinator.Rtl433Coordinator.ignore_device` stays silent: dispatched
     from the loop it would fire once per device, and each of those would render a
@@ -138,6 +148,9 @@ async def async_ignore_devices(
 
     ignored = _hub_ignored_devices(entry)
     for device_key in keys:
+        if device_key in coordinator.adopted:
+            result.skipped.append(device_key)
+            continue
         coordinator.ignore_device(device_key)
         if device_key in ignored:
             result.skipped.append(device_key)

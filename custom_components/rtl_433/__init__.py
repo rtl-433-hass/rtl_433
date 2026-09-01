@@ -102,6 +102,15 @@ PANEL_URL_BASE = "/rtl_433_panel"
 PANEL_ELEMENT_NAME = "rtl-433-panel"
 PANEL_MODULE_NAME = "rtl_433-panel.js"
 
+# Key under ``hass.data[DOMAIN]`` claimed synchronously by whichever hub setup
+# gets to the panel registration first. ``async_panel_exists`` alone is not
+# enough: the registration awaits (the static-path helper hops to the executor),
+# and Home Assistant sets a domain's config entries up with ``asyncio.gather``,
+# so two receivers both pass an existence check that is only true *after* the
+# await. This flag is set before the first await, which is what makes the guard
+# hold across it.
+DATA_PANEL_CLAIMED = "_panel_claimed"
+
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
     """Serve and register the discovery panel, once per Home Assistant run.
@@ -110,6 +119,15 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     this is called from per-entry setup: a second receiver must not try to
     register a second panel, and ``async_register_built_in_panel`` raises rather
     than tolerating the duplicate.
+
+    The guard is two-part on purpose. ``async_panel_exists`` covers the sequential
+    case (a hub added later, or an entry reloading), but it cannot cover the
+    startup case on its own: Home Assistant sets a domain's entries up
+    concurrently (``asyncio.gather`` in ``setup.py``) and the registration below
+    awaits before the panel exists, so both receivers would sail past an
+    existence check and the second would die on ``Overwriting panel``. The
+    :data:`DATA_PANEL_CLAIMED` flag is claimed synchronously — before any await —
+    so exactly one caller ever reaches the registration.
 
     ``config_panel_domain`` is deliberately **not** passed, though it would put
     the panel behind this integration's entry in Settings → Devices & services.
@@ -134,28 +152,38 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
       cache with, and a browser serving yesterday's panel against today's
       WebSocket API is a miserable bug to be handed.
     """
-    if async_panel_exists(hass, DOMAIN):
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if async_panel_exists(hass, DOMAIN) or domain_data.get(DATA_PANEL_CLAIMED):
         return
+    domain_data[DATA_PANEL_CLAIMED] = True
 
-    await hass.http.async_register_static_paths(
-        [
-            StaticPathConfig(
-                PANEL_URL_BASE,
-                str(Path(__file__).parent / "frontend"),
-                cache_headers=False,
-            )
-        ]
-    )
-    await panel_custom.async_register_panel(
-        hass=hass,
-        frontend_url_path=DOMAIN,
-        webcomponent_name=PANEL_ELEMENT_NAME,
-        module_url=f"{PANEL_URL_BASE}/{PANEL_MODULE_NAME}",
-        embed_iframe=False,
-        require_admin=True,
-        sidebar_title="rtl_433",
-        sidebar_icon="mdi:radio-tower",
-    )
+    # The claim is released again if registration fails, so Home Assistant's
+    # retry of a hub that went ``ConfigEntryNotReady`` here (or the user's next
+    # receiver) tries once more rather than quietly setting up a hub whose panel
+    # nobody can reach.
+    try:
+        await hass.http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    PANEL_URL_BASE,
+                    str(Path(__file__).parent / "frontend"),
+                    cache_headers=False,
+                )
+            ]
+        )
+        await panel_custom.async_register_panel(
+            hass=hass,
+            frontend_url_path=DOMAIN,
+            webcomponent_name=PANEL_ELEMENT_NAME,
+            module_url=f"{PANEL_URL_BASE}/{PANEL_MODULE_NAME}",
+            embed_iframe=False,
+            require_admin=True,
+            sidebar_title="rtl_433",
+            sidebar_icon="mdi:radio-tower",
+        )
+    except Exception:
+        domain_data.pop(DATA_PANEL_CLAIMED, None)
+        raise
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
