@@ -770,6 +770,14 @@ const STYLES = `
     font-size: 12px;
     color: var(--secondary-text-color, #727272);
   }
+  /*
+   * An author display rule beats the user agent's "[hidden] { display: none }",
+   * so every element this file gives a display to needs its own hidden rule or
+   * the hidden property silently does nothing. The picker is the only one --
+   * and without this it stayed on screen for a single receiver, which is
+   * exactly the useless one-option control _renderHubPicker means to hide.
+   */
+  .hub-picker[hidden] { display: none; }
   .hub-select {
     font: inherit;
     font-size: 14px;

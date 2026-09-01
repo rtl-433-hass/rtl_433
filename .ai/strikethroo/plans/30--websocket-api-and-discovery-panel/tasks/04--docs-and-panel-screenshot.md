@@ -2,7 +2,7 @@
 id: 4
 group: "documentation"
 dependencies: [3]
-status: "pending"
+status: "completed"
 created: 2026-09-01
 skills:
   - mkdocs-documentation

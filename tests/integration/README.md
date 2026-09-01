@@ -24,6 +24,7 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | File | Shows |
 | --- | --- |
 | `02-device-page.png` | The device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
+| `17-discovery-panel.png` | The **discovery panel** (`/rtl_433`): the live pending table, one row per heard device with its sighting count, signal level, latest values and per-row Add / Ignore buttons |
 | `03-options-flow.png` | The hub options flow menu (Add discovered devices / Ignored devices / Hub settings / Device settings / Device mappings / Replace device) |
 | `15-add-devices.png` | The **Add discovered devices** step: every heard-but-not-added device, each labelled with its model, key, sighting count, signal level and last-seen, over the Add and Ignore multi-selects |
 | `16-ignored-devices.png` | The **Ignored devices** step, with the ignored leak detector waiting to be un-ignored |
@@ -52,10 +53,21 @@ pending candidate — a whole round emitted at once would leave only its first
 device visible.
 
 Nothing is added to Home Assistant automatically, so the `shots` stage works the
-approval flow for real: it captures the options menu and the populated
+approval flow for real: it captures the **discovery panel** with every heard
+device still pending, then the options menu and the populated
 **Add discovered devices** form, adds five devices, ignores the leak detector,
 captures the **Ignored devices** step, then un-ignores and adds the leak detector
 too — which is why the later shots have a full hub to work with.
+
+**Order matters for the panel shot.** It is captured *before* the approval steps
+run, because those add five of the six replayed devices and would leave the panel
+showing a single row. `STAGE=panel` re-captures it on its own against a harness
+whose devices are still pending; it also logs what the panel read out of its
+shadow root (proving a real browser loaded the module and received `hass`), the
+sighting counts before and after 20s with no reload (proving the subscription
+pushes), and a second capture with `prefers-color-scheme: dark` emulated
+(`panel-dark-theme.png`, a verification artifact — the documented image is the
+light one).
 
 ## Prerequisites
 
@@ -167,6 +179,19 @@ fetched over HTTP `/cmd`, which the bridge does not serve, so they read
 `unknown` in `14-hub-noise.png`. That is the documented WebSocket-only-proxy
 behaviour rather than a defect; populating them would mean inventing server
 state, so the harness leaves them alone.
+
+## Resolved — why the panel is not registered with `config_panel_domain`
+
+For one commit on this branch the panel was registered with
+`config_panel_domain`, which made Home Assistant turn the hub's Configure
+control into a link to the panel. Nothing else opens the options flow, so every
+options-flow shot became uncapturable — `openOptionsMenu` landed on the panel —
+and, far worse than the shots, every options-flow step lost its only entry point
+for real users while still passing every Python test.
+
+The harness is what caught it. `openOptionsMenu` still warns loudly if the menu
+never opens, because that warning is the signal the entry point has gone again
+rather than that a click was mistimed. See AGENTS.md, "Approval surfaces".
 
 ## Known limitation — why the `ws-bridge` exists
 

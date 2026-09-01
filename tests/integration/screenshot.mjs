@@ -4,8 +4,9 @@
 // up, HA onboarding is seeded (ha-onboard.mjs), and the WebSocket is emitting
 // JSON (verified with ws-probe.mjs).
 //
-// Captured shots: 06 (empty config-flow form), 03 (options menu), 15 (the
-// populated "Add discovered devices" form), 16 (the "Ignored devices" step),
+// Captured shots: 06 (empty config-flow form), 17 (the discovery panel, live and
+// populated), 03 (options menu), 15 (the populated "Add discovered devices"
+// form), 16 (the "Ignored devices" step),
 // 09 (integration overview / docs home hero), 02 (device page), 11 (doorbell
 // event entity), 07 (Hub settings form), 05 (Device mappings YAML), 08 (Device
 // settings form), 12 (calibration step), 10 (device page with the
@@ -28,6 +29,8 @@
 //              settings pair, and the per-device signal diagnostics.
 //   approve  - re-capture only the options menu / add-devices / ignored-devices
 //              shots against an already-running harness; for iterating.
+//   panel    - re-capture only the discovery panel against an already-running
+//              harness (hub added, devices still pending); for iterating.
 //   unavail  - (after run-harness.sh stops the rtl433 replay and waits past the
 //              timeout) capture the device page with all entities Unavailable.
 //   device   - re-capture only the Device settings + calibration steps against
@@ -130,6 +133,12 @@ async function addHubAndCapture(page) {
   // Close the post-create "area assign" dialog if present.
   await page.getByRole("button", { name: /finish|close/i }).first().click({ timeout: 3000 }).catch(() => {});
   await page.waitForTimeout(1500);
+
+  // --- Discovery panel -----------------------------------------------------
+  // Captured BEFORE the approval stage, which adds five of the six replayed
+  // devices: a panel screenshot taken afterwards would show one row and none of
+  // the reason the panel exists.
+  await capturePanel(page);
 
   // --- Approve the heard devices -------------------------------------------
   // Nothing is added automatically: every device the server decodes lands on the
@@ -300,6 +309,149 @@ async function tickPendingRows(page, patterns, fieldLabel) {
     await page.waitForTimeout(700);
   }
   return results;
+}
+
+// Read the discovery panel's own state out of its shadow root.
+//
+// The panel (`custom_components/rtl_433/frontend/rtl_433-panel.js`) is a plain
+// custom element that Home Assistant loads as an ES module and hands `hass` to
+// as a property, and everything it shows comes from the WebSocket API rather
+// than from the page. Both of those are asserted here rather than assumed: the
+// element is otherwise covered only by a Python registration test, so this is
+// the one place a real browser proves the module loaded, `hass` arrived, and the
+// table filled from `rtl_433/devices/subscribe`.
+//
+// It sits several shadow roots deep (home-assistant -> … -> ha-panel-custom),
+// so it is found by walking the shadow trees, the same way the options-flow
+// helpers above find their form fields.
+async function readPanel(page) {
+  return page.evaluate(() => {
+    const deep = (root, out = []) => {
+      for (const el of root.querySelectorAll("*")) {
+        out.push(el);
+        if (el.shadowRoot) deep(el.shadowRoot, out);
+      }
+      return out;
+    };
+    const panel = deep(document).find((el) => el.localName === "rtl-433-panel");
+    if (!panel) {
+      return { found: false };
+    }
+    const root = panel.shadowRoot;
+    const cell = (row, selector) =>
+      (row.querySelector(selector)?.textContent || "").trim();
+    return {
+      found: true,
+      // `hass` is set as a property by the frontend for a non-iframe panel; no
+      // `hass` means no connection and an empty page.
+      hass: Boolean(panel.hass),
+      status: (root.querySelector(".status")?.textContent || "").trim(),
+      banner: root.querySelector(".banner")?.hidden
+        ? ""
+        : (root.querySelector(".banner")?.textContent || "").trim(),
+      rows: [...root.querySelectorAll(".pending-body tr")].map((row) => ({
+        model: cell(row, ".model"),
+        key: cell(row, ".key"),
+        count: cell(row, ".count"),
+        signal: cell(row, ".signal"),
+        buttons: [...row.querySelectorAll("button")].map((b) =>
+          b.textContent.trim(),
+        ),
+      })),
+      // The panel inherits the frontend's theme through CSS custom properties
+      // only, so the computed colours are the check that dark mode really
+      // reaches it.
+      colors: {
+        background: getComputedStyle(panel).backgroundColor,
+        text: getComputedStyle(panel).color,
+      },
+    };
+  });
+}
+
+// Capture the discovery panel with a genuinely populated table:
+//
+//   17-discovery-panel.png  the live pending list, one row per heard device
+//                           with its sighting count, signal level, latest
+//                           values and per-row Add / Ignore buttons
+//
+// Run BEFORE approveDevices(): that stage adds five of the six replayed devices,
+// and a panel with one row would show none of the reason the panel exists.
+//
+// The bounded poll here doubles as the live-update check. Nothing is reloaded
+// between the two reads: the counts move because the backend pushed a new
+// payload down the open subscription, which is the behaviour the page is for.
+async function capturePanel(page) {
+  await page.goto(`${BASE}/rtl_433`, { waitUntil: "domcontentloaded" });
+  // The Acurite capture decodes continuously and ws-bridge re-emits the fixtures
+  // every 8s, so a bounded wait (~100s) gives every candidate a realistic
+  // sighting count to render. Six devices are expected; five is enough to make
+  // the point if one fixture round is slow.
+  let state = await readPanel(page);
+  for (let i = 0; i < 50 && (state.rows || []).length < 6; i++) {
+    await page.waitForTimeout(2000);
+    state = await readPanel(page);
+  }
+  console.log("screenshot: panel -> " + JSON.stringify(state));
+  if (!state.found || !state.rows.length) {
+    console.log("screenshot: panel did not render rows; skipping 17-discovery-panel.png");
+    return;
+  }
+
+  // Live update, no reload: re-read after a further fixture round and report the
+  // per-key sighting counts before and after.
+  const before = Object.fromEntries(state.rows.map((r) => [r.key, r.count]));
+  await page.waitForTimeout(20000);
+  const later = await readPanel(page);
+  const after = Object.fromEntries(later.rows.map((r) => [r.key, r.count]));
+  console.log(
+    "screenshot: panel live update (no reload) -> " +
+      JSON.stringify({ before, after }),
+  );
+
+  // Dump what the commands themselves return, from the same live hub, so the
+  // payloads quoted in docs/websocket-api.md are transcribed from a real
+  // response rather than composed by hand. `callWS` goes over the frontend's
+  // own authenticated connection -- the same one the panel uses.
+  const api = await page.evaluate(async () => {
+    const hass = document.querySelector("home-assistant")?.hass;
+    if (!hass) return { error: "no hass on page" };
+    const hubs = await hass.callWS({ type: "rtl_433/hubs" });
+    const entryId = hubs.hubs?.[0]?.entry_id;
+    const pending = entryId
+      ? await hass.callWS({ type: "rtl_433/devices/pending", entry_id: entryId })
+      : null;
+    return { hubs, pending };
+  });
+  console.log("screenshot: api -> " + JSON.stringify(api));
+
+  // Widen for the capture only. At the documentation viewport the sidebar leaves
+  // the table about 60px short, and the actions column -- the whole point of the
+  // shot -- is the part that scrolls out of sight. (The table scrolls
+  // horizontally rather than truncating, so nothing is unreachable in a real
+  // browser; it just does not photograph.)
+  await page.setViewportSize({ width: 1680, height: 900 });
+  await page.waitForTimeout(1000);
+  await shot(page, "17-discovery-panel.png");
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(500);
+
+  // Dark theme: Home Assistant's default theme setting follows the browser, so
+  // emulating the media query is the same switch a user's system makes. Captured
+  // as a verification artifact (the docs image is the light one) because the
+  // panel takes every colour from theme custom properties and nothing else.
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  let dark = await readPanel(page);
+  for (let i = 0; i < 15 && !(dark.rows || []).length; i++) {
+    await page.waitForTimeout(2000);
+    dark = await readPanel(page);
+  }
+  console.log("screenshot: panel dark -> " + JSON.stringify(dark.colors || {}));
+  await shot(page, "panel-dark-theme.png");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
 }
 
 // Drive the two approval steps and capture them:
@@ -661,6 +813,18 @@ async function openOptionsMenu(page) {
     if (await menuShown()) break;
     await page.waitForTimeout(1500);
   }
+  // Say so loudly rather than letting the caller capture whatever page it
+  // landed on. This control is the only route to the options flow, so this
+  // warning firing on every attempt means the options flow has no entry point in
+  // the UI at all, not that a click was mistimed -- which is exactly how
+  // registering the panel with `config_panel_domain` broke it once. See
+  // AGENTS.md, "Approval surfaces".
+  if (!(await menuShown())) {
+    console.log(
+      `screenshot: WARNING options menu never opened at ${page.url()} — ` +
+        "every options-flow shot after this one will be wrong or skipped",
+    );
+  }
   await page.waitForTimeout(1500);
 }
 
@@ -713,6 +877,11 @@ async function run() {
       // Iterate only the hub device page / receiver-noise capture against an
       // already running harness (hub already added).
       await captureHubNoise(page);
+    } else if (STAGE === "panel") {
+      // Iterate only the discovery-panel capture against an already running
+      // harness (hub added, devices still pending). Not part of the full
+      // pipeline.
+      await capturePanel(page);
     } else if (STAGE === "approve") {
       // Iterate only the options menu / add-devices / ignored-devices captures
       // against an already running harness (hub already added, devices still
