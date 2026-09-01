@@ -394,7 +394,13 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
     @property
     def min_level(self) -> float | None:
-        """Auto-adjusted minimum detection level in dB (requires ``-Y autolevel``)."""
+        """Auto-adjusted minimum detection level in dB (requires ``-Y autolevel``).
+
+        Carried only by the ``-Y autolevel`` *adjustment* log line, never by the
+        ``-M noise`` periodic report, so this trails :attr:`noise_level`: it
+        stays ``None`` until the server actually re-adjusts the threshold, which
+        a receiver whose noise floor has settled may never do.
+        """
         return self._client.min_level
 
     # ------------------------------------------------------------------ #
