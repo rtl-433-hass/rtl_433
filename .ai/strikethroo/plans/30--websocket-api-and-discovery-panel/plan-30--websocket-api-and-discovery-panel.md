@@ -302,9 +302,9 @@ no honest parallelism to take here.
 **Parallel Tasks:**
 - ✔️ Task 002: Ship the discovery panel (depends on: 001)
 
-### Phase 3: Verification
+### ✅ Phase 3: Verification
 **Parallel Tasks:**
-- Task 003: Test the WebSocket API and panel registration (depends on: 002)
+- ✔️ Task 003: Test the WebSocket API and panel registration (depends on: 002)
 
 ### Phase 4: Documentation
 **Parallel Tasks:**

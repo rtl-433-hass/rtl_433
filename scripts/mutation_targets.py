@@ -80,6 +80,16 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
         "coordinator/_events.py",
     ],
     "tests/test_mut_init.py": ["__init__.py", "migration.py", "hub_settings.py"],
+    # The discovery WebSocket API end to end. It drives the commands, so it
+    # covers ``websocket_api.py`` and the shared ``adoption.py`` service they
+    # delegate to; it also asserts the panel + static-path registration that
+    # lives in ``__init__.py``. The stem would auto-resolve to ``websocket_api.py``
+    # alone, which would under-scope the other two.
+    "tests/test_websocket_api.py": [
+        "websocket_api.py",
+        "adoption.py",
+        "__init__.py",
+    ],
     "tests/test_config_flow.py": ["config_flow.py", "options_flow.py"],
     "tests/test_mut_config_flow.py": ["config_flow.py", "options_flow.py"],
     # Static guard: reads both flow modules' source for the translation keys
