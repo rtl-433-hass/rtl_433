@@ -85,7 +85,7 @@ from .migration import (
     _migrate_motion_event_to_binary_sensor,
     async_migrate_entry,
 )
-from .websocket_api import async_register_commands
+from .websocket_api import async_preload_entity_icons, async_register_commands
 
 # Where the shipped ``frontend/`` directory is served from. Its own path rather
 # than something under ``/api`` because it is a plain static directory, and a
@@ -198,6 +198,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # call is made from every hub's setup and made idempotent inside. A user with
     # two receivers must not lose the second entry to a duplicate registration.
     async_register_commands(hass)
+    # Home Assistant's own device-class icon table, read once so the discovery
+    # payload can name each reading's icon without file I/O on the event loop.
+    await async_preload_entity_icons(hass)
     # Same story for the panel: per-run, called from per-entry setup, idempotent
     # inside. It is awaited before anything else because a failure here is a
     # failure to set the hub up at all, and that should be loud rather than a
