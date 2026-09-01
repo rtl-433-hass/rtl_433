@@ -753,21 +753,27 @@ class Rtl433Panel extends HTMLElement {
       ignore: element.querySelector(".ignore"),
     };
     element.parts = parts;
+    // `_cards()` builds a fresh descriptor object every render, so the handlers
+    // below must read the *current* one off the element rather than close over
+    // the one this card was created from -- that one's `row` freezes at the
+    // moment the card first appeared, and Add would snapshot a sighting count,
+    // signal and set of readings minutes out of date.
+    element.card = card;
 
     parts.areaSelect.addEventListener("change", () => {
       const value = parts.areaSelect.value;
       if (value) {
-        this._areaChoice.set(card.key, value);
+        this._areaChoice.set(element.card.key, value);
       } else {
-        this._areaChoice.delete(card.key);
+        this._areaChoice.delete(element.card.key);
       }
     });
-    parts.add.addEventListener("click", () => this._addDevice(card.row));
+    parts.add.addEventListener("click", () => this._addDevice(element.card.row));
     parts.ignore.addEventListener("click", () =>
       this._act(
         "rtl_433/devices/ignore",
-        card.key,
-        `${card.key} was already ignored.`
+        element.card.key,
+        `${element.card.key} was already ignored.`
       )
     );
     return element;
@@ -776,6 +782,7 @@ class Rtl433Panel extends HTMLElement {
   _updateDeviceCard(element, card, now, areas, areasChanged) {
     const parts = element.parts;
     const row = card.row;
+    element.card = card;
 
     // The model and key are the card's identity, promoted into the coloured
     // heading: without an interview step there is nothing else to lead with,
@@ -797,7 +804,14 @@ class Rtl433Panel extends HTMLElement {
 
     this._renderReadings(parts.readings, row.readings || []);
 
-    if (areasChanged) {
+    // `areasChanged` alone would only ever populate the cards that existed on
+    // the render the area registry last changed on. A candidate heard while the
+    // panel is open -- the whole point of subscribing -- is created on a render
+    // where the registry has not moved, so its `<select>` would stay empty and
+    // the user could not give the new device an area at all. An empty select is
+    // therefore always (re)built: `_renderAreaOptions` writes "No area" first,
+    // so a populated one is never empty, even with no areas configured.
+    if (areasChanged || parts.areaSelect.options.length === 0) {
       this._renderAreaOptions(parts.areaSelect, areas, card.key);
     }
 
