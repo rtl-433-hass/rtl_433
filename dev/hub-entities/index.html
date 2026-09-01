@@ -812,9 +812,8 @@ noise over time and alert when it climbs high enough to drown out your devices:<
   dB; transmissions weaker than this are not decoded.</li>
 </ul>
 <p>rtl_433 only reports these when its auto-level feature is active, so run the
-server with <code>-Y autolevel</code> (updates on every shift greater than 1 dB) and
-optionally <code>-M noise:30</code> (a periodic report every 30 seconds). The config-file
-equivalents are:</p>
+server with <code>-Y autolevel</code> and optionally <code>-M noise:30</code> (a periodic report every
+30 seconds). The config-file equivalents are:</p>
 <div class="highlight"><pre><span></span><code>pulse_detect autolevel
 report_meta noise:30
 </code></pre></div>
@@ -823,6 +822,25 @@ per-radio override file in the add-on config directory (see the add-on
 documentation). Without them the sensors stay <code>unknown</code>. Note that <code>autolevel</code>
 changes reception behavior by design: it continuously adapts the pulse
 detector's minimum level to the measured noise floor.</p>
+<p>The two sensors update on different schedules, and <strong>Minimum detection level</strong>
+is the fussier of the pair. <code>-M noise:30</code> emits a report every 30 seconds, but
+that report carries only the noise estimate, so <strong>Noise level</strong> refreshes
+steadily while <strong>Minimum detection level</strong> updates <em>only</em> at the moment
+<code>autolevel</code> actually re-adjusts the threshold. rtl_433 re-adjusts only when the
+estimated noise sits more than 3 dB below the configured <code>minlevel</code> (default
+-12.1 dB, so roughly below -15 dB) <em>and</em> the new threshold differs from the
+current one by more than 1 dB. Two consequences are worth knowing before you go
+debugging:</p>
+<ul>
+<li>On a receiver whose noise floor is above about -15 dB, <code>autolevel</code> never
+  engages and <strong>Minimum detection level</strong> stays <code>unknown</code> however long you wait.
+  Check <strong>Noise level</strong> first: it decides whether the threshold can move at all.</li>
+<li>rtl_433 fires a burst of adjustments while it converges at startup, then goes
+  quiet. The event stream carries no backlog, so a server that settled before
+  Home Assistant connected leaves the sensor <code>unknown</code> until the noise floor
+  drifts by more than 1 dB. To force an update, nudge the hub's <strong>Gain</strong> number
+  entity far enough to move the floor, then set it back.</li>
+</ul>
 <p>Unlike the sensors below, this data arrives over the event stream itself
 (rtl_433 ≥ 23.11), so it works even when <code>/cmd</code> is proxied away behind a
 WebSocket-only proxy.</p>
