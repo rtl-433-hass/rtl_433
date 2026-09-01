@@ -42,6 +42,7 @@ UI.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import timedelta
 import logging
 from typing import Any, Final
@@ -52,8 +53,10 @@ from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.icon import async_get_icons
+from homeassistant.helpers.translation import async_get_translations
 
 from .adoption import (
     AdoptionResult,
@@ -64,7 +67,7 @@ from .adoption import (
 from .const import (
     CONF_DEVICES,
     CONF_MODEL,
-    DATA_ENTITY_ICONS,
+    DATA_ENTITY_META,
     DATA_ENTRY_LIBRARY,
     DOMAIN,
     signal_pending_update,
@@ -147,33 +150,94 @@ def _async_get_coordinator(
     return entry, coordinator
 
 
-async def async_preload_entity_icons(hass: HomeAssistant) -> None:
-    """Warm Home Assistant's device-class icon map for the discovery payload.
+async def async_preload_entity_metadata(hass: HomeAssistant) -> None:
+    """Warm the tables Home Assistant describes its own entities with.
 
-    Core keeps the icon for each device class in the platform's own
-    ``icons.json`` -- the same table the frontend renders entities from -- so
-    reading it is how the panel shows a candidate's readings with the icons they
-    will actually have, rather than with a second-guessed set maintained here.
+    Two of them, both keyed by device class and both shipped by the platform
+    integrations themselves: ``icons.json`` for the icon, and the
+    ``entity_component`` strings for the name and for a binary entity's on/off
+    words. They are what the frontend renders a device page from, so reading
+    them is what lets this payload promise "these are the entities you are
+    about to get" rather than an approximation of them.
 
-    Loaded once during hub setup because ``async_get_icons`` reads files on
-    first use; it caches in ``hass.data``, so the repeated calls from a second
-    hub (or a reload) cost nothing. Failure is not fatal: icons are decoration,
-    and a panel with no icons is much better than a hub that will not set up.
+    Loaded once during hub setup because both accessors do file I/O on first
+    use, and cached so ``_pending_payload`` -- a sync ``@callback`` -- can
+    resolve without awaiting. Failure is not fatal: the preview degrades to
+    un-iconed, un-translated rows rather than failing a hub's setup.
+
+    The strings are fetched for the language configured *now*. A hub reload
+    picks up a language change; nothing else does.
     """
-    if DATA_ENTITY_ICONS in hass.data.setdefault(DOMAIN, {}):
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if DATA_ENTITY_META in domain_data:
         return
+
+    platforms = ["sensor", "binary_sensor", "event"]
     try:
-        icons = await async_get_icons(
-            hass, "entity_component", ["sensor", "binary_sensor"]
-        )
+        icons = await async_get_icons(hass, "entity_component", platforms)
     except Exception:  # noqa: BLE001 - decoration must never fail a setup
         _LOGGER.debug("Could not load entity icons; the panel will show none")
         icons = {}
-    hass.data[DOMAIN][DATA_ENTITY_ICONS] = icons
+    try:
+        strings = await async_get_translations(
+            hass, hass.config.language, "entity_component", platforms
+        )
+    except Exception:  # noqa: BLE001 - as above
+        _LOGGER.debug("Could not load entity strings; the panel will derive names")
+        strings = {}
+
+    domain_data[DATA_ENTITY_META] = _EntityMeta(
+        icons=_with_sorted_ranges(icons), strings=strings
+    )
+
+
+def _with_sorted_ranges(icons: dict[str, Any]) -> dict[str, Any]:
+    """Pre-sort every device class's icon bands, once, at load.
+
+    Core keys a ``range`` by its lower bound as a *string* (``battery`` has
+    eleven of them). Sorting and float-parsing that on every reading of every
+    candidate of every push is pure recomputation of a constant, so it is done
+    here instead and stored as ``[(bound, icon), ...]`` ascending.
+    """
+    converted: dict[str, Any] = {}
+    for platform, classes in icons.items():
+        converted[platform] = {}
+        for device_class, entry in classes.items():
+            if ranges := entry.get("range"):
+                entry = {
+                    **entry,
+                    "range": sorted(
+                        ((float(bound), icon) for bound, icon in ranges.items()),
+                        key=lambda pair: pair[0],
+                    ),
+                }
+            converted[platform][device_class] = entry
+    return converted
+
+
+@dataclass(frozen=True, slots=True)
+class _EntityMeta:
+    """Core's icon and string tables, as the preview reads them."""
+
+    icons: dict[str, Any]
+    strings: dict[str, str]
+
+    def string(
+        self, platform: str, device_class: str | None, suffix: str
+    ) -> str | None:
+        """One ``entity_component`` string, or ``None`` when core has none."""
+        if not device_class:
+            return None
+        return self.strings.get(
+            f"component.{platform}.entity_component.{device_class}.{suffix}"
+        )
+
+
+_EMPTY_META: Final = _EntityMeta(icons={}, strings={})
 
 
 def _reading_icon(
-    descriptor: FieldDescriptor, value: Any, icons: dict[str, Any]
+    descriptor: FieldDescriptor, value: Any, meta: _EntityMeta
 ) -> str | None:
     """The icon Home Assistant would give this field's entity, or ``None``.
 
@@ -195,7 +259,7 @@ def _reading_icon(
         return descriptor.icon
     if not descriptor.device_class:
         return None
-    entry = icons.get(descriptor.platform, {}).get(descriptor.device_class)
+    entry = meta.icons.get(descriptor.platform, {}).get(descriptor.device_class)
     if not entry:
         return None
 
@@ -204,35 +268,92 @@ def _reading_icon(
             return entry.get("state", {}).get("on") or entry.get("default")
         return entry.get("default")
 
-    ranges = entry.get("range")
-    if ranges and isinstance(value, (int, float)):
-        # Core's bands are keyed by their lower bound as a string; the icon is
-        # the highest band the value reaches.
+    if (ranges := entry.get("range")) and isinstance(value, (int, float)):
         chosen = None
-        for threshold, icon in sorted(ranges.items(), key=lambda kv: float(kv[0])):
-            if value >= float(threshold):
+        for bound, icon in ranges:
+            if value >= bound:
                 chosen = icon
         if chosen:
             return chosen
     return entry.get("default")
 
 
-def _reading_display(value: Any) -> str | None:
-    """The value as the entity's state string, or ``None`` for a binary field.
+def _reading_name(descriptor: FieldDescriptor, meta: _EntityMeta) -> str:
+    """The entity name Home Assistant would show for this field.
 
-    Home Assistant renders a sensor from its state, which is ``str()`` of the
-    value the entity holds -- which is why a humidity of ``float(99)`` shows as
-    "99.0" and a battery rounded to a whole number shows as "1". Formatting the
-    number again in JavaScript would quietly disagree with the device page the
-    user lands on a moment later, so the string is built here, from the same
-    value the entity will take.
+    Mirrors what :class:`~.entity.Rtl433Entity` does with the same descriptor:
+    an explicit library ``name`` wins, and a descriptor that deliberately
+    leaves it unset is one whose name core derives from the device class.
 
-    Binary fields return ``None``: they have no numeric state, and the panel
-    owns the on/off vocabulary.
+    That derivation is a *lookup*, not a spelling rule -- core's table says
+    ``pm25`` is "PM2.5" and ``aqi`` is "Air quality index", which no amount of
+    underscore-replacing produces -- and it is translated, so a German hub
+    previews the same word its device page will show.
+
+    A field with neither a name nor a device class core knows is titled after
+    its field key. That is this module's choice rather than core's (core would
+    fall back to the device's own name), because a row labelled with the key
+    the radio sent is more use than a row labelled with the device.
     """
-    if value is None or isinstance(value, bool):
-        return None
-    return str(value)
+    if descriptor.name is not None:
+        return descriptor.name
+    if translated := meta.string(descriptor.platform, descriptor.device_class, "name"):
+        return translated
+    spaced = descriptor.field_key.replace("_", " ").strip()
+    return spaced[:1].upper() + spaced[1:]
+
+
+def _reading_state(
+    descriptor: FieldDescriptor, raw: Any, meta: _EntityMeta
+) -> tuple[Any, str | None]:
+    """The value the entity will hold, and the string its state will read as.
+
+    One function for both because the two are the same question asked twice,
+    and splitting them is what let the panel invent its own vocabulary:
+
+    * a **binary** field's state is a *word*, and which word depends on the
+      device class -- core calls a ``safety`` sensor Safe/Unsafe and a
+      ``moisture`` one Dry/Wet, not On/Off. Rendering "On" for a tamper
+      contact previewed something the device page would never say.
+    * an **event** field's state is its mapped event type, so ``secret_knock``
+      reads "ring" rather than the ``1`` on the wire. The raw value is mapped
+      here exactly as :class:`~.event.Rtl433Event` maps it.
+    * a **sensor**'s state is ``str()`` of its value, which is why a humidity
+      of ``float(99)`` reads "99.0", and the unit is joined to a percentage
+      and spaced from everything else -- core's own rule.
+
+    Returning the finished string means the panel prints what it is given and
+    holds no formatting rules of its own. Known gap: core converts a handful of
+    device classes to the configured unit system (wind speed, rainfall and
+    pressure, for this library). That is not applied here, because the
+    precision core would then display depends on entity-registry options this
+    integration does not set, and a converted preview could disagree about the
+    digits where today it disagrees about the unit.
+    """
+    if descriptor.platform == "event":
+        event_map = descriptor.event_map
+        event_type = event_map.get(str(raw), str(raw)) if event_map else str(raw)
+        return event_type, event_type
+
+    value = apply_transform(descriptor, raw)
+
+    if descriptor.platform == "binary_sensor":
+        if not isinstance(value, bool):
+            return value, None
+        word = meta.string(
+            "binary_sensor",
+            descriptor.device_class,
+            f"state.{'on' if value else 'off'}",
+        )
+        return value, word or ("On" if value else "Off")
+
+    if value is None:
+        return None, None
+    shown = str(value)
+    unit = descriptor.unit_of_measurement
+    if not unit:
+        return value, shown
+    return value, f"{shown}{unit}" if unit == "%" else f"{shown} {unit}"
 
 
 @callback
@@ -251,33 +372,12 @@ def _entry_registry(hass: HomeAssistant, entry: ConfigEntry) -> Registry | None:
     )
 
 
-def _reading_name(descriptor: FieldDescriptor) -> str:
-    """The entity name Home Assistant would show for this field.
-
-    Mirrors what :class:`~.entity.Rtl433Entity` does with the same descriptor:
-    an explicit library ``name`` wins, and a descriptor that deliberately leaves
-    it unset is one whose name Home Assistant derives from the device class.
-    Deriving it the same way here is the whole point of the preview -- the panel
-    is meant to show the "Temperature" the user will get, not the
-    ``temperature_C`` the radio sent.
-
-    The device-class fallback is sentence case (``signal_strength`` ->
-    "Signal strength"), which is how core writes them. A descriptor with neither
-    is named after its field key rather than left blank.
-    """
-    if descriptor.name is not None:
-        return descriptor.name
-    source = descriptor.device_class or descriptor.field_key
-    spaced = source.replace("_", " ").strip()
-    return spaced[:1].upper() + spaced[1:]
-
-
 @callback
 def _readings(
     fields: dict[str, Any],
     model: str,
     registry: Registry | None,
-    icons: dict[str, Any],
+    meta: _EntityMeta,
 ) -> list[dict[str, Any]]:
     """Preview a frame as the entities adopting it would create.
 
@@ -289,12 +389,6 @@ def _readings(
     is what drops ``time``, ``freq``, ``rssi``, ``snr`` and ``noise`` without
     naming any of them here. The signal figures the card already shows in their
     own right fall out of that second rule for free.
-
-    Values go through :func:`~.mapping.apply_transform`, so a scaled or
-    payload-mapped field previews the state the entity would hold rather than
-    the raw number on the wire. A binary field arrives as a real ``bool`` and is
-    rendered by the panel, not stringified here, so the panel keeps the choice
-    of vocabulary.
 
     Ordered the way Home Assistant orders a device page: the readings proper
     first, then the diagnostics, each group alphabetical. Sorting here rather
@@ -310,21 +404,21 @@ def _readings(
         descriptor = lookup(field_key, model or None, registry)
         if descriptor is None or not descriptor.enabled_by_default:
             continue
-        value = apply_transform(descriptor, raw)
+        value, display = _reading_state(descriptor, raw, meta)
         readings.append(
             {
                 "key": field_key,
-                "name": _reading_name(descriptor),
+                "name": _reading_name(descriptor, meta),
                 "value": value,
-                "display": _reading_display(value),
+                "display": display,
                 "unit": descriptor.unit_of_measurement,
                 "platform": descriptor.platform,
                 "entity_category": descriptor.entity_category,
-                "icon": _reading_icon(descriptor, value, icons),
+                "icon": _reading_icon(descriptor, value, meta),
             }
         )
-    # Diagnostics last, alphabetical within each group.
-    readings.sort(key=lambda r: (r["entity_category"] == "diagnostic", r["name"]))
+    diagnostic = EntityCategory.DIAGNOSTIC.value
+    readings.sort(key=lambda r: (r["entity_category"] == diagnostic, r["name"]))
     return readings
 
 
@@ -350,7 +444,7 @@ def _pending_payload(
     """
     stored: dict[str, Any] = entry.data.get(CONF_DEVICES, {})
     registry = _entry_registry(hass, entry)
-    icons: dict[str, Any] = hass.data.get(DOMAIN, {}).get(DATA_ENTITY_ICONS, {})
+    meta: _EntityMeta = hass.data.get(DOMAIN, {}).get(DATA_ENTITY_META, _EMPTY_META)
     return {
         "pending": [
             {
@@ -361,7 +455,7 @@ def _pending_payload(
                 "first_seen": record.first_seen.isoformat(),
                 "last_seen": record.last_seen.isoformat(),
                 "readings": _readings(
-                    record.event.fields, record.model, registry, icons
+                    record.event.fields, record.model, registry, meta
                 ),
             }
             for record in coordinator.pending_candidates()

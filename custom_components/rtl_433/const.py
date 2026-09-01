@@ -162,12 +162,12 @@ DATA_LIBRARY: Final = "_library"
 # stored ``CONF_USER_MAPPINGS`` overrides merged in. The coordinator, entity
 # platforms, options flow, and diagnostics read their hub's entry here.
 DATA_ENTRY_LIBRARY: Final = "_entry_library"
-# Key under ``hass.data[DOMAIN]`` holding Home Assistant's own device-class icon
-# map, ``{platform: {device_class: {"default", "state", "range"}}}``, as core
-# ships it in each platform's ``icons.json``. Warmed once during hub setup (it
-# reads files) so the discovery payload can name the icon a field's entity would
-# be given without doing I/O on the event loop.
-DATA_ENTITY_ICONS: Final = "_entity_icons"
+# Key under ``hass.data[DOMAIN]`` holding the tables Home Assistant describes its
+# own entities with: each platform's ``icons.json`` device-class map, and its
+# ``entity_component`` strings (names, and a binary entity's on/off words).
+# Warmed once during hub setup, because both accessors do file I/O on first use,
+# so the discovery payload can preview a field's entity without awaiting.
+DATA_ENTITY_META: Final = "_entity_meta"
 
 # --- Defaults ---------------------------------------------------------------
 # Default rtl_433 HTTP server port (the documented "-F http" default).
