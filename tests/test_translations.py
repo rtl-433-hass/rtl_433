@@ -28,6 +28,20 @@ import pytest
 
 COMPONENT = Path(__file__).parent.parent / "custom_components" / "rtl_433"
 
+# mutmut runs the suite against a rewritten copy of the package in its
+# ``mutants/`` sandbox, where every mutable function is expanded into an
+# ``__mutmut_orig`` plus one ``__mutmut_N`` variant per mutation. Those variants
+# include ``step_id=None``, ``reason=None`` and ``errors["base"] = None``, so the
+# harvest below reads the flow as emitting keys built from something other than a
+# literal and the dynamic-key guard fails before any mutant is even evaluated.
+# The name mutmut prefixes onto every variant is the marker for that copy.
+#
+# Skipping there loses no coverage and makes the score more honest: this module
+# reads source text and ``en.json`` rather than driving the flow, so it can kill
+# no mutant on behaviour -- it could only ever "kill" one on the shape of the
+# rewritten source.
+_MUTMUT_MARKER = "__mutmut_"
+
 
 @dataclass
 class _FlowKeys:
@@ -51,10 +65,15 @@ def _literal(node: ast.expr | None) -> str | None:
     return None
 
 
-def _collect(module: str) -> _FlowKeys:
+def _source(module: str) -> str:
+    """The flow module's source, as it sits on disk under this test run."""
+    return (COMPONENT / module).read_text(encoding="utf-8")
+
+
+def _collect(module: str, source: str) -> _FlowKeys:
     """Walk a flow module's AST for every translation key it can render."""
     found = _FlowKeys()
-    tree = ast.parse((COMPONENT / module).read_text(encoding="utf-8"))
+    tree = ast.parse(source)
 
     for node in ast.walk(tree):
         # ``errors["base"] = "cannot_connect"`` -> an ``error`` key.
@@ -117,7 +136,13 @@ def test_every_flow_key_has_an_english_string(module, section, translations):
     Asserted as whole-set differences so a failure names precisely the keys that
     are missing rather than the first one encountered.
     """
-    keys = _collect(module)
+    source = _source(module)
+    if _MUTMUT_MARKER in source:
+        pytest.skip(
+            "flow source rewritten by mutmut; this source-driven check runs in "
+            "the normal pytest job only"
+        )
+    keys = _collect(module, source)
     strings = translations[section]
 
     assert keys.dynamic == set(), (
