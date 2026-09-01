@@ -298,9 +298,9 @@ no honest parallelism to take here.
 **Parallel Tasks:**
 - ✔️ Task 001: Extract the adoption service and add the WebSocket API
 
-### Phase 2: Panel
+### ✅ Phase 2: Panel
 **Parallel Tasks:**
-- Task 002: Ship the discovery panel (depends on: 001)
+- ✔️ Task 002: Ship the discovery panel (depends on: 001)
 
 ### Phase 3: Verification
 **Parallel Tasks:**
