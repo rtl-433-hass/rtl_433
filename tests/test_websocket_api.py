@@ -761,13 +761,19 @@ async def test_the_panel_registers_once_and_serves_its_module(
     prefix — so without the guard a user's *second* receiver simply fails to set
     up. Asserting both entries are loaded is what states that.
 
-    The panel's stored config is asserted because three of its values are the
-    whole reason the approach works and none of them is checked anywhere else:
-    ``config_panel_domain`` is what puts the page behind this integration's own
-    entry in Settings rather than only in the sidebar, ``embed_iframe=False`` is
-    what gets ``hass`` handed to the element as a property (an iframe would cut it
-    off from the frontend's connection *and* its theme), and ``require_admin``
-    matches the gate on the commands the page calls.
+    The panel's stored config is asserted because its values are the whole reason
+    the approach works and none of them is checked anywhere else.
+    ``embed_iframe=False`` is what gets ``hass`` handed to the element as a
+    property (an iframe would cut it off from the frontend's connection *and* its
+    theme), and ``require_admin`` matches the gate on the commands the page calls.
+
+    ``config_panel_domain`` must stay **unset**, and that is asserted rather than
+    left implicit. Setting it does not add a route to the panel, it replaces one:
+    the config entry's Configure control becomes a link here, and every
+    options-flow step behind it -- receiver settings, device settings, device
+    mappings, calibration, replace-device -- loses its only entry point. That was
+    briefly the case on this branch and was caught in a real browser, so the
+    assertion exists to keep it caught.
 
     Finally the module is fetched over HTTP. The element name in the served body
     has to match ``webcomponent_name`` exactly — Home Assistant loads the module
@@ -781,13 +787,11 @@ async def test_the_panel_registers_once_and_serves_its_module(
     assert second.state is ConfigEntryState.LOADED
 
     panels = hass.data[DATA_PANELS]
-    assert [
-        url_path
-        for url_path, panel in panels.items()
-        if panel.config_panel_domain == DOMAIN
-    ] == [DOMAIN]
+    assert [url_path for url_path in panels if url_path == DOMAIN] == [DOMAIN]
 
     panel = panels[DOMAIN]
+    # Unset, so the entry's Configure control still opens the options flow.
+    assert panel.config_panel_domain is None
     assert panel.require_admin is True
     assert panel.component_name == "custom"
     custom = panel.config["_panel_custom"]

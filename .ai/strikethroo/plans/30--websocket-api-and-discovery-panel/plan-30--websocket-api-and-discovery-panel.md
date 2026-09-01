@@ -306,9 +306,9 @@ no honest parallelism to take here.
 **Parallel Tasks:**
 - ✔️ Task 003: Test the WebSocket API and panel registration (depends on: 002)
 
-### Phase 4: Documentation
+### ✅ Phase 4: Documentation
 **Parallel Tasks:**
-- Task 004: Document the panel and the WebSocket API, with a screenshot (depends on: 003)
+- ✔️ Task 004: Document the panel and the WebSocket API, with a screenshot (depends on: 003)
 
 ### Post-phase Actions
 

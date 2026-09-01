@@ -110,11 +110,18 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     register a second panel, and ``async_register_built_in_panel`` raises rather
     than tolerating the duplicate.
 
-    Three of the arguments are the whole reason this works the way it does:
+    ``config_panel_domain`` is deliberately **not** passed, though it would put
+    the panel behind this integration's entry in Settings → Devices & services.
+    It does not add a route, it *replaces* one: the entry's Configure control
+    becomes a link to the panel, and the options flow behind it -- receiver
+    settings, device settings, device mappings, calibration, replace-device --
+    loses its only entry point. ``knx`` is the one core integration that ships
+    both a panel and an options flow, and it omits the argument for the same
+    reason; ``dynalite`` and ``insteon`` pass it and have no options flow to
+    lose. The panel is reached from the sidebar instead.
 
-    - ``config_panel_domain`` is what puts the panel behind this integration's
-      own entry in Settings → Devices & services, so a user finds it where they
-      are already looking at their receiver instead of only in the sidebar.
+    Two arguments are the whole reason this works the way it does:
+
     - ``embed_iframe=False`` is what gets ``hass`` handed to the element as a
       property. An iframe would isolate the panel from the frontend's connection
       *and* its theme, and then the panel would need its own authentication and
@@ -141,7 +148,6 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     await panel_custom.async_register_panel(
         hass=hass,
         frontend_url_path=DOMAIN,
-        config_panel_domain=DOMAIN,
         webcomponent_name=PANEL_ELEMENT_NAME,
         module_url=f"{PANEL_URL_BASE}/{PANEL_MODULE_NAME}",
         embed_iframe=False,
