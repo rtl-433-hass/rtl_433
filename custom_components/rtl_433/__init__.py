@@ -126,7 +126,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
       property. An iframe would isolate the panel from the frontend's connection
       *and* its theme, and then the panel would need its own authentication and
       its own colours. Unlike ``knx`` and ``dynalite``, which embed large
-      pre-built SPAs with their own routing, this is one table and belongs in
+      pre-built SPAs with their own routing, this is one screen and belongs in
       the page.
     - ``cache_headers=False`` because the file ships *inside* the integration
       and changes on upgrade. There is no content hash in its URL to bust a

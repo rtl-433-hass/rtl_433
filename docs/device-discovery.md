@@ -18,27 +18,38 @@ device the receiver has heard and you have not added. The panel is only
 available to administrators; if you do not see it in the sidebar, use the
 options flow below instead.
 
-![The rtl_433 discovery panel: a Pending table of six devices, each row giving the model, device key, sighting count, signal level, how long ago it was last heard and its latest decoded values, with Add and Ignore buttons at the end of the row](images/17-discovery-panel.png)
+![The rtl_433 discovery panel: a grid of device cards, each with a blue heading giving the model and device key, then its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Ignore and Add buttons](images/17-discovery-panel.png)
 
-The most recently heard device is at the top. Click a column heading to sort by
-model, device key, sightings, signal or last seen; click it again to reverse the
-order.
+Each candidate gets a card, newest discovery first. Cards keep their place as
+devices transmit, so a card does not move under the cursor while you are reading
+it.
 
-| Column | What it tells you |
+The blue heading is the device's identity: the model rtl_433 decoded, and below
+it the device key — the id rtl_433 uses to tell one device of that model from
+another, with its channel and subtype when it reports them.
+
+| On the card | What it tells you |
 | --- | --- |
-| **Model** | The model rtl_433 decoded. |
-| **Device key** | The id rtl_433 uses to tell one device of that model from another, with its channel and subtype when it reports them. |
 | **Sightings** | How many times the device has transmitted since Home Assistant started. A real sensor keeps checking in; a bad decode is usually heard once. |
 | **Signal** | The signal-to-noise ratio of the most recent message, or its RSSI when no SNR was reported. Only shown when the server reports levels; your own sensors are normally the strongest. |
 | **Last seen** | How long ago the device last transmitted. Hover over it for the exact first and last times. |
-| **Latest values** | The readings from its most recent message. This is usually the quickest way to tell two identical sensors apart. |
+| **Readings** | The most recent message, shown as the entities adding it would create — `Temperature 21.4 °C`, not `temperature_C: 21.4`. This is usually the quickest way to tell two identical sensors apart. |
 
-**Add** creates that device and its entities immediately. It starts recording
-history from that point and leaves the list:
+The readings are the ones you would actually get. A field the device library
+does not map creates no entity, and one it maps as disabled by default (the
+`SNR`, `RSSI` and `Noise` diagnostics) is not something you would see on the
+device page, so neither is listed here.
+
+Pick an **Area** before adding to have the new device filed there straight away.
+Leave it on *No area* to sort it out later on the device page.
+
+**Add** creates that device and its entities immediately, and starts recording
+history from that point. The card stays where it is and turns green, with a link
+to the device that was just created:
 
 ![An Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics](images/02-device-page.png)
 
-**Ignore** drops the device for good — see [Ignoring
+**Ignore** hides the device until you un-ignore it — see [Ignoring
 Devices](#ignoring-devices).
 
 The page is live. A device heard while it is open appears on its own, sighting
@@ -65,7 +76,7 @@ added yet:
 
 ![The Add discovered devices step, listing the heard devices with their model, id, sighting count, signal level, and last-seen time, above the two selection lists for adding and ignoring](images/15-add-devices.png)
 
-Each row carries the same details as a row of the panel. The difference is that
+Each row carries the same details as a card in the panel. The difference is that
 a form is a snapshot: it is built when you open the step, so a device heard
 afterwards only shows up when you close and reopen it.
 
@@ -86,15 +97,15 @@ good.
 Ignoring is not deleting: an ignored device is simply not offered, and its
 messages are dropped as they arrive.
 
-To undo it, click **Show ignored devices** under the table in the panel and then
+To undo it, click **Show ignored devices** under the cards in the panel and then
 **Un-ignore**. From the options flow, open **Configure → Ignored devices**, tick
 the devices you want back, and submit:
 
 ![The Ignored devices step, listing an ignored device with a checkbox to stop ignoring it](images/16-ignored-devices.png)
 
-Un-ignoring is not retroactive. The device reappears under **Add discovered
-devices** the next time it transmits, which for a door or motion sensor means
-the next time it is triggered.
+The device reappears under **Add discovered devices** the next time it
+transmits, which for a door or motion sensor means the next time it is
+triggered.
 
 ## The Discovered List Is Temporary
 
@@ -115,7 +126,7 @@ Services → rtl_433 → the device → Delete**.
 
 Deleting removes the device and its entities from Home Assistant, but it does not
 stop the transmitter. The device returns to the discovered list the next time it
-transmits, so you can add it back. If you want it gone for good, ignore it
+transmits, so you can add it back. To keep it out of the list, ignore it
 instead.
 
 ## Post-Connection Registration

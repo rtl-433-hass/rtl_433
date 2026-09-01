@@ -258,7 +258,17 @@ async def test_pending_returns_the_columns_the_panel_renders(hass, hub, hass_ws_
     assert newest["model"] == "EnergyMeter-2000"
     assert newest["count"] == 2
     assert newest["signal"] == 11.5  # snr, not the rssi in the same frame
-    assert newest["fields"]["power_W"] == 1450.5
+    # Readings are the frame previewed as the entities adoption would create:
+    # named the way Home Assistant will name them rather than the way the radio
+    # sent them, and carrying the unit the entity would show.
+    readings = {reading["key"]: reading for reading in newest["readings"]}
+    assert readings["power_W"]["value"] == 1450.5
+    assert readings["power_W"]["name"] == "Power"
+    assert readings["power_W"]["unit"] == "W"
+    # The frame metadata the card shows in its own right (or not at all) maps to
+    # no descriptor, so it never reaches the readings list.
+    assert "snr" not in readings
+    assert "rssi" not in readings
     first_seen = dt_util.parse_datetime(newest["first_seen"])
     last_seen = dt_util.parse_datetime(newest["last_seen"])
     assert first_seen is not None and last_seen is not None
@@ -267,6 +277,81 @@ async def test_pending_returns_the_columns_the_panel_renders(hass, hub, hass_ws_
     assert rows[_MID_KEY]["signal"] == -8.5  # rssi, the fallback
     assert rows[_OLD_KEY]["signal"] is None  # neither reported: no reading at all
     assert rows[_OLD_KEY]["count"] == 1
+
+
+async def test_pending_readings_preview_the_entities_adoption_would_create(
+    hass, hub, hass_ws_client
+):
+    """A candidate's readings are named and valued the way its entities will be.
+
+    This is the whole point of previewing a frame rather than dumping it: the
+    user is deciding whether the thing on the patio is the thing in the list,
+    and "Temperature 21.4 °C" answers that where ``temperature_C: 21.4`` makes
+    them translate. So the name comes from the library descriptor exactly as
+    :class:`~.entity.Rtl433Entity` takes it -- here via the device-class
+    fallback, since none of these fields carries an explicit ``name`` -- and the
+    unit comes with it.
+
+    Binary fields stay real booleans over the wire. The panel owns the on/off
+    vocabulary; sending it a rendered string would put half the presentation in
+    Python and half in JavaScript.
+
+    The two exclusions are the load-bearing part. ``snr`` and ``rssi`` *do* have
+    descriptors, so "has a descriptor" alone would show them -- they are dropped
+    because the library marks them ``enabled_by_default: false``, which is its
+    own statement that adoption creates them disabled and the user will not see
+    them. An unmapped field creates no entity at all and is dropped for the
+    simpler reason.
+    """
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+
+    old = {reading["key"]: reading for reading in rows[_OLD_KEY]["readings"]}
+    assert old["temperature_C"]["name"] == "Temperature"
+    assert old["temperature_C"]["value"] == 21.4
+    assert old["temperature_C"]["unit"] == "°C"
+    assert old["humidity"]["name"] == "Humidity"
+    assert old["humidity"]["unit"] == "%"
+
+    mid = {reading["key"]: reading for reading in rows[_MID_KEY]["readings"]}
+    # ``closed: 0`` is a binary field: it arrives as a bool, not as the 0 the
+    # radio sent nor as a string this module chose to render.
+    assert mid["closed"]["platform"] == "binary_sensor"
+    assert isinstance(mid["closed"]["value"], bool)
+    # Disabled by default in the library, so never previewed -- even though both
+    # resolve to a descriptor and one of them is in this very frame.
+    assert "rssi" not in mid
+    assert "snr" not in mid
+
+
+async def test_a_field_with_no_library_mapping_is_not_previewed(
+    hass, hub, hass_ws_client
+):
+    """An unmapped field creates no entity, so the card must not promise one.
+
+    A bad decode is exactly how an unrecognised field key turns up, and it is
+    also one of the things the pending list exists to help a user spot. Showing
+    it among the readings would suggest adoption produces an entity for it,
+    which it does not.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {"model": "Oddball-1", "id": 5, "temperature_C": 9.0, "not_a_real_field": 7},
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    readings = {reading["key"]: reading for reading in rows["Oddball-1-5"]["readings"]}
+
+    assert "temperature_C" in readings
+    assert "not_a_real_field" not in readings
 
 
 # --------------------------------------------------------------------------- #

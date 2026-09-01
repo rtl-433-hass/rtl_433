@@ -376,15 +376,14 @@ The `result`, with four of its six devices left out:
       "signal": 39.134,
       "first_seen": "2026-09-01T04:01:51.881359+00:00",
       "last_seen": "2026-09-01T04:07:02.042143+00:00",
-      "fields": {
-        "battery_ok": 1,
-        "temperature_C": 26.7,
-        "humidity": 74,
-        "freq": 434.003,
-        "rssi": 0.618,
-        "snr": 39.134,
-        "noise": -39.134
-      }
+      "readings": [
+        {"key": "battery_ok", "name": "Battery", "value": 100,
+         "unit": "%", "platform": "sensor"},
+        {"key": "temperature_C", "name": "Temperature", "value": 26.7,
+         "unit": "°C", "platform": "sensor"},
+        {"key": "humidity", "name": "Humidity", "value": 74.0,
+         "unit": "%", "platform": "sensor"}
+      ]
     },
     {
       "key": "LeakDetector-9-21",
@@ -393,7 +392,12 @@ The `result`, with four of its six devices left out:
       "signal": null,
       "first_seen": "2026-09-01T04:01:56.472199+00:00",
       "last_seen": "2026-09-01T04:07:00.516721+00:00",
-      "fields": {"detect_wet": 1, "battery_ok": 1}
+      "readings": [
+        {"key": "detect_wet", "name": "Water sensor", "value": true,
+         "unit": null, "platform": "binary_sensor"},
+        {"key": "battery_ok", "name": "Battery", "value": 100,
+         "unit": "%", "platform": "sensor"}
+      ]
     }
   ],
   "ignored": []
@@ -407,7 +411,19 @@ The `result`, with four of its six devices left out:
 | `count` | Sightings since Home Assistant started. The list is memory-only, so this counts from the last restart or hub reload. |
 | `signal` | The most recent message's SNR, or its RSSI when no SNR was reported, in dB. `null` when the server reports no levels (it needs `-M level`). |
 | `first_seen`, `last_seen` | ISO 8601 timestamps. |
-| `fields` | The decoded fields of the most recent message, verbatim. |
+| `readings` | The most recent message, resolved through the device library into the entities adoption would create. |
+
+Each reading carries the `name` Home Assistant will give the entity (from the
+library descriptor, or derived from its device class), the `value` after the
+library's own transform — so a binary field is a real `true`/`false` and a
+scaled field is already scaled — the `unit` the entity will report, and the
+`platform` it lands on.
+
+Two kinds of field are deliberately absent, because neither produces an entity
+the user would see: one the device library does not map at all, and one it maps
+with `enabled_by_default: false` (the `time`, `freq`, `rssi`, `snr` and `noise`
+diagnostics). Read the raw frame from the device's own entities after adoption,
+or from `rtl_433/events` above, if you need it verbatim.
 
 `ignored` carries one `{"key", "model"}` per ignored device. The model is an
 empty string for a device that was ignored while still pending, which is the
@@ -438,9 +454,8 @@ applies to, and each command means something slightly different by that:
 | `ignore` | The key was added to the ignore list and dropped from the discovered list. | It was already ignored. |
 | `unignore` | The key was taken off the ignore list. | It was not on it. |
 
-Un-ignoring is not retroactive: `applied` means the key is no longer ignored,
-not that it is back on the discovered list. The device returns there on its next
-transmission.
+`applied` means the key is no longer ignored, not that it is back on the
+discovered list. The device returns there on its next transmission.
 
 ### `rtl_433/devices/subscribe`
 

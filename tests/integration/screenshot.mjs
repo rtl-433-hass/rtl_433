@@ -349,15 +349,26 @@ async function readPanel(page) {
       banner: root.querySelector(".banner")?.hidden
         ? ""
         : (root.querySelector(".banner")?.textContent || "").trim(),
-      rows: [...root.querySelectorAll(".pending-body tr")].map((row) => ({
-        model: cell(row, ".model"),
-        key: cell(row, ".key"),
-        count: cell(row, ".count"),
-        signal: cell(row, ".signal"),
-        buttons: [...row.querySelectorAll("button")].map((b) =>
-          b.textContent.trim(),
-        ),
-      })),
+      rows: [...root.querySelectorAll(".grid:not(.ignored-grid) .device-card")].map(
+        (card) => ({
+          model: cell(card, ".device-model"),
+          key: cell(card, ".device-key"),
+          count: cell(card, ".stat-count"),
+          signal: cell(card, ".stat-signal"),
+          added: card.classList.contains("added"),
+          // The readings are the part of the card that has to come back from
+          // the library rather than from the frame, so they are worth reporting
+          // in the harness log: a card showing "temperature_C" instead of
+          // "Temperature" means the descriptor lookup silently failed.
+          readings: [...card.querySelectorAll(".reading")].map((reading) => ({
+            name: cell(reading, ".reading-name"),
+            value: cell(reading, ".reading-value"),
+          })),
+          buttons: [...card.querySelectorAll("button")]
+            .filter((b) => !b.hidden)
+            .map((b) => b.textContent.trim()),
+        }),
+      ),
       // The panel inherits the frontend's theme through CSS custom properties
       // only, so the computed colours are the check that dark mode really
       // reaches it.
@@ -369,14 +380,15 @@ async function readPanel(page) {
   });
 }
 
-// Capture the discovery panel with a genuinely populated table:
+// Capture the discovery panel with a genuinely populated grid:
 //
-//   17-discovery-panel.png  the live pending list, one row per heard device
-//                           with its sighting count, signal level, latest
-//                           values and per-row Add / Ignore buttons
+//   17-discovery-panel.png  the live pending list, one card per heard device
+//                           with its sighting count, signal level, its latest
+//                           readings named as Home Assistant entities, an area
+//                           picker and per-card Add / Ignore buttons
 //
 // Run BEFORE approveDevices(): that stage adds five of the six replayed devices,
-// and a panel with one row would show none of the reason the panel exists.
+// and a panel with one card would show none of the reason the panel exists.
 //
 // The bounded poll here doubles as the live-update check. Nothing is reloaded
 // between the two reads: the counts move because the backend pushed a new
@@ -394,7 +406,7 @@ async function capturePanel(page) {
   }
   console.log("screenshot: panel -> " + JSON.stringify(state));
   if (!state.found || !state.rows.length) {
-    console.log("screenshot: panel did not render rows; skipping 17-discovery-panel.png");
+    console.log("screenshot: panel did not render cards; skipping 17-discovery-panel.png");
     return;
   }
 
@@ -425,11 +437,10 @@ async function capturePanel(page) {
   });
   console.log("screenshot: api -> " + JSON.stringify(api));
 
-  // Widen for the capture only. At the documentation viewport the sidebar leaves
-  // the table about 60px short, and the actions column -- the whole point of the
-  // shot -- is the part that scrolls out of sight. (The table scrolls
-  // horizontally rather than truncating, so nothing is unreachable in a real
-  // browser; it just does not photograph.)
+  // Widen for the capture only. The grid lays out in columns of at least 320px,
+  // so at the documentation viewport six candidates stack into a tall narrow
+  // column that photographs as a list rather than as the grid a real screen
+  // shows. Nothing is unreachable at either width; it just does not photograph.
   await page.setViewportSize({ width: 1680, height: 900 });
   await page.waitForTimeout(1000);
   await shot(page, "17-discovery-panel.png");

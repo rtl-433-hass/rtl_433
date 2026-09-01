@@ -59,9 +59,16 @@ from .adoption import (
     async_ignore_devices,
     async_unignore_devices,
 )
-from .const import CONF_DEVICES, CONF_MODEL, DOMAIN, signal_pending_update
+from .const import (
+    CONF_DEVICES,
+    CONF_MODEL,
+    DATA_ENTRY_LIBRARY,
+    DOMAIN,
+    signal_pending_update,
+)
 from .coordinator import Rtl433Coordinator
 from .hub_settings import _hub_ignored_devices
+from .mapping import FieldDescriptor, Registry, apply_transform, lookup
 
 # How often an open subscription re-renders its payload to catch changes that
 # fire no signal: the sighting count and last-seen of a candidate already on the
@@ -136,8 +143,89 @@ def _async_get_coordinator(
 
 
 @callback
+def _entry_registry(hass: HomeAssistant, entry: ConfigEntry) -> Registry | None:
+    """This hub's merged library (shipped + its own overrides), or ``None``.
+
+    The same cache the entity platforms read, so a reading previewed here is
+    resolved through exactly the descriptor that would create the entity. Absent
+    only if the library failed to load, in which case the preview degrades to
+    "no readings" rather than to a guess.
+    """
+    return (
+        hass.data.get(DOMAIN, {})
+        .get(DATA_ENTRY_LIBRARY, {})
+        .get(entry.entry_id, (None, None))[0]
+    )
+
+
+def _reading_name(descriptor: FieldDescriptor) -> str:
+    """The entity name Home Assistant would show for this field.
+
+    Mirrors what :class:`~.entity.Rtl433Entity` does with the same descriptor:
+    an explicit library ``name`` wins, and a descriptor that deliberately leaves
+    it unset is one whose name Home Assistant derives from the device class.
+    Deriving it the same way here is the whole point of the preview -- the panel
+    is meant to show the "Temperature" the user will get, not the
+    ``temperature_C`` the radio sent.
+
+    The device-class fallback is sentence case (``signal_strength`` ->
+    "Signal strength"), which is how core writes them. A descriptor with neither
+    is named after its field key rather than left blank.
+    """
+    if descriptor.name is not None:
+        return descriptor.name
+    source = descriptor.device_class or descriptor.field_key
+    spaced = source.replace("_", " ").strip()
+    return spaced[:1].upper() + spaced[1:]
+
+
+@callback
+def _readings(
+    fields: dict[str, Any], model: str, registry: Registry | None
+) -> list[dict[str, Any]]:
+    """Preview a frame as the entities adopting it would create.
+
+    Two filters, both the library's own statements rather than a blocklist this
+    module maintains. A field that resolves to no descriptor creates no entity,
+    so showing it would promise something adoption will not deliver. A
+    descriptor marked ``enabled_by_default: false`` creates an entity that
+    arrives disabled, so it is not a reading the user would see either -- which
+    is what drops ``time``, ``freq``, ``rssi``, ``snr`` and ``noise`` without
+    naming any of them here. The signal figures the card already shows in their
+    own right fall out of that second rule for free.
+
+    Values go through :func:`~.mapping.apply_transform`, so a scaled or
+    payload-mapped field previews the state the entity would hold rather than
+    the raw number on the wire. A binary field arrives as a real ``bool`` and is
+    rendered by the panel, not stringified here, so the panel keeps the choice
+    of vocabulary.
+
+    Order follows the frame, which is the device's own field order and stable
+    between transmissions -- sorting by name would reshuffle a card whenever a
+    device dropped an optional field from one frame.
+    """
+    if registry is None:
+        return []
+    readings: list[dict[str, Any]] = []
+    for field_key, raw in fields.items():
+        descriptor = lookup(field_key, model or None, registry)
+        if descriptor is None or not descriptor.enabled_by_default:
+            continue
+        readings.append(
+            {
+                "key": field_key,
+                "name": _reading_name(descriptor),
+                "value": apply_transform(descriptor, raw),
+                "unit": descriptor.unit_of_measurement,
+                "platform": descriptor.platform,
+            }
+        )
+    return readings
+
+
+@callback
 def _pending_payload(
-    entry: ConfigEntry, coordinator: Rtl433Coordinator
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: Rtl433Coordinator
 ) -> dict[str, Any]:
     """Render one hub's approval state: the candidates and the ignore list.
 
@@ -156,6 +244,7 @@ def _pending_payload(
     record -- so the panel falls back to the key.
     """
     stored: dict[str, Any] = entry.data.get(CONF_DEVICES, {})
+    registry = _entry_registry(hass, entry)
     return {
         "pending": [
             {
@@ -165,7 +254,7 @@ def _pending_payload(
                 "signal": record.signal,
                 "first_seen": record.first_seen.isoformat(),
                 "last_seen": record.last_seen.isoformat(),
-                "fields": dict(record.event.fields),
+                "readings": _readings(record.event.fields, record.model, registry),
             }
             for record in coordinator.pending_candidates()
         ],
@@ -273,7 +362,7 @@ def ws_pending_devices(
     if resolved is None:
         return
     entry, coordinator = resolved
-    connection.send_result(msg["id"], _pending_payload(entry, coordinator))
+    connection.send_result(msg["id"], _pending_payload(hass, entry, coordinator))
 
 
 @websocket_api.websocket_command(
@@ -389,7 +478,7 @@ def ws_subscribe_devices(
         return
     entry, coordinator = resolved
 
-    last_sent: dict[str, Any] = _pending_payload(entry, coordinator)
+    last_sent: dict[str, Any] = _pending_payload(hass, entry, coordinator)
 
     @callback
     def _push_if_changed(_now: Any = None) -> None:
@@ -403,7 +492,7 @@ def ws_subscribe_devices(
         live: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
         if live is None:
             return
-        payload = _pending_payload(entry, live)
+        payload = _pending_payload(hass, entry, live)
         if payload == last_sent:
             return
         last_sent = payload
