@@ -1,7 +1,7 @@
 """Tests for the in-place device re-key helper (``device_replace``).
 
 The property these tests protect is the whole point of the feature: when a cheap
-433 MHz sensor draws a new transmitter id after a battery swap, re-keying the
+433 MHz sensor generates a new transmitter id after a battery swap, re-keying the
 device onto the new id must carry the user's recorder history across. History is
 keyed on ``entity_id``, and an ``entity_id`` only survives if the *registry row*
 survives — so the central assertions compare the immutable registry row id

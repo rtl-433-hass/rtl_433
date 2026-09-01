@@ -172,7 +172,7 @@
       },
       "replace": {
         "title": "Replace device",
-        "description": "Some sensors draw a new transmitter id when their batteries are changed, so the same hardware turns up as a brand-new device. Pick the device you want to keep: its history, settings and automations are moved onto the new id.",
+        "description": "Some sensors generate a new transmitter id when their batteries are changed, so the same hardware turns up as a brand-new device. Pick the device you want to keep: its history, settings and automations are moved onto the new id.",
         "data": {
           "device": "Device to keep"
         },

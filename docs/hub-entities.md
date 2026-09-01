@@ -33,9 +33,8 @@ noise over time and alert when it climbs high enough to drown out your devices:
   dB; transmissions weaker than this are not decoded.
 
 rtl_433 only reports these when its auto-level feature is active, so run the
-server with `-Y autolevel` (updates on every shift greater than 1 dB) and
-optionally `-M noise:30` (a periodic report every 30 seconds). The config-file
-equivalents are:
+server with `-Y autolevel` and optionally `-M noise:30` (a periodic report every
+30 seconds). The config-file equivalents are:
 
 ```text
 pulse_detect autolevel
@@ -47,6 +46,25 @@ per-radio override file in the add-on config directory (see the add-on
 documentation). Without them the sensors stay `unknown`. Note that `autolevel`
 changes reception behavior by design: it continuously adapts the pulse
 detector's minimum level to the measured noise floor.
+
+The two sensors update on different schedules, and **Minimum detection level**
+is the fussier of the pair. `-M noise:30` emits a report every 30 seconds, but
+that report carries only the noise estimate, so **Noise level** refreshes
+steadily while **Minimum detection level** updates *only* at the moment
+`autolevel` actually re-adjusts the threshold. rtl_433 re-adjusts only when the
+estimated noise sits more than 3 dB below the configured `minlevel` (default
+-12.1 dB, so roughly below -15 dB) *and* the new threshold differs from the
+current one by more than 1 dB. Two consequences are worth knowing before you go
+debugging:
+
+- On a receiver whose noise floor is above about -15 dB, `autolevel` never
+  engages and **Minimum detection level** stays `unknown` however long you wait.
+  Check **Noise level** first: it decides whether the threshold can move at all.
+- rtl_433 fires a burst of adjustments while it converges at startup, then goes
+  quiet. The event stream carries no backlog, so a server that settled before
+  Home Assistant connected leaves the sensor `unknown` until the noise floor
+  drifts by more than 1 dB. To force an update, nudge the hub's **Gain** number
+  entity far enough to move the floor, then set it back.
 
 Unlike the sensors below, this data arrives over the event stream itself
 (rtl_433 ≥ 23.11), so it works even when `/cmd` is proxied away behind a

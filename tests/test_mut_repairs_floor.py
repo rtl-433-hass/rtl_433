@@ -1243,7 +1243,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
     """Test that form schema defaults correctly use entry data values.
 
     These tests ensure that schema field defaults (for host, port, path) are
-    drawn from entry.data (not None, not a sentinel XXXX), which kills many
+    taken from entry.data (not None, not a sentinel XXXX), which kills many
     of the default= mutation variants. We achieve this by instantiating the
     flow with an entry that has specific non-default values, then checking
     the form's data_schema.
