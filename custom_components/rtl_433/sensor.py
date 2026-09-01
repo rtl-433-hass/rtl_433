@@ -17,12 +17,16 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import (
     DOMAIN as SENSOR_DOMAIN,
+    UNIT_CONVERTERS,
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
+    SensorExtraStoredData,
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    ATTR_UNIT_OF_MEASUREMENT,
     MATCH_ALL,
     SIGNAL_STRENGTH_DECIBELS,
     UnitOfFrequency,
@@ -78,8 +82,14 @@ _TEMPERATURE_UNITS = frozenset(
 )
 
 
-class Rtl433Sensor(Rtl433Entity, SensorEntity):
-    """A single measurement field of an rtl_433 device."""
+class Rtl433Sensor(Rtl433Entity, RestoreSensor):
+    """A single measurement field of an rtl_433 device.
+
+    Restores through Home Assistant's ``RestoreSensor``, whose
+    ``SensorExtraStoredData`` persists the **native** value together with the
+    native unit it was measured in — see :meth:`_async_restore_state` for why the
+    displayed state string alone is not a safe substitute.
+    """
 
     def __init__(
         self,
@@ -159,8 +169,8 @@ class Rtl433Sensor(Rtl433Entity, SensorEntity):
         self._attr_native_value = apply_transform(self._descriptor, raw_value)
 
     @property
-    def extra_restore_state_data(self) -> RestoredExtraData | None:
-        """Persist the native value independently of ``available``.
+    def extra_restore_state_data(self) -> SensorExtraStoredData:
+        """Persist the native value + native unit, independently of ``available``.
 
         Home Assistant writes ``unavailable`` as the *state* whenever
         ``available`` is False, so the state string alone cannot carry a value
@@ -169,12 +179,42 @@ class Rtl433Sensor(Rtl433Entity, SensorEntity):
         cause. Keeping the value in the restore entity's extra data means a
         never-expire door contact (or any other device) comes back with its last
         reading instead of ``unknown``.
+
+        The unit rides along (HA's own ``SensorExtraStoredData`` shape) so the
+        restore can tell what the stored number *means*: a device-library update
+        that re-maps a field's native unit would otherwise have the old number
+        silently reinterpreted in the new unit.
         """
-        if self._attr_native_value is None:
-            return None
-        return RestoredExtraData(
-            {"native_value": _restorable_value(self._attr_native_value)}
+        return SensorExtraStoredData(
+            _restorable_value(self._attr_native_value)
+            if self._attr_native_value is not None
+            else None,
+            self.native_unit_of_measurement,
         )
+
+    def _to_native_unit(self, value: Any, from_unit: str | None) -> Any:
+        """Return ``value`` (measured in ``from_unit``) in the entity's native unit.
+
+        Left untouched when there is nothing to convert: no unit on either side,
+        units that already agree, a device class HA does not convert, or a unit
+        outside that converter's vocabulary. A non-numeric value is likewise
+        passed through rather than raising.
+        """
+        native_unit = self.native_unit_of_measurement
+        if from_unit is None or native_unit is None or from_unit == native_unit:
+            return value
+        converter = UNIT_CONVERTERS.get(self.device_class)
+        if converter is None:
+            return value
+        if (
+            from_unit not in converter.VALID_UNITS
+            or native_unit not in converter.VALID_UNITS
+        ):
+            return value
+        try:
+            return converter.convert(float(value), from_unit, native_unit)
+        except TypeError, ValueError:
+            return value
 
     async def _async_restore_state(self) -> None:
         """Restore the last known native value on startup.
@@ -183,19 +223,42 @@ class Rtl433Sensor(Rtl433Entity, SensorEntity):
         restored one. The availability-independent extra data is preferred over
         the state string, which is ``unavailable``/``unknown`` (and so unusable)
         whenever the entity was gated at shutdown.
+
+        Both sources are converted back to the native unit before being adopted.
+        That matters most for the state-string fallback: ``state.state`` is the
+        value **as displayed**, which for any device class HA converts (every
+        temperature on a °F install, pressure, rain, wind speed, …) is not the
+        native number. Restoring it verbatim re-injects a Fahrenheit reading as a
+        Celsius one — a 37 °F fridge came back as 37 °C ≈ 98.7 °F on every reload
+        until the next live event corrected it (issue #135).
+
+        The fallback is kept (rather than dropped in favour of extra data alone)
+        because it is the only source for a config entry whose last restore data
+        was written by a build that stored no extra data.
         """
         if self._attr_native_value is not None:
             return
         extra = await self.async_get_last_extra_data()
-        if (
-            extra is not None
-            and (restored := extra.as_dict().get("native_value")) is not None
-        ):
-            self._attr_native_value = restored
-            return
+        if extra is not None:
+            stored = extra.as_dict()
+            # 0.20.0 wrote the bare native value under the same ``native_value``
+            # key with no unit beside it, a shape ``from_dict`` rejects; read the
+            # value out by hand in that case and take it as already native.
+            sensor_data = SensorExtraStoredData.from_dict(stored)
+            if sensor_data is not None:
+                value = sensor_data.native_value
+                unit = sensor_data.native_unit_of_measurement
+            else:
+                value = stored.get("native_value")
+                unit = None
+            if value is not None:
+                self._attr_native_value = self._to_native_unit(value, unit)
+                return
         last_state = await self.async_get_last_state()
         if last_state is not None and last_state.state not in _NON_RESTORABLE:
-            self._attr_native_value = last_state.state
+            self._attr_native_value = self._to_native_unit(
+                last_state.state, last_state.attributes.get(ATTR_UNIT_OF_MEASUREMENT)
+            )
 
 
 # --------------------------------------------------------------------------- #
