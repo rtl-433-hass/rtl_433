@@ -278,9 +278,16 @@ async def test_stop_clears_the_gate_state(hass, coordinator):
 # Logging: the connection loss is visible without DEBUG                        #
 # --------------------------------------------------------------------------- #
 async def test_disconnect_logs_the_loss_and_the_device_count(hass, coordinator, caplog):
-    """Losing the socket logs the URL and how many devices it took with it."""
+    """Losing the socket logs the URL and how many devices it took with it.
+
+    The device is marked adopted first: only an adopted device has entities for
+    the gate to take unavailable, so only an adopted device is counted. A device
+    that has merely been *heard* sits in the pending list with nothing in Home
+    Assistant to mark, and correctly contributes nothing to this total.
+    """
     from pyrtl_433.normalizer import NormalizedEvent
 
+    coordinator.adopted.add("Acurite-606TX-42")
     with patch("custom_components.rtl_433.coordinator.base.async_dispatcher_send"):
         coordinator._on_client_event(
             NormalizedEvent(
