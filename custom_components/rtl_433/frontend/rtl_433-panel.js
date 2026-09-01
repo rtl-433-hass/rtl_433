@@ -110,10 +110,24 @@ function formatAge(iso, now) {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+/**
+ * Formatter for the exact timestamps in a row's tooltip.
+ *
+ * Built once at module scope rather than per call. `toLocaleString()`
+ * constructs a fresh `Intl.DateTimeFormat` every time it runs, and this is
+ * called twice for every row of every render -- on a hub with dozens of
+ * candidates that is a lot of formatter construction to produce a string
+ * nobody may ever hover over.
+ */
+const EXACT_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "medium",
+});
+
 /** Format an ISO timestamp in the viewer's own locale, for a cell tooltip. */
 function formatExact(iso) {
   const parsed = Date.parse(iso);
-  return Number.isNaN(parsed) ? "" : new Date(parsed).toLocaleString();
+  return Number.isNaN(parsed) ? "" : EXACT_TIME_FORMAT.format(new Date(parsed));
 }
 
 /** Render a frame's readings as one compact `key: value` line. */
@@ -691,6 +705,13 @@ class Rtl433Panel extends HTMLElement {
     }
   }
 
+  /** Set `title` only on a real change -- the tooltip twin of `_text`. */
+  _title(node, value) {
+    if (node.title !== value) {
+      node.title = value;
+    }
+  }
+
   _createPendingRow(row) {
     const element = document.createElement("tr");
     element.innerHTML = `
@@ -742,12 +763,15 @@ class Rtl433Panel extends HTMLElement {
     this._text(parts.count, String(row.count));
     this._text(parts.signal, formatSignal(row.signal));
     this._text(parts.age, formatAge(row.last_seen, now));
-    parts.age.title = `First seen ${formatExact(
-      row.first_seen
-    )}\nLast seen ${formatExact(row.last_seen)}`;
+    this._title(
+      parts.age,
+      `First seen ${formatExact(row.first_seen)}\nLast seen ${formatExact(
+        row.last_seen
+      )}`
+    );
     const fields = formatFields(row.fields);
     this._text(parts.fields, fields);
-    parts.fields.title = fields;
+    this._title(parts.fields, fields);
     const busy = this._busy.has(row.key);
     parts.add.disabled = busy;
     parts.ignore.disabled = busy;

@@ -41,6 +41,7 @@ UI.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Any, Final
 
@@ -58,22 +59,9 @@ from .adoption import (
     async_ignore_devices,
     async_unignore_devices,
 )
-from .const import (
-    CONF_DEVICES,
-    CONF_IGNORED_DEVICES,
-    CONF_MODEL,
-    DOMAIN,
-    signal_pending_update,
-)
+from .const import CONF_DEVICES, CONF_MODEL, DOMAIN, signal_pending_update
 from .coordinator import Rtl433Coordinator
-
-# Sentinel on ``hass.data[DOMAIN]`` marking that the commands are registered.
-# Registration is per Home Assistant *run*, not per config entry -- a second hub
-# must not register the same command names again -- and this integration has no
-# ``async_setup``, so the guard rides along with the per-entry data the same way
-# ``DATA_LIBRARY`` does. The leading underscore keeps it out of the entry-id
-# namespace that shares this dict.
-DATA_WS_REGISTERED: Final = "_websocket_api_registered"
+from .hub_settings import _hub_ignored_devices
 
 # How often an open subscription re-renders its payload to catch changes that
 # fire no signal: the sighting count and last-seen of a candidate already on the
@@ -90,18 +78,16 @@ ERR_NOT_LOADED: Final = "not_loaded"
 
 @callback
 def async_register_commands(hass: HomeAssistant) -> None:
-    """Register the discovery commands once per Home Assistant run.
+    """Register the discovery commands.
 
     Called from every hub's ``async_setup_entry`` because this integration is
-    entry-only, and guarded with a sentinel because command names are global:
-    registering the same name twice raises. A user with two receivers must not
-    lose the second one to that.
+    entry-only. Command names are global and registration is really per Home
+    Assistant *run*, but it needs no guard of its own:
+    ``async_register_command`` is a dict assignment keyed by command name, so a
+    second hub -- or the same hub reloading -- rewrites the same six entries with
+    the same handlers. Registering is idempotent, so the simplest thing that
+    works is to just register.
     """
-    domain_data = hass.data.setdefault(DOMAIN, {})
-    if domain_data.get(DATA_WS_REGISTERED):
-        return
-    domain_data[DATA_WS_REGISTERED] = True
-
     websocket_api.async_register_command(hass, ws_hubs)
     websocket_api.async_register_command(hass, ws_pending_devices)
     websocket_api.async_register_command(hass, ws_add_devices)
@@ -150,25 +136,6 @@ def _async_get_coordinator(
 
 
 @callback
-def _signal_level(fields: dict[str, Any]) -> float | None:
-    """Return the frame's signal level in dB, preferring SNR over RSSI.
-
-    SNR is preferred because it is the figure that tracks decodability, which is
-    what a user judging a marginal device actually wants to know. A receiver
-    started without ``-M level`` reports neither, and that yields ``None`` rather
-    than a zero the panel would render as a real (and terrible) reading. A
-    non-numeric value is treated the same way: the API's contract is a number or
-    nothing, so a caller never has to type-check the field.
-    """
-    level = fields.get("snr")
-    if level is None:
-        level = fields.get("rssi")
-    if isinstance(level, bool) or not isinstance(level, (int, float)):
-        return None
-    return float(level)
-
-
-@callback
 def _pending_payload(
     entry: ConfigEntry, coordinator: Rtl433Coordinator
 ) -> dict[str, Any]:
@@ -179,9 +146,10 @@ def _pending_payload(
     which changes only the second half, still reaches an open panel through the
     same push.
 
-    Candidates are ordered most-recently-heard first, matching the options form:
-    a long list is worked from the top, and the device the user just triggered to
-    make it transmit is the one they came here for. Timestamps go out as ISO
+    Candidates are ordered by
+    :meth:`~.coordinator.Rtl433Coordinator.pending_candidates`, which is also
+    what the options form renders, so the two surfaces cannot put a different
+    device at the top of the same list. Timestamps go out as ISO
     strings because JSON has no datetime and the panel wants to format them in the
     viewer's locale anyway. The ignore list carries a model only when one is known
     -- a device is usually ignored while pending, long before it has a stored
@@ -194,35 +162,62 @@ def _pending_payload(
                 "key": record.key,
                 "model": record.model,
                 "count": record.count,
-                "signal": _signal_level(record.event.fields),
+                "signal": record.signal,
                 "first_seen": record.first_seen.isoformat(),
                 "last_seen": record.last_seen.isoformat(),
                 "fields": dict(record.event.fields),
             }
-            for record in sorted(
-                coordinator.pending.values(),
-                key=lambda record: record.last_seen,
-                reverse=True,
-            )
+            for record in coordinator.pending_candidates()
         ],
         "ignored": [
             {
                 "key": device_key,
                 "model": stored.get(device_key, {}).get(CONF_MODEL, ""),
             }
-            for device_key in sorted(entry.data.get(CONF_IGNORED_DEVICES, []))
+            for device_key in sorted(_hub_ignored_devices(entry))
         ],
     }
 
 
-@callback
-def _result_payload(result: AdoptionResult) -> dict[str, list[str]]:
-    """Shape an :class:`~.adoption.AdoptionResult` as the action commands' reply.
+# The parameters every action command takes. Spread into each command's schema
+# rather than repeated, so ``entry_id`` and ``device_keys`` cannot come to mean
+# something subtly different on one of the three. The ``type`` is added per
+# command because ``websocket_command`` reads the command name out of it.
+_ACTION_PARAMS: Final[dict[Any, Any]] = {
+    vol.Required("entry_id"): str,
+    vol.Required("device_keys"): [str],
+}
 
-    Both halves are always present, even when empty, so a caller never has to
-    guard a missing key to find out that everything it asked for went through.
+
+async def _async_run_action(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+    action: Callable[
+        [HomeAssistant, ConfigEntry, Rtl433Coordinator, list[str]],
+        Awaitable[AdoptionResult],
+    ],
+) -> None:
+    """Resolve the hub, run one :mod:`.adoption` verb, and reply with the result.
+
+    The three action commands differ only in which verb they call: each resolves
+    the same ``entry_id``, hands the same ``device_keys`` to its function, and
+    replies with the same two lists. Keeping that body in one place is what makes
+    "the reply shape is identical across the three" a fact rather than a promise
+    -- there is one place to change when it moves.
+
+    Both halves of the reply are always present, even when empty, so a caller
+    never has to guard a missing key to find out that everything it asked for
+    went through.
     """
-    return {"applied": result.applied, "skipped": result.skipped}
+    resolved = _async_get_coordinator(hass, connection, msg)
+    if resolved is None:
+        return
+    entry, coordinator = resolved
+    result = await action(hass, entry, coordinator, msg["device_keys"])
+    connection.send_result(
+        msg["id"], {"applied": result.applied, "skipped": result.skipped}
+    )
 
 
 @websocket_api.websocket_command({vol.Required("type"): "rtl_433/hubs"})
@@ -282,11 +277,7 @@ def ws_pending_devices(
 
 
 @websocket_api.websocket_command(
-    {
-        vol.Required("type"): "rtl_433/devices/add",
-        vol.Required("entry_id"): str,
-        vol.Required("device_keys"): [str],
-    }
+    {vol.Required("type"): "rtl_433/devices/add", **_ACTION_PARAMS}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -303,20 +294,11 @@ async def ws_add_devices(
     arrived, which is the difference the panel has to be able to explain to the
     person who clicked.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
-        return
-    entry, coordinator = resolved
-    result = await async_adopt_devices(hass, entry, coordinator, msg["device_keys"])
-    connection.send_result(msg["id"], _result_payload(result))
+    await _async_run_action(hass, connection, msg, async_adopt_devices)
 
 
 @websocket_api.websocket_command(
-    {
-        vol.Required("type"): "rtl_433/devices/ignore",
-        vol.Required("entry_id"): str,
-        vol.Required("device_keys"): [str],
-    }
+    {vol.Required("type"): "rtl_433/devices/ignore", **_ACTION_PARAMS}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -330,20 +312,11 @@ async def ws_ignore_devices(
     ``skipped`` here means "already ignored" rather than "could not", so a
     double-click on a row is reported honestly without being an error.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
-        return
-    entry, coordinator = resolved
-    result = await async_ignore_devices(hass, entry, coordinator, msg["device_keys"])
-    connection.send_result(msg["id"], _result_payload(result))
+    await _async_run_action(hass, connection, msg, async_ignore_devices)
 
 
 @websocket_api.websocket_command(
-    {
-        vol.Required("type"): "rtl_433/devices/unignore",
-        vol.Required("entry_id"): str,
-        vol.Required("device_keys"): [str],
-    }
+    {vol.Required("type"): "rtl_433/devices/unignore", **_ACTION_PARAMS}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -360,12 +333,7 @@ async def ws_unignore_devices(
     off the ignore list", not "back on the pending list", and a panel should say
     so rather than waiting for a row that is not coming yet.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
-        return
-    entry, coordinator = resolved
-    result = await async_unignore_devices(hass, entry, coordinator, msg["device_keys"])
-    connection.send_result(msg["id"], _result_payload(result))
+    await _async_run_action(hass, connection, msg, async_unignore_devices)
 
 
 @websocket_api.websocket_command(
@@ -404,6 +372,17 @@ def ws_subscribe_devices(
     one callable, so closing the panel -- or the socket dropping -- takes the
     timer down with the listener and never leaves an orphaned interval firing
     against a dead connection.
+
+    The **coordinator is re-resolved on every render**, never captured. A hub
+    reload replaces the object in ``hass.data`` while the subscription lives on
+    (the config entry, and so the dispatcher signal, survive the reload), so a
+    captured coordinator would be a stopped one whose pending map never changes
+    again -- the panel would sit on a frozen list for the rest of the session
+    without ever reporting an error. Re-reading it means the first render after
+    the new coordinator lands shows what the running hub is actually hearing.
+    While the entry is mid-reload there is briefly no coordinator at all; that is
+    a gap of milliseconds with nothing truthful to say, so the render is skipped
+    and the last payload stands until the hub is back.
     """
     resolved = _async_get_coordinator(hass, connection, msg)
     if resolved is None:
@@ -413,31 +392,29 @@ def ws_subscribe_devices(
     last_sent: dict[str, Any] = _pending_payload(entry, coordinator)
 
     @callback
-    def _push_if_changed() -> None:
-        """Re-render and send, unless nothing a subscriber can see has changed."""
+    def _push_if_changed(_now: Any = None) -> None:
+        """Re-render and send, unless nothing a subscriber can see has changed.
+
+        Serves both triggers directly. They differ in *when* they fire, not in
+        what they do, so the timer's unused tick argument is defaulted away
+        rather than absorbed by a second wrapper per trigger.
+        """
         nonlocal last_sent
-        payload = _pending_payload(entry, coordinator)
+        live: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if live is None:
+            return
+        payload = _pending_payload(entry, live)
         if payload == last_sent:
             return
         last_sent = payload
         connection.send_message(websocket_api.event_message(msg["id"], payload))
 
-    @callback
-    def _on_membership_change() -> None:
-        """Handle the coordinator's membership signal: push without waiting."""
-        _push_if_changed()
-
-    @callback
-    def _on_refresh_tick(_now: Any) -> None:
-        """Handle the throttle tick: push only the drift the signal never reports."""
-        _push_if_changed()
-
     remove_signal = async_dispatcher_connect(
-        hass, signal_pending_update(entry.entry_id), _on_membership_change
+        hass, signal_pending_update(entry.entry_id), _push_if_changed
     )
     remove_timer = async_track_time_interval(
         hass,
-        _on_refresh_tick,
+        _push_if_changed,
         _REFRESH_INTERVAL,
         name=f"rtl_433 discovery refresh {entry.entry_id}",
     )

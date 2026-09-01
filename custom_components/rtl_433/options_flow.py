@@ -76,7 +76,6 @@ from .const import (
     COMMODITY_NONE,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
-    CONF_IGNORED_DEVICES,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_USER_MAPPINGS,
@@ -91,6 +90,7 @@ from .const import (
     DOMAIN,
 )
 from .device_replace import DeviceReplaceError, async_replace_device
+from .hub_settings import _hub_ignored_devices
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -114,6 +114,20 @@ MAPPINGS_DOCS_URL = (
 )
 
 
+def _model_label(model: str, device_key: str) -> str:
+    """Name one device for a picker: its model and key, or the key alone.
+
+    Every picker in this flow names a device the same way, and they have to: the
+    add-devices step, the ignored-devices step, the device picker and both
+    replace steps can all show the same hardware in one session, and a user who
+    sees it written three ways has to work out that they are the same device. A
+    model is not always known -- an ignored device usually has no stored record
+    and a bad decode may carry no model at all -- and then the key stands alone
+    rather than being prefixed with a blank.
+    """
+    return f"{model} ({device_key})" if model else device_key
+
+
 def _pending_label(record: PendingDevice, now: datetime) -> str:
     """Describe one pending device densely enough to judge it from the picker.
 
@@ -122,24 +136,23 @@ def _pending_label(record: PendingDevice, now: datetime) -> str:
     the model and device key and then carries the three signals that do
     discriminate: how often the device has been heard (a bad decode is typically
     heard once, a real sensor keeps checking in), how strong its most recent
-    frame was, and how long ago that was. ``snr`` is preferred over ``rssi``
-    because it is the figure that tracks decodability; a device reporting neither
-    (the server was started without ``-M level``) simply omits the segment rather
-    than showing a placeholder.
+    frame was, and how long ago that was. The signal reading comes from
+    :attr:`~.coordinator.PendingDevice.signal` — the same property the WebSocket
+    payload reports, so the form and the discovery panel cannot disagree about a
+    device — and one reporting no level at all (the server was started without
+    ``-M level``) simply omits the segment rather than showing a placeholder.
 
     ``now`` is passed in rather than read here so every row of one render shares
     a single clock, and the age is clamped to it because
     :func:`~homeassistant.util.dt.get_age` raises on a future timestamp and a
     form render must never raise.
     """
-    parts = [f"{record.model or 'unknown'} ({record.key})", f"seen {record.count}x"]
-    level = record.event.fields.get("snr")
-    if level is None:
-        level = record.event.fields.get("rssi")
-    if level is not None:
-        parts.append(
-            f"{level:.1f} dB" if isinstance(level, (int, float)) else f"{level} dB"
-        )
+    parts = [
+        _model_label(record.model or "unknown", record.key),
+        f"seen {record.count}x",
+    ]
+    if (level := record.signal) is not None:
+        parts.append(f"{level:.1f} dB")
     parts.append(f"last seen {dt_util.get_age(min(record.last_seen, now))} ago")
     return " — ".join(parts)
 
@@ -238,16 +251,12 @@ class Rtl433OptionsFlow(OptionsFlow):
                 return await self._apply_add_and_ignore(coordinator, add, ignore)
 
         now = dt_util.utcnow()
-        # Most recently heard first: a long list is worked from the top, and the
-        # device the user just triggered to make it transmit is the one they came
-        # here for.
+        # Ordered by the coordinator, which is also what the discovery panel
+        # renders, so a long list is worked from the top in the same order on
+        # both surfaces.
         options = [
             SelectOptionDict(value=record.key, label=_pending_label(record, now))
-            for record in sorted(
-                coordinator.pending.values(),
-                key=lambda record: record.last_seen,
-                reverse=True,
-            )
+            for record in coordinator.pending_candidates()
         ]
         # One selector serves both fields: same candidates, same rendering; only
         # the meaning of the selection differs.
@@ -319,7 +328,7 @@ class Rtl433OptionsFlow(OptionsFlow):
             return self.async_abort(reason="hub_not_loaded")
 
         entry = self.config_entry
-        ignored: list[str] = list(entry.data.get(CONF_IGNORED_DEVICES, []))
+        ignored = _hub_ignored_devices(entry)
         if not ignored:
             return self.async_abort(reason="no_ignored_devices")
 
@@ -340,10 +349,8 @@ class Rtl433OptionsFlow(OptionsFlow):
         options = [
             SelectOptionDict(
                 value=device_key,
-                label=(
-                    f"{model} ({device_key})"
-                    if (model := devices.get(device_key, {}).get(CONF_MODEL))
-                    else device_key
+                label=_model_label(
+                    devices.get(device_key, {}).get(CONF_MODEL, ""), device_key
                 ),
             )
             for device_key in sorted(ignored)
@@ -826,9 +833,8 @@ class Rtl433OptionsFlow(OptionsFlow):
     def _replacement_label(
         self,
         device_key: str,
-        devices: dict[str, Any],
-        heard: dict[str, Any],
-        pending: dict[str, Any],
+        model: str,
+        record: PendingDevice | None,
         now: datetime,
     ) -> str:
         """Label one replacement candidate, marking the ones not yet added.
@@ -840,12 +846,15 @@ class Rtl433OptionsFlow(OptionsFlow):
         history of one they have. The sighting count is what identifies the
         replacement here, since a sensor put back into service after a battery
         change starts checking in immediately.
+
+        Takes the already-resolved ``model`` and pending ``record`` rather than
+        the three maps to look them up in: the caller resolves each model exactly
+        once for the sort it has to do anyway, so re-deriving them per label
+        would repeat work the caller has already finished.
         """
-        record = pending.get(device_key)
         if record is not None:
             return f"{_pending_label(record, now)} — not added yet"
-        model = self._replacement_model(device_key, devices, heard)
-        return f"{model} ({device_key})" if model else device_key
+        return _model_label(model, device_key)
 
     async def async_step_replace_target(
         self, user_input: dict[str, Any] | None = None
@@ -912,15 +921,17 @@ class Rtl433OptionsFlow(OptionsFlow):
         }
 
         old_model = self._replacement_model(old_key, devices, heard)
+        # Resolve each candidate's model once. The sort comparator would
+        # otherwise re-derive it on every comparison and the label pass once
+        # more, which is the same lookup done O(n log n) times for a value that
+        # cannot change during the render.
+        models = {
+            key: self._replacement_model(key, devices, heard)
+            for key in (set(devices) | set(heard)) - {old_key}
+        }
         candidates = sorted(
-            (set(devices) | set(heard)) - {old_key},
-            key=lambda key: (
-                0
-                if old_model
-                and self._replacement_model(key, devices, heard) == old_model
-                else 1,
-                key,
-            ),
+            models,
+            key=lambda key: (0 if old_model and models[key] == old_model else 1, key),
         )
         if not candidates:
             return self.async_abort(reason="no_replacement_candidates")
@@ -929,7 +940,9 @@ class Rtl433OptionsFlow(OptionsFlow):
         options = [
             SelectOptionDict(
                 value=device_key,
-                label=self._replacement_label(device_key, devices, heard, pending, now),
+                label=self._replacement_label(
+                    device_key, models[device_key], pending.get(device_key), now
+                ),
             )
             for device_key in candidates
         ]
