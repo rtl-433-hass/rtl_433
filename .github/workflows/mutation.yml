@@ -171,10 +171,18 @@ jobs:
     name: "Mutation floor — shard ${{ matrix.shard }}"
     needs: [stats]
     runs-on: "ubuntu-latest"
-    # A single shard mutates at most the package's heaviest module, so it finishes
-    # well inside this backstop; the six shards run in parallel. (The old single
-    # full job used 90.)
-    timeout-minutes: 30
+    # The gate waits on the slowest shard, and the slowest shard can never be
+    # faster than the package's single heaviest module: a module is the smallest
+    # unit mutmut can filter to, so it cannot be split across jobs. ``entity.py``
+    # is currently ~17% of the package's total mutation time, which is what makes
+    # six the natural shard count -- raising it would leave entity.py alone in its
+    # bin and shorten nobody's critical path.
+    #
+    # 30 was too tight once that module set grew: a shard was cancelled mid-run at
+    # 98% complete. This is a backstop for a hung run, not a target, so it is sized
+    # off the heaviest shard with room for the package to keep growing. (The old
+    # single full job used 90.)
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
