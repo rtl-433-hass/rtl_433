@@ -456,7 +456,13 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
     # rtl_433 has no structured noise getter; the pyrtl_433 client parses the
     # pulse detector's "Auto Level" log frames into these snapshots. They stay
     # ``unknown`` unless the server runs with ``-Y autolevel`` (adjustments)
-    # and/or ``-M noise[:secs]`` (periodic reports).
+    # and/or ``-M noise[:secs]`` (periodic reports). The two do not track
+    # together: the periodic report carries the noise estimate alone, so
+    # ``min_level`` rides the ``-Y autolevel`` adjustment line only -- which
+    # upstream emits just while the estimate sits >3 dB below the configured
+    # ``minlevel`` and the new threshold moves by >1 dB. A settled receiver
+    # emits none, so ``min_level`` can stay ``unknown`` indefinitely even with
+    # ``autolevel`` on (see ``docs/hub-entities.md``).
     HubSensorDesc(
         suffix="noise_level",
         name="Noise level",
