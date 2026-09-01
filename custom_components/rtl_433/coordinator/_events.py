@@ -31,7 +31,8 @@ library applied.
 ``__init__`` (``adopted``, ``ignored``, ``pending``, ``devices``, ``last_seen``,
 ``available``, ``seen_fields``, ``device_fields``, ``known_field_keys``,
 ``_connection_time``, ``_discovered``, ``_logged_unmapped``,
-``new_device_callback``) plus ``_dispatch`` (base.py).
+``new_device_callback``) plus ``_dispatch`` and ``_emit_pending_update``
+(base.py).
 
 :class:`PendingDevice` lives here rather than in ``base.py`` because this is the
 module that builds one; ``base.py`` imports it (and re-exports it through the
@@ -208,6 +209,11 @@ class _EventProcessingMixin:
                 key,
                 normalized.model,
             )
+            # A candidate appearing is a membership change, so any open discovery
+            # panel is told at once. This is the only branch that dispatches: the
+            # repeat-sighting branch below deliberately stays silent (see
+            # ``_emit_pending_update``).
+            self._emit_pending_update()
             return
 
         # A repeat sighting sharpens the existing candidate instead of creating a

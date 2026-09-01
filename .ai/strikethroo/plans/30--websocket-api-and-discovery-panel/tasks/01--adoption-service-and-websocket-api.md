@@ -2,7 +2,7 @@
 id: 1
 group: "api"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-09-01
 skills:
   - home-assistant-integration

@@ -81,6 +81,7 @@ from ..const import (
     sdr_store_key,
     signal_device_update,
     signal_hub_update,
+    signal_pending_update,
 )
 from ._events import PendingDevice, _EventProcessingMixin
 from ._sdr import _SdrSettingsMixin, _SdrStore
@@ -470,6 +471,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.device_fields.pop(device_key, None)
         # Re-arm registration so re-adopting the device wires its entities up.
         self._discovered.discard(device_key)
+        self._emit_pending_update()
 
     @callback
     def adopt_device(self, device_key: str) -> PendingDevice | None:
@@ -502,6 +504,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
         if self.new_device_callback is not None:
             self.new_device_callback(device_key, event.model, False)
+        self._emit_pending_update()
         return record
 
     @callback
@@ -514,6 +517,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         """
         self.pending.pop(device_key, None)
         self.ignored.add(device_key)
+        self._emit_pending_update()
 
     async def async_stop(self) -> None:
         """Stop the client and cancel the watchdog (never close the HA session)."""
@@ -628,6 +632,24 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
                 self.hub_info_callback()
             except Exception as err:  # noqa: BLE001 - never kill the loop
                 LOGGER.debug("rtl_433 hub_info_callback failed: %s", err)
+
+    @callback
+    def _emit_pending_update(self) -> None:
+        """Announce that the pending map's *membership* changed.
+
+        The single seam every membership change goes through -- a candidate first
+        heard (``_record_pending``), one adopted, ignored, or forgotten -- so the
+        discovery panel's WebSocket subscription has exactly one thing to listen
+        to and this class has exactly one place that knows the signal's name.
+
+        Nothing calls this for a repeat sighting of a candidate already on the
+        list. That is the whole point of the signal: a busy receiver decodes
+        constantly, and dispatching per frame would push a full list down every
+        open socket so one count could tick up. Keeping the freshening of those
+        counts in the websocket layer (a slow, change-detecting re-send) leaves
+        this class a pure state holder that never learns a UI exists.
+        """
+        async_dispatcher_send(self.hass, signal_pending_update(self.entry.entry_id))
 
     def _dispatch(
         self,

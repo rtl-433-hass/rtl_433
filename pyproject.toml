@@ -25,6 +25,7 @@ requires-python = ">=3.14"
 dev = [
     "pytest-homeassistant-custom-component==0.13.357",
     "pyrtl_433==0.2.0",
+    "home-assistant-frontend==20260729.7",
     "mutmut==3.7.0",
 ]
 
@@ -83,6 +84,26 @@ filterwarnings = [
     "error",
     # Ignore specific warnings from third-party libraries as needed
     # "ignore:.*custom_components.* is using deprecated.*:DeprecationWarning",
+    #
+    # Home Assistant's own ``http`` component stores state under plain string
+    # keys -- ``app["hass"] = hass`` for backwards compatibility
+    # (``http/server.py``) and ``request[KEY_SUPERVISOR_UNIX_SOCKET]`` in the ban
+    # middleware (``http/const.py``) -- and aiohttp warns on any key that is not
+    # an ``AppKey`` / ``RequestKey``. The integration now declares ``http`` (via
+    # ``websocket_api`` / ``panel_custom``) as a manifest dependency, so every
+    # test that sets up a hub entry sets that component up, and every test that
+    # makes a request through it hits the second one. Both are core's code and
+    # core's decision, nothing this repository can fix, and under "error" they
+    # fail the suite outright -- so they are ignored narrowly, by their exact
+    # messages, rather than by relaxing the blanket rule.
+    #
+    # The trailing module pattern pins them to core's two call sites. Without it
+    # the filters match on message alone, so the day this repository writes a
+    # plain-string key into an aiohttp app or request, the identical warning
+    # would be swallowed silently instead of failing the suite. We own no HTTP
+    # views today, which is exactly why the guard is worth having before we do.
+    "ignore:It is recommended to use web.AppKey instances for keys:UserWarning:homeassistant.components.http.*",
+    "ignore:It is recommended to use web.RequestKey instances for keys:UserWarning:homeassistant.components.http.*",
 ]
 
 [tool.coverage.run]

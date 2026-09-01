@@ -305,3 +305,24 @@ SIGNAL_HUB_AVAILABILITY: Final = "rtl_433_hub_availability_{hub_entry_id}"
 def signal_hub_availability(hub_entry_id: str) -> str:
     """Return the hub-level availability-gate dispatcher signal for one hub."""
     return SIGNAL_HUB_AVAILABILITY.format(hub_entry_id=hub_entry_id)
+
+
+# Hub-level "the pending-device list changed" signal. Fired when the *membership*
+# of the coordinator's pending map changes — a candidate appears, or one is
+# adopted, ignored, or forgotten — so the WebSocket subscription behind the
+# discovery panel can push a fresh list the moment the answer to "what is waiting
+# for me?" actually changes.
+#
+# Deliberately NOT fired for a repeat sighting of a candidate already on the
+# list. A busy receiver in an urban area decodes constantly, and a per-frame
+# dispatch would push a whole list down every open socket so a count could tick
+# up by one. The count and last-seen columns still have to stay fresh, so the
+# *websocket layer* re-sends on a slow timer and only when the rendered payload
+# actually differs (see ``websocket_api.py``). Keeping that coalescing there
+# leaves the coordinator a pure state holder with no idea a UI exists.
+SIGNAL_PENDING_UPDATE: Final = "rtl_433_pending_update_{hub_entry_id}"
+
+
+def signal_pending_update(hub_entry_id: str) -> str:
+    """Return the hub-level pending-list-changed dispatcher signal for one hub."""
+    return SIGNAL_PENDING_UPDATE.format(hub_entry_id=hub_entry_id)

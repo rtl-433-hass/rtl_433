@@ -24,9 +24,15 @@ via :func:`async_remove_config_entry_device`, which returns it to the pending
 list; deleting the hub entry removes all nested devices and entities
 automatically.
 
+Setting up the first hub also registers the discovery WebSocket commands
+(:mod:`.websocket_api`), which back the approval panel and are equally usable
+from a script. Those command names are global, so registration is guarded to run
+once per Home Assistant run rather than once per hub entry.
+
 The library loading lives in :mod:`.library`, the hub-setting resolvers in
-:mod:`.hub_settings`, and the config-entry migration / one-time legacy cleanups
-in :mod:`.migration`; this module keeps only the steady-state lifecycle.
+:mod:`.hub_settings`, the shared adopt / ignore / un-ignore service in
+:mod:`.adoption`, and the config-entry migration / one-time legacy cleanups in
+:mod:`.migration`; this module keeps only the steady-state lifecycle.
 """
 
 from __future__ import annotations
@@ -72,6 +78,7 @@ from .migration import (
     _migrate_motion_event_to_binary_sensor,
     async_migrate_entry,
 )
+from .websocket_api import async_register_commands
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -82,6 +89,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     forwards the entity platforms once on the hub entry.
     """
     hass.data.setdefault(DOMAIN, {})
+    # Command names are global and registration is per Home Assistant run, not
+    # per entry -- but this integration is entry-only (no ``async_setup``), so the
+    # call is made from every hub's setup and made idempotent inside. A user with
+    # two receivers must not lose the second entry to a duplicate registration.
+    async_register_commands(hass)
 
     shipped_registry, shipped_skip_keys = await _async_load_library(hass)
     entry_registry, entry_skip_keys = _merge_entry_library(

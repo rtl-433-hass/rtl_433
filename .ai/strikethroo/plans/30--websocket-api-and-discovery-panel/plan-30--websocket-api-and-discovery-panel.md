@@ -294,9 +294,9 @@ Fully serial by necessity: the panel is written against the API contract, the
 tests assert both, and the screenshot must show test-verified behaviour. There is
 no honest parallelism to take here.
 
-### Phase 1: API Foundation
+### ✅ Phase 1: API Foundation
 **Parallel Tasks:**
-- Task 001: Extract the adoption service and add the WebSocket API
+- ✔️ Task 001: Extract the adoption service and add the WebSocket API
 
 ### Phase 2: Panel
 **Parallel Tasks:**

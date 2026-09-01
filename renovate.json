@@ -54,6 +54,7 @@
       "matchPackageNames": [
         "pytest-homeassistant-custom-component",
         "pyrtl_433",
+        "home-assistant-frontend",
         "mutmut"
       ],
       "groupName": "test dependencies",
