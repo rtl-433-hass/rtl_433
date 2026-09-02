@@ -114,6 +114,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_ignore_devices)
     websocket_api.async_register_command(hass, ws_unignore_devices)
     websocket_api.async_register_command(hass, ws_replace_device)
+    websocket_api.async_register_command(hass, ws_clear_devices)
     websocket_api.async_register_command(hass, ws_subscribe_devices)
 
 
@@ -460,9 +461,7 @@ def _pending_payload(
                 "signal": record.signal,
                 "first_seen": record.first_seen.isoformat(),
                 "last_seen": record.last_seen.isoformat(),
-                "readings": _readings(
-                    record.event.fields, record.model, registry, meta
-                ),
+                "readings": _readings(record.fields, record.model, registry, meta),
             }
             for record in coordinator.pending_candidates()
         ],
@@ -618,6 +617,47 @@ async def ws_ignore_devices(
     double-click on a row is reported honestly without being an error.
     """
     await _async_run_action(hass, connection, msg, async_ignore_devices)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rtl_433/devices/clear",
+        vol.Required("entry_id"): str,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_clear_devices(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Forget every candidate heard so far, so the list can refill from scratch.
+
+    A receiver left running in a dense neighbourhood accumulates hundreds of
+    candidates, and the one the user came to add is somewhere in them. Clearing
+    turns the list back into a live question -- trigger the doorbell, and it is
+    the only thing on the screen.
+
+    Nothing is persisted and nothing is ignored: the pending list has always
+    been memory-only and rebuilt from live traffic, so this discards a working
+    set rather than making a decision. Every device cleared comes back on its
+    next transmission, which is precisely what makes it safe to offer as a
+    one-click button with no confirmation to read.
+
+    A device the user *has* ignored stays ignored -- that list is persisted and
+    is a decision, and this is not the control for undoing it.
+    """
+    resolved = _async_get_coordinator(hass, connection, msg)
+    if resolved is None:
+        return
+    entry, coordinator = resolved
+    cleared = len(coordinator.pending)
+    coordinator.pending.clear()
+    # A membership change, so every open panel is told at once -- including the
+    # other admin's, who is looking at a list that just emptied.
+    coordinator.emit_pending_update()
+    connection.send_result(msg["id"], {"cleared": cleared})
 
 
 @websocket_api.websocket_command(
