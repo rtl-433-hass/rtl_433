@@ -513,6 +513,18 @@ async function approveDevices(page) {
   );
   console.log("screenshot: ignored toggle -> " + JSON.stringify(revealed));
   await page.waitForTimeout(1500);
+  // The ignored section sits below every remaining candidate, so on a hub with
+  // five of them it is off-screen and the capture would show the top of the
+  // page instead of the thing it is named after.
+  await inPanel(
+    page,
+    `(panel) => {
+      panel.shadowRoot
+        .querySelector(".ignored-toggle")
+        .scrollIntoView({ block: "center" });
+    }`,
+  );
+  await page.waitForTimeout(800);
   await shot(page, "16-ignored-devices.png");
 
   // Undo it, the way the documentation says to.

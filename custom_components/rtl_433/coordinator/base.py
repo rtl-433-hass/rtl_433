@@ -265,6 +265,18 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.adopted: set[str] = set(adopted_keys or ())
         self.ignored: set[str] = set(ignored_keys or ())
         self.pending: dict[str, PendingDevice] = {}
+        # The last model decoded for each ignored key, so an approval surface can
+        # name the thing it is offering to un-ignore. The persisted ignore list
+        # is bare keys -- it has always been, because ignoring is a decision
+        # about a key and not a record of a device -- and an ignored device has
+        # no entry in ``devices`` either, since its frames are dropped before
+        # they get there. Without this the only honest label is "Unknown model"
+        # over a key that visibly contains the model.
+        #
+        # Memory-only, like ``pending``: it is seeded when a device is ignored
+        # and re-seeded by every later transmission, so after a restart a
+        # neighbour's sensor names itself again the moment it transmits.
+        self.ignored_models: dict[str, str] = {}
 
         # --- Runtime state, all scoped to this config entry ------------------
         # Every map below describes *adopted* devices only, so the availability
@@ -529,7 +541,11 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         is working through a batch and the change is not fully applied until the
         persisted list is written, so it makes the one announcement afterwards.
         """
-        self.pending.pop(device_key, None)
+        record = self.pending.pop(device_key, None)
+        # Remember what it was, so the ignored list can name it straight away
+        # rather than waiting for the device to transmit again.
+        if record is not None and record.model:
+            self.ignored_models[device_key] = record.model
         self.ignored.add(device_key)
 
     async def async_stop(self) -> None:

@@ -18,7 +18,7 @@ rtl_433 page: it lists every device the receiver has heard and you have not
 added, and it is where the receiver's own settings live too. It is available to
 administrators only.
 
-![The rtl_433 page: a toolbar, a row of Receiver settings / Device settings / Device mappings buttons, then a grid of device cards, each with a blue heading giving the model and device key, its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Replace, Ignore and Add buttons](images/17-discovery-panel.png)
+![The rtl_433 page: a toolbar, a row of Receiver settings / Device settings / Device mappings buttons, then a grid of device cards, each with a blue heading giving the model and device key, its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Ignore and Add buttons](images/17-discovery-panel.png)
 
 Each candidate gets a card, newest discovery first. Cards keep their place as
 devices transmit, so a card does not move under the cursor while you are reading
@@ -76,8 +76,8 @@ ignored — that is a decision, and this is not the control for undoing it.
 
 ## Receiver and Device Settings
 
-The same page carries the settings that used to sit behind **Configure**, as
-three dialogs above the discovered devices.
+The same page carries this receiver's settings, as three dialogs above the
+discovered devices.
 
 **Receiver settings** is the default availability timeout for every device on
 this receiver, and whether Home Assistant manages the server's own SDR settings
@@ -156,7 +156,8 @@ original stops updating and eventually goes unavailable.
 
 You meet this problem from the new device's side: something you did not add has
 appeared on the discovered list, and it is really a sensor you already have. So
-that is where the fix starts. Find the new device's card and click **Replace**,
+that is where the fix starts. Find the new device's card and click **Replace**
+— it appears once there is at least one added device it could stand in for —
 then pick the device it replaces — the existing one whose history you want to
 keep. Devices of the same model are listed first, since a battery swap does not
 change the model.

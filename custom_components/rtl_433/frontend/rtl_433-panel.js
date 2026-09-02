@@ -1252,6 +1252,14 @@ class Rtl433Panel extends HTMLElement {
     } else {
       this._buildMappingsForm(body);
     }
+    // A native <dialog> focuses its first focusable descendant, which for the
+    // mappings form is the documentation link in the intro -- so opening it put
+    // a focus ring on a link instead of the caret in the editor. Naming the
+    // first control explicitly puts focus where the user is going to type.
+    const first = body.querySelector("input, select, textarea");
+    if (first) {
+      first.autofocus = true;
+    }
   }
 
   _buildHubForm(body) {
@@ -2123,12 +2131,25 @@ const STYLES = `
     overflow-wrap: normal;
     overflow-x: auto;
   }
+  /*
+   * A checkbox reads as "[x] label", with its hint on its own line beneath --
+   * so the row wraps and the hint is given the whole width. Without that the
+   * hint sits beside the label as a flex sibling and squeezes it into a
+   * three-word-wide column, which is what it did until a screenshot showed it.
+   */
   .field.checkbox {
     display: flex;
-    align-items: flex-start;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
   }
-  .field.checkbox > label { margin: 0; color: inherit; font-size: 14px; }
+  .field.checkbox > label {
+    flex: 1 1 auto;
+    margin: 0;
+    color: inherit;
+    font-size: 14px;
+  }
+  .field.checkbox .hint { flex: 1 0 100%; margin-top: 0; }
   .field[hidden] { display: none; }
 
   .settings-body { max-height: 55vh; overflow-y: auto; }

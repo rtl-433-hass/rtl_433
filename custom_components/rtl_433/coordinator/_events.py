@@ -220,6 +220,11 @@ class _EventProcessingMixin:
         if is_replay or is_backlog:
             return
         if key in self.ignored:
+            # Dropped, but not before noting what it is: this is the only place
+            # an ignored device's model is ever seen again, and it is what lets
+            # the ignore list name a device that was ignored before a restart.
+            if normalized.model:
+                self.ignored_models[key] = normalized.model
             LOGGER.debug("rtl_433 ignoring device %s (on the hub's ignore list)", key)
             return
 
