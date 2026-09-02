@@ -488,9 +488,13 @@ def _pending_payload(
     what the options form renders, so the two surfaces cannot put a different
     device at the top of the same list. Timestamps go out as ISO
     strings because JSON has no datetime and the panel wants to format them in the
-    viewer's locale anyway. The ignore list carries a model only when one is known
-    -- a device is usually ignored while pending, long before it has a stored
-    record -- so the panel falls back to the key.
+    viewer's locale anyway.
+
+    The ignore list carries a model wherever one can be found. There is rarely a
+    *stored* record -- a device is usually ignored while pending, long before it
+    has one -- so the coordinator's memory of what it last decoded for that key
+    fills in, which covers both the device just ignored and the one still
+    transmitting after a restart. Only a key that has neither goes out unnamed.
     """
     stored: dict[str, Any] = entry.data.get(CONF_DEVICES, {})
     registry = _entry_registry(hass, entry)
@@ -511,7 +515,8 @@ def _pending_payload(
         "ignored": [
             {
                 "key": device_key,
-                "model": stored.get(device_key, {}).get(CONF_MODEL, ""),
+                "model": stored.get(device_key, {}).get(CONF_MODEL)
+                or coordinator.ignored_models.get(device_key, ""),
             }
             for device_key in sorted(_hub_ignored_devices(entry))
         ],

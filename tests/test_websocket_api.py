@@ -660,6 +660,55 @@ async def test_add_creates_only_what_was_asked_for_and_reports_the_rest_skipped(
         assert _registry_device(hass, hub, key) is None
 
 
+async def test_an_ignored_device_is_still_named_by_its_model(
+    hass, hub, hass_ws_client
+):
+    """The ignore list names the device, before and after it transmits again.
+
+    The persisted list is bare keys, and an ignored device has no stored record
+    and no entry in the coordinator's ``devices`` map -- its frames are dropped
+    before they get there. So without the coordinator remembering what it last
+    decoded, the only honest label is "Unknown model" over a key that visibly
+    contains the model, which is what the panel showed.
+
+    Both halves are checked because they cover different moments: the model is
+    seeded at the instant of ignoring (the user is looking straight at the list),
+    and re-seeded by every later transmission (so a neighbour's sensor names
+    itself again after a restart, which is the only way a pre-existing ignore
+    ever gets a model at all).
+    """
+    client = await hass_ws_client(hass)
+    coordinator = _coordinator(hass, hub)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/devices/ignore",
+            "entry_id": hub.entry_id,
+            "device_keys": [_NEW_KEY],
+        },
+    )
+    assert reply["success"] is True
+
+    reply, _ = await _call(client, _message("rtl_433/devices/pending", hub.entry_id))
+    (ignored,) = reply["result"]["ignored"]
+    assert ignored["key"] == _NEW_KEY
+    assert ignored["model"] == _NEW_FRAME["model"]
+
+    # Now forget it the way a restart would, and let the device transmit again.
+    coordinator.ignored_models.clear()
+    _hear(coordinator, _NEW_FRAME)
+    await hass.async_block_till_done()
+
+    reply, _ = await _call(client, _message("rtl_433/devices/pending", hub.entry_id))
+    (ignored,) = reply["result"]["ignored"]
+    assert ignored["model"] == _NEW_FRAME["model"]
+    # ...and it is still ignored: naming it is not un-ignoring it.
+    assert not reply["result"]["pending"] or all(
+        row["key"] != _NEW_KEY for row in reply["result"]["pending"]
+    )
+
+
 async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
     hass, hub, hass_ws_client
 ):
@@ -718,7 +767,11 @@ async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
     reply, _ = await _call(
         client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
     )
-    assert reply["result"]["ignored"] == [{"key": _MID_KEY, "model": ""}]
+    # Named, not just keyed: the coordinator remembers what it was told to
+    # ignore, so the list can say what the user is looking at.
+    assert reply["result"]["ignored"] == [
+        {"key": _MID_KEY, "model": _MID_FRAME["model"]}
+    ]
     assert _MID_KEY not in {row["key"] for row in reply["result"]["pending"]}
 
     # Un-ignoring clears both stores; a key that was never ignored is skipped.
@@ -982,7 +1035,9 @@ async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribe
     assert reply["success"]
     assert events, "ignoring a candidate must repaint an open panel"
     assert _MID_KEY not in {row["key"] for row in events[-1]["event"]["pending"]}
-    assert events[-1]["event"]["ignored"] == [{"key": _MID_KEY, "model": ""}]
+    assert events[-1]["event"]["ignored"] == [
+        {"key": _MID_KEY, "model": _MID_FRAME["model"]}
+    ]
 
     reply, _ = await _call(
         client, {"type": "unsubscribe_events", "subscription": subscription}

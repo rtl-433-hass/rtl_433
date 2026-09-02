@@ -1064,7 +1064,7 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
    [add-a-mapping workflow](docs/device-library.md#add-a-mapping-workflow).
 
 For an installation-local change that should **not** be committed, use the
-hub's *Device mappings* options step instead of editing the shipped library (see
+hub's *Device mappings* dialog instead of editing the shipped library (see
 [Adding device mappings](docs/device-library.md#adding-device-mappings)).
 
 ## Running the unit tests

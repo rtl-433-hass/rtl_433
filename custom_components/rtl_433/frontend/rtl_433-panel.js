@@ -1893,6 +1893,10 @@ class Rtl433Panel extends HTMLElement {
       return native;
     });
     editor.className = "mappings-editor";
+    // A native <dialog> focuses its first focusable descendant, which here is
+    // the documentation link in the intro -- so without this the mappings form
+    // opened with a focus ring on a link instead of a caret in the editor.
+    editor.autofocus = true;
     if (editor.localName === "ha-code-editor") {
       editor.hass = this._hass;
       editor.mode = "yaml";
@@ -2648,12 +2652,25 @@ const STYLES = `
     overflow-wrap: normal;
     overflow-x: auto;
   }
+  /*
+   * A checkbox reads as "[x] label", with its hint on its own line beneath --
+   * so the row wraps and the hint is given the whole width. Without that the
+   * hint sits beside the label as a flex sibling and squeezes it into a
+   * three-word-wide column, which is what it did until a screenshot showed it.
+   */
   .field.checkbox {
     display: flex;
-    align-items: flex-start;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 8px;
   }
-  .field.checkbox > label { margin: 0; color: inherit; font-size: 14px; }
+  .field.checkbox > label {
+    flex: 1 1 auto;
+    margin: 0;
+    color: inherit;
+    font-size: 14px;
+  }
+  .field.checkbox .hint { flex: 1 0 100%; margin-top: 0; }
   .field[hidden] { display: none; }
 
   /*
