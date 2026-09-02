@@ -18,26 +18,22 @@ captures documentation screenshots with Playwright.
 A single `rtl_433` process replays a real Acurite capture continuously; the
 integration connects over a WebSocket, holds every device it hears as a pending
 candidate, creates entities with correct device classes/units for the ones the
-run adds from the options flow, and flips them to `unavailable` when the stream
+run adds from the panel, and flips them to `unavailable` when the stream
 stops. Playwright captures these screenshots (see `../../screenshots/`):
 
 | File | Shows |
 | --- | --- |
 | `02-device-page.png` | The device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
-| `17-discovery-panel.png` | The **discovery panel** (`/rtl_433`): the live pending table, one row per heard device with its sighting count, signal level, latest values and per-row Add / Ignore buttons |
-| `03-options-flow.png` | The hub options flow menu (Add discovered devices / Ignored devices / Hub settings / Device settings / Device mappings / Replace device) |
-| `15-add-devices.png` | The **Add discovered devices** step: every heard-but-not-added device, each labelled with its model, key, sighting count, signal level and last-seen, over the Add and Ignore multi-selects |
-| `16-ignored-devices.png` | The **Ignored devices** step, with the ignored leak detector waiting to be un-ignored |
+| `17-discovery-panel.png` | The **rtl_433 page** (`/rtl_433`): the toolbar, the settings row, and one card per heard device with its sighting count, signal level, latest readings and per-card Replace / Ignore / Add buttons |
+| `16-ignored-devices.png` | The same page with the ignored section revealed, showing the ignored leak detector and its Un-ignore button |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
-| `05-mapping-overrides.png` | The **Device mappings** step: the YAML editor pre-filled with an example per-hub override |
+| `05-mapping-overrides.png` | The **Device mappings** dialog: the YAML editor pre-filled with an example per-hub override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
-| `07-hub-settings.png` | The **Hub settings** step (default availability timeout, managed settings) |
-| `13-device-picker.png` | The **Device settings** device picker, with the SCMplus meter labelled `— gas detected` from its `MeterType` |
-| `08-device-settings.png` | The per-device settings step for that meter (timeout override, meter commodity pre-filled to Gas) |
+| `07-hub-settings.png` | The **Receiver settings** dialog (default availability timeout, managed settings) |
+| `08-device-settings.png` | The **Device settings** dialog for the SCMplus meter: the picker, the timeout override, the commodity pre-filled to `gas`, and the base unit + scale it reveals |
 | `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
 | `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
-| `12-calibration.png` | The utility-meter **calibration** step (base unit + scale) |
 | `14-hub-noise.png` | The hub device's **Diagnostic** card with the receiver-noise sensors (Noise level / Minimum detection level) populated from real "Auto Level" log frames |
 
 Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
@@ -53,15 +49,14 @@ pending candidate — a whole round emitted at once would leave only its first
 device visible.
 
 Nothing is added to Home Assistant automatically, so the `shots` stage works the
-approval flow for real: it captures the **discovery panel** with every heard
-device still pending, then the options menu and the populated
-**Add discovered devices** form, adds five devices, ignores the leak detector,
-captures the **Ignored devices** step, then un-ignores and adds the leak detector
-too — which is why the later shots have a full hub to work with.
+approval flow for real: it captures the page with every heard device still
+pending, ignores the leak detector and captures the ignored section, then
+un-ignores it and adds every device — which is why the later shots have a full
+hub to work with.
 
-**Order matters for the panel shot.** It is captured *before* the approval steps
-run, because those add five of the six replayed devices and would leave the panel
-showing a single row. `STAGE=panel` re-captures it on its own against a harness
+**Order matters for the panel shot.** It is captured *before* the approval runs,
+because that adds all six replayed devices and would leave the page with no cards
+at all. `STAGE=panel` re-captures it on its own against a harness
 whose devices are still pending; it also logs what the panel read out of its
 shadow root (proving a real browser loaded the module and received `hass`), the
 sighting counts before and after 20s with no reload (proving the subscription
@@ -115,7 +110,7 @@ cd tests/integration
 # or step by step:
 ./run-harness.sh up        # start containers, poll WS-JSON + HA API readiness
 ./run-harness.sh onboard   # seed HA owner + token via the onboarding REST API
-./run-harness.sh shots     # add the hub, capture discovery/device/options
+./run-harness.sh shots     # add the hub, capture the panel and its dialogs
 ./run-harness.sh hubnoise  # restart the decoder, capture the hub noise sensors
 ./run-harness.sh unavailable  # stop replay, wait out the timeout, capture, resume
 ./run-harness.sh down      # tear everything down (removes the shared volume)
@@ -180,18 +175,21 @@ fetched over HTTP `/cmd`, which the bridge does not serve, so they read
 behaviour rather than a defect; populating them would mean inventing server
 state, so the harness leaves them alone.
 
-## Resolved — why the panel is not registered with `config_panel_domain`
+## Why every stage drives the panel
 
-For one commit on this branch the panel was registered with
-`config_panel_domain`, which made Home Assistant turn the hub's Configure
-control into a link to the panel. Nothing else opens the options flow, so every
-options-flow shot became uncapturable — `openOptionsMenu` landed on the panel —
-and, far worse than the shots, every options-flow step lost its only entry point
-for real users while still passing every Python test.
+The panel is registered with `config_panel_domain`, so Home Assistant turns the
+hub's Configure control into a link to it and **nothing opens the options flow**.
+That is deliberate now, but it was first discovered by accident: for one commit
+it was set while the settings still lived only in the flow, and every one of
+those steps lost its only entry point for real users while passing every Python
+test. This harness is what caught it — the options shots simply stopped being
+capturable.
 
-The harness is what caught it. `openOptionsMenu` still warns loudly if the menu
-never opens, because that warning is the signal the entry point has gone again
-rather than that a click was mistimed. See AGENTS.md, "Approval surfaces".
+So the stages here reach for controls inside the panel's shadow root
+(`inPanel` / `openPanelSettings` in `screenshot.mjs`), and each one warns loudly
+when the control it wants is not there. That warning is the signal that a
+settings form has lost its entry point again, not that a click was mistimed. See
+AGENTS.md, "Approval surfaces".
 
 ## Known limitation — why the `ws-bridge` exists
 

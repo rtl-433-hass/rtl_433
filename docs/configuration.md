@@ -103,35 +103,29 @@ integration separate two transmissions from the same device inside one second.
 Use **Reconfigure** to point an existing hub at the same server's new address:
 host, port, path, or secure mode. Devices and their history are preserved.
 
-Use **Configure** for hub options:
+Use **Configure** to open the rtl_433 page. It is where devices are added and
+ignored — see [Device Discovery](device-discovery.md) — and it carries three
+settings dialogs:
 
-- **Add discovered devices**: add heard devices to Home Assistant, or ignore
-  them. Nothing is added without this step — see
-  [Device Discovery](device-discovery.md).
-- **Ignored devices**: offer previously ignored devices again.
-- **Hub settings**: default availability timeout and the managed-settings toggle.
-- **Device settings**: per-device availability timeout, motion clear delay, and
-  utility-meter calibration.
-- **Device mappings**: per-hub mapping overrides.
-- **Replace device**: move a device onto the new id it drew after a battery
-  change.
+- **Receiver settings**: default availability timeout and the managed-settings
+  toggle.
+- **Device settings**: one device's availability timeout, motion clear delay,
+  and utility-meter calibration.
+- **Device mappings**: this receiver's mapping overrides.
 
-![Hub options flow menu showing Add discovered devices, Ignored devices, Hub settings, Device settings, Device mappings, and Replace device](images/03-options-flow.png)
-
-The **Hub settings** step configures the default availability timeout for every
+**Receiver settings** configures the default availability timeout for every
 device on the hub, and whether Home Assistant manages the server's SDR settings:
 
-![Hub settings step with the default availability timeout and the managed-settings toggle](images/07-hub-settings.png)
+![The Receiver settings dialog, with the default availability timeout and the managed-settings toggle](images/07-hub-settings.png)
 
-The **Device settings** step targets one device for a timeout override, motion
-clear delay, or utility-meter calibration. You pick the device first, then
-configure it — every field on the second form is pre-filled from the device you
-picked, and fields that do not apply to it (such as the motion clear delay on a
-non-motion device) are hidden:
+**Device settings** targets one device for a timeout override, motion clear
+delay, or utility-meter calibration. Pick the device at the top of the dialog and
+the rest of the form rebuilds from it: every field is pre-filled from that
+device, and fields that do not apply to it are not shown — the motion clear delay
+only appears for a device that actually auto-clears, and the base unit and scale
+only once a commodity is chosen.
 
-![Device picker step, with a utility meter labelled with its detected commodity](images/13-device-picker.png)
-
-![Device settings step with the availability timeout override and meter commodity selector](images/08-device-settings.png)
+![The Device settings dialog with the device picker, availability timeout override, and meter commodity selector](images/08-device-settings.png)
 
 Changing timeout options applies live. Changing the managed-settings toggle
 reloads the hub because the entity set changes.
