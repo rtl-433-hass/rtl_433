@@ -4,46 +4,54 @@
 // up, HA onboarding is seeded (ha-onboard.mjs), and the WebSocket is emitting
 // JSON (verified with ws-probe.mjs).
 //
-// Captured shots: 06 (empty config-flow form), 17 (the discovery panel, live and
-// populated), 03 (options menu), 15 (the populated "Add discovered devices"
-// form), 16 (the "Ignored devices" step),
-// 09 (integration overview / docs home hero), 02 (device page), 11 (doorbell
-// event entity), 07 (Hub settings form), 05 (Device mappings YAML), 08 (Device
-// settings form), 12 (calibration step), 10 (device page with the
-// signal-diagnostic sensors enabled and populated), 14 (the hub device's
-// Diagnostic card with the receiver-noise sensors), 04 (unavailable). The
-// doorbell / energy meter / door / leak devices come from ws-bridge replaying
-// tests/fixtures.
+// Captured shots: 06 (empty config-flow form), 17 (the panel, live and
+// populated), 16 (the ignored-devices section), 09 (integration overview / docs
+// home hero), 02 (device page), 11 (doorbell event entity), 07 (Receiver
+// settings dialog), 05 (Device mappings editor), 08 (Device settings dialog),
+// 10 (device page with the signal-diagnostic sensors enabled and populated),
+// 14 (the hub device's Diagnostic card with the receiver-noise sensors),
+// 04 (unavailable). The doorbell / energy meter / door / leak devices come from
+// ws-bridge replaying tests/fixtures.
+//
+// **Everything but the config flow is now driven through the panel.** The hub
+// entry registers it with `config_panel_domain`, so Configure on the entry opens
+// `/rtl_433` and there is no options dialog to drive: adding, ignoring,
+// un-ignoring, receiver settings, device settings and device mappings are all
+// controls inside the panel's shadow root, reached through `inPanel` below. A
+// stage that finds no dialog says so loudly rather than capturing whatever page
+// it landed on -- a settings form with no entry point is exactly the break this
+// harness exists to catch.
 //
 // Stages (STAGE env var):
 //   add      - log in, add the rtl_433 hub via the config flow (host=wsbridge).
 //              Nothing is added to Home Assistant automatically: the heard
 //              devices sit on the coordinator's in-memory pending list until
-//              they are added from the options flow, so the run captures the
-//              options MENU, the populated "Add discovered devices" form and the
-//              "Ignored devices" step, and adds the devices the later shots need
-//              (approveDevices). It then opens the nested device and captures
-//              the device page; opens Hub settings, sets a low availability
-//              timeout (15s) so the unavailable stage is fast and captures the
-//              form; then Device mappings with an example override, the Device
-//              settings pair, and the per-device signal diagnostics.
-//   approve  - re-capture only the options menu / add-devices / ignored-devices
-//              shots against an already-running harness; for iterating.
-//   panel    - re-capture only the discovery panel against an already-running
+//              somebody clicks Add, so the run captures the panel, ignores the
+//              leak detector to capture the ignored section, then un-ignores it
+//              and adds every device the later shots need (approveDevices). It
+//              then captures the integration overview and the device page; opens
+//              Receiver settings, sets a low availability timeout (15s) so the
+//              unavailable stage is fast and captures the dialog; then Device
+//              mappings with an example override, Device settings against the
+//              gas meter, and the per-device signal diagnostics.
+//   approve  - re-capture only the approval / ignored-devices shots against an
+//              already-running harness; for iterating.
+//   panel    - re-capture only the panel itself against an already-running
 //              harness (hub added, devices still pending); for iterating.
 //   unavail  - (after run-harness.sh stops the rtl433 replay and waits past the
 //              timeout) capture the device page with all entities Unavailable.
-//   device   - re-capture only the Device settings + calibration steps against
-//              an already-running harness (hub already added); for iterating.
+//   device   - re-capture only the Device settings dialog against an
+//              already-running harness (hub already added); for iterating.
+//   hub      - re-capture only the Receiver settings and Device mappings
+//              dialogs against an already-running harness; for iterating.
 //   hubnoise - re-capture only the hub Diagnostic card (receiver-noise sensors)
 //              against an already-running harness; for iterating.
 //   full     - add, then unavail (the orchestrator stops replay in between).
 //
 // Every capture is gated on a selector/state where practical, never a blind long
 // sleep. Output goes to ../../screenshots. Selectors were validated against HA
-// 2026.5.x; the config-flow form is an ha-form (inputs by name), per-entry
-// options open via the gear icon on the integration's entries page, and the
-// options flow is now a menu (async_show_menu with Hub/Device settings).
+// 2026.5.x; the config-flow form is an ha-form (inputs by name), and everything
+// else is the panel's own markup, which this repository owns.
 
 import { chromium } from "playwright";
 import { fileURLToPath } from "node:url";
@@ -142,10 +150,9 @@ async function addHubAndCapture(page) {
 
   // --- Approve the heard devices -------------------------------------------
   // Nothing is added automatically: every device the server decodes lands on the
-  // coordinator's in-memory pending list and reaches Home Assistant only when it
-  // is added from the options flow. This captures the options menu, the
-  // populated "Add discovered devices" form, and the "Ignored devices" step, and
-  // leaves the hub holding the devices the later shots need.
+  // coordinator's in-memory pending list and reaches Home Assistant only when a
+  // person adds it. This drives the cards, captures the ignored-devices section,
+  // and leaves the hub holding the devices the later shots need.
   await approveDevices(page);
 
   // --- Integration overview (docs home-page hero) --------------------------
@@ -186,34 +193,17 @@ async function addHubAndCapture(page) {
     console.log("screenshot: doorbell device not present; skipping 11-event-entity.png");
   }
 
-  // --- Hub settings form: lower the availability timeout, then submit -------
-  // (The options menu itself was captured as 03-options-flow.png during the
-  // approval stage, when its two approval entries had devices behind them.)
-  await openOptionsMenu(page);
-  // Open Hub settings from the menu, set a low timeout (so the unavailable stage
-  // is fast), and submit. This also exercises the live-options update path. The
-  // Hub-settings form carries the availability-timeout field (input[type=number])
-  // and the managed-settings checkbox; we only change the former.
-  await page.locator("text=Hub settings").first().click({ timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(2500);
-  const tf = page.locator("ha-dialog input[type=number], dialog input[type=number]").first();
-  await tf.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
-  // Capture the Hub settings form (docs: configuration / hub-entities) showing
-  // its defaults before we lower the timeout.
-  await shot(page, "07-hub-settings.png");
-  if (await tf.count()) {
-    await tf.fill(SHORT_TIMEOUT);
-    // Blur so the ha-form commits the new value before we submit.
-    await tf.press("Tab");
-  }
-  await page.getByRole("button", { name: /^submit$/i }).first().click({ timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(2500);
+  // --- Receiver settings: lower the availability timeout, then save --------
+  // Captured from the panel's own dialog, which is where these settings live
+  // now: the config entry's Configure control opens the panel, so there is no
+  // options form to drive. Lowering the timeout here is also what makes the
+  // later unavailable stage fast.
+  await captureHubSettings(page);
 
-  // --- Device mappings editor (NEW: UI-editable per-hub overrides) ----------
-  // Re-open the menu, open Device mappings, pre-fill the YAML editor with an
-  // example override, and capture it. We do NOT submit — saving validates and
-  // reloads the hub; the screenshot only needs the editor showing real content.
-  await openOptionsMenu(page);
+  // --- Device mappings editor ----------------------------------------------
+  // Pre-fill the editor with an example override and capture it. NOT saved --
+  // storing overrides reloads the hub, and the screenshot only needs the editor
+  // showing real content.
   await captureMappings(page);
 
   // --- Device settings + calibration steps ---------------------------------
@@ -226,89 +216,106 @@ async function addHubAndCapture(page) {
   // needs the orchestrator to restart the decoder first — see captureHubNoise.
 }
 
-// Tick rows in one of an approval step's multi-selects. A SelectSelector in
-// LIST + multiple mode renders each option as an <ha-checkbox> whose light-DOM
-// text is the option label, with the real <input type=checkbox> inside the
-// checkbox's shadow root; the whole form sits several shadow roots deep inside
-// the dialog. So the rows are found by walking the shadow trees from the
-// <ha-selector-select> whose `label` matches the field ("Add these devices",
-// "Ignore these devices", "Stop ignoring these devices") — scoping by field
-// rather than by ordinal, because the add-devices step renders every candidate
-// twice, once per action. Clicking the inner input is what fires the change
-// event the selector listens for; clicking the host does not.
+// Run `fn` with the panel element as its argument, inside the page.
 //
-// Rows are ticked ONE PER CALL with a pause between them (tickPendingRows).
-// The selector rebuilds its whole value from its previous value on every change,
-// and that value is only refreshed on the next render, so a burst of clicks in a
-// single synchronous pass would submit just the last one — the same reason a
-// person ticking boxes by hand never hits this.
-async function tickPendingRow(page, pattern, fieldLabel) {
-  return page.evaluate(
-    ({ pattern, fieldLabel }) => {
-      const deep = (root, out = []) => {
-        for (const el of root.querySelectorAll("*")) {
-          out.push(el);
-          if (el.shadowRoot) deep(el.shadowRoot, out);
-        }
-        return out;
-      };
-      const field = deep(document).find(
-        (el) =>
-          el.localName === "ha-selector-select" &&
-          String(el.label || "").includes(fieldLabel),
-      );
-      if (!field) return { error: `no field labelled ${fieldLabel}` };
-      const boxes = [...deep(field), ...(field.shadowRoot ? deep(field.shadowRoot) : [])].filter(
-        (el) => el.localName === "ha-checkbox",
-      );
-      const rows = boxes.map((el) => ({ el, label: el.textContent.trim() }));
-      const row = rows.find((candidate) => candidate.label.includes(pattern));
-      if (!row) return { error: `no row matching ${pattern}`, rows: rows.map((r) => r.label) };
-      const input = row.el.shadowRoot?.querySelector("input");
-      if (!input) return { error: `no checkbox input for ${pattern}` };
-      if (!input.checked) input.click();
-      return { ticked: row.label };
-    },
-    { pattern, fieldLabel },
-  );
-}
-
-// Read back which rows of a field are ticked, so a submit is never made on an
-// assumption: the selector rebuilds its value on every change, and a value that
-// did not stick shows up here as an unchecked row.
-async function checkedRows(page, fieldLabel) {
-  return page.evaluate(
-    ({ fieldLabel }) => {
-      const deep = (root, out = []) => {
-        for (const el of root.querySelectorAll("*")) {
-          out.push(el);
-          if (el.shadowRoot) deep(el.shadowRoot, out);
-        }
-        return out;
-      };
-      const field = deep(document).find(
-        (el) =>
-          el.localName === "ha-selector-select" &&
-          String(el.label || "").includes(fieldLabel),
-      );
-      if (!field) return { error: `no field labelled ${fieldLabel}` };
-      return [...deep(field), ...(field.shadowRoot ? deep(field.shadowRoot) : [])]
-        .filter((el) => el.localName === "ha-checkbox")
-        .filter((el) => el.shadowRoot?.querySelector("input")?.checked)
-        .map((el) => el.textContent.trim());
-    },
-    { fieldLabel },
-  );
-}
-
-async function tickPendingRows(page, patterns, fieldLabel) {
-  const results = [];
-  for (const pattern of patterns) {
-    results.push(await tickPendingRow(page, pattern, fieldLabel));
-    // Let the selector re-render with the new value before the next tick.
-    await page.waitForTimeout(700);
+// The panel sits several shadow roots deep (home-assistant -> … ->
+// ha-panel-custom) and everything it shows lives inside its own shadow root, so
+// every interaction with it has to start by walking the trees to find it. The
+// walker is passed as source text because `page.evaluate` serializes the
+// function it is given and closures do not survive that.
+const PANEL_FINDER = `
+  () => {
+    const walk = (root, out = []) => {
+      for (const el of root.querySelectorAll("*")) {
+        out.push(el);
+        if (el.shadowRoot) walk(el.shadowRoot, out);
+      }
+      return out;
+    };
+    return walk(document).find((el) => el.localName === "rtl-433-panel") || null;
   }
-  return results;
+`;
+
+function inPanel(page, body, arg) {
+  return page.evaluate(
+    ([finder, source, value]) => {
+      const panel = eval(finder)();
+      if (!panel) return { error: "panel not found" };
+      return eval(source)(panel, value);
+    },
+    [PANEL_FINDER, body, arg],
+  );
+}
+
+// Open the panel and wait for it to have rendered at least one candidate card.
+async function openPanel(page, { cards = 1, tries = 30 } = {}) {
+  await page.goto(`${BASE}/rtl_433`, { waitUntil: "domcontentloaded" });
+  for (let i = 0; i < tries; i++) {
+    const ready = await inPanel(
+      page,
+      `(panel) => panel.shadowRoot.querySelectorAll(".device-card").length`,
+    );
+    if (typeof ready === "number" && ready >= cards) return true;
+    await page.waitForTimeout(2000);
+  }
+  console.log("screenshot: WARNING panel never rendered its cards");
+  return false;
+}
+
+// Click one of the panel's settings buttons and wait for its dialog.
+//
+// The dialog only appears once `rtl_433/settings/get` has answered, and after a
+// save that reloaded the hub that can take a couple of seconds -- so this polls
+// rather than sleeping, and says so loudly if the dialog never opens. That
+// warning is the signal that the settings forms have lost their entry point,
+// which is the failure mode this whole page exists to avoid.
+async function openPanelSettings(page, buttonClass) {
+  await inPanel(
+    page,
+    `(panel, cls) => panel.shadowRoot.querySelector(cls).click()`,
+    buttonClass,
+  );
+  for (let i = 0; i < 20; i++) {
+    const open = await inPanel(
+      page,
+      `(panel) => Boolean(panel.shadowRoot.querySelector(".settings-dialog").open)`,
+    );
+    if (open === true) {
+      // Let the form finish laying out before a capture.
+      await page.waitForTimeout(800);
+      return true;
+    }
+    await page.waitForTimeout(1000);
+  }
+  console.log(`screenshot: WARNING ${buttonClass} never opened its dialog`);
+  return false;
+}
+
+async function closePanelSettings(page) {
+  await inPanel(
+    page,
+    `(panel) => panel.shadowRoot.querySelector(".settings-dialog").close()`,
+  );
+  await page.waitForTimeout(500);
+}
+
+// Click a named button on the card for `key` ("add" / "ignore").
+async function clickCardButton(page, key, action) {
+  return inPanel(
+    page,
+    `(panel, arg) => {
+      const cards = [...panel.shadowRoot.querySelectorAll(".device-card")];
+      const card = cards.find((c) =>
+        (c.querySelector(".device-key")?.textContent || "").includes(arg.key),
+      );
+      if (!card) return "no card";
+      const button = card.querySelector("." + arg.action);
+      if (!button || button.hidden) return "no button";
+      button.click();
+      return "clicked";
+    }`,
+    { key, action },
+  );
 }
 
 // Read the discovery panel's own state out of its shadow root.
@@ -465,125 +472,82 @@ async function capturePanel(page) {
   await page.waitForTimeout(2000);
 }
 
-// Drive the two approval steps and capture them:
+// Add the heard devices from their cards, and capture the ignored section:
 //
-//   03-options-flow.png     the options menu, led by the two approval entries
-//   15-add-devices.png      the populated "Add discovered devices" form
-//   16-ignored-devices.png  the "Ignored devices" step
+//   16-ignored-devices.png  the ignored device, with the control that undoes it
 //
 // Nothing reaches the Home Assistant device registry without this stage: the
 // coordinator records every device it hears into an in-memory pending list, and
-// the add-devices step is the only route out of it. The stage adds the devices
-// the later shots need, ignores the leak detector so the ignored-devices step
-// has something real to show, then un-ignores and adds it again — the documented
-// round trip, and it leaves the hub holding every replayed device.
+// a person clicking Add is the only route out of it. The stage ignores the leak
+// detector first so the ignored section has something real to show, captures it,
+// then un-ignores and adds it -- the documented round trip -- leaving the hub
+// holding every replayed device.
+//
+// Driven through the cards rather than a form because that is now the only
+// surface: the config entry's Configure control opens this page.
 async function approveDevices(page) {
-  // The Acurite capture decodes continuously and ws-bridge re-emits the
-  // fixtures every 8s, so a short wait gives every candidate a realistic
-  // sighting count and signal level to render in its label.
+  // The Acurite capture decodes continuously and ws-bridge re-emits the fixtures
+  // every 8s, so a short wait gives every candidate a realistic sighting count.
   await page.waitForTimeout(45000);
-
-  await openOptionsMenu(page);
-  await shot(page, "03-options-flow.png");
-
-  const opened = await openApprovalStep(page, "Add discovered devices", /add these devices/i);
-  if (!opened) {
-    console.log("screenshot: add-devices step did not render; skipping 15/16");
+  if (!(await openPanel(page, { cards: 5 }))) {
+    console.log("screenshot: no cards to approve; skipping 16-ignored-devices.png");
     return;
   }
-  // The form carries two full candidate lists, so it is taller than the
-  // documentation viewport. Grow the viewport for this capture only, so the shot
-  // shows both actions instead of the first list and a scrollbar.
-  await page.setViewportSize({ width: 1440, height: 1400 });
+
+  console.log(
+    "screenshot: ignore -> " +
+      (await clickCardButton(page, "LeakDetector-9", "ignore")),
+  );
+  await page.waitForTimeout(3000);
+
+  // Reveal the ignored section and capture it. The toggle names its own count,
+  // so a shot with it open is also the proof the ignore landed.
+  const revealed = await inPanel(
+    page,
+    `(panel) => {
+      const toggle = panel.shadowRoot.querySelector(".ignored-toggle");
+      if (!toggle || toggle.hidden) return "no toggle";
+      toggle.click();
+      return toggle.textContent.trim();
+    }`,
+  );
+  console.log("screenshot: ignored toggle -> " + JSON.stringify(revealed));
   await page.waitForTimeout(1500);
-  await shot(page, "15-add-devices.png");
+  await shot(page, "16-ignored-devices.png");
 
-  const adds = ["Acurite-Tower", "Honeywell-Doorbell", "EnergyMeter-2000", "SCMplus", "GenericDoor-X1"];
+  // Undo it, the way the documentation says to.
   console.log(
-    "screenshot: add rows -> " + JSON.stringify(await tickPendingRows(page, adds, "Add these devices")),
+    "screenshot: unignore -> " +
+      (await inPanel(
+        page,
+        `(panel) => {
+          const card = [...panel.shadowRoot.querySelectorAll(".ignored-grid .device-card")][0];
+          if (!card) return "no ignored card";
+          card.querySelector(".unignore").click();
+          return "clicked";
+        }`,
+      )),
   );
-  console.log(
-    "screenshot: ignore rows -> " +
-      JSON.stringify(await tickPendingRows(page, ["LeakDetector-9"], "Ignore these devices")),
-  );
-  console.log(
-    "screenshot: ticked -> " +
-      JSON.stringify({
-        add: await checkedRows(page, "Add these devices"),
-        ignore: await checkedRows(page, "Ignore these devices"),
-      }),
-  );
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.waitForTimeout(500);
-  await submitDialog(page);
+  // Un-ignoring is not retroactive: the device comes back on its next
+  // transmission, so wait for a fixture round before expecting its card.
+  await page.waitForTimeout(20000);
+
+  for (const key of [
+    "Acurite-Tower",
+    "Honeywell-Doorbell",
+    "EnergyMeter-2000",
+    "SCMplus",
+    "GenericDoor-X1",
+    "LeakDetector-9",
+  ]) {
+    console.log(
+      `screenshot: add ${key} -> ` + (await clickCardButton(page, key, "add")),
+    );
+    await page.waitForTimeout(2500);
+  }
   await page.waitForTimeout(4000);
-
-  // --- Ignored devices: capture it, then un-ignore the leak detector --------
-  if (await openApprovalStep(page, "Ignored devices", /stop ignoring these devices/i)) {
-    await shot(page, "16-ignored-devices.png");
-    console.log(
-      "screenshot: unignore rows -> " +
-        JSON.stringify(await tickPendingRows(page, ["LeakDetector-9"], "Stop ignoring these devices")),
-    );
-    await submitDialog(page);
-    await page.waitForTimeout(3000);
-  } else {
-    console.log("screenshot: ignored-devices step did not render; skipping 16");
-  }
-
-  // Un-ignoring is not retroactive, so the leak detector re-enters the pending
-  // list on its next transmission (the fixture replay, within 8s). Add it, so
-  // the hub in the overview shot holds every replayed device.
-  await page.waitForTimeout(12000);
-  if (await openApprovalStep(page, "Add discovered devices", /add these devices/i)) {
-    console.log(
-      "screenshot: re-add rows -> " +
-        JSON.stringify(await tickPendingRows(page, ["LeakDetector-9"], "Add these devices")),
-    );
-    await submitDialog(page);
-    await page.waitForTimeout(4000);
-  }
 }
 
-// Open one options-flow step from the menu and wait for a field of its form to
-// render. Menu items are list rows rather than buttons (see openOptionsMenu), so
-// they are clicked by text; `fieldText` is a label from the step's own form,
-// which is what distinguishes a rendered form from the menu it came from or from
-// an abort dialog ("no devices are waiting").
-async function openApprovalStep(page, menuText, fieldText) {
-  await openOptionsMenu(page);
-  await page.locator(`text=${menuText}`).first().click({ timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(2500);
-  return page
-    .getByText(fieldText)
-    .first()
-    .waitFor({ state: "visible", timeout: 8000 })
-    .then(() => true)
-    .catch(() => false);
-}
-
-async function submitDialog(page) {
-  await page
-    .getByRole("button", { name: /^(submit|next|finish)$/i })
-    .first()
-    .click({ timeout: 8000 })
-    .catch(() => {});
-}
-
-// The hub device page carries the hub-level diagnostic sensors. Two of them —
-// Noise level and Minimum detection level (docs/hub-entities.md "Receiver
-// Noise") — are fed by rtl_433's "Auto Level" log frames, which the harness
-// produces for real: the decoder runs with `-Y autolevel -M noise:10` and the
-// ws-bridge re-frames its `-F log` output as the structured log frames a real
-// `-F http` server pushes. Resolve the hub device from the device registry
-// (model "rtl_433 server"), poll until both noise sensors carry a number, then
-// capture the Diagnostic card.
-//
-// Run this via run-harness.sh's `hubnoise` step, which restarts the decoder
-// first. `-M noise` reports the noise level every 10s, but `-Y autolevel` only
-// logs the *adjustment* line behind Minimum detection level while its estimate
-// is still converging — a burst over the first seconds of a decoder run, then
-// silence once it settles. Without that restart the sensor stays `unknown`.
 async function captureHubNoise(page) {
   await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2000);
@@ -707,159 +671,99 @@ async function enableAndCaptureDiagnostics(page) {
   await shot(page, "10-diagnostics.png");
 }
 
-// Pick an option in an HA SelectSelector(DROPDOWN), which renders as an
-// ha-select (mwc-select): click the anchor to open the menu, then click the
-// list item whose text matches.
-async function selectPick(selectLoc, page, typeahead, optionRegex) {
-  await selectLoc.click();
-  await page.waitForTimeout(700);
-  const opt = page
-    .locator("mwc-list-item, ha-list-item, vaadin-combo-box-item")
-    .filter({ hasText: optionRegex })
-    .first();
-  if (await opt.count()) {
-    await opt.scrollIntoViewIfNeeded().catch(() => {});
-    const clicked = await opt
-      .click({ timeout: 4000 })
-      .then(() => true)
-      .catch(() => false);
-    if (clicked) {
-      await page.waitForTimeout(600);
-      return;
-    }
-  }
-  // Fallback: mwc-select typeahead — type the option's leading text, commit.
-  await page.keyboard.type(typeahead);
-  await page.waitForTimeout(400);
-  await page.keyboard.press("Enter");
-  await page.waitForTimeout(600);
-}
-
-// Drive the three-form Device settings path and capture each rendered step:
+// Capture the receiver-settings dialog and lower the availability timeout.
 //
-//   13-device-picker.png    the picker alone, showing the SCMplus gas meter
-//                           annotated "— gas detected" from its MeterType
-//   08-device-settings.png  that device's settings, commodity pre-filled to gas
-//   12-calibration.png      the gas base-unit + scale form
+//   07-hub-settings.png  the receiver's own settings: default availability
+//                        timeout and the managed-settings toggle
 //
-// The picker is its own step precisely so the settings form can be pre-filled
-// from the selected device, so the shots must be taken in sequence rather than
-// off one combined form. Only the picker and settings forms are submitted (to
-// advance); the calibration form is left unsubmitted.
-async function captureDeviceSettings(page) {
-  await openOptionsMenu(page);
-  await page.locator("text=Device settings").first().click({ timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(2500);
-
-  const submit = () =>
-    page
-      .getByRole("button", { name: /^(submit|next)$/i })
-      .first()
-      .click({ timeout: 8000 })
-      .catch(() => {});
-
-  // Step 1 — the picker is the only field on the form.
-  const picker = page.locator("ha-dialog ha-select, dialog ha-select").first();
-  if (!(await picker.count())) {
-    console.log("screenshot: device picker not found; skipping 13/08/12");
+// The timeout is lowered to SHORT_TIMEOUT as a side effect, which is what makes
+// the later unavailable stage finish in under a minute instead of ten.
+async function captureHubSettings(page) {
+  await openPanel(page, { cards: 0 });
+  if (!(await openPanelSettings(page, ".open-hub-settings"))) {
     return;
   }
-  // Select the gas meter FIRST, then capture: the point of this shot is the
-  // per-device "— <commodity> detected" annotation, and the collapsed anchor
-  // shows it for the chosen device. (Screenshotting with the menu expanded is
-  // not worth it — holding an mwc-select menu open across a capture reliably
-  // dismisses the whole dialog.)
-  await selectPick(picker, page, "SCMplus", /SCMplus/).catch(() =>
-    console.log("screenshot: SCMplus meter not pickable; using default device"),
+  await shot(page, "07-hub-settings.png");
+  console.log(
+    "screenshot: hub settings -> " +
+      JSON.stringify(
+        await inPanel(
+          page,
+          `(panel, timeout) => {
+            const root = panel.shadowRoot;
+            const field = root.querySelector('.settings-body input[type="number"]');
+            const was = field.value;
+            field.value = timeout;
+            root.querySelector(".settings-save").click();
+            return { was, now: timeout };
+          }`,
+          SHORT_TIMEOUT,
+        ),
+      ),
   );
-  await shot(page, "13-device-picker.png");
-  await submit();
-  await page.waitForTimeout(2500);
+  // Saving the hub form does not reload the entry (the timeout applies live), but
+  // the panel re-subscribes regardless; give it a moment to settle.
+  await page.waitForTimeout(4000);
+}
+
+// Capture the device-settings dialog against the replayed gas meter:
+//
+//   08-device-settings.png  one device's overrides, with the commodity
+//                           pre-filled from its decoded MeterType and the
+//                           base-unit + scale controls it reveals
+//
+// One dialog rather than the three forms this used to take. The picker, the
+// per-device overrides and the calibration are on the same surface now, and the
+// fields rebuild when the picked device changes -- which is what the options
+// flow needed a separate step for.
+async function captureDeviceSettings(page) {
+  await openPanel(page, { cards: 0 });
+  if (!(await openPanelSettings(page, ".open-device-settings"))) {
+    return;
+  }
+  const picked = await inPanel(
+    page,
+    `(panel) => {
+      const picker = panel.shadowRoot.querySelector(".settings-body select");
+      if (!picker) return "no picker";
+      const option = [...picker.options].find((o) => o.value.includes("SCMplus"));
+      if (!option) return "no SCMplus option";
+      picker.value = option.value;
+      picker.dispatchEvent(new Event("change"));
+      return option.textContent.trim();
+    }`,
+  );
+  console.log("screenshot: device settings -> " + JSON.stringify(picked));
+  await page.waitForTimeout(1000);
   await shot(page, "08-device-settings.png");
-
-  // Step 2 — commodity is pre-filled from MeterType, so just submit it through
-  // to the calibration step. (The motion clear-delay field is absent here: the
-  // selected device is not motion-bearing.)
-  await submit();
-  await page.waitForTimeout(2500);
-  await shot(page, "12-calibration.png");
+  // Not saved: the shot only needs the form, and storing a calibration would
+  // reload the hub and change the device page shots that follow.
+  await closePanelSettings(page);
 }
 
-// Open the per-entry options flow, which lands on the menu step
-// (Hub settings / Device settings / Device mappings). The menu items render as
-// list rows (not button-role), so callers wait on / click by text.
-async function openOptionsMenu(page) {
-  await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(2500);
-  // Gate on the integration card actually rendering: a fixed sleep races the
-  // frontend's "Loading data" splash on a cold load, and clicking through it
-  // silently produces no dialog.
-  await page
-    .locator(`text=rtl_433 (${RTL_HOST})`)
-    .first()
-    .waitFor({ state: "visible", timeout: 30000 })
-    .catch(() => {});
-
-  const menuShown = () =>
-    page
-      .locator("text=Hub settings")
-      .first()
-      .waitFor({ state: "visible", timeout: 8000 })
-      .then(() => true)
-      .catch(() => false);
-
-  // The gear (options/Configure) icon sits at the right edge of the hub header.
-  // On a cold page load the first click can land before the card is interactive,
-  // so retry a couple of times rather than silently continuing without a dialog.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const hubHeader = page.locator(`text=rtl_433 (${RTL_HOST})`).first();
-    const box = await hubHeader.boundingBox().catch(() => null);
-    if (box) {
-      await page.mouse.click(1243, box.y + box.height / 2);
-    } else {
-      // Fallback: open Configure from a kebab/Configure button if the header
-      // layout shifts.
-      await page.getByRole("button", { name: /configure/i }).first().click({ timeout: 5000 }).catch(() => {});
-    }
-    if (await menuShown()) break;
-    await page.waitForTimeout(1500);
-  }
-  // Say so loudly rather than letting the caller capture whatever page it
-  // landed on. This control is the only route to the options flow, so this
-  // warning firing on every attempt means the options flow has no entry point in
-  // the UI at all, not that a click was mistimed -- which is exactly how
-  // registering the panel with `config_panel_domain` broke it once. See
-  // AGENTS.md, "Approval surfaces".
-  if (!(await menuShown())) {
-    console.log(
-      `screenshot: WARNING options menu never opened at ${page.url()} — ` +
-        "every options-flow shot after this one will be wrong or skipped",
-    );
-  }
-  await page.waitForTimeout(1500);
-}
-
-// From the open options menu, enter the Device mappings step and pre-fill the
-// native YAML editor (ObjectSelector -> ha-yaml-editor -> ha-code-editor, a
-// CodeMirror contenteditable). We seed it via clipboard paste: CodeMirror
-// inserts pasted text verbatim, whereas typed Enter keys would auto-indent and
-// mangle the YAML. Permissions are granted on the context in run().
+// Capture the device-mappings editor, pre-filled with a real example:
+//
+//   05-mapping-overrides.png  the YAML editor holding two overrides
+//
+// A plain <textarea>, so the document is assigned rather than typed -- there is
+// no editor here to auto-indent it into something that no longer parses, which
+// is what the previous CodeMirror-based editor required a clipboard paste to
+// avoid. NOT saved: storing overrides reloads the hub.
 async function captureMappings(page) {
-  await page.locator("text=Device mappings").first().click({ timeout: 8000 }).catch(() => {});
-  await page.waitForTimeout(2500);
-  const editor = page
-    .locator("ha-dialog ha-code-editor .cm-content, dialog ha-code-editor .cm-content")
-    .first();
-  await editor.waitFor({ state: "visible", timeout: 8000 }).catch(() => {});
-  if (await editor.count()) {
-    await editor.click();
-    await page.keyboard.press("Control+a");
-    await page.evaluate((text) => navigator.clipboard.writeText(text), EXAMPLE_MAPPINGS);
-    await page.keyboard.press("Control+v");
-    // Let CodeMirror re-render the pasted document before the capture.
-    await page.waitForTimeout(1500);
+  await openPanel(page, { cards: 0 });
+  if (!(await openPanelSettings(page, ".open-mappings"))) {
+    return;
   }
+  await inPanel(
+    page,
+    `(panel, text) => {
+      panel.shadowRoot.querySelector(".settings-body textarea").value = text;
+    }`,
+    EXAMPLE_MAPPINGS,
+  );
+  await page.waitForTimeout(800);
   await shot(page, "05-mapping-overrides.png");
+  await closePanelSettings(page);
 }
 
 async function captureUnavailable(page) {
@@ -873,8 +777,6 @@ async function captureUnavailable(page) {
 async function run() {
   const browser = await chromium.launch({ args: ["--no-sandbox"] });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  // Needed to seed the Device-mappings YAML editor via clipboard paste.
-  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
   const page = await context.newPage();
   try {
     await login(page);
@@ -894,10 +796,15 @@ async function run() {
       // pipeline.
       await capturePanel(page);
     } else if (STAGE === "approve") {
-      // Iterate only the options menu / add-devices / ignored-devices captures
-      // against an already running harness (hub already added, devices still
-      // pending). Not part of the full pipeline.
+      // Iterate only the approval + ignored-devices captures against an already
+      // running harness (hub already added, devices still pending). Not part of
+      // the full pipeline.
       await approveDevices(page);
+    } else if (STAGE === "hub") {
+      // Iterate only the receiver-settings and device-mappings dialogs against
+      // an already running harness. Not part of the full pipeline.
+      await captureHubSettings(page);
+      await captureMappings(page);
     } else if (STAGE === "diagnostics") {
       // Iterate only the enable-and-capture diagnostics step against an already
       // running harness (hub already added).

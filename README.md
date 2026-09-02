@@ -21,7 +21,7 @@ them, with no cloud dependency and no polling.
   Assistant devices under that hub.
 - Device support is data-driven through a YAML
   [device library](docs/device-library.md), with per-hub user overrides available
-  from the Home Assistant options flow.
+  from the Home Assistant UI.
 - Every device the receiver hears is listed for you to add or ignore; nothing is
   added to Home Assistant on its own.
 - Supports class-aware availability, Last seen timestamps, momentary event

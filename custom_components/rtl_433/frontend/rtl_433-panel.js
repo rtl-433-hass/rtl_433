@@ -1,6 +1,8 @@
 /**
- * rtl_433 discovery panel: a live view of what the receiver is hearing, as one
- * card per candidate device with Add and Ignore on the card itself.
+ * rtl_433 panel: a live view of what the receiver is hearing, as one card per
+ * candidate device with Add, Ignore and Replace on the card itself -- and the
+ * receiver's own settings, since this page *is* the integration's configuration
+ * page and there is nowhere else for them to be.
  *
  * This file is deliberately plain. It is one custom element in one ES module
  * with **no imports at all**, and there is no build step anywhere in this
@@ -26,7 +28,12 @@
  * and `rtl_433/devices/replace` re-points an existing device onto a candidate.
  * None of the adopt/ignore/replace *logic* is reimplemented here; every button
  * is one command call, so this panel cannot drift from what the integration
- * does.
+ * does. The same holds for the three settings dialogs: `rtl_433/settings/get`
+ * answers with everything they render -- including which units are valid for
+ * which commodity -- and `.../hub`, `.../device` and `.../mappings` store it.
+ * A form here knows how to lay a control out and nothing about what a value
+ * means, which is why the panel cannot store a setting the integration would
+ * refuse.
  *
  * **Why cards rather than a table.** A candidate is judged on evidence that is
  * not columnar: how often it has been heard, how strong it was, and above all
@@ -46,6 +53,20 @@
  * rendering reconciles the existing cards rather than rebuilding them.
  */
 const CLOCK_INTERVAL_MS = 15000;
+
+/**
+ * How long to keep waiting for a hub that is mid-reload, and how often to look.
+ *
+ * Saving a calibration, a mapping override or the manage-settings toggle
+ * reloads the hub, and for a moment afterwards it is genuinely not loaded --
+ * the subscription this page depends on cannot be opened against it. That is a
+ * wait, not a failure, and reporting it as one would put an error banner in
+ * front of the user at the exact moment their save succeeded. Ten seconds is
+ * far longer than a reload takes and still short enough that a hub which is
+ * really unreachable says so rather than spinning.
+ */
+const RELOAD_RETRY_MS = 1000;
+const RELOAD_RETRY_LIMIT = 10;
 
 /** The integration domain, as it appears in a device registry identifier. */
 const DOMAIN = "rtl_433";
@@ -156,6 +177,10 @@ class Rtl433Panel extends HTMLElement {
     this._data = null;
     this._unsubscribe = null;
     this._clock = null;
+    // A scheduled re-attempt at subscribing to a hub that was mid-reload, and
+    // how many have been made. Both are reset by every deliberate subscribe.
+    this._retry = null;
+    this._retries = 0;
 
     this._showIgnored = false;
 
@@ -165,6 +190,18 @@ class Rtl433Panel extends HTMLElement {
     // per card would be dozens of hidden dialogs in the tree.
     this._replaceFor = null;
     this._replaceChoice = "";
+
+    // The settings payload (`rtl_433/settings/get`), which form is open, and
+    // that form's live controls. Fetched when a dialog is first opened rather
+    // than on load: most visits to this page are about discovery and never
+    // touch a setting, and the payload walks every adopted device to build it.
+    this._settings = null;
+    this._settingsForm = null;
+    this._settingsFields = null;
+    // Which device the settings dialog is showing. Remembered across opens
+    // because editing several devices in a row is the normal way to use it,
+    // and re-picking from a list of thirty each time is not.
+    this._settingsDevice = "";
 
     // Device keys with a command in flight, so their buttons can be disabled.
     this._busy = new Set();
@@ -319,6 +356,10 @@ class Rtl433Panel extends HTMLElement {
   }
 
   _teardownSubscription() {
+    if (this._retry !== null) {
+      window.clearTimeout(this._retry);
+      this._retry = null;
+    }
     if (!this._unsubscribe) {
       return;
     }
@@ -333,7 +374,7 @@ class Rtl433Panel extends HTMLElement {
 
   async _subscribe() {
     this._teardownSubscription();
-    const entryId = this._entryId;
+    this._retries = 0;
     this._data = null;
     this._banner = null;
     // The green cards describe adoptions made against *this* hub, so they are
@@ -344,8 +385,26 @@ class Rtl433Panel extends HTMLElement {
     // never match, and the `hass` setter would scan the whole device registry
     // on every state change in the instance for the life of the page.
     this._pendingAreas.clear();
+    // The settings payload describes *a* hub, and every device key in it
+    // belongs to that one. Carried across a switch it would offer the previous
+    // receiver's devices under this receiver's name.
+    this._settings = null;
+    this._settingsDevice = "";
     this._status = "Loading…";
     this._render();
+    await this._openSubscription();
+  }
+
+  /**
+   * Open the subscription, waiting out a hub that is mid-reload.
+   *
+   * Split from `_subscribe` so a retry re-attempts only the *connection*. The
+   * resets above describe "the user pointed this page at a hub", which happens
+   * once; this can happen several times for that one intent, and clearing the
+   * status on each attempt would flicker the page while it waits.
+   */
+  async _openSubscription() {
+    const entryId = this._entryId;
 
     let unsubscribe;
     try {
@@ -363,10 +422,27 @@ class Rtl433Panel extends HTMLElement {
         { type: "rtl_433/devices/subscribe", entry_id: entryId }
       );
     } catch (error) {
-      if (this._entryId === entryId) {
-        this._status = "";
-        this._setBanner(describeError(error), "error");
+      if (this._entryId !== entryId) {
+        return;
       }
+      // A hub that is reloading is a wait, not a failure -- and it is the
+      // *expected* answer for a second or so after saving a setting that
+      // requires a reload. Reporting it would show an error banner at the one
+      // moment the user has just succeeded at something.
+      if (error && error.code === "not_loaded" && this._retries < RELOAD_RETRY_LIMIT) {
+        this._retries += 1;
+        this._status = "Waiting for the receiver to reload…";
+        this._render();
+        this._retry = window.setTimeout(() => {
+          this._retry = null;
+          if (this._entryId === entryId && this.isConnected) {
+            this._openSubscription();
+          }
+        }, RELOAD_RETRY_MS);
+        return;
+      }
+      this._status = "";
+      this._setBanner(describeError(error), "error");
       return;
     }
 
@@ -579,6 +655,16 @@ class Rtl433Panel extends HTMLElement {
       dialogList: root.querySelector(".replace-list"),
       dialogCancel: root.querySelector(".replace-cancel"),
       dialogConfirm: root.querySelector(".replace-confirm"),
+      openHub: root.querySelector(".open-hub-settings"),
+      openDevice: root.querySelector(".open-device-settings"),
+      openMappings: root.querySelector(".open-mappings"),
+      settings: root.querySelector(".settings-dialog"),
+      settingsTitle: root.querySelector(".settings-title"),
+      settingsIntro: root.querySelector(".settings-intro"),
+      settingsProblem: root.querySelector(".settings-problem"),
+      settingsBody: root.querySelector(".settings-body"),
+      settingsCancel: root.querySelector(".settings-cancel"),
+      settingsSave: root.querySelector(".settings-save"),
     };
 
     this._el.hubSelect.addEventListener("change", () => {
@@ -600,6 +686,22 @@ class Rtl433Panel extends HTMLElement {
     this._el.dialog.addEventListener("close", () => {
       this._replaceFor = null;
       this._replaceChoice = "";
+    });
+
+    this._el.openHub.addEventListener("click", () => this._openSettings("hub"));
+    this._el.openDevice.addEventListener("click", () =>
+      this._openSettings("device")
+    );
+    this._el.openMappings.addEventListener("click", () =>
+      this._openSettings("mappings")
+    );
+    this._el.settingsCancel.addEventListener("click", () => {
+      this._el.settings.close();
+    });
+    this._el.settingsSave.addEventListener("click", () => this._saveSettings());
+    this._el.settings.addEventListener("close", () => {
+      this._settingsForm = null;
+      this._settingsFields = null;
     });
   }
 
@@ -655,6 +757,14 @@ class Rtl433Panel extends HTMLElement {
     );
 
     this._el.clear.hidden = !loaded || cards.length === 0;
+    // Every settings command names a hub, so the row waits for one to resolve.
+    for (const button of [
+      this._el.openHub,
+      this._el.openDevice,
+      this._el.openMappings,
+    ]) {
+      button.disabled = !this._entryId;
+    }
 
     const ignored = this._data && this._data.ignored ? this._data.ignored : [];
     this._el.ignoredToggle.hidden = !loaded || ignored.length === 0;
@@ -1036,6 +1146,372 @@ class Rtl433Panel extends HTMLElement {
     }
   }
 
+  // -- Settings ---------------------------------------------------------------
+
+  /**
+   * Open one of the three settings forms.
+   *
+   * The payload behind all three is fetched once and reused, because the three
+   * dialogs are one screenful and the alternative is a round trip per open. It
+   * is re-fetched after every save so the next open shows what was stored
+   * rather than what was typed -- the two differ exactly where the backend
+   * cleared something, which is the case the user most needs to see.
+   */
+  async _openSettings(kind) {
+    if (!this._entryId) {
+      return;
+    }
+    this._el.settingsProblem.hidden = true;
+    if (!this._settings) {
+      this._el.settingsSave.disabled = true;
+      try {
+        this._settings = await this._call({
+          type: "rtl_433/settings/get",
+          entry_id: this._entryId,
+        });
+      } catch (error) {
+        this._setBanner(describeError(error), "error");
+        return;
+      } finally {
+        this._el.settingsSave.disabled = false;
+      }
+    }
+    this._settingsForm = kind;
+    this._buildSettingsForm(kind);
+    this._el.settings.showModal();
+  }
+
+  /**
+   * Build one field: a label, a control, and an optional hint beneath it.
+   *
+   * Returns the control so the caller can read it back on save. Every form here
+   * is a handful of these, so a builder is cheaper than a template per form and
+   * keeps the markup and the read-back next to each other -- the two things
+   * that drift when a field is added.
+   */
+  _field(parent, { label, control, hint, hidden }) {
+    const wrapper = document.createElement("div");
+    wrapper.className = control.type === "checkbox" ? "field checkbox" : "field";
+    wrapper.hidden = Boolean(hidden);
+    const id = `field-${Math.random().toString(36).slice(2)}`;
+    control.id = id;
+    const labelEl = document.createElement("label");
+    labelEl.setAttribute("for", id);
+    labelEl.textContent = label;
+    // A checkbox reads as "[x] label", everything else as "label / control".
+    if (control.type === "checkbox") {
+      wrapper.append(control, labelEl);
+    } else {
+      wrapper.append(labelEl, control);
+    }
+    if (hint) {
+      const hintEl = document.createElement("span");
+      hintEl.className = "hint";
+      hintEl.textContent = hint;
+      wrapper.append(hintEl);
+    }
+    parent.append(wrapper);
+    control.fieldEl = wrapper;
+    return control;
+  }
+
+  /** A `<select>` pre-set to `value`, from `[value, label]` pairs. */
+  _select(options, value) {
+    const select = document.createElement("select");
+    for (const [optionValue, optionLabel] of options) {
+      const option = document.createElement("option");
+      option.value = optionValue;
+      option.textContent = optionLabel;
+      option.selected = optionValue === value;
+      select.append(option);
+    }
+    return select;
+  }
+
+  /** A number input, blank when `value` is null (which means "not set"). */
+  _numberInput(value, min) {
+    const input = document.createElement("input");
+    input.type = "number";
+    if (min !== undefined) {
+      input.min = String(min);
+    }
+    input.value = value === null || value === undefined ? "" : String(value);
+    return input;
+  }
+
+  _buildSettingsForm(kind) {
+    const body = this._el.settingsBody;
+    body.textContent = "";
+    this._el.settingsIntro.textContent = "";
+    this._el.settingsSave.hidden = false;
+    this._settingsFields = {};
+    if (kind === "hub") {
+      this._buildHubForm(body);
+    } else if (kind === "device") {
+      this._buildDeviceForm(body);
+    } else {
+      this._buildMappingsForm(body);
+    }
+  }
+
+  _buildHubForm(body) {
+    const settings = this._settings;
+    this._el.settingsTitle.textContent = "Receiver settings";
+    this._el.settingsIntro.textContent =
+      "Settings for this receiver as a whole. Individual devices can override the timeout.";
+
+    this._settingsFields.timeout = this._field(body, {
+      label: "Availability timeout (seconds)",
+      control: this._numberInput(settings.hub.availability_timeout, 0),
+      hint:
+        `Leave at ${settings.defaults.availability_timeout} to use the per-device-type ` +
+        "defaults, which is what keeps event-driven devices — doorbells, motion, " +
+        "contacts — from going unavailable on silence. Use 0 to never expire.",
+    });
+    const manage = document.createElement("input");
+    manage.type = "checkbox";
+    manage.checked = Boolean(settings.hub.manage_settings);
+    this._settingsFields.manage = this._field(body, {
+      label: "Manage the receiver's own settings",
+      control: manage,
+      hint:
+        "Adds the frequency, gain and sample-rate controls, and lets Home Assistant " +
+        "apply them. Turning this off leaves the receiver exactly as configured " +
+        "elsewhere.",
+    });
+  }
+
+  _buildDeviceForm(body) {
+    const settings = this._settings;
+    this._el.settingsTitle.textContent = "Device settings";
+    if (!settings.devices.length) {
+      this._el.settingsIntro.textContent =
+        "No devices have been added yet. Add one from this page first, and its settings will appear here.";
+      this._el.settingsSave.hidden = true;
+      return;
+    }
+    this._el.settingsIntro.textContent =
+      "Overrides for one device. Blank means “use the receiver's setting”.";
+
+    const picker = this._field(body, {
+      label: "Device",
+      control: this._select(
+        settings.devices.map((device) => [device.device_key, device.label]),
+        this._settingsDevice || settings.devices[0].device_key
+      ),
+    });
+    this._settingsFields.picker = picker;
+
+    // The rest of the form is rebuilt per device, because every default on it
+    // comes *from* the device: its stored override, whether it has a field that
+    // auto-clears at all, and whether it already has a calibration. That is why
+    // the options flow made the picker its own step; here the two can share a
+    // dialog because the fields can simply be rebuilt in place.
+    const rest = document.createElement("div");
+    body.append(rest);
+    const rebuild = () => {
+      this._settingsDevice = picker.value;
+      this._buildDeviceFields(rest, this._deviceSettings(picker.value));
+    };
+    picker.addEventListener("change", rebuild);
+    rebuild();
+  }
+
+  /** The settings row for one device key, from the last fetched payload. */
+  _deviceSettings(deviceKey) {
+    return (
+      this._settings.devices.find((device) => device.device_key === deviceKey) ||
+      null
+    );
+  }
+
+  _buildDeviceFields(container, device) {
+    container.textContent = "";
+    if (!device) {
+      return;
+    }
+    const settings = this._settings;
+    const fields = this._settingsFields;
+
+    fields.timeout = this._field(container, {
+      label: "Availability timeout override (seconds)",
+      control: this._numberInput(device.timeout_override, 0),
+      hint: "Blank uses the receiver's timeout. 0 means never expire.",
+    });
+
+    // Only for devices with a field that actually auto-clears; anywhere else
+    // this would be a control with nothing behind it.
+    if (device.motion) {
+      fields.clearDelay = this._field(container, {
+        label: "Motion clear delay (seconds)",
+        control: this._numberInput(device.motion_clear_delay, 1),
+        hint:
+          `How long after a detection this device is reported clear. Blank uses ` +
+          `${settings.defaults.motion_clear_delay} seconds.`,
+      });
+    } else {
+      fields.clearDelay = null;
+    }
+
+    const commodity = this._field(container, {
+      label: "Utility meter commodity",
+      control: this._select(
+        settings.commodities.map((value) => [value, value]),
+        device.calibration ? device.calibration.commodity : device.commodity
+      ),
+      hint:
+        "Setting a commodity turns this device's counter into an Energy-dashboard " +
+        "sensor. “none” leaves it as the library describes it.",
+    });
+    fields.commodity = commodity;
+
+    const unit = this._field(container, {
+      label: "Base unit",
+      control: this._select([], ""),
+      hint: "One unit of what the counter counts.",
+    });
+    fields.unit = unit;
+
+    const scale = this._field(container, {
+      label: "Scale",
+      control: this._numberInput(
+        device.calibration ? device.calibration.scale : 1,
+        0
+      ),
+      hint: "Multiplier on the raw counter, to reach one base unit.",
+    });
+    scale.step = "any";
+    fields.scale = scale;
+
+    // The unit list is per commodity: offering a unit Home Assistant will not
+    // convert for the chosen commodity produces a sensor the Energy dashboard
+    // silently refuses, so the list is narrowed rather than validated later.
+    const refreshUnits = () => {
+      const chosen = commodity.value;
+      const units = settings.commodity_units[chosen] || [];
+      const isCalibrated = units.length > 0;
+      unit.fieldEl.hidden = !isCalibrated;
+      scale.fieldEl.hidden = !isCalibrated;
+      if (!isCalibrated) {
+        return;
+      }
+      const current =
+        device.calibration && device.calibration.commodity === chosen
+          ? device.calibration.unit
+          : units[0];
+      unit.textContent = "";
+      for (const value of units) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        option.selected = value === current;
+        unit.append(option);
+      }
+    };
+    commodity.addEventListener("change", refreshUnits);
+    refreshUnits();
+  }
+
+  _buildMappingsForm(body) {
+    this._el.settingsTitle.textContent = "Device mappings";
+    // The one intro that needs a link, so it is built rather than assigned.
+    this._el.settingsIntro.textContent =
+      "YAML overrides for how this receiver's fields become entities. Clearing the editor removes them all. ";
+    const link = document.createElement("a");
+    link.href = this._settings.mappings_docs_url;
+    link.target = "_blank";
+    link.rel = "noreferrer noopener";
+    link.textContent = "Documentation";
+    this._el.settingsIntro.append(link);
+
+    const editor = document.createElement("textarea");
+    editor.spellcheck = false;
+    editor.value = this._settings.mappings;
+    this._settingsFields.mappings = this._field(body, {
+      label: "Overrides",
+      control: editor,
+    });
+  }
+
+  /** Read a number field: blank is `null` (clear it), not `0`. */
+  _readNumber(control) {
+    if (!control || control.value.trim() === "") {
+      return null;
+    }
+    const value = Number(control.value);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  /**
+   * Save the open form.
+   *
+   * A rejected save keeps the dialog open and reports the reason inside it: the
+   * page's banner is behind the backdrop, and a dialog that closes on a refusal
+   * throws away what the user typed. On success the payload is dropped so the
+   * next open re-reads it, and the subscription is re-established -- a hub
+   * reloads when its calibration, mappings or manage-settings toggle changes,
+   * and the old subscription would then be pushing a replaced coordinator's
+   * state.
+   */
+  async _saveSettings() {
+    const kind = this._settingsForm;
+    if (!kind) {
+      return;
+    }
+    const fields = this._settingsFields;
+    let message;
+    if (kind === "hub") {
+      message = {
+        type: "rtl_433/settings/hub",
+        entry_id: this._entryId,
+        availability_timeout:
+          this._readNumber(fields.timeout) ??
+          this._settings.defaults.availability_timeout,
+        manage_settings: fields.manage.checked,
+      };
+    } else if (kind === "device") {
+      const commodity = fields.commodity.value;
+      message = {
+        type: "rtl_433/settings/device",
+        entry_id: this._entryId,
+        device_key: fields.picker.value,
+        timeout_override: this._readNumber(fields.timeout),
+        motion_clear_delay: this._readNumber(fields.clearDelay),
+        commodity,
+        unit: fields.unit.fieldEl.hidden ? null : fields.unit.value,
+        scale: fields.unit.fieldEl.hidden ? null : this._readNumber(fields.scale),
+      };
+    } else {
+      message = {
+        type: "rtl_433/settings/mappings",
+        entry_id: this._entryId,
+        yaml: fields.mappings.value,
+      };
+    }
+
+    this._el.settingsSave.disabled = true;
+    this._el.settingsProblem.hidden = true;
+    try {
+      await this._call(message);
+    } catch (error) {
+      this._el.settingsProblem.textContent = describeError(error);
+      this._el.settingsProblem.hidden = false;
+      return;
+    } finally {
+      this._el.settingsSave.disabled = false;
+    }
+
+    this._settings = null;
+    this._el.settings.close();
+    // Re-subscribe *before* the banner, not after. A hub reloads when its
+    // calibration, mappings or manage-settings toggle changes, and the old
+    // subscription would go on pushing a replaced coordinator's state -- but
+    // `_subscribe` also clears the banner on its way past, so a "saved" set
+    // first is wiped before anyone reads it.
+    this._subscribe();
+    this._setBanner("Settings saved.", "notice");
+  }
+
   // -- Replace ---------------------------------------------------------------
 
   /**
@@ -1225,6 +1701,12 @@ const SKELETON = `
     </label>
   </div>
 
+  <div class="page-actions">
+    <button class="ghost open-hub-settings" type="button">Receiver settings</button>
+    <button class="ghost open-device-settings" type="button">Device settings</button>
+    <button class="ghost open-mappings" type="button">Device mappings</button>
+  </div>
+
   <div class="banner" hidden></div>
   <div class="status" hidden></div>
 
@@ -1243,14 +1725,27 @@ const SKELETON = `
 
   <div class="grid ignored-grid" hidden></div>
 
-  <dialog class="replace-dialog">
-    <form method="dialog" class="replace-form">
-      <h2 class="replace-title">Replace a device</h2>
-      <p class="replace-intro"></p>
+  <dialog class="replace-dialog panel-dialog">
+    <form method="dialog" class="panel-dialog-form">
+      <h2 class="panel-dialog-title">Replace a device</h2>
+      <p class="replace-intro panel-dialog-intro"></p>
       <div class="replace-list" role="radiogroup" aria-label="Device to replace"></div>
-      <div class="replace-actions">
+      <div class="panel-dialog-actions">
         <button class="ghost replace-cancel" type="button">Cancel</button>
         <button class="primary replace-confirm" type="button" disabled>Replace</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="settings-dialog panel-dialog">
+    <form method="dialog" class="panel-dialog-form">
+      <h2 class="settings-title panel-dialog-title"></h2>
+      <p class="settings-intro panel-dialog-intro"></p>
+      <div class="settings-problem" hidden></div>
+      <div class="settings-body"></div>
+      <div class="panel-dialog-actions">
+        <button class="ghost settings-cancel" type="button">Cancel</button>
+        <button class="primary settings-save" type="button">Save</button>
       </div>
     </form>
   </dialog>
@@ -1517,11 +2012,11 @@ const STYLES = `
   }
 
   /*
-   * The replace dialog. A native <dialog>, so the backdrop, the stacking and
-   * the focus trap are the platform's; only the surface needs dressing, in the
-   * same tokens as the cards.
+   * Both dialogs. Native <dialog>s, so the backdrop, the stacking and the focus
+   * trap are the platform's; only the surface needs dressing, in the same
+   * tokens as the cards.
    */
-  .replace-dialog {
+  .panel-dialog {
     padding: 0;
     border: none;
     border-radius: var(--ha-card-border-radius, 12px);
@@ -1530,18 +2025,19 @@ const STYLES = `
     max-width: 480px;
     width: calc(100vw - 32px);
   }
-  .replace-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-  .replace-form {
+  .panel-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+  .panel-dialog-form {
     margin: 0;
     padding: 20px;
     font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif);
     font-size: 14px;
   }
-  .replace-title { margin: 0 0 8px; font-size: 20px; font-weight: 400; }
-  .replace-intro {
+  .panel-dialog-title { margin: 0 0 8px; font-size: 20px; font-weight: 400; }
+  .panel-dialog-intro {
     margin: 0 0 16px;
     color: var(--secondary-text-color, #727272);
   }
+  .panel-dialog-intro a { color: var(--primary-color, #03a9f4); }
   .replace-list {
     max-height: 45vh;
     overflow-y: auto;
@@ -1562,11 +2058,94 @@ const STYLES = `
     color: var(--secondary-text-color, #727272);
     overflow-wrap: anywhere;
   }
-  .replace-actions {
+  .panel-dialog-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
   }
+
+  /*
+   * The settings row: the three forms that used to live behind the config
+   * entry's Configure button and now have nowhere else to be, since this panel
+   * *is* that button. Above the discovered devices rather than below them,
+   * because a receiver in a busy neighbourhood puts dozens of cards between the
+   * two and a setting nobody can find is a setting nobody has.
+   */
+  .page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  /*
+   * Form controls, sized and coloured like Home Assistant's own so the dialogs
+   * read as part of the frontend rather than as a page that happens to be
+   * inside it. Deliberately native input/select/textarea elements and not the
+   * frontend's own ha-* ones: this file imports nothing, and a control that is
+   * merely styled like core's cannot break when core's internals move. (No
+   * backticks in here -- this comment is inside a template literal, and one
+   * would end it.)
+   */
+  .field { margin-bottom: 16px; }
+  .field > label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 13px;
+    color: var(--secondary-text-color, #727272);
+  }
+  .field .hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--secondary-text-color, #727272);
+  }
+  .field input[type="number"],
+  .field input[type="text"],
+  .field select,
+  .field textarea {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--primary-text-color, #212121);
+    background: var(--card-background-color, #ffffff);
+    border: 1px solid var(--divider-color, #e0e0e0);
+    border-radius: 4px;
+  }
+  .field textarea {
+    min-height: 220px;
+    font-family: var(--ha-font-family-code, ui-monospace, monospace);
+    font-size: 13px;
+    resize: vertical;
+    white-space: pre;
+    overflow-wrap: normal;
+    overflow-x: auto;
+  }
+  .field.checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .field.checkbox > label { margin: 0; color: inherit; font-size: 14px; }
+  .field[hidden] { display: none; }
+
+  .settings-body { max-height: 55vh; overflow-y: auto; }
+  /*
+   * A rejected save reports what was wrong *inside* the dialog. The page's own
+   * banner is behind the backdrop, so putting it there would hide the reason
+   * the dialog is still open.
+   */
+  .settings-problem {
+    margin-bottom: 16px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    background: var(--error-color, #db4437);
+    color: var(--text-primary-color, #ffffff);
+    white-space: pre-wrap;
+  }
+  .settings-problem[hidden] { display: none; }
 `;
 
 // Guarded because a panel module can be evaluated more than once in a

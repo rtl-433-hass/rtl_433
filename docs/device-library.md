@@ -115,7 +115,7 @@ models:
 Mapping overrides are **global or model-scoped only** — they apply to every device
 of a model, not a single physical unit. To change settings for one specific unit
 (its availability timeout, meter calibration, or motion clear delay), use the
-options flow's *Device settings* step instead.
+*Device settings* dialog instead.
 
 ## Mapping entry schema
 
@@ -163,7 +163,7 @@ temperature_C:
     <tr><td><code>value_transform</code></td><td>no</td><td>mapping</td><td>Declarative numeric transform applied before the value is stored. See <a href="#value-transforms">Value transforms</a>. Omit for binary fields.</td></tr>
     <tr><td><code>payload</code></td><td>no</td><td><code>{ on: &lt;raw&gt;, off: &lt;raw&gt; }</code></td><td>For <code>binary_sensor</code> only: maps the raw rtl_433 value to the HA on/off state. See <a href="#binary-payloads">Binary payloads</a>.</td></tr>
     <tr><td><code>event_map</code></td><td>no</td><td><code>{ &lt;raw-string&gt;: &lt;event-type&gt; }</code></td><td>For <code>event</code> only: maps a stringified raw value to a named <code>event_type</code>; mapped types are declared up front in <code>event_types</code>. See <a href="#event-entities">Event entities</a>.</td></tr>
-    <tr><td><code>clear_delay</code></td><td>no</td><td>int (seconds)</td><td>For <code>binary_sensor</code> only: seconds after a detection to <strong>synthesize</strong> an off, for detect-only hardware that sends no off. Reschedules on each detection; per-device override via the options flow. See <a href="#motion-occupancy">Motion / occupancy</a>.</td></tr>
+    <tr><td><code>clear_delay</code></td><td>no</td><td>int (seconds)</td><td>For <code>binary_sensor</code> only: seconds after a detection to <strong>synthesize</strong> an off, for detect-only hardware that sends no off. Reschedules on each detection; per-device override in <em>Device settings</em>. See <a href="#motion-occupancy">Motion / occupancy</a>.</td></tr>
     <tr><td><code>force_update</code></td><td>no</td><td>bool</td><td>Mirrors upstream <code>force_update</code>; write state even when the value is unchanged. Defaults to false.</td></tr>
     <tr><td><code>entity_category</code></td><td>no</td><td><code>diagnostic</code> | <code>config</code> | <code>null</code></td><td>Categorizes the entity in the HA UI. Diagnostic fields (battery, signal, tamper) use <code>diagnostic</code>.</td></tr>
     <tr><td><code>enabled_by_default</code></td><td>no</td><td>bool</td><td>Set <code>false</code> to register the entity disabled (the user can enable it). Defaults to true.</td></tr>
@@ -255,8 +255,8 @@ off window restarts on each retrigger. The shipped default is **90 s**.
 A stale `on` is never restored across a restart (there would be no live timer to
 clear it): the sensor comes back off/unknown until the next detection.
 
-**Per-device override.** The delay can be tuned per device in the options flow —
-**Settings → Devices & Services → rtl_433 → Configure → (device step)** exposes a
+**Per-device override.** The delay can be tuned per device in *Device settings* —
+**Settings → Devices & Services → rtl_433 → Configure → Device settings** exposes a
 *Motion clear delay (seconds)* field, shown only for motion-bearing devices.
 Leave it blank to use the 90 s default. The override is resolved at runtime
 (per-device value, else the descriptor default).
@@ -442,7 +442,7 @@ before the global tier.)
 > carry a guessed `models:` consumption mapping for any real model — a wrong
 > scale would silently corrupt real Energy data. The example below is purely
 > illustrative; for a real meter use the per-device calibration step in the
-> options flow (see [Utility-meter calibration](calibration.md)) until a model's unit/scale is authoritatively
+> *Device settings* dialog (see [Utility-meter calibration](calibration.md)) until a model's unit/scale is authoritatively
 > known.
 
 ## The skip-keys file
