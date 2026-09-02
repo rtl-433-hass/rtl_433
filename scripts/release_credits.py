@@ -1,26 +1,36 @@
 #!/usr/bin/env python3
-"""Append ``@username`` credits for outside contributors to the release PR body.
+"""Credit outside contributors inline on the release PR's changelog lines.
 
 release-please writes a changelog whose entries link to commits, never to the
 people who wrote them, so a community contribution lands in the release notes
-anonymously and the contributor is never notified that their work shipped. This
-helper closes that gap: it reads the open release PR, resolves every commit the
-changelog links to back to the pull request it merged from, drops the ones
-authored by maintainers and bots, and appends a marker-delimited credits block
-naming the rest with an ``@mention``.
+anonymously. This helper closes that gap: it reads the open release PR, resolves
+every commit the changelog links to back to the pull request it merged from, and
+appends the author's name to that entry's own line when they are not a
+maintainer or a bot::
+
+    * mark detect_wet as event_driven ([2eddd52](...)) (thanks [dimatx](...)!)
 
 Run by ``.github/workflows/release-credits.yml`` after every Release run, so the
-block is refreshed whenever release-please rewrites the PR.
+credits are refreshed whenever release-please rewrites the PR body.
+
+**Credits are deliberately not ``@mentions``.** An ``@login`` in a PR body is a
+GitHub mention, which is exactly the thing that notifies people, so the default
+credit is a plain Markdown link to the contributor's profile: same visible
+credit, clickable, but nothing GitHub's mention parser reacts to. ``--mention``
+switches to a real ``@login`` for anyone who *wants* the notification. Nothing
+here ever posts a comment, and editing a PR body does not notify its subscribers,
+so the default run is silent.
+
+Only the PR description is touched; ``CHANGELOG.md`` and the published release
+notes keep release-please's own wording.
 
 "Maintainer" is decided by the pull request's GitHub ``author_association``:
 ``OWNER``, ``MEMBER`` and ``COLLABORATOR`` are maintainers (people who can push
 to the repo), everyone else is an outside contributor worth crediting. Bots are
 never credited. Extra logins can be excluded with ``--exclude``.
 
-The block is delimited by HTML comment markers, so a rerun replaces its own
-previous output instead of stacking duplicates, and the body is left untouched
-when nothing changed (an unchanged body is not PATCHed at all, which keeps
-GitHub from re-notifying the mentioned contributors on every release push).
+A credit already on a line is replaced rather than repeated, so reruns are
+idempotent, and a body that would not change is not written back at all.
 
 Usage::
 
@@ -37,7 +47,6 @@ right after a release PR merges, not a failure.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
 import os
 import re
@@ -52,20 +61,23 @@ import urllib.request
 # outside contributor.
 MAINTAINER_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
-# Markers around the generated block. They must stay stable across releases:
-# they are how a rerun finds and replaces its own previous output.
-BLOCK_START = "<!-- release-credits:start -->"
-BLOCK_END = "<!-- release-credits:end -->"
-
-BLOCK_HEADING = "### Thanks to our contributors"
-
 # release-please names its branch ``release-please--branches--<base>`` and
 # labels the PR ``autorelease: pending``. Either is enough to identify it; both
 # are checked so a label rename upstream does not silently disable this.
 RELEASE_BRANCH_PREFIX = "release-please--"
 RELEASE_LABEL = "autorelease: pending"
 
+PROFILE_URL = "https://github.com"
+
 _SHA_RE = r"[0-9a-f]{7,40}"
+
+# Matches a credit this script appended, in either style, at the end of a line.
+# It is how a rerun finds and replaces its own previous output, so it has to keep
+# matching what ``render_credit`` writes — including the styles it no longer
+# writes by default, or switching --mention on and off would leave both behind.
+CREDIT_SUFFIX_RE = re.compile(
+    r"\s*\(thanks (?:@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?|\[[^\]]+\]\([^)]*\))!\)\s*$"
+)
 
 
 class GitHubAPI(Protocol):
@@ -78,32 +90,23 @@ class GitHubAPI(Protocol):
         """PATCH ``path`` (repo-relative) with ``payload`` as JSON."""
 
 
-@dataclass(frozen=True)
-class Credit:
-    """One outside contributor and the PRs of theirs in this release."""
-
-    login: str
-    pulls: tuple[int, ...]
-
-    @property
-    def first_pull(self) -> int:
-        """Lowest PR number, used to order credits the way the changelog runs."""
-        return self.pulls[0]
-
-
-def extract_commit_shas(body: str, repo: str) -> list[str]:
-    """Return the commit SHAs ``body`` links to, in first-seen order.
+def _commit_link_re(repo: str) -> re.Pattern[str]:
+    """Match this repo's commit links.
 
     Only links to ``repo`` count: a changelog can quote another project's commit
     (an upstream fix, a dependency bump), and resolving those against this repo
     would 404 or, worse, hit an unrelated commit that happens to share a prefix.
     """
-    pattern = re.compile(
+    return re.compile(
         rf"https://github\.com/{re.escape(repo)}/commit/({_SHA_RE})\b",
         re.IGNORECASE,
     )
+
+
+def extract_commit_shas(body: str, repo: str) -> list[str]:
+    """Return the commit SHAs ``body`` links to, in first-seen order."""
     seen: dict[str, None] = {}
-    for match in pattern.finditer(body or ""):
+    for match in _commit_link_re(repo).finditer(body or ""):
         seen.setdefault(match.group(1).lower(), None)
     return list(seen)
 
@@ -145,20 +148,20 @@ def choose_pull(pulls: list[dict[str, Any]], sha: str) -> dict[str, Any] | None:
     return ordered[0]
 
 
-def collect_credits(
+def resolve_credits(
     api: GitHubAPI,
     body: str,
     repo: str,
     exclude: frozenset[str] = frozenset(),
-) -> list[Credit]:
-    """Resolve the changelog's commits to the outside contributors behind them.
+) -> dict[str, str]:
+    """Map each linked commit SHA to the outside contributor who wrote it.
 
-    Commits with no associated pull request are skipped: on a protected branch
+    Commits with no associated pull request are left out: on a protected branch
     those are direct maintainer pushes, and there is no author association to
     judge an unknown one by.
     """
     excluded = {login.lower() for login in exclude}
-    by_login: dict[str, set[int]] = {}
+    credits: dict[str, str] = {}
 
     for sha in extract_commit_shas(body, repo):
         pulls = api.get(f"/repos/{repo}/commits/{sha}/pulls") or []
@@ -180,49 +183,42 @@ def collect_credits(
         if is_maintainer(association):
             continue
 
-        by_login.setdefault(login, set()).add(int(pull["number"]))
+        credits[sha] = login
 
-    credits = [
-        Credit(login=login, pulls=tuple(sorted(pulls)))
-        for login, pulls in by_login.items()
-    ]
-    credits.sort(key=lambda credit: (credit.first_pull, credit.login.lower()))
     return credits
 
 
-def render_block(credits: list[Credit]) -> str:
-    """Render the credits block, or an empty string when there is nothing to say."""
-    if not credits:
-        return ""
-    lines = [BLOCK_START, "", BLOCK_HEADING, ""]
-    for credit in credits:
-        pulls = ", ".join(f"#{number}" for number in credit.pulls)
-        lines.append(f"* @{credit.login} — {pulls}")
-    lines += ["", BLOCK_END]
-    return "\n".join(lines)
+def render_credit(login: str, mention: bool = False) -> str:
+    """Render the trailing credit for one changelog line.
 
-
-def update_body(body: str, block: str) -> str:
-    """Return ``body`` with the credits block replaced by (or set to) ``block``.
-
-    Any previously generated block is removed first, so this is idempotent:
-    applying it to its own output changes nothing. An empty ``block`` just
-    strips a stale block, which is what should happen when the last outside
-    contribution drops out of a release.
+    The default links to the profile instead of writing ``@login``: a mention is
+    what generates a notification, and this script is meant to be silent.
     """
-    normalized = (body or "").replace("\r\n", "\n")
-    stripped = re.sub(
-        rf"\n*{re.escape(BLOCK_START)}.*?{re.escape(BLOCK_END)}\n*",
-        "\n",
-        normalized,
-        flags=re.DOTALL,
-    )
-    stripped = stripped.rstrip()
-    if not block:
-        return stripped
-    if not stripped:
-        return block
-    return f"{stripped}\n\n{block}"
+    who = f"@{login}" if mention else f"[{login}]({PROFILE_URL}/{login})"
+    return f" (thanks {who}!)"
+
+
+def annotate_body(
+    body: str,
+    repo: str,
+    credits: dict[str, str],
+    mention: bool = False,
+) -> str:
+    """Return ``body`` with each changelog line credited to its contributor.
+
+    A line is matched to a contributor through the commit it links to, so the
+    credit lands on the entry it belongs to rather than in a summary at the end.
+    Any credit already present is stripped first, which makes this idempotent and
+    also clears a stale one when a line's authorship no longer qualifies.
+    """
+    link_re = _commit_link_re(repo)
+    lines = []
+    for raw_line in (body or "").replace("\r\n", "\n").split("\n"):
+        line = CREDIT_SUFFIX_RE.sub("", raw_line)
+        match = link_re.search(line)
+        login = credits.get(match.group(1).lower()) if match else None
+        lines.append(line + render_credit(login, mention) if login else line)
+    return "\n".join(lines)
 
 
 class _RestAPI:
@@ -285,6 +281,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="comma-separated logins to treat as maintainers",
     )
     parser.add_argument(
+        "--mention",
+        action="store_true",
+        help="credit with @login instead of a profile link (this notifies them)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="print the resulting body instead of updating the PR",
@@ -321,25 +322,23 @@ def main(argv: list[str] | None = None, api: GitHubAPI | None = None) -> int:
         part.strip() for part in str(args.exclude).split(",") if part.strip()
     )
 
-    credits = collect_credits(api, body, args.repo, exclude)
-    new_body = update_body(body, render_block(credits))
+    credits = resolve_credits(api, body, args.repo, exclude)
+    new_body = annotate_body(body, args.repo, credits, args.mention)
+    named = ", ".join(sorted(set(credits.values()), key=str.lower))
 
     if args.dry_run:
         print(new_body)
         return 0
 
     if new_body == body:
-        print(
-            f"PR #{number}: credits already up to date ({len(credits)} contributor(s))."
-        )
+        print(f"PR #{number}: credits already up to date ({named or 'none'}).")
         return 0
 
     api.patch(f"/repos/{args.repo}/pulls/{number}", {"body": new_body})
     if credits:
-        named = ", ".join(f"@{credit.login}" for credit in credits)
         print(f"PR #{number}: credited {named}.")
     else:
-        print(f"PR #{number}: no outside contributors; removed stale credits block.")
+        print(f"PR #{number}: no outside contributors; cleared stale credits.")
     return 0
 
 

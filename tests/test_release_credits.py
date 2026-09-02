@@ -1,12 +1,12 @@
-"""Tests for ``scripts/release_credits.py`` — the release PR credits block.
+"""Tests for ``scripts/release_credits.py`` — inline release PR credits.
 
 ``.github/workflows/release-credits.yml`` runs this script against the live
 release PR with write access to its body, and there is no review step between
-the script and the published release notes. The failure modes that matters are
+the script and the published release notes. The failure modes that matter are
 therefore: crediting a maintainer (noise, and wrong), missing an outside
-contributor (the thing the script exists to prevent), and stacking duplicate
-blocks or rewriting an unchanged body (which re-notifies everyone mentioned on
-every release push). Each has a test below, driven through a fake API so no
+contributor (the thing the script exists to prevent), duplicating a credit on
+rerun, and — the explicit requirement — writing an ``@mention``, which is what
+would notify people. Each has a test below, driven through a fake API so no
 network is involved.
 """
 
@@ -39,8 +39,8 @@ def _load_credits_module():
     """Load the standalone script (it lives in ``scripts/``, not a package)."""
     spec = importlib.util.spec_from_file_location("release_credits", _SCRIPT)
     module = importlib.util.module_from_spec(spec)
-    # ``@dataclass`` resolves its annotations through ``sys.modules``, so the
-    # module has to be registered before it executes, not after.
+    # Annotations are resolved through ``sys.modules``, so the module has to be
+    # registered before it executes, not after.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
@@ -54,12 +54,14 @@ def _sha(seed: str) -> str:
     return (seed * 40)[:40]
 
 
+def _entry(sha: str, subject: str = "some change") -> str:
+    """One changelog bullet shaped like release-please's."""
+    return f"* {subject} ([{sha[:7]}](https://github.com/{_REPO}/commit/{sha}))"
+
+
 def _body(*shas: str) -> str:
     """A release PR body shaped like release-please's, linking ``shas``."""
-    entries = "\n".join(
-        f"* some change ([{sha[:7]}](https://github.com/{_REPO}/commit/{sha}))"
-        for sha in shas
-    )
+    entries = "\n".join(_entry(sha) for sha in shas)
     return (
         ":robot: I have created a release *beep* *boop*\n---\n\n\n"
         f"## [0.21.0](https://github.com/{_REPO}/compare/v0.20.1...v0.21.0)\n\n\n"
@@ -121,8 +123,7 @@ def _pull(
 
 def test_extracts_linked_shas_in_order_without_duplicates():
     one, two = _sha("a"), _sha("b")
-    body = _body(one, two, one)
-    assert rc.extract_commit_shas(body, _REPO) == [one, two]
+    assert rc.extract_commit_shas(_body(one, two, one), _REPO) == [one, two]
 
 
 def test_ignores_commit_links_to_other_repositories():
@@ -186,7 +187,7 @@ def test_falls_back_to_the_merged_pull_then_to_the_lowest_number():
     assert rc.choose_pull([], sha) is None
 
 
-# --- collect_credits ---------------------------------------------------------
+# --- resolve_credits ---------------------------------------------------------
 
 
 def test_credits_outside_contributors_and_skips_maintainers_and_bots():
@@ -198,31 +199,13 @@ def test_credits_outside_contributors_and_skips_maintainers_and_bots():
             bot: [_pull(199, "renovate[bot]", "CONTRIBUTOR", user_type="Bot")],
         }
     )
-    credits = rc.collect_credits(api, _body(outside, mine, bot), _REPO)
-    assert [(credit.login, credit.pulls) for credit in credits] == [("dimatx", (208,))]
-
-
-def test_groups_multiple_commits_and_pulls_per_contributor():
-    first, second, third = _sha("a"), _sha("b"), _sha("d")
-    api = FakeAPI(
-        pulls_for_sha={
-            first: [_pull(210, "dimatx")],
-            second: [_pull(205, "dimatx")],
-            third: [_pull(207, "someone-else")],
-        }
-    )
-    credits = rc.collect_credits(api, _body(first, second, third), _REPO)
-    # Ordered by each contributor's earliest PR, PRs ascending within a person.
-    assert [(credit.login, credit.pulls) for credit in credits] == [
-        ("dimatx", (205, 210)),
-        ("someone-else", (207,)),
-    ]
+    credits = rc.resolve_credits(api, _body(outside, mine, bot), _REPO)
+    assert credits == {outside: "dimatx"}
 
 
 def test_commit_without_an_associated_pull_is_skipped():
     sha = _sha("a")
-    api = FakeAPI(pulls_for_sha={sha: []})
-    assert rc.collect_credits(api, _body(sha), _REPO) == []
+    assert rc.resolve_credits(FakeAPI(pulls_for_sha={sha: []}), _body(sha), _REPO) == {}
 
 
 def test_missing_association_is_re_read_rather_than_assumed():
@@ -233,71 +216,89 @@ def test_missing_association_is_re_read_rather_than_assumed():
         pulls_for_sha={sha: [inline]},
         pulls_by_number={200: _pull(200, "deviantintegral", "MEMBER")},
     )
-    assert rc.collect_credits(api, _body(sha), _REPO) == []
+    assert rc.resolve_credits(api, _body(sha), _REPO) == {}
     assert f"/repos/{_REPO}/pulls/200" in api.gets
 
 
 def test_excluded_logins_are_treated_as_maintainers():
     sha = _sha("a")
     api = FakeAPI(pulls_for_sha={sha: [_pull(208, "DimaTX")]})
-    credits = rc.collect_credits(api, _body(sha), _REPO, frozenset({"dimatx"}))
-    assert credits == []
+    assert rc.resolve_credits(api, _body(sha), _REPO, frozenset({"dimatx"})) == {}
 
 
-# --- rendering and body rewriting -------------------------------------------
+# --- inline annotation -------------------------------------------------------
 
 
-def test_block_names_each_contributor_with_an_at_mention():
-    block = rc.render_block(
-        [rc.Credit("dimatx", (205, 210)), rc.Credit("someone-else", (207,))]
-    )
-    assert block.startswith(rc.BLOCK_START)
-    assert block.endswith(rc.BLOCK_END)
-    assert "* @dimatx — #205, #210" in block
-    assert "* @someone-else — #207" in block
+def test_credit_is_appended_to_the_line_of_its_own_commit():
+    mine, theirs = _sha("a"), _sha("b")
+    annotated = rc.annotate_body(_body(mine, theirs), _REPO, {theirs: "dimatx"})
+    lines = annotated.split("\n")
+    assert [line for line in lines if "thanks" in line] == [
+        _entry(theirs) + " (thanks [dimatx](https://github.com/dimatx)!)"
+    ]
+    # The maintainer's own line is left exactly as release-please wrote it.
+    assert _entry(mine) in lines
 
 
-def test_no_contributors_renders_nothing():
-    assert rc.render_block([]) == ""
+def test_default_credit_is_a_profile_link_and_never_an_at_mention():
+    sha = _sha("a")
+    annotated = rc.annotate_body(_body(sha), _REPO, {sha: "dimatx"})
+    assert "https://github.com/dimatx" in annotated
+    # An "@" anywhere in the body is the thing that would notify someone.
+    assert "@" not in annotated
 
 
-def test_block_is_appended_after_the_generated_body():
-    body = _body(_sha("a"))
-    block = rc.render_block([rc.Credit("dimatx", (208,))])
-    updated = rc.update_body(body, block)
-    assert updated.startswith(":robot:")
-    assert updated.endswith(block)
+def test_mention_style_is_opt_in():
+    sha = _sha("a")
+    annotated = rc.annotate_body(_body(sha), _REPO, {sha: "dimatx"}, mention=True)
+    assert "(thanks @dimatx!)" in annotated
 
 
-def test_rewriting_is_idempotent_rather_than_stacking_blocks():
-    body = _body(_sha("a"))
-    block = rc.render_block([rc.Credit("dimatx", (208,))])
-    once = rc.update_body(body, block)
-    twice = rc.update_body(once, block)
+def test_annotating_twice_does_not_repeat_the_credit():
+    sha = _sha("a")
+    credits = {sha: "dimatx"}
+    once = rc.annotate_body(_body(sha), _REPO, credits)
+    twice = rc.annotate_body(once, _REPO, credits)
     assert twice == once
-    assert twice.count(rc.BLOCK_START) == 1
+    assert once.count("thanks") == 1
 
 
-def test_a_stale_block_is_replaced_not_duplicated():
-    body = _body(_sha("a"))
-    stale = rc.update_body(body, rc.render_block([rc.Credit("old-name", (1,))]))
-    fresh = rc.update_body(stale, rc.render_block([rc.Credit("dimatx", (208,))]))
+def test_switching_between_styles_replaces_rather_than_stacks():
+    sha = _sha("a")
+    credits = {sha: "dimatx"}
+    linked = rc.annotate_body(_body(sha), _REPO, credits)
+    mentioned = rc.annotate_body(linked, _REPO, credits, mention=True)
+    assert mentioned.count("thanks") == 1
+    assert "(thanks @dimatx!)" in mentioned
+    assert rc.annotate_body(mentioned, _REPO, credits) == linked
+
+
+def test_a_stale_credit_is_replaced_with_the_current_author():
+    sha = _sha("a")
+    stale = rc.annotate_body(_body(sha), _REPO, {sha: "old-name"})
+    fresh = rc.annotate_body(stale, _REPO, {sha: "dimatx"})
     assert "old-name" not in fresh
-    assert "@dimatx" in fresh
-    assert fresh.count(rc.BLOCK_START) == 1
+    assert "dimatx" in fresh
+    assert fresh.count("thanks") == 1
 
 
-def test_dropping_the_last_contributor_removes_the_block():
-    body = _body(_sha("a"))
-    with_block = rc.update_body(body, rc.render_block([rc.Credit("dimatx", (208,))]))
-    assert rc.update_body(with_block, "") == body.rstrip()
+def test_dropping_a_contributor_clears_the_credit_from_the_line():
+    sha = _sha("a")
+    body = _body(sha)
+    credited = rc.annotate_body(body, _REPO, {sha: "dimatx"})
+    assert rc.annotate_body(credited, _REPO, {}) == body
+
+
+def test_lines_without_a_commit_link_are_untouched():
+    body = "### Features\n\nsome prose\n"
+    assert rc.annotate_body(body, _REPO, {_sha("a"): "dimatx"}) == body
 
 
 def test_carriage_returns_are_normalized_so_reruns_compare_equal():
-    body = _body(_sha("a"))
-    block = rc.render_block([rc.Credit("dimatx", (208,))])
-    once = rc.update_body(body, block)
-    assert rc.update_body(once.replace("\n", "\r\n"), block) == once
+    sha = _sha("a")
+    credits = {sha: "dimatx"}
+    once = rc.annotate_body(_body(sha), _REPO, credits)
+    assert rc.annotate_body(once.replace("\n", "\r\n"), _REPO, credits) == once
 
 
 # --- finding the release PR --------------------------------------------------
@@ -311,8 +312,8 @@ def test_release_pull_is_found_by_branch_prefix_or_label():
         "labels": [{"name": "autorelease: pending"}],
     }
     other = {"number": 212, "head": {"ref": "feature"}, "labels": []}
-    assert rc.find_release_pull(FakeAPI(open_pulls=[other, by_branch]), _REPO) == (
-        by_branch
+    assert (
+        rc.find_release_pull(FakeAPI(open_pulls=[other, by_branch]), _REPO) == by_branch
     )
     assert (
         rc.find_release_pull(FakeAPI(open_pulls=[other, by_label]), _REPO) == by_label
@@ -332,7 +333,7 @@ def _release_pull(number: int, body: str) -> dict[str, Any]:
     }
 
 
-def test_main_writes_the_credits_block_to_the_release_pull():
+def test_main_writes_inline_credits_to_the_release_pull():
     sha = _sha("a")
     api = FakeAPI(
         pulls_for_sha={sha: [_pull(208, "dimatx")]},
@@ -341,12 +342,13 @@ def test_main_writes_the_credits_block_to_the_release_pull():
     assert rc.main(["--repo", _REPO], api=api) == 0
     ((path, payload),) = api.patches
     assert path == f"/repos/{_REPO}/pulls/210"
-    assert "@dimatx — #208" in payload["body"]
+    assert "(thanks [dimatx](https://github.com/dimatx)!)" in payload["body"]
+    assert "@" not in payload["body"]
 
 
 def test_main_does_not_rewrite_an_unchanged_body():
     sha = _sha("a")
-    body = rc.update_body(_body(sha), rc.render_block([rc.Credit("dimatx", (208,))]))
+    body = rc.annotate_body(_body(sha), _REPO, {sha: "dimatx"})
     api = FakeAPI(
         pulls_for_sha={sha: [_pull(208, "dimatx")]},
         open_pulls=[_release_pull(210, body)],
@@ -369,7 +371,7 @@ def test_main_dry_run_prints_the_body_and_writes_nothing(capsys):
     )
     assert rc.main(["--repo", _REPO, "--pr", "210", "--dry-run"], api=api) == 0
     assert api.patches == []
-    assert "@dimatx — #208" in capsys.readouterr().out
+    assert "(thanks [dimatx](https://github.com/dimatx)!)" in capsys.readouterr().out
 
 
 def test_main_requires_a_repository():

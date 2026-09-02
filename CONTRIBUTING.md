@@ -64,12 +64,24 @@ commits and let release-please do it.
 release-please's changelog links commits, not people, so a separate workflow
 (`.github/workflows/release-credits.yml`, backed by `scripts/release_credits.py`)
 adds them back. After each release-please run it resolves every commit the
-release PR links to back to its pull request and appends an `@username` credits
-block for the authors who are not maintainers or bots, so contributors are named
-in the release notes and notified that their work is shipping. The block sits
-between HTML comment markers at the end of the PR body and is rewritten in place
-on each run, so you can leave it alone; edits inside the markers are overwritten.
-To preview or re-run it by hand:
+release PR links to back to its pull request and, when the author is neither a
+maintainer nor a bot, appends their name to that entry's own line in the PR
+description:
+
+```text
+* mark detect_wet as event_driven ([2eddd52](...)) (thanks [dimatx](https://github.com/dimatx)!)
+```
+
+The credit is a link to the contributor's profile rather than an `@mention` on
+purpose: a mention is what generates a notification, and this workflow is meant
+to be silent. It never comments, and editing a PR body notifies nobody.
+(`--mention` switches to `@login` if a notification is ever wanted.)
+
+Only the pull request description is annotated; `CHANGELOG.md` and the published
+release notes keep release-please's own wording. A credit already on a line is
+replaced rather than repeated, so the workflow can re-run freely and you can
+leave the lines alone — hand edits to them are overwritten. To preview or re-run
+it by hand:
 
 ```bash
 # Preview without writing (needs a token with repo read access).

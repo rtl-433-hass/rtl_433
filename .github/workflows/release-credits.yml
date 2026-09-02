@@ -1,20 +1,23 @@
 name: Release Credits
 
 # release-please's changelog links commits, never the people who wrote them, so
-# a community pull request ships in the release notes anonymously and its author
-# is never notified. After each Release run this appends an "@username" credits
-# block to the open release PR naming every contributor who is not a maintainer
-# (see scripts/release_credits.py for how "maintainer" is decided).
+# a community pull request ships in the release notes anonymously. After each
+# Release run this appends the author's name to that entry's own line in the
+# release PR description, for the authors who are not maintainers or bots (see
+# scripts/release_credits.py for how "maintainer" is decided).
+#
+# It is deliberately silent: the credit is a Markdown link to the contributor's
+# profile, not an "@mention", because a mention is precisely what would notify
+# them. Nothing here posts a comment, and editing a PR body notifies no one.
 #
 # It hangs off workflow_run rather than pull_request because the release PR only
 # ever changes as a result of the Release workflow: that is exactly when the
-# block needs recomputing, it re-runs even when release-please rewrites the body
+# credits need recomputing, it re-runs even when release-please rewrites the body
 # without touching the branch, and it keeps this job off fork PR events, where
 # GITHUB_TOKEN is read-only.
 #
-# The block is marker-delimited and rewritten in place, so repeated runs replace
-# it instead of stacking copies, and an unchanged body is not written at all (a
-# no-op PATCH could re-notify the mentioned contributors).
+# A credit already on a line is replaced rather than repeated, so repeated runs
+# are idempotent, and a body that would not change is not written at all.
 #
 # workflow_run only fires for the copy of this file on the default branch, so it
 # starts working once merged to main; use the workflow_dispatch trigger (with an
