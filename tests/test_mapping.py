@@ -808,12 +808,24 @@ def test_scmplus_consumption_key_is_camelcase(library):
     assert "Consumption" in registry.flat
 
 
-def test_lowercase_consumption_no_longer_ships():
-    """The old lowercase ``consumption`` key is gone from the shipped library.
+def test_neptune_r900_bare_consumption_ships():
+    """Bare lowercase ``consumption`` ships for Neptune-R900 flow meters.
 
-    Guards the rename: lookup is case-sensitive, so a stale lowercase entry would
-    silently shadow nothing and give SCMplus users an entity that never updates.
+    rtl_433's Neptune-R900 decoder emits its counter as ``consumption`` (no
+    suffix), distinct from ERT-SCM's ``consumption_data`` and SCMplus's
+    CamelCase ``Consumption``. Lookup is case-sensitive, so all three must
+    ship as separate keys that share the same unitless-counter shape and
+    ``object_suffix`` (entity ids line up across meter families).
     """
-    assert lookup("consumption") is None
-    # The SCM/ERT sibling keeps its own (genuinely lowercase) wire name.
+    descriptor = lookup("consumption")
+    assert descriptor is not None
+    assert descriptor.field_key == "consumption"
+    assert descriptor.platform == "sensor"
+    # Ships unitless; a real device_class/unit comes from a per-device calibration.
+    assert descriptor.device_class is None
+    assert descriptor.unit_of_measurement is None
+    assert descriptor.state_class == "total_increasing"
+    assert descriptor.object_suffix == "consumption"
+    # The two sibling spellings keep their own wire names.
+    assert lookup("Consumption") is not None
     assert lookup("consumption_data") is not None
