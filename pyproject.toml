@@ -159,3 +159,77 @@ pytest_add_cli_args_test_selection = ["tests/"]
 pytest_add_cli_args = ["-n0"]
 # custom_components/ has no __init__.py (namespace package); copy it only if present.
 also_copy = ["custom_components/__init__.py"]
+
+# Shared mutation CI tooling (https://github.com/rtl-433-hass/mutmut-ratchet).
+# These are the per-repo constants the deleted ``scripts/mutation_*.py`` helpers
+# used to hard-code: everything else (the tolerance band, the baseline/timings
+# paths) keeps the tool's defaults, which are the values those scripts used.
+[tool.mutmut_ratchet]
+package_path = "custom_components/rtl_433"
+# Changes to these escalate a scoped PR run to a full one: they can move results
+# package-wide, so scoping to the diff would not be sound.
+escalate_paths = [
+    "pyproject.toml",
+    "requirements_test.txt",
+    "tests/conftest.py",
+    ".github/workflows/mutation.yml",
+]
+
+# Tests whose filename does not map 1:1 to a source module via the
+# ``test[_mut]_<name>.py`` -> ``<name>.py`` convention, declared with the modules
+# they actually exercise so a PR touching them scopes instead of escalating.
+# Covers compound tests (``test_diagnostics_repairs`` -> diagnostics + repairs),
+# the ``coordinator`` package root, and the ``__init__`` root (the resolver
+# cannot reach ``__init__.py`` — there is no ``init.py``).
+#
+# Genuinely broad integration tests (``test_lifecycle.py`` drives the whole
+# config-entry setup across __init__, entity, and every platform) are
+# intentionally absent so they still escalate — a full run is correct when they
+# change. Values are module paths under ``custom_components/rtl_433/``. An entry
+# that under-specifies a test's modules is caught by the push-to-main + nightly
+# FULL runs (which re-verify the entire baseline), so it is a delayed catch,
+# never a silent floor blind spot.
+[tool.mutmut_ratchet.explicit_test_sources]
+"tests/test_coordinator.py" = ["coordinator/base.py"]
+"tests/test_mut_init.py" = ["__init__.py", "migration.py", "hub_settings.py"]
+"tests/test_config_flow.py" = ["config_flow.py", "options_flow.py"]
+"tests/test_mut_config_flow.py" = ["config_flow.py", "options_flow.py"]
+"tests/test_binary_sensor_motion.py" = ["binary_sensor.py", "event.py"]
+"tests/test_event_trace.py" = ["event.py"]
+"tests/test_diagnostics_repairs.py" = ["diagnostics.py", "repairs.py"]
+"tests/test_sdr_controls.py" = [
+    "number.py",
+    "select.py",
+    "switch.py",
+    "sdr_settings.py",
+]
+# The sdr_settings HA adapter mapping (``test_sdr_settings_adapter`` does not
+# auto-resolve to a source module via the naming convention).
+"tests/test_sdr_settings_adapter.py" = ["sdr_settings.py"]
+# The fixture mapping-coverage sweep: data-driven, and everything it exercises in
+# code (library loading plus descriptor resolution) now lives in
+# ``pyrtl_433.library``, which mutmut does not mutate. Mapped to an empty list so
+# touching it scopes to *no* source rather than escalating to a full run; the
+# library's own mutation gate lives in the pyrtl_433 repository.
+"tests/test_fixture_coverage.py" = []
+# Mutation-floor test files: their ``_floor`` suffix does not auto-resolve to a
+# source module via the naming convention, so each is mapped explicitly.
+"tests/test_mut_calibration_floor.py" = ["calibration.py"]
+"tests/test_mut_library_floor.py" = ["library.py"]
+"tests/test_mut_migration_floor.py" = ["migration.py"]
+# End-to-end migration round-trip identity tests: exercise the migration ladder
+# (``async_migrate_entry``) against seeded registries; the ``_roundtrip`` suffix
+# does not auto-resolve to a module.
+"tests/test_migration_roundtrip.py" = ["migration.py"]
+"tests/test_mut_repairs_floor.py" = ["repairs.py"]
+# The connection-backed availability gate: the coordinator half (the outage
+# clock, the gate itself, the repaint dispatch) plus every entity type that reads
+# it. ``hub_availability`` has no module of its own to auto-resolve to.
+"tests/test_hub_availability.py" = [
+    "coordinator/_watchdog.py",
+    "coordinator/base.py",
+    "entity.py",
+    "sensor.py",
+    "event.py",
+    "diagnostics.py",
+]

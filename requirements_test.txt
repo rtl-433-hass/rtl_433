@@ -28,5 +28,12 @@ pyrtl_433==0.3.0
 # Mutation testing. mutmut 3.x copies the package into a mutants/ working tree
 # and forks once per mutant, running the pytest suite with coverage-based test
 # selection. Configured under [tool.mutmut] in pyproject.toml; the CI mutation
-# workflow and scripts/mutation_ratchet.py depend on it.
+# workflow and mutmut-ratchet (below) depend on it.
 mutmut==3.7.0
+
+# The mutation CI gate: PR scoping, time-balanced sharding, per-file stats, and
+# the score ratchet. Shared with the pyrtl_433 repository, which is why it is a
+# package rather than the scripts/mutation_*.py helpers it replaced. Configured
+# under [tool.mutmut_ratchet] in pyproject.toml.
+# https://github.com/rtl-433-hass/mutmut-ratchet
+mutmut-ratchet>=0.1.0
