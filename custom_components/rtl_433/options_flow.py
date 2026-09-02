@@ -25,6 +25,13 @@ like, when a step aborts, and how the dialog closes.
   its own step so every default on the settings form can be derived from the
   selected device.
 - **mappings** edits this hub's device-library overrides as YAML.
+
+The sentinel rules behind those forms -- which submitted values mean "clear
+this", which mean "use the default and store nothing", and which of
+``entry.data`` / ``entry.options`` each lands in -- are not here. They live in
+:mod:`.settings`, because the discovery panel now offers the same three settings
+over the WebSocket API and a rule kept in two places is a rule that will
+eventually be two rules.
 - **replace** picks a device to keep, then **replace_target** picks the newly
   seen device that is really the same hardware, and re-keys the survivor onto it
   via :func:`~.device_replace.async_replace_device` (the battery-swap recovery).
@@ -41,9 +48,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from pyrtl_433.library import (
-    Registry,
-    lookup,
-    normalize_overrides,
     validate_user_mappings,
 )
 import voluptuous as vol
@@ -62,12 +66,7 @@ from homeassistant.helpers.selector import (
 from homeassistant.util import dt as dt_util
 
 from .adoption import async_adopt_devices, async_ignore_devices, async_unignore_devices
-from .calibration import (
-    COMMODITY_UNITS,
-    commodity_from_fields,
-    default_unit,
-    normalize_calibration,
-)
+from .calibration import COMMODITY_UNITS, default_unit, normalize_calibration
 from .const import (
     CALIBRATION_COMMODITIES,
     CALIBRATION_COMMODITY,
@@ -79,18 +78,26 @@ from .const import (
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_USER_MAPPINGS,
-    DATA_ENTRY_LIBRARY,
-    DEFAULT_AVAILABILITY_TIMEOUT,
-    DEFAULT_MANAGE_SETTINGS,
     DEFAULT_MOTION_CLEAR_DELAY,
     DEVICE_CALIBRATION,
-    DEVICE_FIELDS,
     DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
 from .device_replace import DeviceReplaceError, async_replace_device
 from .hub_settings import _hub_ignored_devices
+from .settings import (
+    MAPPINGS_DOCS_URL,
+    build_device_data,
+    build_device_options,
+    build_hub_options,
+    build_mappings_data,
+    device_clear_delay,
+    device_defaults,
+    device_label,
+    hub_defaults,
+    is_motion_bearing,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -106,12 +113,6 @@ CONF_DEVICE = "device"
 CONF_ADD_DEVICES = "add"
 CONF_IGNORE_DEVICES = "ignore"
 CONF_UNIGNORE_DEVICES = "unignore"
-
-# Documentation link for the Device-mappings step. Passed as a description
-# placeholder (hassfest forbids literal URLs in translation strings).
-MAPPINGS_DOCS_URL = (
-    "https://github.com/rtl-433-hass/rtl_433#device-library-and-user-overrides"
-)
 
 
 def _model_label(model: str, device_key: str) -> str:
@@ -388,20 +389,18 @@ class Rtl433OptionsFlow(OptionsFlow):
         re-acquiring it on every options save.
         """
         if user_input is not None:
-            options = dict(user_input)
-            if options.get(CONF_AVAILABILITY_TIMEOUT) == DEFAULT_AVAILABILITY_TIMEOUT:
-                options.pop(CONF_AVAILABILITY_TIMEOUT, None)
-            return self.async_create_entry(title="", data=options)
+            return self.async_create_entry(
+                title="",
+                data=build_hub_options(
+                    self.config_entry,
+                    user_input[CONF_AVAILABILITY_TIMEOUT],
+                    user_input[CONF_MANAGE_SETTINGS],
+                ),
+            )
 
-        entry = self.config_entry
-        timeout_default = entry.options.get(
-            CONF_AVAILABILITY_TIMEOUT,
-            entry.data.get(CONF_AVAILABILITY_TIMEOUT, DEFAULT_AVAILABILITY_TIMEOUT),
-        )
-        manage_default = entry.options.get(
-            CONF_MANAGE_SETTINGS,
-            entry.data.get(CONF_MANAGE_SETTINGS, DEFAULT_MANAGE_SETTINGS),
-        )
+        defaults = hub_defaults(self.config_entry)
+        timeout_default = defaults[CONF_AVAILABILITY_TIMEOUT]
+        manage_default = defaults[CONF_MANAGE_SETTINGS]
 
         schema = vol.Schema(
             {
@@ -438,10 +437,7 @@ class Rtl433OptionsFlow(OptionsFlow):
             else:
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
-                    data={
-                        **self.config_entry.data,
-                        CONF_USER_MAPPINGS: normalize_overrides(raw),
-                    },
+                    data=build_mappings_data(self.config_entry, raw),
                 )
                 return self.async_create_entry(
                     title="", data=dict(self.config_entry.options)
@@ -458,52 +454,6 @@ class Rtl433OptionsFlow(OptionsFlow):
             data_schema=schema,
             errors=errors,
             description_placeholders=placeholders,
-        )
-
-    def _device_commodity_default(self, device_key: str) -> str:
-        """Best-effort commodity pre-fill from the device's last decoded event.
-
-        Reads the running coordinator's most recent ``NormalizedEvent`` for the
-        device and derives a commodity hint from its ``MeterType`` / ``ert_type``
-        fields. Everything is guarded: a missing coordinator/event/field falls
-        back to ``none`` and never raises into the form render.
-        """
-        coordinator = self._coordinator()
-        event = getattr(coordinator, "devices", {}).get(device_key)
-        fields = getattr(event, "fields", None)
-        return commodity_from_fields(fields)
-
-    def _registry(self) -> Registry | None:
-        """Return this hub's merged device-library registry cached at setup.
-
-        The hub builds the shipped library + this hub's user overrides at setup
-        and caches ``(registry, skip_keys)`` per entry under
-        ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]``; reuse it so descriptor
-        lookups never re-read the YAML on the event loop. Returns ``None`` if the
-        hub has not finished loading (the conditional clear-delay field then
-        simply does not appear).
-        """
-        return (
-            self.hass.data.get(DOMAIN, {})
-            .get(DATA_ENTRY_LIBRARY, {})
-            .get(self.config_entry.entry_id, (None, None))[0]
-        )
-
-    def _is_motion_bearing(self, device_key: str) -> bool:
-        """Return ``True`` if the device has a field carrying a ``clear_delay``.
-
-        A device is "motion-bearing" iff any of its observed fields resolves
-        (model-scoped) to a descriptor with a truthy ``clear_delay`` -- i.e. a
-        motion/event binary_sensor that auto-clears. Only such devices expose the
-        per-device clear-delay knob.
-        """
-        record = self.config_entry.data.get(CONF_DEVICES, {}).get(device_key, {})
-        model = record.get(CONF_MODEL)
-        registry = self._registry()
-        return any(
-            (descriptor := lookup(field_key, model, registry)) is not None
-            and descriptor.clear_delay
-            for field_key in record.get(DEVICE_FIELDS, [])
         )
 
     def _write_device_record(
@@ -524,44 +474,37 @@ class Rtl433OptionsFlow(OptionsFlow):
         actually changed.
 
         The per-device motion clear-delay is persisted into ``entry.options``
-        instead (keyed by ``DEVICE_MOTION_CLEAR_DELAY``); setup copies that into
-        the device record. ``motion_clear_delay is None`` clears any prior
-        override (the field falls back to the descriptor default).
+        instead (keyed by ``DEVICE_MOTION_CLEAR_DELAY``), which
+        :func:`.settings.device_clear_delay` is the one reader of.
+        ``motion_clear_delay is None`` clears any prior override (the field falls
+        back to the descriptor default).
+
+        Both dicts are built by :mod:`.settings`, which the panel's WebSocket
+        commands build theirs with too. Only the *writing* differs, and it has to:
+        a flow persists options by finishing, and this one does exactly one
+        ``async_update_entry`` so a single save is a single reload.
         """
-        data = dict(self.config_entry.data)
-        new_devices = dict(data.get(CONF_DEVICES, {}))
-        record = dict(new_devices.get(device_key, {}))
-        if override is None:
-            # Blank submission clears the override (fall back to hub default).
-            record.pop(DEVICE_TIMEOUT_OVERRIDE, None)
-        else:
-            record[DEVICE_TIMEOUT_OVERRIDE] = override
-        if calibration is None:
-            record.pop(DEVICE_CALIBRATION, None)
-        else:
-            record[DEVICE_CALIBRATION] = calibration
-        new_devices[device_key] = record
-        data[CONF_DEVICES] = new_devices
-
-        self.hass.config_entries.async_update_entry(self.config_entry, data=data)
-
-        # The motion clear-delay lives in entry.options (setup copies it into the
-        # device record). Merge it into the per-device options sub-map; a blank
-        # submission clears the override.
-        options = dict(self.config_entry.options)
-        opt_devices = dict(options.get(CONF_DEVICES, {}))
-        opt_record = dict(opt_devices.get(device_key, {}))
-        if motion_clear_delay is None:
-            opt_record.pop(DEVICE_MOTION_CLEAR_DELAY, None)
-        else:
-            opt_record[DEVICE_MOTION_CLEAR_DELAY] = motion_clear_delay
-        if opt_record:
-            opt_devices[device_key] = opt_record
-        else:
-            opt_devices.pop(device_key, None)
-        options[CONF_DEVICES] = opt_devices
-
-        return self.async_create_entry(title="", data=options)
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data=build_device_data(
+                self.config_entry,
+                device_key,
+                override=override,
+                calibration=calibration,
+            ),
+        )
+        # ``async_create_entry`` *is* the options write for a flow, so the
+        # options half goes through it rather than through a second
+        # ``async_update_entry`` -- which would fire the update listener again
+        # and reload the hub twice for one save.
+        return self.async_create_entry(
+            title="",
+            data=build_device_options(
+                self.config_entry,
+                device_key,
+                motion_clear_delay=motion_clear_delay,
+            ),
+        )
 
     def _device_label(self, device_key: str, record: dict[str, Any]) -> str:
         """Human label for the device picker, annotated with a detected commodity.
@@ -571,11 +514,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         gas/water before choosing it -- the per-device calibration is otherwise
         easy to miss.
         """
-        label = f"{record.get(CONF_MODEL, device_key)} ({device_key})"
-        commodity = self._device_commodity_default(device_key)
-        if commodity != COMMODITY_NONE:
-            label = f"{label} — {commodity} detected"
-        return label
+        return device_label(self.hass, self.config_entry, device_key, record)
 
     async def async_step_device(
         self, user_input: dict[str, Any] | None = None
@@ -660,12 +599,9 @@ class Rtl433OptionsFlow(OptionsFlow):
         ]
         # Pre-fill the commodity from this device's existing calibration when it
         # has one, else from its decoded MeterType / ert_type hint.
-        existing = normalize_calibration(record.get(DEVICE_CALIBRATION))
-        commodity_default = (
-            existing[CALIBRATION_COMMODITY]
-            if existing is not None
-            else self._device_commodity_default(device_key)
-        )
+        commodity_default = device_defaults(self.hass, self.config_entry, device_key)[
+            CALIBRATION_COMMODITY
+        ]
         # ``suggested_value`` (not ``default``) so an emptied field still submits
         # as absent and clears the persisted override.
         schema_dict: dict[Any, Any] = {
@@ -686,12 +622,13 @@ class Rtl433OptionsFlow(OptionsFlow):
         # The clear-delay knob is only meaningful for motion-bearing devices
         # (those with a field whose descriptor carries a ``clear_delay``), so it
         # appears iff *this* device is one, pre-filled from its persisted override.
-        if self._is_motion_bearing(device_key):
+        if is_motion_bearing(self.hass, self.config_entry, device_key):
             schema_dict[
                 vol.Optional(
                     DEVICE_MOTION_CLEAR_DELAY,
-                    default=record.get(
-                        DEVICE_MOTION_CLEAR_DELAY, DEFAULT_MOTION_CLEAR_DELAY
+                    default=(
+                        device_clear_delay(self.config_entry, device_key)
+                        or DEFAULT_MOTION_CLEAR_DELAY
                     ),
                 )
             ] = vol.All(int, vol.Range(min=1))

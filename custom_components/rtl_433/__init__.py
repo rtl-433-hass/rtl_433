@@ -61,7 +61,6 @@ from .const import (
     CONF_USER_MAPPINGS,
     DATA_ENTRY_LIBRARY,
     DEFAULT_MOTION_CLEAR_DELAY,
-    DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     LOGGER,
@@ -85,6 +84,7 @@ from .migration import (
     _migrate_motion_event_to_binary_sensor,
     async_migrate_entry,
 )
+from .settings import device_clear_delay
 from .websocket_api import async_preload_entity_metadata, async_register_commands
 
 # Where the shipped ``frontend/`` directory is served from. Its own path rather
@@ -241,17 +241,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def effective_clear_delay_resolver(device_key: str) -> int:
         """Resolve a device's effective motion clear-delay (override > default).
 
-        Reads the per-device ``motion_clear_delay`` from the hub's devices map
-        (``entry.data[CONF_DEVICES][device_key]``); falls back to
-        ``DEFAULT_MOTION_CLEAR_DELAY`` when none is set.
+        Reads the per-device ``motion_clear_delay`` through
+        :func:`.settings.device_clear_delay`, which looks in ``entry.options``
+        before ``entry.data``; falls back to ``DEFAULT_MOTION_CLEAR_DELAY`` when
+        neither holds one.
+
+        Both locations have to be consulted because the two are written by
+        different eras of this integration. The migration from per-device child
+        entries lands the value in ``data``, which is the only place this
+        resolver used to look -- while every edit made through the settings UI
+        writes it to ``options``, where nothing read it. A clear-delay set by
+        hand therefore did nothing at all; consulting options first is what
+        makes that knob take effect, including for anyone who set one long ago
+        and assumed it had.
         """
-        override = (
-            entry.data.get(CONF_DEVICES, {})
-            .get(device_key, {})
-            .get(DEVICE_MOTION_CLEAR_DELAY)
-        )
+        override = device_clear_delay(entry, device_key)
         if override is not None:
-            return int(override)
+            return override
         return DEFAULT_MOTION_CLEAR_DELAY
 
     def new_device_callback(device_key: str, model: str, is_replay: bool) -> None:

@@ -173,6 +173,42 @@ async def test_per_device_override_drives_off(hass, hub_entry_builder):
 
 
 # --------------------------------------------------------------------------- #
+# A clear-delay saved through a settings form (entry.options) also takes effect.#
+# --------------------------------------------------------------------------- #
+async def test_options_clear_delay_drives_off(hass, hub_entry_builder):
+    """An override stored in ``entry.options`` drives the auto-off, not the default.
+
+    The two settings surfaces write this knob to ``entry.options[CONF_DEVICES]``
+    while the migration from per-device child entries writes it to
+    ``entry.data[CONF_DEVICES]``, and for a long time the resolver read only the
+    latter -- so every clear-delay a user set by hand was silently discarded and
+    the device kept the 90s default. Nothing failed: the value was persisted, the
+    form showed it back, and only the timer disagreed. This is the test that says
+    the stored value and the behaviour are the same thing.
+    """
+    override = 15  # much shorter than the 90s default
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices=_motion_devices(),
+        options={CONF_DEVICES: {_DEVICE_KEY: {DEVICE_MOTION_CLEAR_DELAY: override}}},
+    )
+    eid = _motion_eid(hass, hub)
+
+    start = dt_util.utcnow()
+    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).state == "on"
+
+    await _advance_to(hass, start, override - 5)
+    assert hass.states.get(eid).state == "on"
+
+    await _advance_to(hass, start, override + 2)
+    assert hass.states.get(eid).state == "off"
+    assert override + 2 < DEFAULT_MOTION_CLEAR_DELAY
+
+
+# --------------------------------------------------------------------------- #
 # Removing the entity with a timer pending must not write or raise later.      #
 # --------------------------------------------------------------------------- #
 async def test_remove_cancels_pending_timer(hass, hub_entry_builder):

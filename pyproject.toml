@@ -221,14 +221,26 @@ escalate_paths = [
 # it also asserts the panel + static-path registration that lives in
 # ``__init__.py``. The stem would auto-resolve to ``websocket_api.py`` alone,
 # which would under-scope the other two.
-"tests/test_websocket_api.py" = ["websocket_api.py", "adoption.py", "__init__.py"]
+"tests/test_websocket_api.py" = [
+    "websocket_api.py",
+    "adoption.py",
+    "settings.py",
+    "__init__.py",
+]
 # Static guard: reads both flow modules' source for the translation keys they can
 # render, so a mutated abort reason / error key / step id is caught by it as
 # surely as by a flow-driving test.
 "tests/test_translations.py" = ["config_flow.py", "options_flow.py"]
 "tests/test_mut_init.py" = ["__init__.py", "migration.py", "hub_settings.py"]
-"tests/test_config_flow.py" = ["config_flow.py", "options_flow.py"]
-"tests/test_mut_config_flow.py" = ["config_flow.py", "options_flow.py"]
+# ``settings.py`` holds the sentinel rules behind the hub / device / mapping
+# forms, and both the options flow and the panel's WebSocket commands are only
+# presentation over it -- so a change to either flow test has to reach it.
+"tests/test_config_flow.py" = ["config_flow.py", "options_flow.py", "settings.py"]
+"tests/test_mut_config_flow.py" = [
+    "config_flow.py",
+    "options_flow.py",
+    "settings.py",
+]
 "tests/test_binary_sensor_motion.py" = ["binary_sensor.py", "event.py"]
 "tests/test_event_trace.py" = ["event.py"]
 "tests/test_diagnostics_repairs.py" = ["diagnostics.py", "repairs.py"]
