@@ -41,8 +41,9 @@ package) the same way it imports ``_SdrStore`` from ``_sdr.py``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from pyrtl_433.normalizer import NormalizedEvent
 from pyrtl_433.replay import DISCOVERY_BACKLOG_GRACE
@@ -72,6 +73,14 @@ class PendingDevice:
     count: int
     first_seen: datetime
     last_seen: datetime
+    # Every field this device has reported since it was first heard, newest
+    # value winning. Not the same as ``event.fields``: a weather station splits
+    # its readings across transmissions (an Acurite-5n1 sends wind and
+    # temperature in one message and rainfall in another), so any single frame
+    # is a partial view of the device. Judging a candidate from one frame means
+    # judging it on whichever half happened to arrive last, and adopting from
+    # one means creating half its entities and waiting for the rest.
+    fields: dict[str, Any] = field(default_factory=dict)
 
     @property
     def signal(self) -> float | None:
@@ -224,6 +233,7 @@ class _EventProcessingMixin:
                 count=1,
                 first_seen=now,
                 last_seen=now,
+                fields=dict(normalized.fields),
             )
             LOGGER.info(
                 "rtl_433 heard a new device %s (model %s); add it from the hub's "
@@ -246,6 +256,10 @@ class _EventProcessingMixin:
         existing.model = normalized.model or existing.model
         existing.count += 1
         existing.last_seen = now
+        # Union rather than replace, so a device that splits its readings across
+        # transmissions accumulates into the whole picture instead of flickering
+        # between halves. A field seen again takes the newer value.
+        existing.fields.update(normalized.fields)
 
     def _maybe_register_device(
         self,

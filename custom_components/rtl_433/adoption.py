@@ -96,7 +96,7 @@ async def async_adopt_devices(
             entry,
             device_key,
             model=record.model,
-            fields=set(record.event.fields),
+            fields=set(record.fields),
         )
         result.applied.append(device_key)
 
