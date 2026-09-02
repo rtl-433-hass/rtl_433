@@ -659,9 +659,7 @@ async def test_add_creates_only_what_was_asked_for_and_reports_the_rest_skipped(
         assert _registry_device(hass, hub, key) is None
 
 
-async def test_an_ignored_device_is_still_named_by_its_model(
-    hass, hub, hass_ws_client
-):
+async def test_an_ignored_device_is_still_named_by_its_model(hass, hub, hass_ws_client):
     """The ignore list names the device, before and after it transmits again.
 
     The persisted list is bare keys, and an ignored device has no stored record
