@@ -62,6 +62,18 @@ supercap_V:
   entity_category: diagnostic
   object_suffix: V
 
+# Neptune-R900 flow meters emit their counter as bare `consumption` (no
+# suffix), distinct from ERT-SCM's `consumption_data` and SCMplus's
+# `Consumption` below. Same plain-integer-counter shape.
+consumption:
+  platform: sensor
+  device_class: null
+  unit_of_measurement: null
+  state_class: total_increasing
+  name: Consumption
+  value_transform: { int: true }
+  object_suffix: consumption
+
 # Utility meter consumption (SCM / ERT). Plain integer counter.
 consumption_data:
   platform: sensor

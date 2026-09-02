@@ -70,13 +70,14 @@ from custom_components.rtl_433.const import (
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
-from homeassistant.const import MATCH_ALL
+from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, MATCH_ALL
 from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 
 LEGACY_OBSERVED_FIELDS = "observed_fields"
 
@@ -595,6 +596,81 @@ async def test_restore_entity_restores_last_state(hass, hub_entry_builder):
     assert temp is not None
     # No live event was fed, so the value is the restored one.
     assert hass.states.get(temp).state == "19.9"
+
+
+async def test_restore_state_string_converts_from_the_displayed_unit(
+    hass, hub_entry_builder
+):
+    """Issue #135: a °F *displayed* value must not restore as a native °C value.
+
+    ``state.state`` is the value as displayed, so on a US-customary install a
+    native-°C temperature is persisted in °F. Restoring it verbatim re-injected
+    a 37 °F fridge reading as 37 °C -- an ~98.7 °F phantom spike on every reload
+    until the next live event corrected it. Only the state string is seeded here
+    (no extra data), which is the shape every build up to 0.19.3 left behind.
+    """
+    hass.config.units = US_CUSTOMARY_SYSTEM
+    device_key = "Acurite-606TX-42"
+    restore_entity_id = "sensor.acurite_606tx_42_temperature"
+
+    mock_restore_cache(
+        hass, (State(restore_entity_id, "37.0", {ATTR_UNIT_OF_MEASUREMENT: "°F"}),)
+    )
+
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+
+    ent_reg = er.async_get(hass)
+    temp = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:T"
+    )
+    assert temp is not None
+    # Comes back showing the same reading it was showing, not 98.6 °F.
+    assert hass.states.get(temp).state == "37.0"
+
+
+async def test_reload_keeps_the_displayed_temperature(hass, hub_entry_builder):
+    """Issue #135 end to end: reloading the entry must not move a °F reading.
+
+    The reporter's trigger was enabling a diagnostic entity, which reloads the
+    config entry and so tears every entity down and restores it.
+    """
+    hass.config.units = US_CUSTOMARY_SYSTEM
+    device_key = "Acurite-606TX-42"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+    _feed(
+        _coordinator(hass, hub),
+        {"model": "Acurite-606TX", "id": 42, "temperature_C": 2.77778},
+    )
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    temp = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:T"
+    )
+    before = hass.states.get(temp).state
+    assert before == "37.04"
+
+    assert await hass.config_entries.async_reload(hub.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(temp).state == before
 
 
 # --------------------------------------------------------------------------- #

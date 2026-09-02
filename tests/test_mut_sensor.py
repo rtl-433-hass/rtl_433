@@ -45,6 +45,7 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
     mock_restore_cache,
+    mock_restore_cache_with_extra_data,
 )
 
 from custom_components.rtl_433.const import (
@@ -69,13 +70,19 @@ from custom_components.rtl_433.sensor import (
     _frames,
     _gain,
     _meta,
+    _restorable_value,
 )
-from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorExtraStoredData,
+    SensorStateClass,
+)
 from homeassistant.const import UnitOfFrequency
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
 
 # ---------------------------------------------------------------------------
@@ -1974,3 +1981,266 @@ class TestDropStaleTemperatureUnitOverride:
         ):
             sensor._drop_stale_temperature_unit_override()
         registry.async_update_entity_options.assert_not_called()
+
+
+# ===========================================================================
+# _to_native_unit: the restore-time unit correction, exercised directly.
+#
+#     native_unit = self.native_unit_of_measurement
+#     if from_unit is None or native_unit is None or from_unit == native_unit:
+#         return value
+#     converter = UNIT_CONVERTERS.get(self.device_class)
+#     if converter is None:
+#         return value
+#     if (from_unit not in converter.VALID_UNITS
+#             or native_unit not in converter.VALID_UNITS):
+#         return value
+#     try:
+#         return converter.convert(float(value), from_unit, native_unit)
+#     except TypeError, ValueError:
+#         return value
+#
+# Every mutant here degrades one of two ways: a guard flips and the number is
+# handed back *unconverted*, or the ``convert`` call is mutilated and either
+# raises past the ``except`` or trips a TypeError the ``except`` swallows --
+# which again yields the unconverted number. So the first test pins the exact
+# converted result against the untouched input, and the pass-through guards are
+# pinned from the other side with a value a live converter would have moved.
+#
+# ``_pin_test_sensor`` builds a temperature sensor whose native unit is °F, so
+# "stored in °C" is the interesting direction here.
+# ===========================================================================
+
+
+class TestToNativeUnit:
+    """``Rtl433Sensor._to_native_unit`` -- restore-time unit correction."""
+
+    def test_converts_from_the_stored_unit(self):
+        """0 °C stored against a native-°F sensor comes back as 32 °F.
+
+        The workhorse: every mutant that short-circuits to the unconverted
+        value leaves 0.0 here instead of 32.0 -- ``native_unit`` nulled
+        (mutmut_1), each of the three first-guard comparisons inverted (4, 5,
+        6), the converter lookup nulled or mis-keyed (7, 8), the
+        ``converter is None`` guard inverted (9), either ``VALID_UNITS``
+        membership test inverted (11, 12), and every mutilated ``convert`` call
+        whose resulting TypeError the ``except`` swallows (13, 16, 17, 18, 19).
+        Mutants 14 and 15 pass ``None`` as a unit, which the converter rejects
+        outright.
+        """
+        sensor = _pin_test_sensor()
+        assert sensor._to_native_unit(0.0, "°C") == pytest.approx(32.0)
+
+    def test_matching_unit_is_handed_back_untouched(self):
+        """A value already in the native unit is returned as-is, not re-derived."""
+        sensor = _pin_test_sensor()
+        assert sensor._to_native_unit(21.5, "°F") == 21.5
+
+    def test_matching_unit_does_not_coerce_a_restored_string(self):
+        """The state-string fallback hands in a *str*; a no-op must keep it one.
+
+        ``last_state.state`` is always a string, and when the displayed unit
+        already is the native one there is nothing to convert -- so the value
+        goes through untouched, exactly as it did before this path learned to
+        convert. Kills mutmut_2, which re-associates the first guard's ``or``
+        into ``from_unit is None or (native_unit is None and from_unit ==
+        native_unit)``: the matching-unit case then falls through to a
+        same-unit ``convert(float(value), ...)`` -- an identity on the number
+        but not on its type, handing back 19.9 where the original returns
+        "19.9".
+        """
+        sensor = _pin_test_sensor()
+        assert sensor._to_native_unit("19.9", "°F") == "19.9"
+
+    def test_missing_stored_unit_is_handed_back_untouched(self):
+        """No stored unit means "already native" -- the 0.20.0 upgrade path."""
+        sensor = _pin_test_sensor()
+        assert sensor._to_native_unit(21.5, None) == 21.5
+
+    def test_unit_outside_the_converter_is_handed_back_untouched(self):
+        """A unit the converter does not know is passed through, not converted.
+
+        Kills mutmut_10 (the ``or`` between the two ``VALID_UNITS`` tests turned
+        into ``and``) and mutmut_11 (the first test inverted): both let the
+        unknown unit reach ``converter.convert``, which rejects it with a
+        HomeAssistantError the ``except TypeError, ValueError`` does not catch.
+        """
+        sensor = _pin_test_sensor()
+        assert sensor._to_native_unit(5.0, "furlongs") == 5.0
+
+    def test_device_class_without_a_converter_is_handed_back_untouched(self):
+        """A device class HA does not convert leaves the value alone.
+
+        Pins mutmut_9 from the other side: with no converter to be found, the
+        inverted ``converter is not None`` guard walks straight into
+        ``None.VALID_UNITS``.
+        """
+        sensor = _pin_test_sensor("aqi")
+        assert sensor._to_native_unit(5.0, "°C") == 5.0
+
+    def test_non_numeric_value_is_handed_back_untouched(self):
+        """``float()`` failing is caught, not raised at the caller."""
+        sensor = _pin_test_sensor()
+        assert sensor._to_native_unit("not-a-number", "°C") == "not-a-number"
+        assert sensor._to_native_unit(None, "°C") is None
+
+
+# ===========================================================================
+# _async_restore_state, the extra-data branch:
+#
+#     extra = await self.async_get_last_extra_data()
+#     if extra is not None:
+#         stored = extra.as_dict()
+#         sensor_data = SensorExtraStoredData.from_dict(stored)
+#         if sensor_data is not None:
+#             value = sensor_data.native_value
+#             unit = sensor_data.native_unit_of_measurement
+#         else:
+#             value = stored.get("native_value")
+#             unit = None
+#         if value is not None:
+#             self._attr_native_value = self._to_native_unit(value, unit)
+#             return
+#
+# This is the branch that survives a restart taken while the entity was
+# unavailable: Home Assistant persists the *state* as "unavailable", which the
+# last_state guard below then drops, so the value can only come back through the
+# extra data. Both tests therefore pin the extra data against an "unavailable"
+# persisted state that the fallback path could not have produced, and pick a
+# stored unit that differs from the entity's native one so a skipped conversion
+# is visible as a wrong number rather than a missing one.
+# ===========================================================================
+
+
+async def test_restore_extra_data_converts_from_the_stored_native_unit(
+    hass, hub_entry_builder
+):
+    """A native value stored in °F is restored into the entity's native °C.
+
+    The stored unit is what makes the number meaningful: a device-library change
+    to a field's native unit (or, historically, data written under a different
+    one) must not have the old number silently reinterpreted. 37 °F is 2.78 °C,
+    so a skipped conversion shows up as a ~37 °C reading.
+
+    Kills the extra-data mutants that fall through to the dropped "unavailable"
+    state and leave the sensor unknown -- ``extra`` nulled (mutmut_2), the
+    ``extra is not None`` guard inverted (3), ``value`` nulled (8), the
+    ``value is not None`` guard inverted (15), the assignment nulled (16) and
+    the ``_to_native_unit`` call stripped of its value argument (17, 19) -- plus
+    those that reach the value but skip the conversion, leaving 37 °C instead of
+    2.78: ``stored`` nulled (4), ``sensor_data`` nulled or fed ``None`` (5, 6),
+    the ``sensor_data is not None`` guard inverted (7), ``unit`` nulled (9) and
+    the unit argument dropped (18, 20).
+    """
+    device_key = "Acurite-606TX-42"
+    restore_entity_id = "sensor.acurite_606tx_42_temperature"
+
+    mock_restore_cache_with_extra_data(
+        hass,
+        (
+            (
+                State(restore_entity_id, "unavailable"),
+                SensorExtraStoredData(37.0, "°F").as_dict(),
+            ),
+        ),
+    )
+
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+
+    ent_reg = er.async_get(hass)
+    temp_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:T"
+    )
+    assert temp_eid is not None
+    assert float(hass.states.get(temp_eid).state) == pytest.approx(2.78, abs=0.05)
+
+
+async def test_restore_extra_data_reads_the_0_20_0_unitless_shape(
+    hass, hub_entry_builder
+):
+    """0.20.0 wrote a bare ``native_value`` with no unit; it is still read.
+
+    ``SensorExtraStoredData.from_dict`` rejects that shape (it has no
+    ``native_unit_of_measurement`` key), so the value is dug out by hand and
+    taken as already native. Kills the else-branch mutants, all of which lose
+    the value and leave the sensor unknown behind the dropped "unavailable"
+    state: ``value`` nulled (mutmut_10) and each corruption of the ``get`` key
+    (11, 12, 13).
+    """
+    device_key = "Acurite-606TX-42"
+    restore_entity_id = "sensor.acurite_606tx_42_temperature"
+
+    mock_restore_cache_with_extra_data(
+        hass,
+        (
+            (
+                State(restore_entity_id, "unavailable"),
+                RestoredExtraData({"native_value": 19.9}).as_dict(),
+            ),
+        ),
+    )
+
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+
+    ent_reg = er.async_get(hass)
+    temp_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:T"
+    )
+    assert temp_eid is not None
+    assert float(hass.states.get(temp_eid).state) == pytest.approx(19.9)
+
+
+def test_restorable_value_stringifies_a_non_json_scalar():
+    """A value the restore store cannot hold is persisted as its own ``str``.
+
+    ``extra_restore_state_data`` runs every native value through this before
+    handing it to the restore store, so the stringification has to carry the
+    reading -- kills mutmut_1, which stringifies ``None`` and would persist the
+    literal "None" in place of every non-scalar value.
+    """
+    moment = dt_util.utcnow()
+    assert _restorable_value(moment) == str(moment)
+    assert _restorable_value(moment) != "None"
+
+
+def test_sensor_force_update_comes_from_the_descriptor():
+    """``force_update`` is taken from the descriptor, not hard-coded.
+
+    A field that re-reports an unchanged value still has to raise a state
+    event (a rain gauge sitting at the same total, say), which is what
+    ``force_update`` buys. Kills mutmut_22, which nulls the attribute and so
+    silently drops those repeat events.
+    """
+    descriptor = FieldDescriptor(
+        field_key="rain_mm",
+        platform="sensor",
+        name=None,
+        object_suffix="rain",
+        device_class="precipitation",
+        unit_of_measurement="mm",
+        state_class="total_increasing",
+        force_update=True,
+    )
+    coordinator = MagicMock()
+    coordinator.devices = {}
+    coordinator.last_seen = {}
+    sensor = Rtl433Sensor(coordinator, "hub", "dev", "Acurite-899", descriptor)
+    assert sensor.force_update is True
