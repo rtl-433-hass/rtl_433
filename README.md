@@ -20,8 +20,8 @@ them, with no cloud dependency and no polling.
 - Add one hub per rtl_433 server; decoded RF devices appear as nested Home
   Assistant devices under that hub.
 - Device support is data-driven through a YAML
-  [device library](docs/device-library.md), with per-hub user overrides available
-  from the Home Assistant options flow.
+  [device library](docs/device-library.md) shipped by the `pyrtl_433` dependency,
+  with per-hub user overrides available from the Home Assistant options flow.
 - Supports automatic device discovery, class-aware availability, Last seen
   timestamps, momentary event entities, synthesized-off motion sensors, and
   utility-meter calibration.
@@ -60,5 +60,6 @@ guides for the full setup flow.
 
 - [Documentation source](docs/index.md)
 - [Contributing guide](CONTRIBUTING.md)
-- [Device-library reference](docs/device-library.md)
+- [Device-library guide](docs/device-library.md) (schema reference:
+  [pyrtl_433](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/))
 - [Issue tracker](https://github.com/rtl-433-hass/rtl_433/issues)
