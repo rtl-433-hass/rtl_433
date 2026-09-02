@@ -376,3 +376,47 @@ def test_main_dry_run_prints_the_body_and_writes_nothing(capsys):
 
 def test_main_requires_a_repository():
     assert rc.main(["--repo", ""], api=FakeAPI()) == 2
+
+
+def test_credit_lands_on_the_credited_commit_when_a_line_links_two():
+    """A line citing a second commit (a revert, a follow-up) keeps its credit.
+
+    Only the *first* link used to be consulted, so an entry whose credited commit
+    was cited second silently lost its contributor.
+    """
+    first, second = _sha("b"), _sha("c")
+    line = (
+        f"* revert ([{first[:7]}](https://github.com/{_REPO}/commit/{first}))"
+        f" reverts ([{second[:7]}](https://github.com/{_REPO}/commit/{second}))"
+    )
+    annotated = rc.annotate_body(line, _REPO, {second: "dimatx"})
+    assert annotated == line + " (thanks [dimatx](https://github.com/dimatx)!)"
+
+
+def test_main_does_not_rewrite_a_crlf_body_that_is_already_credited():
+    """GitHub hands back CRLF for any body a human has touched in the web UI.
+
+    ``annotate_body`` emits LF, so without normalizing the body first it looks
+    changed on every run and the workflow PATCHes it — and logs a fresh credit —
+    each time the Release workflow completes.
+    """
+    sha = _sha("a")
+    body = rc.annotate_body(_body(sha), _REPO, {sha: "dimatx"}).replace("\n", "\r\n")
+    api = FakeAPI(
+        pulls_for_sha={sha: [_pull(208, "dimatx")]},
+        open_pulls=[_release_pull(210, body)],
+    )
+    assert rc.main(["--repo", _REPO], api=api) == 0
+    assert api.patches == []
+
+
+def test_main_fails_loudly_when_the_requested_pull_does_not_exist():
+    """``--pr`` on a number the API has nothing for must not crash on ``None``."""
+
+    class MissingPullAPI(FakeAPI):
+        def get(self, path: str) -> Any:
+            return None
+
+    api = MissingPullAPI()
+    assert rc.main(["--repo", _REPO, "--pr", "999"], api=api) == 1
+    assert api.patches == []

@@ -21,8 +21,11 @@ switches to a real ``@login`` for anyone who *wants* the notification. Nothing
 here ever posts a comment, and editing a PR body does not notify its subscribers,
 so the default run is silent.
 
-Only the PR description is touched; ``CHANGELOG.md`` and the published release
-notes keep release-please's own wording.
+Only the PR description is touched, so ``CHANGELOG.md`` keeps release-please's
+own wording. Note that the *published GitHub Release* notes are built by
+release-please from the merged release PR's body, so whatever credits are on it
+at merge time do carry through to the release — which is why ``--mention`` is
+not the default: an ``@login`` there would notify.
 
 "Maintainer" is decided by the pull request's GitHub ``author_association``:
 ``OWNER``, ``MEMBER`` and ``COLLABORATOR`` are maintainers (people who can push
@@ -215,8 +218,17 @@ def annotate_body(
     lines = []
     for raw_line in (body or "").replace("\r\n", "\n").split("\n"):
         line = CREDIT_SUFFIX_RE.sub("", raw_line)
-        match = link_re.search(line)
-        login = credits.get(match.group(1).lower()) if match else None
+        # Every link on the line is considered, not just the first: an entry that
+        # cites a second commit (a revert, a follow-up) would otherwise lose its
+        # credit to whichever link happened to come first.
+        login = next(
+            (
+                credited
+                for match in link_re.finditer(line)
+                if (credited := credits.get(match.group(1).lower()))
+            ),
+            None,
+        )
         lines.append(line + render_credit(login, mention) if login else line)
     return "\n".join(lines)
 
@@ -252,8 +264,19 @@ class _RestAPI:
 
 
 def find_release_pull(api: GitHubAPI, repo: str) -> dict[str, Any] | None:
-    """Return the open release-please PR, or None when no release is pending."""
-    pulls = api.get(f"/repos/{repo}/pulls?state=open&per_page=100") or []
+    """Return the open release-please PR, or None when no release is pending.
+
+    Sorted by most-recently-updated because only the first page is read: the
+    release PR is rewritten on every Release run, so it is always near the top,
+    whereas the default (newest-created first) would push a long-lived release PR
+    off the page on a repo carrying 100+ open dependency PRs.
+    """
+    pulls = (
+        api.get(
+            f"/repos/{repo}/pulls?state=open&per_page=100&sort=updated&direction=desc"
+        )
+        or []
+    )
     for pull in pulls:
         head_ref = str((pull.get("head") or {}).get("ref", ""))
         labels = {str(label.get("name", "")) for label in pull.get("labels") or []}
@@ -315,9 +338,16 @@ def main(argv: list[str] | None = None, api: GitHubAPI | None = None) -> int:
             return 0
     else:
         pull = api.get(f"/repos/{args.repo}/pulls/{args.pr}")
+        if not pull:
+            print(f"::error::PR #{args.pr} not found in {args.repo}", file=sys.stderr)
+            return 1
 
     number = int(pull["number"])
-    body = pull.get("body") or ""
+    # Normalized up front so the "did the body change?" check below compares like
+    # with like: GitHub hands back CRLF for any body a human has touched in the
+    # web UI, and ``annotate_body`` emits LF, which would otherwise look like a
+    # change on every single run.
+    body = (pull.get("body") or "").replace("\r\n", "\n")
     exclude = frozenset(
         part.strip() for part in str(args.exclude).split(",") if part.strip()
     )

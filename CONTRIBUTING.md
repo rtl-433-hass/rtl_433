@@ -77,11 +77,13 @@ purpose: a mention is what generates a notification, and this workflow is meant
 to be silent. It never comments, and editing a PR body notifies nobody.
 (`--mention` switches to `@login` if a notification is ever wanted.)
 
-Only the pull request description is annotated; `CHANGELOG.md` and the published
-release notes keep release-please's own wording. A credit already on a line is
-replaced rather than repeated, so the workflow can re-run freely and you can
-leave the lines alone — hand edits to them are overwritten. To preview or re-run
-it by hand:
+Only the pull request description is annotated, so `CHANGELOG.md` keeps
+release-please's own wording. The published GitHub Release notes are a different
+matter: release-please builds them from the merged release PR's body, so credits
+sitting on it at merge time do ship with the release — another reason
+`--mention` is not the default. A credit already on a line is replaced rather
+than repeated, so the workflow can re-run freely and you can leave the lines
+alone — hand edits to them are overwritten. To preview or re-run it by hand:
 
 ```bash
 # Preview without writing (needs a token with repo read access).
