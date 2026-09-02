@@ -490,6 +490,105 @@ async def test_a_field_with_no_library_mapping_is_not_previewed(
     assert "not_a_real_field" not in readings
 
 
+async def test_replace_repoints_an_existing_device_onto_a_candidate(
+    hass, hub, hass_ws_client
+):
+    """The battery-swap recovery, driven from the candidate the user is looking at.
+
+    ``device_key`` is the new transmitter id heard on the air and ``replaces``
+    is the device already in Home Assistant whose history should survive, which
+    is the inverse of :func:`async_replace_device`'s own argument order -- so
+    this pins the mapping, not just the outcome. A silent swap of the two would
+    re-key the wrong device and strand exactly the history the feature exists to
+    keep.
+    """
+    client = await hass_ws_client(hass)
+    await _call(
+        client,
+        {
+            "type": "rtl_433/devices/add",
+            "entry_id": hub.entry_id,
+            "device_keys": [_OLD_KEY],
+        },
+    )
+    await hass.async_block_till_done()
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/devices/replace",
+            "entry_id": hub.entry_id,
+            "device_key": _NEW_KEY,
+            "replaces": _OLD_KEY,
+        },
+    )
+
+    assert reply["success"]
+    assert reply["result"] == {"replaced": _OLD_KEY}
+    # The survivor now lives under the candidate's key, and the old one is gone.
+    stored = hub.data[CONF_DEVICES]
+    assert _NEW_KEY in stored
+    assert _OLD_KEY not in stored
+
+
+async def test_replace_reports_a_refused_request_as_an_error(
+    hass, hub, hass_ws_client
+):
+    """A replace the helper refuses comes back as an error, not a traceback.
+
+    A panel is held open across reloads and adoptions, so asking to replace a
+    device that is no longer there is an ordinary stale-UI outcome. It carries
+    its own error code so a caller can tell it from "the hub is not loaded",
+    which is retryable and this is not.
+    """
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/devices/replace",
+            "entry_id": hub.entry_id,
+            "device_key": _NEW_KEY,
+            "replaces": "Nothing-Like-This-99",
+        },
+    )
+
+    assert not reply["success"]
+    assert reply["error"]["code"] == "replace_failed"
+
+
+async def test_the_payload_lists_the_devices_a_candidate_could_replace(
+    hass, hub, hass_ws_client
+):
+    """The hub's own devices ride along with the candidates.
+
+    The replace dialog is built from this list, and it travels in the same
+    payload as the cards so the two halves of "which of these is the same
+    hardware?" can never disagree about what the hub has.
+    """
+    client = await hass_ws_client(hass)
+    await _call(
+        client,
+        {
+            "type": "rtl_433/devices/add",
+            "entry_id": hub.entry_id,
+            "device_keys": [_OLD_KEY],
+        },
+    )
+    await hass.async_block_till_done()
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+
+    devices = {row["key"]: row for row in reply["result"]["devices"]}
+    assert _OLD_KEY in devices
+    assert devices[_OLD_KEY]["model"] == "Acurite-606TX"
+    # An adopted device is no longer a candidate, so it appears in exactly one
+    # of the two lists.
+    assert _OLD_KEY not in {row["key"] for row in reply["result"]["pending"]}
+
+
 # --------------------------------------------------------------------------- #
 # The three actions.                                                          #
 # --------------------------------------------------------------------------- #
