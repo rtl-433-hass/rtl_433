@@ -59,6 +59,41 @@ Releases are automated with
 You do not edit the changelog or bump versions by hand — write good conventional
 commits and let release-please do it.
 
+### Contributor credits
+
+release-please's changelog links commits, not people, so a separate workflow
+(`.github/workflows/release-credits.yml`, backed by `scripts/release_credits.py`)
+adds them back. After each release-please run it resolves every commit the
+release PR links to back to its pull request and, when the author is neither a
+maintainer nor a bot, appends their name to that entry's own line in the PR
+description:
+
+```text
+* mark detect_wet as event_driven ([2eddd52](...)) (thanks [dimatx](https://github.com/dimatx)!)
+```
+
+The credit is a link to the contributor's profile rather than an `@mention` on
+purpose: a mention is what generates a notification, and this workflow is meant
+to be silent. It never comments, and editing a PR body notifies nobody.
+(`--mention` switches to `@login` if a notification is ever wanted.)
+
+Only the pull request description is annotated, so `CHANGELOG.md` keeps
+release-please's own wording. The published GitHub Release notes are a different
+matter: release-please builds them from the merged release PR's body, so credits
+sitting on it at merge time do ship with the release — another reason
+`--mention` is not the default. A credit already on a line is replaced rather
+than repeated, so the workflow can re-run freely and you can leave the lines
+alone — hand edits to them are overwritten. To preview or re-run it by hand:
+
+```bash
+# Preview without writing (needs a token with repo read access).
+GITHUB_TOKEN=... python3 scripts/release_credits.py --repo rtl-433-hass/rtl_433 \
+  --pr <number> --dry-run
+```
+
+The workflow also has a `workflow_dispatch` trigger that takes an optional PR
+number, for re-running it against the current release PR from the Actions tab.
+
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management and
 for running tools, the same as CI. Install it with
 `curl -LsSf https://astral.sh/uv/install.sh | sh` (see the uv docs for other
