@@ -88,10 +88,19 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
     "tests/test_websocket_api.py": [
         "websocket_api.py",
         "adoption.py",
+        "settings.py",
         "__init__.py",
     ],
-    "tests/test_config_flow.py": ["config_flow.py", "options_flow.py"],
-    "tests/test_mut_config_flow.py": ["config_flow.py", "options_flow.py"],
+    # ``settings.py`` holds the sentinel rules behind the hub / device / mapping
+    # forms, and both the options flow and the panel's WebSocket commands are
+    # only presentation over it -- so a change to either flow test has to be able
+    # to reach it.
+    "tests/test_config_flow.py": ["config_flow.py", "options_flow.py", "settings.py"],
+    "tests/test_mut_config_flow.py": [
+        "config_flow.py",
+        "options_flow.py",
+        "settings.py",
+    ],
     # Static guard: reads both flow modules' source for the translation keys
     # they can render, so a mutated abort reason / error key / step id is caught
     # by it as surely as by a flow-driving test.
