@@ -28,7 +28,7 @@ hub-identity refresh, and the ``signal_hub_update`` dispatch). The library clien
 does not own the managed-SDR policy or the availability watchdog, so those are
 driven here off the connect edge and a HA time-interval respectively.
 
-Decoupling: the coordinator imports nothing from ``mapping.py``,
+Decoupling: the coordinator imports nothing from ``library.py``,
 ``config_flow.py``, or ``entity.py``. To stay file-disjoint and cycle-free it
 accepts the pieces it needs as injectable attributes:
 

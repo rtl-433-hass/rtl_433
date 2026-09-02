@@ -28,6 +28,8 @@ in :mod:`.migration`; this module keeps only the steady-state lifecycle.
 
 from __future__ import annotations
 
+from pyrtl_433.library import event_driven_field_keys
+
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -64,7 +66,6 @@ from .hub_settings import (
     _hub_secure,
 )
 from .library import _async_load_library, _merge_entry_library
-from .mapping import event_driven_field_keys
 from .migration import (
     _cleanup_phantom_unknown_device,
     _migrate_motion_event_to_binary_sensor,

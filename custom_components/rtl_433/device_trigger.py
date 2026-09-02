@@ -184,7 +184,8 @@ def _device_field_from_unique_id(
     The unique_id is ``f"{hub_entry_id}:{device_key}:{object_suffix}"``
     (``entity.py``); the ``device_key`` never contains a colon (it is built from
     safe tokens, ``normalizer.device_key``) and an event field's
-    ``object_suffix`` equals its ``field_key`` (``device_library/events.yaml``).
+    ``object_suffix`` equals its ``field_key`` (``pyrtl_433.library``'s
+    ``events.yaml``).
     """
     if not unique_id:
         return None, None

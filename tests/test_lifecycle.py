@@ -2033,8 +2033,9 @@ async def test_per_hub_user_mappings_isolated_in_entry_library(hass, hub_entry_b
     private field. The two cached registries must resolve independently — an
     override on hub A does not affect hub B's lookups, and vice versa.
     """
+    from pyrtl_433.library import lookup
+
     from custom_components.rtl_433.const import CONF_USER_MAPPINGS, DATA_ENTRY_LIBRARY
-    from custom_components.rtl_433.mapping import lookup
 
     async def _hub_with_mappings(host, port, mappings):
         entry = hub_entry_builder(host=host, port=port)

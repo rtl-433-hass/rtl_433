@@ -37,6 +37,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+from pyrtl_433.library import FieldDescriptor, Registry
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -76,7 +77,6 @@ from custom_components.rtl_433.const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
-from custom_components.rtl_433.mapping import FieldDescriptor, Registry
 from custom_components.rtl_433.options_flow import CONF_DEVICE
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
@@ -1393,7 +1393,7 @@ async def test_device_step_motion_bearing_shows_clear_delay_field(
     hass, hub_entry_builder
 ):
     """When a motion-bearing device is in the hub, clear-delay field appears."""
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     device_key = "Motion-1"
     field_key = "motion"
@@ -1432,7 +1432,7 @@ async def test_device_step_clear_delay_default_is_constant_multi_device(
     The picker is its own step, so the default reflects the *selected* device;
     ``dev_a`` has no stored override, so the constant is used.
     """
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     dev_a = "Motion-A"
@@ -1475,7 +1475,7 @@ async def test_device_step_clear_delay_prefill_from_single_device_record(
     hass, hub_entry_builder
 ):
     """With one motion-bearing device, clear-delay is pre-filled from the device record."""
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Motion-Solo"
@@ -1515,7 +1515,7 @@ async def test_device_step_clear_delay_prefill_default_when_no_stored(
     hass, hub_entry_builder
 ):
     """With one motion-bearing device and no stored delay, prefill uses DEFAULT."""
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Motion-Solo2"
@@ -1558,7 +1558,7 @@ async def test_device_step_clear_delay_prefill_default_when_no_stored(
 
 async def test_write_device_record_motion_delay_set_in_options(hass, hub_entry_builder):
     """motion_clear_delay is stored in entry.options[CONF_DEVICES][device_key]."""
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Motion-opt-1"
@@ -1595,7 +1595,7 @@ async def test_write_device_record_motion_delay_not_in_entry_data(
     hass, hub_entry_builder
 ):
     """motion_clear_delay submission does NOT appear in entry.data[devices]."""
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Motion-data-1"
@@ -1664,7 +1664,7 @@ async def test_write_device_record_motion_delay_cleared_removes_opt_record(
 
 async def test_write_device_record_options_devices_key_written(hass, hub_entry_builder):
     """options[CONF_DEVICES] is written (not left absent) when motion delay set."""
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Motion-opts-key"
@@ -1706,7 +1706,7 @@ async def test_calibration_step_motion_delay_carried_and_written(
     hass, hub_entry_builder
 ):
     """motion_clear_delay from the device step is carried through calibration."""
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Cal-motion-1"
@@ -1951,7 +1951,7 @@ async def test_device_step_commodity_prefill_energy_from_electric_meter_type(
 
 async def test_is_motion_bearing_model_scoped_descriptor(hass, hub_entry_builder):
     """_is_motion_bearing uses model-scoped lookup and finds clear_delay."""
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     model = "MotionModel"
@@ -1987,7 +1987,7 @@ async def test_is_motion_bearing_false_when_descriptor_no_clear_delay(
     hass, hub_entry_builder
 ):
     """_is_motion_bearing returns False when descriptor has no clear_delay."""
-    from custom_components.rtl_433.mapping import FieldDescriptor, Registry
+    from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "temperature_C"
     device_key = "NonMotion-1"

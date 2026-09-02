@@ -8,7 +8,8 @@ descriptor ``platform == "binary_sensor"`` (battery, tamper, contact/reed,
 alarm, leak), adds new devices/fields at runtime, and keeps the hub's devices
 map current.
 
-Raw values are converted to ``True``/``False`` via ``mapping.apply_transform``,
+Raw values are converted to ``True``/``False`` via
+``pyrtl_433.library.apply_transform``,
 which applies the descriptor's ``payload`` mapping including the ``battery_ok``
 inversion.
 """
@@ -16,6 +17,8 @@ inversion.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+
+from pyrtl_433.library import apply_transform
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -30,11 +33,11 @@ from homeassistant.helpers.restore_state import RestoredExtraData
 
 from .const import DOMAIN
 from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
-from .mapping import apply_transform
 
 if TYPE_CHECKING:
+    from pyrtl_433.library import FieldDescriptor
+
     from .coordinator import Rtl433Coordinator
-    from .mapping import FieldDescriptor
 
 # This platform owns only descriptors whose ``platform`` attribute equals this.
 PLATFORM = "binary_sensor"

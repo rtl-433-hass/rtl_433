@@ -23,7 +23,7 @@ pre-extraction behaviour.
 
 It imports only from the standard library, Home Assistant helpers, and
 ``pyrtl_433.sdr`` — never from ``coordinator/*``, ``entity``, or the platform
-modules — mirroring how ``mapping.py`` sits import-disjoint below them.
+modules — mirroring how ``pyrtl_433.library`` sits import-disjoint below them.
 """
 
 from __future__ import annotations

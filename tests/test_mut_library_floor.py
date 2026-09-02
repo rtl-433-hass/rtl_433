@@ -17,11 +17,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from pyrtl_433.library import FieldDescriptor, Registry
 import pytest
 
 from custom_components.rtl_433.const import CONF_USER_MAPPINGS, DATA_LIBRARY, DOMAIN
 from custom_components.rtl_433.library import _async_load_library, _merge_entry_library
-from custom_components.rtl_433.mapping import FieldDescriptor, Registry
 
 # ---------------------------------------------------------------------------
 # Helpers

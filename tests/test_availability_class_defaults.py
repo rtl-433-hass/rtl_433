@@ -28,6 +28,7 @@ import logging
 from unittest.mock import patch
 
 from freezegun import freeze_time
+from pyrtl_433.library import FieldDescriptor, event_driven_field_keys
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -43,7 +44,6 @@ from custom_components.rtl_433.const import (
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
-from custom_components.rtl_433.mapping import FieldDescriptor, event_driven_field_keys
 from custom_components.rtl_433.sensor import Rtl433Sensor
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util

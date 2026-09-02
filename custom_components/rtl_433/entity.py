@@ -36,6 +36,9 @@ import dataclasses
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
+from pyrtl_433.library import FieldDescriptor, Registry, lookup
+from pyrtl_433.naming import display_name, identity_suffix
+
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -65,8 +68,6 @@ from .const import (
     signal_hub_update,
     signal_new_device,
 )
-from .mapping import FieldDescriptor, Registry, lookup
-from .normalizer import _safe_token
 from .sdr_settings import SDR_SETTINGS
 
 if TYPE_CHECKING:
@@ -74,46 +75,6 @@ if TYPE_CHECKING:
 
     from .coordinator import Rtl433Coordinator
     from .sdr_settings import SdrSetting
-
-
-def _device_display_name(model: str, device_key: str) -> str:
-    """Human-readable device name: the model plus its distinguishing id suffix.
-
-    ``device_key`` is ``<model-token>-<id>[-ch..][-st..]`` (see ``normalizer``),
-    so naively combining the model with the whole key duplicates the model — e.g.
-    ``Fineoffset-WH51 (Fineoffset-WH51-00c50f)``. Strip the model-token prefix and
-    keep only the suffix, giving ``Fineoffset-WH51 00c50f``: the canonical rtl_433
-    model (matching the device's ``model`` field) plus just the id that
-    distinguishes one unit from another. Falls back to the raw ``device_key`` when
-    there is no model, and to the bare model for a model-only device (no suffix).
-    """
-    if not model:
-        return device_key
-    suffix = device_key.removeprefix(f"{_safe_token(model)}-")
-    if not suffix or suffix == device_key:
-        # Model-only device (key == model token), or an unexpected key shape.
-        return model
-    return f"{model} {suffix}"
-
-
-def _device_identity(model: str, device_key: str) -> str | None:
-    """Return the identity suffix of ``device_key``: the decoded id and channel.
-
-    This is the same ``<id>[-ch..][-st..]`` suffix that
-    :func:`_device_display_name` folds into the device name, surfaced separately
-    so it can be published as a serial number that survives a user rename — the
-    name is the user's to change, the serial number stays the transmitter's.
-    Returns ``None`` rather than an empty string for a model-only device (the key
-    is just the model token, so nothing distinguishes one unit from another) and
-    when the model is unknown, so the caller can leave the field unset.
-    """
-    if not model:
-        return None
-    suffix = device_key.removeprefix(f"{_safe_token(model)}-")
-    if not suffix or suffix == device_key:
-        # Model-only device (key == model token), or an unexpected key shape.
-        return None
-    return suffix
 
 
 def _resolve_entity_category(value: str | None) -> EntityCategory | None:
@@ -198,12 +159,12 @@ class Rtl433Entity(RestoreEntity):
         if descriptor.icon is not None:
             self._attr_icon = descriptor.icon
 
-        device_name = _device_display_name(model, device_key)
+        device_name = display_name(model, device_key)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{hub_entry_id}:{device_key}")},
             name=device_name,
             model=model or None,
-            serial_number=_device_identity(model, device_key),
+            serial_number=identity_suffix(model, device_key),
             manufacturer=MANUFACTURER,
             via_device=(DOMAIN, hub_entry_id),
         )

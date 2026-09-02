@@ -15,6 +15,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from pyrtl_433.library import FieldDescriptor, apply_transform
+
 from homeassistant.components.sensor import (
     DOMAIN as SENSOR_DOMAIN,
     UNIT_CONVERTERS,
@@ -42,7 +44,6 @@ from homeassistant.util.enum import try_parse_enum
 
 from .const import DOMAIN
 from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
-from .mapping import FieldDescriptor, apply_transform
 
 if TYPE_CHECKING:
     from pyrtl_433.normalizer import NormalizedEvent
