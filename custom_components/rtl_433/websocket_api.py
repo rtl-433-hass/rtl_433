@@ -1,7 +1,7 @@
 """WebSocket API for the rtl_433 discovery panel.
 
-Six admin-gated commands that expose the pending-device list and the three
-things a user can do with it. They are the panel's data source, but they are not
+Admin-gated commands that expose the pending-device list, the three things a
+user can do with it, and the hub's settings. They are the panel's data source, but they are not
 *only* that: the same commands are the scriptable, UI-free way to see what a
 receiver is hearing and to approve it, and they are testable without loading any
 JavaScript at all.
@@ -13,6 +13,11 @@ JavaScript at all.
   options flow does.
 - ``rtl_433/devices/subscribe`` — the same payload as ``.../pending``, pushed
   when it changes.
+- ``rtl_433/settings/get`` and ``.../hub`` / ``.../device`` / ``.../mappings`` —
+  the hub's own settings, one device's settings, and the device-library
+  overrides. These are the panel's half of the same forms the options flow
+  renders; both sides build their dicts with :mod:`.settings`, so what a form
+  stores does not depend on which form was used.
 
 Every command names a hub by ``entry_id`` and resolves it through
 :func:`_async_get_coordinator`, which answers a bad id with a WebSocket error
@@ -48,6 +53,7 @@ import logging
 from typing import Any, Final
 
 import voluptuous as vol
+import yaml
 
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
@@ -64,18 +70,46 @@ from .adoption import (
     async_ignore_devices,
     async_unignore_devices,
 )
+from .calibration import COMMODITY_UNITS, normalize_calibration
 from .const import (
+    CALIBRATION_COMMODITIES,
+    CALIBRATION_COMMODITY,
+    CALIBRATION_SCALE,
+    CALIBRATION_UNIT,
+    COMMODITY_NONE,
+    CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
+    CONF_MANAGE_SETTINGS,
     CONF_MODEL,
+    CONF_USER_MAPPINGS,
     DATA_ENTITY_META,
     DATA_ENTRY_LIBRARY,
+    DEFAULT_AVAILABILITY_TIMEOUT,
+    DEFAULT_MOTION_CLEAR_DELAY,
+    DEVICE_MOTION_CLEAR_DELAY,
+    DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     signal_pending_update,
 )
 from .coordinator import Rtl433Coordinator
 from .device_replace import DeviceReplaceError, async_replace_device
 from .hub_settings import _hub_ignored_devices
-from .mapping import FieldDescriptor, Registry, apply_transform, lookup
+from .mapping import (
+    FieldDescriptor,
+    Registry,
+    apply_transform,
+    lookup,
+    validate_user_mappings,
+)
+from .settings import (
+    MAPPINGS_DOCS_URL,
+    build_device_data,
+    build_device_options,
+    build_hub_options,
+    build_mappings_data,
+    device_defaults,
+    hub_defaults,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,6 +128,11 @@ ERR_NOT_LOADED: Final = "not_loaded"
 # the same key on both sides. Its own code rather than ``not_loaded`` so a script
 # can tell "your hub is mid-reload, retry" from "that request cannot work".
 ERR_REPLACE_FAILED: Final = "replace_failed"
+# Mapping overrides the user submitted that this hub will not store: unparseable
+# YAML, or a document that parses but breaks the override schema. Its own code so
+# the caller can render the problems in the editor rather than as a generic
+# failure, and the message carries them joined for a client that cannot.
+ERR_INVALID_MAPPINGS: Final = "invalid_mappings"
 
 
 @callback
@@ -104,9 +143,9 @@ def async_register_commands(hass: HomeAssistant) -> None:
     entry-only. Command names are global and registration is really per Home
     Assistant *run*, but it needs no guard of its own:
     ``async_register_command`` is a dict assignment keyed by command name, so a
-    second hub -- or the same hub reloading -- rewrites the same six entries with
-    the same handlers. Registering is idempotent, so the simplest thing that
-    works is to just register.
+    second hub -- or the same hub reloading -- rewrites the same entries with the
+    same handlers. Registering is idempotent, so the simplest thing that works is
+    to just register.
     """
     websocket_api.async_register_command(hass, ws_hubs)
     websocket_api.async_register_command(hass, ws_pending_devices)
@@ -116,6 +155,10 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_replace_device)
     websocket_api.async_register_command(hass, ws_clear_devices)
     websocket_api.async_register_command(hass, ws_subscribe_devices)
+    websocket_api.async_register_command(hass, ws_get_settings)
+    websocket_api.async_register_command(hass, ws_set_hub_settings)
+    websocket_api.async_register_command(hass, ws_set_device_settings)
+    websocket_api.async_register_command(hass, ws_set_mappings)
 
 
 @callback
@@ -826,3 +869,269 @@ def ws_subscribe_devices(
     # subscription it does not yet believe in.
     connection.send_result(msg["id"])
     connection.send_message(websocket_api.event_message(msg["id"], last_sent))
+
+
+# --------------------------------------------------------------------------- #
+# Settings.                                                                    #
+#                                                                              #
+# The hub's own options, one device's overrides, and the device-library         #
+# mapping overrides -- the three forms that used to be reachable only through   #
+# the options flow, and are now the panel's dialogs as well. Every rule about   #
+# what a submitted value *means* lives in ``settings.py``; these commands are   #
+# transport, and deliberately thin enough that reading them tells you nothing   #
+# the options flow does not also do.                                           #
+# --------------------------------------------------------------------------- #
+
+
+def _mappings_yaml(entry: ConfigEntry) -> str:
+    """Render this hub's mapping overrides as the YAML a user would type.
+
+    The overrides are stored as a plain nested mapping, and YAML is how the
+    documentation writes them and how the options flow's editor showed them --
+    so the round trip is text out, text in, rather than a JSON object the user
+    would have to translate in their head.
+
+    An empty override set renders as the empty string rather than ``{}``, so a
+    hub that has never overridden anything opens an empty editor instead of one
+    holding a token the user has to delete before typing.
+    """
+    overrides = entry.data.get(CONF_USER_MAPPINGS) or {}
+    if not overrides:
+        return ""
+    return yaml.safe_dump(overrides, default_flow_style=False, sort_keys=True)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rtl_433/settings/get",
+        vol.Required("entry_id"): str,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_get_settings(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Answer with everything the three settings forms need to render.
+
+    One command rather than three because they are one screenful: the panel
+    opens all three dialogs from the same page and would otherwise make three
+    round trips to fill controls the user may never look at. The payload is
+    small -- a couple of scalars, one row per adopted device, and the override
+    document.
+
+    The commodity tables travel with it rather than being hard-coded in the
+    panel. Which units Home Assistant will accept for a gas meter is not a fact
+    about this panel, it is a fact about :mod:`.calibration`, and a panel that
+    carried its own copy would offer a unit the entity build then rejects.
+    """
+    resolved = _async_get_coordinator(hass, connection, msg)
+    if resolved is None:
+        return
+    entry, _coordinator = resolved
+
+    hub = hub_defaults(entry)
+    devices = [
+        device_defaults(hass, entry, device_key)
+        for device_key in sorted(entry.data.get(CONF_DEVICES, {}))
+    ]
+    connection.send_result(
+        msg["id"],
+        {
+            "hub": {
+                CONF_AVAILABILITY_TIMEOUT: hub[CONF_AVAILABILITY_TIMEOUT],
+                CONF_MANAGE_SETTINGS: hub[CONF_MANAGE_SETTINGS],
+            },
+            "defaults": {
+                CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
+                DEVICE_MOTION_CLEAR_DELAY: DEFAULT_MOTION_CLEAR_DELAY,
+            },
+            "devices": devices,
+            "commodities": list(CALIBRATION_COMMODITIES),
+            "commodity_units": {
+                commodity: list(units) for commodity, units in COMMODITY_UNITS.items()
+            },
+            "mappings": _mappings_yaml(entry),
+            "mappings_docs_url": MAPPINGS_DOCS_URL,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rtl_433/settings/hub",
+        vol.Required("entry_id"): str,
+        vol.Required(CONF_AVAILABILITY_TIMEOUT): vol.All(int, vol.Range(min=0)),
+        vol.Required(CONF_MANAGE_SETTINGS): bool,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_set_hub_settings(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Persist the hub-level options.
+
+    ``async_update_entry`` is the whole write: it fires the update listener,
+    which pushes a changed timeout into the running coordinator live and reloads
+    the hub only if the manage-settings toggle moved. Nothing is reloaded here
+    for the same reason the config flow does not -- one writer, one listener, one
+    reload.
+    """
+    resolved = _async_get_coordinator(hass, connection, msg)
+    if resolved is None:
+        return
+    entry, _coordinator = resolved
+    hass.config_entries.async_update_entry(
+        entry,
+        options=build_hub_options(
+            entry, msg[CONF_AVAILABILITY_TIMEOUT], msg[CONF_MANAGE_SETTINGS]
+        ),
+    )
+    connection.send_result(msg["id"], hub_defaults(entry))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rtl_433/settings/device",
+        vol.Required("entry_id"): str,
+        vol.Required("device_key"): str,
+        # Each of the three overrides is optional *and* nullable, and the two
+        # mean the same thing: clear it. A form that has just emptied a field
+        # sends null rather than omitting the key, which is the shape a JSON
+        # client naturally produces from an empty input.
+        vol.Optional(DEVICE_TIMEOUT_OVERRIDE): vol.Any(
+            None, vol.All(int, vol.Range(min=0))
+        ),
+        vol.Optional(DEVICE_MOTION_CLEAR_DELAY): vol.Any(
+            None, vol.All(int, vol.Range(min=1))
+        ),
+        vol.Optional(CALIBRATION_COMMODITY, default=COMMODITY_NONE): vol.In(
+            CALIBRATION_COMMODITIES
+        ),
+        vol.Optional(CALIBRATION_UNIT): vol.Any(None, str),
+        vol.Optional(CALIBRATION_SCALE): vol.Any(None, vol.Coerce(float)),
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_set_device_settings(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Persist one device's timeout override, calibration and clear-delay.
+
+    The calibration arrives as its three parts and is put through
+    :func:`~.calibration.normalize_calibration`, which is the only thing that
+    decides whether they add up to a calibration at all: a commodity of ``none``,
+    an unknown one, or a unit that is not convertible for the commodity all come
+    back as ``None`` and clear it. The panel therefore cannot store a calibration
+    the entity build would refuse to honour, however its controls are wired.
+
+    Data and options are written in a single ``async_update_entry`` -- unlike the
+    options flow, which finishes with ``async_create_entry`` for the options half
+    -- so one save is one update-listener firing and at most one reload.
+
+    The normalized calibration comes back in the result so the caller can
+    re-render from what was actually stored rather than from what it sent; the
+    two differ precisely when the user built one that does not add up.
+    """
+    resolved = _async_get_coordinator(hass, connection, msg)
+    if resolved is None:
+        return
+    entry, _coordinator = resolved
+
+    device_key: str = msg["device_key"]
+    if device_key not in entry.data.get(CONF_DEVICES, {}):
+        connection.send_error(
+            msg["id"],
+            websocket_api.const.ERR_NOT_FOUND,
+            f"Unknown device {device_key}",
+        )
+        return
+
+    calibration = normalize_calibration(
+        {
+            CALIBRATION_COMMODITY: msg.get(CALIBRATION_COMMODITY),
+            CALIBRATION_UNIT: msg.get(CALIBRATION_UNIT),
+            CALIBRATION_SCALE: msg.get(CALIBRATION_SCALE, 1.0),
+        }
+    )
+    hass.config_entries.async_update_entry(
+        entry,
+        data=build_device_data(
+            entry,
+            device_key,
+            override=msg.get(DEVICE_TIMEOUT_OVERRIDE),
+            calibration=calibration,
+        ),
+        options=build_device_options(
+            entry,
+            device_key,
+            motion_clear_delay=msg.get(DEVICE_MOTION_CLEAR_DELAY),
+        ),
+    )
+    connection.send_result(msg["id"], device_defaults(hass, entry, device_key))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rtl_433/settings/mappings",
+        vol.Required("entry_id"): str,
+        vol.Required("yaml"): str,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_set_mappings(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Validate and store this hub's device-library mapping overrides.
+
+    The document arrives as text and is parsed here rather than in the panel,
+    which has no YAML parser and should not grow one. ``yaml.safe_load`` and not
+    Home Assistant's loader: this is a string a client submitted, and the safe
+    loader is the one with no tag that can reach the filesystem.
+
+    Two failures are reported the same way and both leave the stored overrides
+    untouched -- text that is not YAML, and YAML that is not a valid override
+    document. They arrive as one error carrying every problem found, because a
+    user fixing a mapping file wants the whole list, not the first line of it.
+    """
+    resolved = _async_get_coordinator(hass, connection, msg)
+    if resolved is None:
+        return
+    entry, _coordinator = resolved
+
+    text: str = msg["yaml"]
+    try:
+        raw = yaml.safe_load(text) if text.strip() else {}
+    except yaml.YAMLError as err:
+        connection.send_error(msg["id"], ERR_INVALID_MAPPINGS, str(err))
+        return
+    # An empty document parses to None, which is "no overrides" rather than a
+    # malformed one -- clearing the editor is how a user removes them all.
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        connection.send_error(
+            msg["id"],
+            ERR_INVALID_MAPPINGS,
+            "Device mappings must be a mapping of model to field overrides",
+        )
+        return
+
+    problems = validate_user_mappings(raw)
+    if problems:
+        connection.send_error(msg["id"], ERR_INVALID_MAPPINGS, "; ".join(problems))
+        return
+
+    hass.config_entries.async_update_entry(entry, data=build_mappings_data(entry, raw))
+    connection.send_result(msg["id"], {"mappings": _mappings_yaml(entry)})
