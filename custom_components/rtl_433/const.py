@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Final
 
+from pyrtl_433.availability import is_event_driven
+
 from homeassistant.const import Platform
 
 # Integration domain. Must match the "domain" key in manifest.json.
@@ -223,10 +225,13 @@ def class_default_timeout(
     default.
 
     ``event_driven_keys`` is derived from the active device library via
-    :func:`mapping.event_driven_field_keys`, so the classification stays in sync
-    with the shipped library and any per-hub user mappings.
+    :func:`pyrtl_433.library.event_driven_field_keys`, so the classification
+    stays in sync with the shipped library and any per-hub user mappings. The
+    intersection test itself is
+    :func:`pyrtl_433.availability.is_event_driven`; this function only maps its
+    boolean onto the integration's two timeout constants.
     """
-    if isinstance(payload, dict) and not event_driven_keys.isdisjoint(payload):
+    if isinstance(payload, dict) and is_event_driven(payload, event_driven_keys):
         return AVAILABILITY_TIMEOUT_NEVER
     return DEFAULT_AVAILABILITY_TIMEOUT
 
