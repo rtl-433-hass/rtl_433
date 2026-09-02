@@ -128,8 +128,8 @@ ERR_NOT_LOADED: Final = "not_loaded"
 # the same key on both sides. Its own code rather than ``not_loaded`` so a script
 # can tell "your hub is mid-reload, retry" from "that request cannot work".
 ERR_REPLACE_FAILED: Final = "replace_failed"
-# Mapping overrides the user submitted that this hub will not store: unparseable
-# YAML, or a document that parses but breaks the override schema. Its own code so
+# Mapping overrides the user submitted that this hub will not store: YAML that
+# does not parse, or a document that parses but breaks the override schema. Its own code so
 # the caller can render the problems in the editor rather than as a generic
 # failure, and the message carries them joined for a client that cannot.
 ERR_INVALID_MAPPINGS: Final = "invalid_mappings"
