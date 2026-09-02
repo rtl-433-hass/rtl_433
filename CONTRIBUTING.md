@@ -59,6 +59,27 @@ Releases are automated with
 You do not edit the changelog or bump versions by hand — write good conventional
 commits and let release-please do it.
 
+### Contributor credits
+
+release-please's changelog links commits, not people, so a separate workflow
+(`.github/workflows/release-credits.yml`, backed by `scripts/release_credits.py`)
+adds them back. After each release-please run it resolves every commit the
+release PR links to back to its pull request and appends an `@username` credits
+block for the authors who are not maintainers or bots, so contributors are named
+in the release notes and notified that their work is shipping. The block sits
+between HTML comment markers at the end of the PR body and is rewritten in place
+on each run, so you can leave it alone; edits inside the markers are overwritten.
+To preview or re-run it by hand:
+
+```bash
+# Preview without writing (needs a token with repo read access).
+GITHUB_TOKEN=... python3 scripts/release_credits.py --repo rtl-433-hass/rtl_433 \
+  --pr <number> --dry-run
+```
+
+The workflow also has a `workflow_dispatch` trigger that takes an optional PR
+number, for re-running it against the current release PR from the Actions tab.
+
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management and
 for running tools, the same as CI. Install it with
 `curl -LsSf https://astral.sh/uv/install.sh | sh` (see the uv docs for other
