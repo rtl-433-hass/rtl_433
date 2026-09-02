@@ -531,9 +531,7 @@ async def test_replace_repoints_an_existing_device_onto_a_candidate(
     assert _OLD_KEY not in stored
 
 
-async def test_replace_reports_a_refused_request_as_an_error(
-    hass, hub, hass_ws_client
-):
+async def test_replace_reports_a_refused_request_as_an_error(hass, hub, hass_ws_client):
     """A replace the helper refuses comes back as an error, not a traceback.
 
     A panel is held open across reloads and adoptions, so asking to replace a
