@@ -751,12 +751,7 @@ class Rtl433Panel extends HTMLElement {
       status: root.querySelector(".status"),
       grid: root.querySelector(".grid"),
       empty: root.querySelector(".pending-empty"),
-      ignoredToggle: (() => {
-        const toggle = haButton("", "ghost ignored-toggle");
-        toggle.hidden = true;
-        root.querySelector(".list-actions").append(toggle);
-        return toggle;
-      })(),
+      back: root.querySelector(".back"),
       ignoredGrid: root.querySelector(".ignored-grid"),
       dialog: this._buildReplaceDialog(root.querySelector(".replace-slot")),
       dialogIntro: root.querySelector(".replace-intro"),
@@ -765,6 +760,21 @@ class Rtl433Panel extends HTMLElement {
       dialogCancel: null,
       dialogConfirm: null,
     };
+    // The two list actions are built rather than templated so they can be Home
+    // Assistant's buttons. They are appended in the order they read on the page,
+    // and both start hidden: one has nothing to reveal until there are ignored
+    // devices, the other nothing to clear until something has been heard.
+    this._el.ignoredToggle = haButton("", "ghost ignored-toggle");
+    this._el.ignoredToggle.hidden = true;
+    this._el.clear = haButton(
+      "Clear discovered devices",
+      "ghost clear-devices"
+    );
+    this._el.clear.hidden = true;
+    root
+      .querySelector(".list-actions")
+      .append(this._el.ignoredToggle, this._el.clear);
+
     // Built rather than templated so they can be Home Assistant's own buttons.
     // Cancel is `plain` and Replace `accent`: that is the weighting core gives a
     // dialog's dismiss-versus-commit pair, and Replace starts disabled because
@@ -799,6 +809,8 @@ class Rtl433Panel extends HTMLElement {
       this._render();
     });
 
+    this._el.back.addEventListener("click", () => this._goBack());
+    this._el.clear.addEventListener("click", () => this._clearDevices());
     this._el.dialogCancel.addEventListener("click", () => this._closeReplace());
     this._el.dialogConfirm.addEventListener("click", () => this._confirmReplace());
     // Esc and the backdrop both close a native dialog on their own; this keeps
@@ -887,6 +899,8 @@ class Rtl433Panel extends HTMLElement {
       (card) => this._createDeviceCard(card),
       (element, card) => this._updateDeviceCard(element, card, now, areasChanged)
     );
+
+    this._el.clear.hidden = !loaded || cards.length === 0;
 
     const ignored = this._data && this._data.ignored ? this._data.ignored : [];
     this._el.ignoredToggle.hidden = !loaded || ignored.length === 0;
@@ -1219,6 +1233,59 @@ class Rtl433Panel extends HTMLElement {
     return control ? control.value : undefined;
   }
 
+  /**
+   * Leave the panel the way the user arrived at it.
+   *
+   * The panel is the rtl_433 entry's configuration page, so it is always
+   * reached from somewhere -- the integration page, or a link. `history.back()`
+   * returns there rather than guessing a destination, which is what makes the
+   * control correct on a phone, where the sidebar is closed and this is the
+   * only way out.
+   */
+  _goBack() {
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    // Opened directly by URL, so there is nothing to go back to. The
+    // integration's own page is where this panel belongs under.
+    window.location.assign("/config/integrations/integration/rtl_433");
+  }
+
+  /**
+   * Forget every candidate, so the list refills from live traffic.
+   *
+   * Offered without a confirmation because there is nothing to confirm: the
+   * pending list is memory-only and every device cleared returns on its next
+   * transmission. What the user is discarding is a working set, not a decision
+   * -- ignoring is the decision, and this does not touch it.
+   */
+  async _clearDevices() {
+    this._banner = null;
+    this._el.clear.disabled = true;
+    try {
+      const result = await this._call({
+        type: "rtl_433/devices/clear",
+        entry_id: this._entryId,
+      });
+      // The green cards describe adoptions, not candidates, but they are the
+      // same screenful: leaving them behind a cleared list would look like the
+      // clear had half worked.
+      this._added.clear();
+      this._setBanner(
+        `Cleared ${result.cleared} discovered ${
+          result.cleared === 1 ? "device" : "devices"
+        }. They reappear as they transmit.`,
+        "notice"
+      );
+    } catch (error) {
+      this._setBanner(describeError(error), "error");
+    } finally {
+      this._el.clear.disabled = false;
+      this._render();
+    }
+  }
+
   // -- Replace ---------------------------------------------------------------
 
   /**
@@ -1385,6 +1452,13 @@ class Rtl433Panel extends HTMLElement {
 }
 
 const SKELETON = `
+  <div class="toolbar">
+    <button class="icon-button back" type="button" aria-label="Back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2z"/></svg>
+    </button>
+    <div class="toolbar-title">rtl_433</div>
+  </div>
+
   <div class="header">
     <div>
       <h1>Discovered devices</h1>
@@ -1444,6 +1518,47 @@ const STYLES = `
     line-height: 1.4;
   }
   .wrap { max-width: 1280px; margin: 0 auto; }
+
+  /*
+   * The page's own toolbar. A panel reached from the integration page has no
+   * chrome of its own -- Home Assistant draws none around a non-iframe custom
+   * panel -- so on a phone, where the sidebar is closed, there would otherwise
+   * be no way back out. Sized and coloured like core's own app bar so it reads
+   * as part of the page rather than as content.
+   */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 56px;
+    margin: -16px -16px 8px;
+    padding: 0 8px;
+    background: var(--app-header-background-color, var(--primary-color, #03a9f4));
+    color: var(--app-header-text-color, var(--text-primary-color, #ffffff));
+  }
+  .toolbar-title { font-size: 20px; font-weight: 400; }
+  .icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .icon-button:hover { background: rgba(255, 255, 255, 0.12); }
+  .icon-button svg { width: 24px; height: 24px; fill: currentColor; }
+
+  .list-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
   .header {
     display: flex;
     flex-wrap: wrap;
@@ -1646,7 +1761,6 @@ const STYLES = `
     outline: 2px solid var(--primary-color, #03a9f4);
     outline-offset: 2px;
   }
-  .ignored-toggle { margin: 0 0 16px; }
 
   /*
    * The replace dialog. A native <dialog>, so the backdrop, the stacking and

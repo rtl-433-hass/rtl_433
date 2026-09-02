@@ -1156,13 +1156,18 @@ async def test_the_panel_registers_once_and_serves_its_module(
     property (an iframe would cut it off from the frontend's connection *and* its
     theme), and ``require_admin`` matches the gate on the commands the page calls.
 
-    ``config_panel_domain`` must stay **unset**, and that is asserted rather than
-    left implicit. Setting it does not add a route to the panel, it replaces one:
-    the config entry's Configure control becomes a link here, and every
-    options-flow step behind it -- receiver settings, device settings, device
-    mappings, calibration, replace-device -- loses its only entry point. That was
-    briefly the case on this branch and was caught in a real browser, so the
-    assertion exists to keep it caught.
+    ``config_panel_domain`` is set, which is what puts the panel behind this
+    integration's entry in Settings rather than in a top-level sidebar slot. The
+    trade it makes is asserted here because it is easy to make by accident and
+    expensive to notice: it does not *add* a route, it replaces one. The entry's
+    settings control opens this panel, and the options flow behind it has no
+    other entry point -- the row's overflow menu offers reload, rename,
+    reconfigure, enable/disable and delete, and nothing that opens options. So
+    every options step must be reachable from the panel, or it is unreachable.
+
+    No ``sidebar_title``/``sidebar_icon`` for the same reason: with them the
+    panel would take a top-level slot *as well*, which is the placement this
+    replaced.
 
     Finally the module is fetched over HTTP. The element name in the served body
     has to match ``webcomponent_name`` exactly — Home Assistant loads the module
@@ -1179,8 +1184,11 @@ async def test_the_panel_registers_once_and_serves_its_module(
     assert [url_path for url_path in panels if url_path == DOMAIN] == [DOMAIN]
 
     panel = panels[DOMAIN]
-    # Unset, so the entry's Configure control still opens the options flow.
-    assert panel.config_panel_domain is None
+    # Set, so the entry's settings control opens this panel.
+    assert panel.config_panel_domain == DOMAIN
+    # ...and no sidebar slot is taken alongside it.
+    assert panel.sidebar_title is None
+    assert panel.sidebar_icon is None
     assert panel.require_admin is True
     assert panel.component_name == "custom"
     custom = panel.config["_panel_custom"]
