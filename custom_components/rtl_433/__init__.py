@@ -127,15 +127,13 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     survives that, and it covers the sequential cases (a hub added later, an
     entry reloading) as well.
 
-    ``config_panel_domain`` is deliberately **not** passed, though it would put
-    the panel behind this integration's entry in Settings → Devices & services.
-    It does not add a route, it *replaces* one: the entry's Configure control
-    becomes a link to the panel, and the options flow behind it -- receiver
-    settings, device settings, device mappings, calibration, replace-device --
-    loses its only entry point. ``knx`` is the one core integration that ships
-    both a panel and an options flow, and it omits the argument for the same
-    reason; ``dynalite`` and ``insteon`` pass it and have no options flow to
-    lose. The panel is reached from the sidebar instead.
+    ``config_panel_domain`` puts the panel behind this integration's entry in
+    Settings → Devices & services, and no ``sidebar_title``/``sidebar_icon`` are
+    passed, so it takes no top-level sidebar slot. A custom integration cannot
+    join the Settings list that Bluetooth, Tags and Z-Wave appear in: those are
+    hard-coded routes inside the ``config`` panel, which core's frontend ships
+    compiled (``zwave_js`` registers no panel of its own at all). Behind the
+    integration's own entry is as close to "in Settings" as a custom panel gets.
 
     Two arguments are the whole reason this works the way it does:
 
@@ -176,8 +174,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             module_url=f"{PANEL_URL_BASE}/{PANEL_MODULE_NAME}",
             embed_iframe=False,
             require_admin=True,
-            sidebar_title="rtl_433",
-            sidebar_icon="mdi:radio-tower",
+            config_panel_domain=DOMAIN,
         )
     except Exception:
         domain_data.pop(DATA_PANEL_CLAIMED, None)
