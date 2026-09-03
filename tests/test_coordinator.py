@@ -429,8 +429,7 @@ def test_tracked_device_cap_is_the_documented_value():
 def _flood(coordinator, count, *, start=0, prefix="Noise"):
     """Feed ``count`` distinct one-off device keys, as spurious decodes do."""
     for index in range(start, start + count):
-        key = f"{prefix}-{index}"
-        coordinator._on_client_event(_event(key=key, model=prefix))
+        coordinator._on_client_event(_event(key=f"{prefix}-{index}", model=prefix))
 
 
 def test_spurious_decodes_do_not_grow_state_without_bound(hass, coordinator):
@@ -444,10 +443,57 @@ def test_spurious_decodes_do_not_grow_state_without_bound(hass, coordinator):
     with patch(DISPATCH):
         _flood(coordinator, _MAX_TRACKED_DEVICES + 10)
 
+    # Exactly at the cap: evicting further would discard state nothing asked us
+    # to discard.
     assert len(coordinator.devices) == _MAX_TRACKED_DEVICES
-    # Coldest gone, freshest kept.
     assert "Noise-0" not in coordinator.devices
     assert f"Noise-{_MAX_TRACKED_DEVICES + 9}" in coordinator.devices
+
+
+def test_nothing_is_evicted_at_exactly_the_cap(hass, coordinator):
+    """The ceiling is a maximum to stay at, not one to fall below."""
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES)
+
+    assert len(coordinator.devices) == _MAX_TRACKED_DEVICES
+    assert "Noise-0" in coordinator.devices
+
+
+def test_a_device_heard_again_is_no_longer_the_coldest(hass, coordinator):
+    """Recency is what "cold" means, so a repeat transmission buys a reprieve.
+
+    Without this the map would evict by first-sighting order, which would drop a
+    device that is still transmitting in favour of one that stopped long ago.
+    """
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES)
+        # The oldest key transmits again, so the *second* oldest is now coldest.
+        coordinator._on_client_event(_event(key="Noise-0", model="Noise"))
+        coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
+
+    assert "Noise-0" in coordinator.devices
+    assert "Noise-1" not in coordinator.devices
+
+
+def test_eviction_never_considers_the_frame_just_taken(hass, coordinator):
+    """The newest key is out of scope, and only the newest.
+
+    A cold key sitting immediately behind it is still fair game — the exclusion
+    is one frame wide, not a general amnesty for recent arrivals.
+    """
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES - 1)
+        coordinator._discovered.update(coordinator.devices)
+        # Cold and unprotected, then the frame that pushes us over the cap.
+        coordinator._on_client_event(_event(key="Noise-cold", model="Noise"))
+        coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
+
+    assert "Noise-cold" not in coordinator.devices
+    assert "Noise-fresh" in coordinator.devices
+    assert len(coordinator.devices) == _MAX_TRACKED_DEVICES
 
 
 def test_eviction_clears_every_per_device_map(hass, coordinator):
@@ -462,7 +508,19 @@ def test_eviction_clears_every_per_device_map(hass, coordinator):
     assert evicted not in coordinator.available
     assert evicted not in coordinator.device_fields
     assert evicted not in coordinator._logged_unmapped
-    assert evicted not in coordinator._heard_order
+
+
+def test_eviction_logs_the_key_and_the_cap(hass, coordinator, caplog):
+    """The DEBUG line names what went and why, or it explains nothing."""
+    caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES + 1)
+
+    lines = [m for m in caplog.messages if m.startswith("rtl_433 evicting cold device")]
+    assert len(lines) == 1
+    assert "Noise-0" in lines[0]
+    assert str(_MAX_TRACKED_DEVICES) in lines[0]
 
 
 def test_real_devices_are_never_evicted(hass, coordinator):
@@ -497,30 +555,30 @@ def test_real_devices_are_never_evicted(hass, coordinator):
     assert "Noise-0" not in coordinator.devices
 
 
-def test_cap_never_evicts_the_frame_just_taken(hass, coordinator):
-    """With everything else protected, the newest key still keeps its state.
-
-    The map is left over the ceiling rather than dropping the state the current
-    frame has just written — real devices outrank the cap.
-    """
+def test_everything_protected_leaves_the_map_over_the_cap(hass, coordinator):
+    """Real devices outrank the ceiling: nothing with entities is ever dropped."""
     coordinator.discovery_enabled = False
     with patch(DISPATCH):
         _flood(coordinator, _MAX_TRACKED_DEVICES)
-        # Everything heard so far counts as a real device.
         coordinator._discovered.update(coordinator.devices)
         coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
 
-    assert "Noise-fresh" in coordinator.devices
     assert len(coordinator.devices) == _MAX_TRACKED_DEVICES + 1
+    assert "Noise-fresh" in coordinator.devices
 
 
-def test_forget_device_drops_the_recency_entry(hass, coordinator):
-    """Removing a device from its device page forgets its ordering slot too."""
+def test_forget_device_clears_the_unmapped_field_memo(hass, coordinator):
+    """A device that comes back is new to us, so its fields log again.
+
+    ``forget_device`` serves both the device-page deletion and the cap, and it
+    used to leave this memo behind.
+    """
+    coordinator.known_field_keys = frozenset({"temperature_C"})
     key = "Acurite-606TX-42"
     with patch(DISPATCH):
-        coordinator._on_client_event(_event(key=key))
-    assert key in coordinator._heard_order
+        coordinator._on_client_event(_event(key=key, fields={"made_up_field": 1}))
+    assert coordinator._logged_unmapped.get(key)
 
     coordinator.forget_device(key)
-    assert key not in coordinator._heard_order
+    assert key not in coordinator._logged_unmapped
     assert key not in coordinator.devices
