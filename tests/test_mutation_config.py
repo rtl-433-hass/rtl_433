@@ -72,6 +72,17 @@ _WORKFLOW_SHARDS = 6
 # removed from here.
 _NO_MUTANTS = {
     "custom_components/rtl_433/coordinator/__init__.py",
+    # Every function in the WebSocket API is decorated -- `@callback` on the
+    # helpers, `@websocket_api.websocket_command` on the handlers -- and mutmut
+    # cannot rewrite a decorated function into its `x_*`/`xǁ*` trampoline form,
+    # so it generates nothing for this module: the meta it writes has an empty
+    # `hash_by_function_name`. Checked, not assumed.
+    #
+    # That means these commands are not mutation-gated yet, which is a real gap
+    # rather than a preference. It closes on its own as the module grows
+    # undecorated helpers -- and when it does, this entry has to come out or the
+    # stale half of the coverage check fails.
+    "custom_components/rtl_433/websocket_api.py",
 }
 
 
