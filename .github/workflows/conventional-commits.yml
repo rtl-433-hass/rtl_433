@@ -6,6 +6,16 @@ on:
 
 permissions: {}
 
+concurrency:
+  # Supersede a PR's in-flight run when the branch is pushed to again: those
+  # results are already stale, and on a busy day they are what the new run
+  # queues behind. Keyed by ref, so separate PRs never block each other.
+  # Non-PR triggers (push to main, the nightly) key on the unique run id
+  # instead, so they neither cancel nor serialize behind one another -- those
+  # are the runs that keep the branch honest.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   validate:
     runs-on: ubuntu-24.04
