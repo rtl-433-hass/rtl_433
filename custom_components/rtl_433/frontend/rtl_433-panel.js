@@ -7,13 +7,22 @@
  * repository -- the file HACS downloads is the file the browser runs. That is a
  * constraint, not an accident, and it is worth stating why:
  *
- * - Home Assistant's frontend internals are not a public API. The `ha-*`
- *   elements, its Lit version, and its internal module paths are all free to
- *   change in any release, and a panel that imports them breaks silently on
- *   upgrade for everyone. So this file touches the smallest surface that is
- *   actually stable in practice: `hass.connection` for messaging, and CSS
- *   custom properties for theming. When something here does break, it degrades
- *   to a broken *page* -- the options flow still adds devices.
+ * - Home Assistant's frontend internals are not a public API. Its Lit version
+ *   and its internal module paths are free to change in any release, and a
+ *   panel that *imports* them breaks silently on upgrade for everyone. So this
+ *   file imports nothing: it touches `hass.connection` for messaging, CSS
+ *   custom properties for theming, and the `ha-*` elements only ever **by tag
+ *   name**, the way `ha-icon` is used below.
+ * - Borrowing those elements by tag name is what makes the panel look and
+ *   behave like the rest of Settings -- the same fields, the same buttons, the
+ *   same focus rings -- instead of like a page that reimplements them and gets
+ *   the details subtly wrong. It is also *more* robust than hand-rolling, not
+ *   less, because the low-level widgets are the ones that churn: `ha-textfield`
+ *   and `ha-select`'s list-item children have both already been replaced
+ *   upstream. `haControl` below therefore prefers the highest-level element
+ *   that will do the job (`ha-form` over a hand-assembled field) and falls back
+ *   to the native control when an element is not registered, so a frontend that
+ *   has moved on degrades to plain-but-working rather than to an inert box.
  * - A bundler would mean a second release pipeline (npm, a lockfile, a publish
  *   step) for a single table. If this panel ever outgrows one hand-written
  *   file, that is a decision to take deliberately rather than to drift into.
@@ -145,6 +154,43 @@ function describeError(error) {
     return error.code;
   }
   return String(error);
+}
+
+/**
+ * Create `tag` if the frontend has registered it, else `fallback()`.
+ *
+ * The registration check is the whole point. An unknown element is inert until
+ * its definition arrives, which is harmless for decoration (`ha-icon` renders
+ * nothing and reserves its space) but not for a control the user has to
+ * operate: an un-upgraded `<ha-select>` has no value and no popup, so a form
+ * built on one would look finished and do nothing. Checking first means the
+ * page either gets Home Assistant's control or a working native one.
+ */
+function haControl(tag, fallback) {
+  return customElements.get(tag) ? document.createElement(tag) : fallback();
+}
+
+/**
+ * A button, preferring Home Assistant's own.
+ *
+ * `appearance`/`variant` are `ha-button`'s current styling API. The classes are
+ * kept on whichever element comes back: they are how the rest of this file (and
+ * the screenshot harness) finds its buttons, and how the native fallback picks
+ * up the `.primary`/`.ghost` rules in STYLES.
+ */
+function haButton(label, className, appearance = "outlined") {
+  const button = haControl("ha-button", () => {
+    const native = document.createElement("button");
+    native.type = "button";
+    return native;
+  });
+  button.className = className;
+  button.textContent = label;
+  if (button.localName === "ha-button") {
+    button.appearance = appearance;
+    button.variant = "brand";
+  }
+  return button;
 }
 
 class Rtl433Panel extends HTMLElement {
@@ -411,6 +457,41 @@ class Rtl433Panel extends HTMLElement {
   // -- DOM -----------------------------------------------------------------
 
   /**
+   * The problem banner, preferring `ha-alert`.
+   *
+   * `ha-alert` is the element every core panel uses to say something went
+   * wrong, so borrowing it gets the icon, the colour and the wording weight
+   * that a user has already learnt to read, for free.
+   */
+  _buildBanner(slot) {
+    const banner = haControl("ha-alert", () => document.createElement("div"));
+    banner.className = "banner";
+    banner.hidden = true;
+    slot.append(banner);
+    return banner;
+  }
+
+  /**
+   * The receiver picker, preferring `ha-select`.
+   *
+   * `ha-select` carries its own floating label, so when it is available the
+   * skeleton's `<span>Receiver</span>` caption is dropped rather than stacked
+   * on top of a second one.
+   */
+  _buildHubSelect(picker) {
+    const select = haControl("ha-select", () =>
+      document.createElement("select")
+    );
+    select.className = "hub-select";
+    if (select.localName === "ha-select") {
+      select.label = "Receiver";
+      picker.textContent = "";
+    }
+    picker.append(select);
+    return select;
+  }
+
+  /**
    * Build the shadow tree once.
    *
    * Shadow DOM so this panel's CSS cannot leak into the rest of Home Assistant
@@ -429,14 +510,19 @@ class Rtl433Panel extends HTMLElement {
 
     this._el = {
       hubPicker: root.querySelector(".hub-picker"),
-      hubSelect: root.querySelector(".hub-select"),
-      banner: root.querySelector(".banner"),
+      hubSelect: this._buildHubSelect(root.querySelector(".hub-picker")),
+      banner: this._buildBanner(root.querySelector(".banner-slot")),
       status: root.querySelector(".status"),
       pendingCard: root.querySelector(".pending-card"),
       pendingBody: root.querySelector(".pending-body"),
       pendingEmpty: root.querySelector(".pending-empty"),
       pendingCount: root.querySelector(".pending-count"),
-      ignoredToggle: root.querySelector(".ignored-toggle"),
+      ignoredToggle: (() => {
+        const toggle = haButton("", "ghost ignored-toggle");
+        toggle.hidden = true;
+        root.querySelector(".list-actions").append(toggle);
+        return toggle;
+      })(),
       ignoredCard: root.querySelector(".ignored-card"),
       ignoredBody: root.querySelector(".ignored-body"),
     };
@@ -451,10 +537,21 @@ class Rtl433Panel extends HTMLElement {
       });
     }
 
-    this._el.hubSelect.addEventListener("change", () => {
-      this._entryId = this._el.hubSelect.value;
+    // Which event a select fires on a pick is exactly the sort of detail that
+    // has changed upstream before, so every plausible one is listened for and
+    // the handler is made idempotent instead: it returns unless the value it
+    // reads is genuinely new, which also covers a popup closed without a pick.
+    const onPick = () => {
+      const picked = this._el.hubSelect.value;
+      if (!picked || picked === this._entryId) {
+        return;
+      }
+      this._entryId = picked;
       this._subscribe();
-    });
+    };
+    for (const name of ["change", "input", "selected", "closed"]) {
+      this._el.hubSelect.addEventListener(name, onPick);
+    }
 
     this._el.ignoredToggle.addEventListener("click", () => {
       this._showIgnored = !this._showIgnored;
@@ -466,13 +563,25 @@ class Rtl433Panel extends HTMLElement {
     // A single receiver is the common case, and a picker with one option is
     // just a control that does nothing.
     this._el.hubPicker.hidden = this._hubs.length < 2;
-    this._el.hubSelect.textContent = "";
-    for (const hub of this._hubs) {
+    const options = this._hubs.map((hub) => ({
+      value: hub.entry_id,
+      label: hub.loaded ? hub.title : `${hub.title} (not loaded)`,
+    }));
+    const select = this._el.hubSelect;
+    if (select.localName === "ha-select") {
+      // `ha-select` is driven by its `options` property; the list-item children
+      // its predecessor took are no longer read.
+      select.options = options;
+      select.value = this._entryId;
+      return;
+    }
+    select.textContent = "";
+    for (const { value, label } of options) {
       const option = document.createElement("option");
-      option.value = hub.entry_id;
-      option.textContent = hub.loaded ? hub.title : `${hub.title} (not loaded)`;
-      option.selected = hub.entry_id === this._entryId;
-      this._el.hubSelect.append(option);
+      option.value = value;
+      option.textContent = label;
+      option.selected = value === this._entryId;
+      select.append(option);
     }
   }
 
@@ -485,6 +594,12 @@ class Rtl433Panel extends HTMLElement {
     if (this._banner) {
       this._el.banner.textContent = this._banner.text;
       this._el.banner.className = `banner ${this._banner.kind}`;
+      if (this._el.banner.localName === "ha-alert") {
+        // `ha-alert` names the two states "error" and "warning"; this file has
+        // always called the softer one a notice.
+        this._el.banner.alertType =
+          this._banner.kind === "notice" ? "warning" : "error";
+      }
       this._el.banner.hidden = false;
     } else {
       this._el.banner.hidden = true;
@@ -585,10 +700,13 @@ class Rtl433Panel extends HTMLElement {
       <td class="num signal"></td>
       <td class="age"></td>
       <td><div class="fields mono"></div></td>
-      <td class="actions">
-        <button class="primary add" type="button">Add</button>
-        <button class="ghost ignore" type="button">Ignore</button>
-      </td>`;
+      <td class="actions"></td>`;
+    element
+      .querySelector(".actions")
+      .append(
+        haButton("Add", "primary add", "accent"),
+        haButton("Ignore", "ghost ignore")
+      );
     const parts = {
       model: element.querySelector(".model"),
       key: element.querySelector(".key"),
@@ -640,9 +758,10 @@ class Rtl433Panel extends HTMLElement {
     element.innerHTML = `
       <td class="model"></td>
       <td class="key mono"></td>
-      <td class="actions">
-        <button class="ghost unignore" type="button">Un-ignore</button>
-      </td>`;
+      <td class="actions"></td>`;
+    element
+      .querySelector(".actions")
+      .append(haButton("Un-ignore", "ghost unignore"));
     const parts = {
       model: element.querySelector(".model"),
       key: element.querySelector(".key"),
@@ -682,11 +801,10 @@ const SKELETON = `
     </div>
     <label class="hub-picker" hidden>
       <span>Receiver</span>
-      <select class="hub-select"></select>
     </label>
   </div>
 
-  <div class="banner" hidden></div>
+  <div class="banner-slot"></div>
   <div class="status" hidden></div>
 
   <div class="card pending-card" hidden>
@@ -717,7 +835,7 @@ const SKELETON = `
     on its own.
   </div>
 
-  <button class="ghost ignored-toggle" type="button" hidden></button>
+  <div class="list-actions"></div>
 
   <div class="card ignored-card" hidden>
     <div class="card-head">Ignored</div>
@@ -778,7 +896,13 @@ const STYLES = `
    * exactly the useless one-option control _renderHubPicker means to hide.
    */
   .hub-picker[hidden] { display: none; }
-  .hub-select {
+  /*
+   * Only the native fallback is styled here. ha-select arrives with Home
+   * Assistant's own field -- floating label, 56px height, theme colours -- and
+   * restyling it from outside would be this panel disagreeing with the rest of
+   * Settings about what a field looks like.
+   */
+  select.hub-select {
     font: inherit;
     font-size: 14px;
     padding: 6px 8px;
@@ -787,7 +911,10 @@ const STYLES = `
     border: 1px solid var(--divider-color, #e0e0e0);
     border-radius: 4px;
   }
-  .banner {
+  ha-select.hub-select { min-width: 240px; }
+  ha-alert.banner { display: block; margin-bottom: 16px; }
+  ha-alert.banner[hidden] { display: none; }
+  div.banner {
     padding: 12px 16px;
     margin-bottom: 16px;
     border-radius: 8px;
@@ -795,7 +922,7 @@ const STYLES = `
     background: var(--card-background-color, #ffffff);
     color: var(--primary-text-color, #212121);
   }
-  .banner.notice { border-left-color: var(--warning-color, #ffa600); }
+  div.banner.notice { border-left-color: var(--warning-color, #ffa600); }
   .status, .empty {
     padding: 24px;
     text-align: center;
@@ -869,6 +996,8 @@ const STYLES = `
     border-radius: 4px;
   }
   button:disabled { opacity: 0.5; cursor: default; }
+  ha-button[hidden] { display: none; }
+  .list-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   button.primary {
     background: var(--primary-color, #03a9f4);
     color: var(--text-primary-color, #ffffff);
