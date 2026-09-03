@@ -21,8 +21,7 @@ here from the event's ``event_time`` and the coordinator's connect-edge anchor
 ``base.py``) and relies on the runtime state declared in that class's
 ``__init__`` (``devices``, ``last_seen``, ``available``, ``seen_fields``,
 ``device_fields``, ``known_field_keys``, ``_connection_time``, ``_discovered``,
-``_logged_unmapped``, ``_heard_order``, ``discovery_enabled``,
-``new_device_callback``) plus ``_dispatch`` and ``forget_device`` (base.py).
+``_logged_unmapped``, ``discovery_enabled``, ``new_device_callback``) plus ``_dispatch`` and ``forget_device`` (base.py).
 """
 
 from __future__ import annotations
@@ -83,8 +82,12 @@ class _EventProcessingMixin:
 
         now = dt_util.utcnow()
 
+        # ``devices`` doubles as the recency order the cap evicts from, so a
+        # key that transmits again moves to the fresh end rather than staying
+        # where it first landed.
         self.devices[key] = normalized
-        self._note_heard(key)
+        self.devices.move_to_end(key)
+        self._evict_cold_devices()
 
         # Track observed field keys for diagnostics (surfaced as unmatched keys).
         # Done for every outcome so a replay-discovered device's sensors can seed.
@@ -110,12 +113,6 @@ class _EventProcessingMixin:
         if not is_replay and was_available is False:
             LOGGER.debug("rtl_433 device %s back online", key)
 
-    def _note_heard(self, key: str) -> None:
-        """Record this key as the most recently heard, then enforce the cap."""
-        self._heard_order[key] = None
-        self._heard_order.move_to_end(key)
-        self._evict_cold_devices()
-
     def _evict_cold_devices(self) -> None:
         """Drop the coldest never-materialized keys until back under the cap.
 
@@ -124,16 +121,16 @@ class _EventProcessingMixin:
         be reading, which is the state that must never be dropped -- what is left
         is the spurious-decode population the cap exists for.
 
-        The key just heard is never a candidate, so a frame can never evict the
-        state it has this moment written. If everything else is protected the map
-        is left over the cap: real devices outrank the ceiling.
+        ``devices`` is ordered oldest-heard first, so this walks from the coldest
+        key towards the freshest and stops the moment the map is back under the
+        ceiling. The frame just taken is excluded, so an ingest can never evict
+        the state it has this moment written; and if everything else is protected
+        the map is simply left over the cap, because real devices outrank it.
         """
-        if len(self._heard_order) <= _MAX_TRACKED_DEVICES:
+        if len(self.devices) <= _MAX_TRACKED_DEVICES:
             return
         adopted = self.entry.data.get(CONF_DEVICES, {})
-        for key in list(self._heard_order)[:-1]:
-            if len(self._heard_order) <= _MAX_TRACKED_DEVICES:
-                return
+        for key in list(self.devices)[:-1]:
             if key in self._discovered or key in adopted:
                 continue
             LOGGER.debug(
@@ -142,6 +139,8 @@ class _EventProcessingMixin:
                 _MAX_TRACKED_DEVICES,
             )
             self.forget_device(key)
+            if len(self.devices) <= _MAX_TRACKED_DEVICES:
+                return
 
     def _trace_unmapped_fields(self, key: str, field_keys: set[str]) -> None:
         """DEBUG-log a device's fields that resolve to no library descriptor.

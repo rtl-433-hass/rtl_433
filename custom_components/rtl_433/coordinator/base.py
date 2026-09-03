@@ -242,7 +242,10 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.device_removers: list[Callable[[str], None]] = []
 
         # --- Runtime state, all scoped to this config entry ------------------
-        self.devices: dict[str, NormalizedEvent] = {}
+        # Ordered oldest-heard first: ``_events`` moves a key to the end on
+        # every frame, so the cap there can evict from the cold end. An
+        # ``OrderedDict`` is a ``dict``, so every reader is unaffected.
+        self.devices: OrderedDict[str, NormalizedEvent] = OrderedDict()
         self.last_seen: dict[str, datetime] = {}
         self.available: dict[str, bool] = {}
         self.seen_fields: set[str] = set()
@@ -291,11 +294,6 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # liveness/replay) so a device first seen in the backlog can still register
         # on its first genuine post-connection event. Not persisted.
         self._discovered: set[str] = set()
-        # Every ``device_key`` heard on this hub, freshest last, so the ingest
-        # path can evict the coldest never-materialized key once the population
-        # exceeds ``_events._MAX_TRACKED_DEVICES``. Only a bookkeeping order: the
-        # state itself lives in the maps above.
-        self._heard_order: OrderedDict[str, None] = OrderedDict()
 
         # --- Managed-SDR desired state (restart-surviving) -------------------
         # ``_desired`` maps a registry key -> the desired value HA wants applied;
@@ -454,7 +452,6 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.available.pop(device_key, None)
         self.device_fields.pop(device_key, None)
         self._logged_unmapped.pop(device_key, None)
-        self._heard_order.pop(device_key, None)
         # Re-arm discovery so a later live event re-registers the device.
         self._discovered.discard(device_key)
 
