@@ -2776,7 +2776,7 @@ const SKELETON = `
     <div class="header">
       <div>
         <div class="subtitle">
-          Devices this receiver has heard that are not in Home Assistant yet.
+          Devices this receiver has decoded that are not in Home Assistant yet.
           Adding one creates its device and entities; ignoring one hides it
           until you un-ignore it. An un-ignored device comes back on its next
           transmission.
@@ -2789,7 +2789,7 @@ const SKELETON = `
     <div class="grid" hidden></div>
 
     <div class="empty pending-empty" hidden>
-      Nothing pending. Everything this receiver has heard is either added or
+      Nothing pending. Everything this receiver has decoded is either added or
       ignored &mdash; trigger a new device so it transmits and it will appear
       here on its own.
     </div>
