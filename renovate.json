@@ -58,11 +58,9 @@
     {
       "matchPackageNames": ["pyrtl-433", "pyrtl_433"],
       "groupName": "pyrtl_433",
-      "minimumReleaseAge": null,
       "description": [
         "pyrtl_433 needs a group of its own because its pin is repeated five times -- manifest.json (read by both the homeassistant-manifest manager and the custom regex manager), requirements.txt, requirements_test.txt and the pyproject dev dependency-group -- and all five have to move in one commit",
         "It must not share the `test dependencies` group. When a branch mixes a cooldown-blocked upgrade with one that has cleared its cooldown, Renovate drops the blocked upgrade from the branch and does not report it anywhere: not as a PR, and not in the Pending section of the dependency dashboard. pytest-homeassistant-custom-component releases most days, so the shared branch had almost always cleared its cooldown, and every fresh pyrtl_433 release was silently discarded",
-        "minimumReleaseAge is disabled for this one package. The cooldown buys time for a bad third-party release to be yanked before it merges, which is not a risk we carry for a package this org publishes; meanwhile pyrtl_433 releases can land less than three days apart, and internalChecksFilter is strict, so Renovate holds the newest version rather than falling back to an older one that has aged -- a fast release cadence would stall the bump indefinitely. The automerge gate is the test suite running against the new library, which is the check that actually matters here",
         "Both spellings are listed because matchPackageNames resolves against the PyPI-normalized name (pyrtl-433), while the requirements and manifest.json managers report the raw underscore form"
       ]
     },
@@ -92,6 +90,17 @@
       "matchUpdateTypes": ["digest", "pinDigest", "pin"],
       "automerge": false,
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": [
+        "Packages this org publishes carry no cooldown before automerge. minimumReleaseAge exists to leave room for a compromised or yanked third-party release to be pulled before Renovate merges it; on a package we publish ourselves there is nothing to wait to find out",
+        "The cooldown also actively hurts here. Releases from our own repositories can land less than three days apart (pyrtl_433 0.3.0 and 0.4.0 were 17 hours apart), and internalChecksFilter is strict, so Renovate holds the newest version rather than falling back to an older one that has aged -- under a fast release cadence the bump stalls indefinitely instead of merely being delayed",
+        "Matched on sourceUrl rather than by name so a new first-party dependency is covered the day it is added, and so it holds for every manager: PyPI pins today, an rtl-433-hass action tomorrow. Renovate re-applies packageRules with the sourceUrl in scope before the cooldown is evaluated, so this reaches minimumReleaseAge",
+        "Listed last on purpose. packageRules are applied in order and the later rule wins, so this has to sit below the github-actions rules above, which would otherwise put a three day hold back on a first-party action",
+        "What stays is the check that actually matters: automerge still waits for the full test suite to pass against the new release"
+      ],
+      "matchSourceUrls": ["https://github.com/rtl-433-hass/**"],
+      "minimumReleaseAge": null
     }
   ]
 }
