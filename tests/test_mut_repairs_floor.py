@@ -12,11 +12,14 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from pyrtl_433 import TimePrecision
+
 from custom_components.rtl_433 import repairs
 from custom_components.rtl_433.const import (
     CONF_HOST,
     CONF_PATH,
     CONF_PORT,
+    CONF_EVENT_TIME_DISMISSED,
     CONF_RADIO_ID,
     DEFAULT_PATH,
     DEFAULT_PORT,
@@ -1796,3 +1799,249 @@ class TestSampleRateApplyFlowNoCoordinator:
         assert result["type"] == FlowResultType.CREATE_ENTRY
         assert result["title"] == ""
         assert result["data"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Unusable-event-time advisory — identity, flag, exact issue fields, flow
+# ---------------------------------------------------------------------------
+
+
+class TestEventTimeIssueIdentity:
+    """The issue id and its prefix are the contract the fix-flow router parses."""
+
+    def test_issue_prefix_is_exact(self):
+        """The prefix doubles as the translation_key, so its spelling is fixed."""
+        assert repairs.ISSUE_EVENT_TIME_UNUSABLE == "event_time_unusable"
+
+    def test_issue_id_is_prefix_underscore_entry_id(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """Asserted literally: the router slices this apart by prefix length."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        assert (
+            repairs._event_time_issue_id(entry)
+            == f"event_time_unusable_{entry.entry_id}"
+        )
+
+
+class TestEventTimeDismissalFlag:
+    """The durable acknowledgement: read, write, and the idempotence guard."""
+
+    def test_absent_flag_reads_as_not_dismissed(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        assert repairs._event_time_advisory_dismissed(entry) is False
+
+    def test_falsey_flag_reads_as_not_dismissed(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """A stored ``False`` is "not dismissed", not merely "key present"."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_EVENT_TIME_DISMISSED: False}
+        )
+        assert repairs._event_time_advisory_dismissed(entry) is False
+
+    def test_set_flag_reads_as_dismissed(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_EVENT_TIME_DISMISSED: True}
+        )
+        assert repairs._event_time_advisory_dismissed(entry) is True
+
+    def test_dismiss_writes_the_flag_and_keeps_the_rest_of_the_data(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """The write merges into ``entry.data`` rather than replacing it."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        before = dict(entry.data)
+
+        repairs._async_dismiss_event_time_advisory(hass, entry)
+
+        assert entry.data[CONF_EVENT_TIME_DISMISSED] is True
+        for key, value in before.items():
+            assert entry.data[key] == value
+
+    def test_dismiss_is_a_no_op_once_the_flag_is_set(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """The guard exists to avoid a pointless entry write (and its listener)."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        repairs._async_dismiss_event_time_advisory(hass, entry)
+
+        with patch.object(hass.config_entries, "async_update_entry") as update:
+            repairs._async_dismiss_event_time_advisory(hass, entry)
+
+        assert update.call_count == 0
+
+
+class TestAsyncRaiseEventTimeUnusable:
+    """The advisory carries exactly these fields."""
+
+    def _raise(self, hass, entry):
+        repairs.async_raise_event_time_unusable(hass, entry)
+        return ir.async_get(hass).async_get_issue(
+            DOMAIN, repairs._event_time_issue_id(entry)
+        )
+
+    def test_issue_is_fixable(self, hass: HomeAssistant, hub_entry_builder):
+        """Fixable so the card can carry the explanation and the acknowledgement."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        issue = self._raise(hass, entry)
+        assert issue is not None
+        assert issue.is_fixable is True
+
+    def test_issue_severity_is_warning(self, hass: HomeAssistant, hub_entry_builder):
+        """A degraded-but-working hub is a warning, not an error."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        assert self._raise(hass, entry).severity is ir.IssueSeverity.WARNING
+
+    def test_issue_translation_key(self, hass: HomeAssistant, hub_entry_builder):
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        assert (
+            self._raise(hass, entry).translation_key
+            == repairs.ISSUE_EVENT_TIME_UNUSABLE
+        )
+
+    def test_issue_title_placeholder_is_the_entry_title(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """The card names the hub, which is the only placeholder it carries."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        issue = self._raise(hass, entry)
+        assert issue.translation_placeholders == {"title": entry.title}
+
+    def test_clear_deletes_the_issue(self, hass: HomeAssistant, hub_entry_builder):
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        self._raise(hass, entry)
+        repairs.async_clear_event_time_unusable(hass, entry)
+        assert (
+            ir.async_get(hass).async_get_issue(
+                DOMAIN, repairs._event_time_issue_id(entry)
+            )
+            is None
+        )
+
+
+class TestEventTimeTracker:
+    """Which precision values the tracker acts on, and when it evaluates."""
+
+    def _wire(self, hass, entry, precision):
+        coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+        coordinator._client.time_precision = precision
+        unsub = repairs.async_track_event_time_precision(hass, entry, coordinator)
+        issue = ir.async_get(hass).async_get_issue(
+            DOMAIN, repairs._event_time_issue_id(entry)
+        )
+        unsub()
+        return issue
+
+    async def test_wire_up_raises_immediately_when_already_unusable(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """The evaluation on wire-up matters: a hub can already be in this state."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        assert self._wire(hass, entry, TimePrecision.UNUSABLE) is not None
+
+    @pytest.mark.parametrize(
+        "precision", [TimePrecision.SECOND, TimePrecision.MICROSECOND, None]
+    )
+    async def test_usable_precisions_are_never_flagged(
+        self, hass: HomeAssistant, hub_entry_builder, precision
+    ):
+        """Only UNUSABLE is a problem; SECOND is the rtl_433 default and works."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        assert self._wire(hass, entry, precision) is None
+
+
+class TestEventTimeFixFlow:
+    """Routing into the flow, and what confirming it does."""
+
+    async def test_router_returns_the_flow_bound_to_the_entry(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+
+        flow = await repairs.async_create_fix_flow(
+            hass, repairs._event_time_issue_id(entry), None
+        )
+        assert isinstance(flow, repairs.EventTimeRepairFlow)
+        assert flow._entry is entry
+
+    async def test_prefix_without_valid_entry_returns_confirm_flow(
+        self, hass: HomeAssistant
+    ):
+        """An id whose entry has gone away falls through to the plain dismiss."""
+        issue_id = f"{repairs.ISSUE_EVENT_TIME_UNUSABLE}_no_such_entry"
+        flow = await repairs.async_create_fix_flow(hass, issue_id, None)
+        assert isinstance(flow, ConfirmRepairFlow)
+
+    async def test_init_shows_the_confirm_form_without_acting(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """Opening the card must explain, not silently dismiss."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        repairs.async_raise_event_time_unusable(hass, entry)
+
+        flow = repairs.EventTimeRepairFlow(entry)
+        flow.hass = hass
+        result = await flow.async_step_init()
+
+        assert result["type"] == FlowResultType.FORM
+        assert result["step_id"] == "confirm"
+        assert result["description_placeholders"] == {"title": entry.title}
+        # An empty schema, not a missing one: the card renders a submit button.
+        # Kills the mutants that pass data_schema=None, drop it, or build the
+        # schema from None.
+        assert result.get("data_schema") is not None
+        assert result["data_schema"].schema == {}
+        assert repairs._event_time_advisory_dismissed(entry) is False
+        assert (
+            ir.async_get(hass).async_get_issue(
+                DOMAIN, repairs._event_time_issue_id(entry)
+            )
+            is not None
+        )
+
+    async def test_confirm_records_the_acknowledgement_and_clears_the_card(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        repairs.async_raise_event_time_unusable(hass, entry)
+
+        flow = repairs.EventTimeRepairFlow(entry)
+        flow.hass = hass
+        result = await flow.async_step_confirm({})
+        await hass.async_block_till_done()
+
+        assert result["type"] == FlowResultType.CREATE_ENTRY
+        # A repair flow completes with an empty entry; asserted exactly so a
+        # stray title or payload cannot creep in unnoticed.
+        assert result["title"] == ""
+        assert result["data"] == {}
+        assert repairs._event_time_advisory_dismissed(entry) is True
+        assert (
+            ir.async_get(hass).async_get_issue(
+                DOMAIN, repairs._event_time_issue_id(entry)
+            )
+            is None
+        )
