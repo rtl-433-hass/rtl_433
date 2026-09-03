@@ -47,9 +47,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pyrtl_433.library import (
-    validate_user_mappings,
-)
+from pyrtl_433.library import validate_user_mappings
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlowResult, OptionsFlow

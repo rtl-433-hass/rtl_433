@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pyrtl_433.library import lookup, normalize_overrides
+
 from .calibration import commodity_from_fields, normalize_calibration
 from .const import (
     CALIBRATION_COMMODITY,
@@ -47,13 +49,12 @@ from .const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
-from .mapping import lookup, normalize_overrides
 
 if TYPE_CHECKING:
+    from pyrtl_433.library import Registry
+
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
-
-    from .mapping import Registry
 
 # Documentation link for the device-mappings editor. Passed to the caller as a
 # value rather than written into a translation string, because hassfest forbids
@@ -280,7 +281,7 @@ def build_device_options(
 def build_mappings_data(entry: ConfigEntry, raw: Any) -> dict[str, Any]:
     """Return ``entry.data`` with normalized mapping overrides applied.
 
-    Validation stays the caller's: :func:`~.mapping.validate_user_mappings`
+    Validation stays the caller's: :func:`~pyrtl_433.library.validate_user_mappings`
     returns the problems a form has to show, and this is only reached once there
     are none.
     """
