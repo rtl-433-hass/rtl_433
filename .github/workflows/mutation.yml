@@ -38,6 +38,14 @@ name: Mutation
 #     more) shards because only ~5 modules dominate the time; extra shards would sit
 #     near-idle and widen the spread without lowering the pole (the slowest module).
 #
+# That weighting is only as good as the committed profile. A module missing from
+# it is packed as though it were free, which does not fail anything -- it just
+# drops one shard's worth of work into whichever bin looked lightest and leaves
+# the gate waiting on it. tests/test_mutation_config.py fails when the profile (or
+# the baseline) does not cover every mutable module, and the `timings` job below
+# publishes a refreshed profile from every full run so satisfying that check is a
+# download rather than a multi-hour local run.
+#
 # The single matrix job runs on every trigger and decides its own scope, so no
 # matrix leg is skipped at the job level (a job-level skip would surface the
 # unexpanded `${{ matrix.shard }}` name as a phantom check). The `mutation-gate`
@@ -50,6 +58,26 @@ name: Mutation
 #
 # The mutants/ working tree is never cached: a stale cache could report a higher
 # score than reality and let a regression through. Only uv's download cache is reused.
+#
+# The one thing the shards DO share is mutmut's stats profile
+# (`mutants/mutmut-stats.json`): the function -> covering-tests map and per-test
+# durations that mutmut builds by running the suite once, serially, before it
+# forks any mutant. Every shard used to rebuild that identically -- measured
+# locally, ~91s of a 176s run whose actual mutation work was 10s -- so the six
+# shards burned ~12 min of runner time computing the same file six times. The
+# `stats` job below computes it once and passes it to the shards as an artifact.
+#
+# This is a per-RUN artifact, never a cross-run cache, and that distinction is
+# load-bearing: `duration_by_test` sets each mutant's wall-clock timeout budget,
+# and mutmut counts a timeout as a KILL, so a stale profile with under-estimated
+# durations could inflate the score. Recomputed every run, it cannot. (Within a
+# run it is exact, and mutmut still re-collects for any test the profile does not
+# know about -- see `collect_or_load_stats`.)
+#
+# The trade is deliberate: it adds one short serial job (~3 min) ahead of the
+# matrix, so the critical path grows ~1 min on an idle repo, but it removes ~12
+# min of runner time per run. Queue contention, not shard length, is what made
+# PR runs take 40+ min, so that is the right side of the trade.
 
 on:
   push:
@@ -63,9 +91,85 @@ on:
 
 permissions: {}
 
+concurrency:
+  # The mutation matrix is six jobs per run, by far the repo's largest CI fan-out.
+  # Without a concurrency group every superseded push kept its six jobs running to
+  # completion, so several active PRs saturated the org's concurrent-job ceiling
+  # and the *queue* became the dominant cost: measured on 2026-09-03, PR shards
+  # waited up to 1221s to start, while the nightly (running alone) waited 3s and
+  # finished sooner despite mutating the whole package.
+  #
+  # Cancel only for pull_request. Push-to-main and the nightly are the runs that
+  # re-verify the entire baseline, so they must never be cancelled -- and they key
+  # on the unique run id rather than the ref so two of them do not serialize
+  # behind one another either.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Build mutmut's stats profile once for the whole matrix. See the note above
+  # for why this is an artifact rather than a cache.
+  stats:
+    name: "Mutation stats"
+    runs-on: "ubuntu-latest"
+    # Bounded by one serial pass of the test suite plus setup.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Install requirements
+        run: |
+          uv venv
+          uv pip install -r requirements_test.txt
+
+      # mutmut has no "collect stats and stop" entry point: the profile is a
+      # by-product of `mutmut run`, written before any mutant is forked. So ask
+      # it to mutate the package's *cheapest* module and keep the profile it
+      # writes on the way -- the mutation work itself then rounds to nothing.
+      #
+      # The module is read from the committed timings profile rather than named
+      # here, so this cannot rot: whatever is cheapest today is what gets picked,
+      # and tests/test_mutation_config.py already guarantees every mutable module
+      # has an entry. patterns_for() is mutmut-ratchet's own path -> filter
+      # translation, so the pattern is built exactly the way the shards build
+      # theirs (including the ``__init__`` special case).
+      - name: Collect the shared stats profile
+        run: |
+          uv run python - <<'PY' > pattern.txt
+          import json
+          import sys
+          from pathlib import Path
+
+          from mutmut_ratchet import load_config
+          from mutmut_ratchet.shards import patterns_for
+
+          config = load_config(Path("pyproject.toml"))
+          timings = json.loads(config.timings.read_text(encoding="utf-8"))["files"]
+          cheapest = min(timings, key=timings.get)
+          print(f"cheapest module: {cheapest} ({timings[cheapest]}s)", file=sys.stderr)
+          print(" ".join(patterns_for([cheapest], config)))
+          PY
+          cat pattern.txt
+          uv run mutmut run $(cat pattern.txt)
+          test -s mutants/mutmut-stats.json
+
+      - name: Upload the stats profile
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutmut-stats
+          path: mutants/mutmut-stats.json
+          retention-days: 1
+          if-no-files-found: error
+
   mutation:
     name: "Mutation floor — shard ${{ matrix.shard }}"
+    needs: [stats]
     runs-on: "ubuntu-latest"
     # A single shard mutates at most the package's heaviest module, so it finishes
     # well inside this backstop; the six shards run in parallel. (The old single
@@ -136,9 +240,22 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           cat shard.txt
 
+      # Drop the shared profile into mutants/ before mutmut runs. mutmut creates
+      # that directory itself and its copy step skips paths that already exist
+      # (and never deletes), so a pre-placed mutmut-stats.json survives
+      # generation and is picked up by `load_stats()` -- which then only
+      # re-collects for tests the profile does not already know about.
+      - name: Restore the shared stats profile
+        if: steps.shard.outputs.patterns != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mutmut-stats
+          path: mutants
+
       - name: Run mutation testing (this shard's modules)
         if: steps.shard.outputs.patterns != ''
         run: |
+          test -s mutants/mutmut-stats.json
           uv run mutmut run ${{ steps.shard.outputs.patterns }}
           uv run mutmut-ratchet stats --paths ${{ steps.shard.outputs.paths }} > mutation-stats.json
 
@@ -146,18 +263,100 @@ jobs:
         if: steps.shard.outputs.patterns != ''
         run: uv run mutmut-ratchet ratchet --mode floor --stats mutation-stats.json
 
+      # On a FULL run (push to main / nightly) each shard also exports the
+      # timings for the modules it just measured; the `timings` job merges the
+      # six partials. This exists so keeping scripts/mutation_timings.json fresh
+      # is a download rather than a multi-hour local full run -- which is why it
+      # went stale in the first place. Nothing is committed automatically: the
+      # profile is a reviewed input to the sharder, and
+      # tests/test_mutation_config.py is what forces the refresh to happen.
+      - name: Export this shard's timings
+        if: steps.shard.outputs.patterns != '' && github.event_name != 'pull_request'
+        run: uv run mutmut-ratchet timings --out "timings-${{ matrix.shard }}.json"
+
+      - name: Upload this shard's timings
+        if: steps.shard.outputs.patterns != '' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-timings-${{ matrix.shard }}
+          path: timings-${{ matrix.shard }}.json
+          retention-days: 7
+          if-no-files-found: error
+
       - name: No modules in this shard
         if: steps.shard.outputs.patterns == ''
         run: echo "No modules in scope for this shard; nothing to check."
 
+  # Merge the shards' partial timings into one downloadable profile. Full runs
+  # only -- a scoped PR measures a handful of modules, and committing that as
+  # "the profile" would drop every module it did not run.
+  timings:
+    name: "Mutation timings profile"
+    needs: [mutation]
+    if: github.event_name != 'pull_request' && needs.mutation.result == 'success'
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 5
+    steps:
+      - name: Download the shards' partial timings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-timings-*
+          merge-multiple: true
+          path: partials
+
+      # The shards mutate disjoint module sets, so the partials never disagree;
+      # a duplicated key would mean the partition itself is broken, so fail loudly
+      # rather than silently picking a winner.
+      - name: Merge into one profile
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          merged: dict[str, float] = {}
+          sources = sorted(Path("partials").glob("*.json"))
+          if not sources:
+              raise SystemExit("no partial timings were uploaded")
+          for part in sources:
+              files = json.loads(part.read_text(encoding="utf-8"))["files"]
+              for path, seconds in files.items():
+                  if path in merged:
+                      raise SystemExit(
+                          f"{path} was timed by more than one shard; the shard "
+                          "partition is not disjoint"
+                      )
+                  merged[path] = seconds
+          out = Path("mutation_timings.json")
+          out.write_text(
+              json.dumps({"files": dict(sorted(merged.items()))}, indent=2, sort_keys=True)
+              + "\n",
+              encoding="utf-8",
+          )
+          total = sum(merged.values())
+          print(f"Merged {len(sources)} shards: {len(merged)} modules, {total:.0f}s total.")
+          PY
+
+      - name: Upload the refreshed profile
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-timings
+          path: mutation_timings.json
+          retention-days: 30
+          if-no-files-found: error
+
   mutation-gate:
     name: "Mutation floor"
-    needs: [mutation]
+    needs: [stats, mutation]
     if: always()
     runs-on: "ubuntu-latest"
     steps:
       - name: Aggregate shard results
         run: |
+          # A failed stats job skips the matrix, which would otherwise surface
+          # here as a non-specific shard failure.
+          if [ "${{ needs.stats.result }}" != "success" ]; then
+            echo "The shared stats job failed; no shard ran."; exit 1
+          fi
           if [ "${{ needs.mutation.result }}" != "success" ]; then
             echo "One or more mutation shards failed."; exit 1
           fi
