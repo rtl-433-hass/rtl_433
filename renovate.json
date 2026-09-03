@@ -51,14 +51,20 @@
       "description": "Group developer tooling updates into a single PR"
     },
     {
-      "matchPackageNames": [
-        "pytest-homeassistant-custom-component",
-        "pyrtl-433",
-        "pyrtl_433",
-        "mutmut"
-      ],
+      "matchPackageNames": ["pytest-homeassistant-custom-component", "mutmut"],
       "groupName": "test dependencies",
-      "description": "The test pins live in both requirements_test.txt (CI, pip users) and the pyproject dependency-groups dev group (so a bare `uv run pytest` bootstraps itself). Sharing one group keeps both in a single PR so they cannot drift apart. Both spellings of pyrtl_433 are listed because matchPackageNames resolves against the PyPI-normalized name (pyrtl-433), while the requirements and manifest.json managers report the raw underscore form"
+      "description": "The test pins live in both requirements_test.txt (CI, pip users) and the pyproject dependency-groups dev group (so a bare `uv run pytest` bootstraps itself). Sharing one group keeps both in a single PR so they cannot drift apart"
+    },
+    {
+      "matchPackageNames": ["pyrtl-433", "pyrtl_433"],
+      "groupName": "pyrtl_433",
+      "minimumReleaseAge": null,
+      "description": [
+        "pyrtl_433 needs a group of its own because its pin is repeated five times -- manifest.json (read by both the homeassistant-manifest manager and the custom regex manager), requirements.txt, requirements_test.txt and the pyproject dev dependency-group -- and all five have to move in one commit",
+        "It must not share the `test dependencies` group. When a branch mixes a cooldown-blocked upgrade with one that has cleared its cooldown, Renovate drops the blocked upgrade from the branch and does not report it anywhere: not as a PR, and not in the Pending section of the dependency dashboard. pytest-homeassistant-custom-component releases most days, so the shared branch had almost always cleared its cooldown, and every fresh pyrtl_433 release was silently discarded",
+        "minimumReleaseAge is disabled for this one package. The cooldown buys time for a bad third-party release to be yanked before it merges, which is not a risk we carry for a package this org publishes; meanwhile pyrtl_433 releases can land less than three days apart, and internalChecksFilter is strict, so Renovate holds the newest version rather than falling back to an older one that has aged -- a fast release cadence would stall the bump indefinitely. The automerge gate is the test suite running against the new library, which is the check that actually matters here",
+        "Both spellings are listed because matchPackageNames resolves against the PyPI-normalized name (pyrtl-433), while the requirements and manifest.json managers report the raw underscore form"
+      ]
     },
     {
       "matchManagers": ["pre-commit"],
