@@ -248,8 +248,14 @@ function inPanel(page, body, arg) {
 }
 
 // Open the panel and wait for it to have rendered at least one candidate card.
-async function openPanel(page, { cards = 1, tries = 30 } = {}) {
-  await page.goto(`${BASE}/rtl_433`, { waitUntil: "domcontentloaded" });
+// `path` names the subview to land on, because the panel is a set of pages
+// now: the overview at /rtl_433, the candidate cards one level down. A caller
+// that only needs the settings rows stays on the overview; one that needs cards
+// asks for the discovered page, and deep-linking straight to it is also what
+// proves the route resolves.
+async function openPanel(page, { cards = 1, tries = 30, path = "" } = {}) {
+  const url = path ? `${BASE}/rtl_433/${path}` : `${BASE}/rtl_433`;
+  await page.goto(url, { waitUntil: "domcontentloaded" });
   for (let i = 0; i < tries; i++) {
     const ready = await inPanel(
       page,
@@ -258,43 +264,56 @@ async function openPanel(page, { cards = 1, tries = 30 } = {}) {
     if (typeof ready === "number" && ready >= cards) return true;
     await page.waitForTimeout(2000);
   }
-  console.log("screenshot: WARNING panel never rendered its cards");
-  return false;
+  if (cards > 0) {
+    console.log("screenshot: WARNING panel never rendered its cards");
+    return false;
+  }
+  return true;
 }
 
-// Click one of the panel's settings buttons and wait for its dialog.
+// Open one of the panel's settings pages by clicking its overview row.
 //
-// The dialog only appears once `rtl_433/settings/get` has answered, and after a
-// save that reloaded the hub that can take a couple of seconds -- so this polls
-// rather than sleeping, and says so loudly if the dialog never opens. That
-// warning is the signal that the settings forms have lost their entry point,
-// which is the failure mode this whole page exists to avoid.
-async function openPanelSettings(page, buttonClass) {
+// These are subviews now rather than dialogs, so what is waited for is the
+// settings view being on screen *with a form in it*: the row navigates
+// immediately, but the form cannot be drawn until `rtl_433/settings/get` has
+// answered, and after a save that reloaded the hub that can take a couple of
+// seconds. A row that never produces a form is the signal that the settings
+// forms have lost their entry point, which is the failure mode this page
+// exists to avoid -- so it is said loudly rather than captured blank.
+async function openPanelSettings(page, rowClass) {
   await inPanel(
     page,
     `(panel, cls) => panel.shadowRoot.querySelector(cls).click()`,
-    buttonClass,
+    rowClass,
   );
   for (let i = 0; i < 20; i++) {
-    const open = await inPanel(
+    const ready = await inPanel(
       page,
-      `(panel) => Boolean(panel.shadowRoot.querySelector(".settings-dialog").open)`,
+      `(panel) => {
+        const root = panel.shadowRoot;
+        const view = root.querySelector(".view-settings");
+        if (!view || view.hidden) return false;
+        const body = root.querySelector(".settings-body");
+        return Boolean(body && body.firstElementChild);
+      }`,
     );
-    if (open === true) {
+    if (ready === true) {
       // Let the form finish laying out before a capture.
       await page.waitForTimeout(800);
       return true;
     }
     await page.waitForTimeout(1000);
   }
-  console.log(`screenshot: WARNING ${buttonClass} never opened its dialog`);
+  console.log(`screenshot: WARNING ${rowClass} never showed a settings form`);
   return false;
 }
 
+// Back to the overview. The panel's own back control is what a user would use,
+// and it is also what keeps the URL and the view in step.
 async function closePanelSettings(page) {
   await inPanel(
     page,
-    `(panel) => panel.shadowRoot.querySelector(".settings-dialog").close()`,
+    `(panel) => panel.shadowRoot.querySelector(".back").click()`,
   );
   await page.waitForTimeout(500);
 }
@@ -401,7 +420,9 @@ async function readPanel(page) {
 // between the two reads: the counts move because the backend pushed a new
 // payload down the open subscription, which is the behaviour the page is for.
 async function capturePanel(page) {
-  await page.goto(`${BASE}/rtl_433`, { waitUntil: "domcontentloaded" });
+  // The cards live on the discovered subview now; the overview is the three
+  // cards of rows above it.
+  await page.goto(`${BASE}/rtl_433/discovered`, { waitUntil: "domcontentloaded" });
   // The Acurite capture decodes continuously and ws-bridge re-emits the fixtures
   // every 8s, so a bounded wait (~100s) gives every candidate a realistic
   // sighting count to render. Six devices are expected; five is enough to make
@@ -489,7 +510,7 @@ async function approveDevices(page) {
   // The Acurite capture decodes continuously and ws-bridge re-emits the fixtures
   // every 8s, so a short wait gives every candidate a realistic sighting count.
   await page.waitForTimeout(45000);
-  if (!(await openPanel(page, { cards: 5 }))) {
+  if (!(await openPanel(page, { cards: 5, path: "discovered" }))) {
     console.log("screenshot: no cards to approve; skipping 16-ignored-devices.png");
     return;
   }

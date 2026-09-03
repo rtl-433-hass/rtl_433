@@ -79,6 +79,47 @@ const RELOAD_RETRY_LIMIT = 10;
 /** The integration domain, as it appears in a device registry identifier. */
 const DOMAIN = "rtl_433";
 
+/**
+ * The panel's views, keyed by the path segment that addresses each one.
+ *
+ * Real paths rather than in-page state, because these are pages: the browser's
+ * back button, a bookmark and a reload all have to land where the user left
+ * off, which is what Home Assistant's own Zigbee and Z-Wave subpages do. The
+ * empty key is the overview.
+ */
+const VIEWS = {
+  "": { view: "overview", title: "rtl_433" },
+  discovered: { view: "discovered", title: "Discovered devices" },
+  options: { view: "settings", title: "Receiver settings", form: "hub" },
+  "device-settings": {
+    view: "settings",
+    title: "Device settings",
+    form: "device",
+  },
+  mappings: { view: "settings", title: "Device mappings", form: "mappings" },
+};
+
+/** mdiDevices, mdiShape, mdiRadar: the overview's row icons. */
+const ICON_DEVICES =
+  "M3 6h18V4H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4v-2H3V6m10 6H9v1.78c-.61.55-1 1.33-1 2.22s.39 1.67 1 2.22V20h4v-1.78c.61-.55 1-1.33 1-2.22s-.39-1.67-1-2.22V12m-2 5.5a1.5 1.5 0 0 1 0-3 1.5 1.5 0 0 1 0 3M22 8h-6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1m-1 10h-4v-8h4v8Z";
+const ICON_ENTITIES =
+  "m12 2 5.5 9h-11L12 2M17.5 13a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9M3 13.5h8v8H3v-8Z";
+const ICON_DISCOVERED =
+  "M19.07 4.93A10 10 0 0 0 12 2v2a8 8 0 0 1 5.66 13.66l1.41 1.41A10 10 0 0 0 19.07 4.93M12 6v2a4 4 0 0 1 2.83 6.83l1.41 1.41A6 6 0 0 0 12 6m-8 6a8 8 0 0 1 2.34-5.66L4.93 4.93A10 10 0 0 0 12 22v-2a8 8 0 0 1-8-8m4 0a4 4 0 0 0 4 4v-2a2 2 0 0 1-2-2H8Z";
+/** mdiCog, mdiTune, mdiCodeBraces: the settings rows. */
+const ICON_RECEIVER =
+  "M12 15.5A3.5 3.5 0 0 1 8.5 12A3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5a3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97c0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1c0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z";
+const ICON_DEVICE_SETTINGS =
+  "M3 17v2h6v-2H3M3 5v2h10V5H3m10 16v-2h8v-2h-8v-2h-2v6h2M7 9v2H3v2h4v2h2V9H7m14 4v-2H11v2h10m-6-4h2V7h4V5h-4V3h-2v6Z";
+const ICON_MAPPINGS =
+  "M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-1-1.73V13a2 2 0 0 0 1-1.73V5h2V3H8m8 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 1-1.73V13a2 2 0 0 1-1-1.73V5h-2V3h2Z";
+
+/** mdiCheckCircle / mdiAlertCircle: the status card's two states. */
+const ICON_ONLINE =
+  "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9Z";
+const ICON_OFFLINE =
+  "M13 13h-2V7h2m0 10h-2v-2h2M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2Z";
+
 /** mdiArrowLeft, for the toolbar's back control and its native fallback. */
 const BACK_ARROW_PATH = "M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2z";
 
@@ -250,6 +291,10 @@ class Rtl433Panel extends HTMLElement {
 
     this._hubs = [];
     this._entryId = null;
+    // The path segment this panel is showing, from `route`. Empty is the
+    // overview.
+    this._segment = "";
+    this._narrow = false;
     // `null` until the first payload lands, which distinguishes "still loading"
     // from "loaded, and there is genuinely nothing here" -- different things to
     // tell someone staring at an empty page.
@@ -347,6 +392,61 @@ class Rtl433Panel extends HTMLElement {
     return this._hass;
   }
 
+  /**
+   * Take the path Home Assistant is showing.
+   *
+   * `ha-panel-custom` assigns `route` as `{prefix, path}` on every navigation
+   * inside the panel, so this is where a subview URL -- typed, bookmarked,
+   * reloaded or arrived at with the browser's back button -- becomes the view
+   * on screen. It arrives before `hass` sometimes and after it others, so it
+   * only records the segment; `_render` is what draws it.
+   */
+  set route(route) {
+    this._segment = ((route && route.path) || "").replace(/^\//, "");
+    if (this._el) {
+      this._render();
+    }
+  }
+
+  get route() {
+    return { prefix: `/${DOMAIN}`, path: `/${this._segment || ""}` };
+  }
+
+  /** Narrow is handed down for the elements that lay themselves out by it. */
+  set narrow(narrow) {
+    this._narrow = Boolean(narrow);
+  }
+
+  get narrow() {
+    return this._narrow;
+  }
+
+  /**
+   * Move to another view by changing the URL.
+   *
+   * `pushState` plus a `location-changed` event is Home Assistant's own
+   * navigation contract: the frontend router listens for it and re-assigns
+   * `route`. The view is also set directly rather than waiting for that round
+   * trip, so a frontend that stops re-assigning `route` still navigates -- the
+   * URL and the view are kept in step by whichever of the two arrives.
+   */
+  _navigate(segment) {
+    const path = segment ? `/${DOMAIN}/${segment}` : `/${DOMAIN}`;
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, "", path);
+      window.dispatchEvent(
+        new CustomEvent("location-changed", { detail: { replace: false } })
+      );
+    }
+    this._segment = segment;
+    this._render();
+  }
+
+  /** The view definition for the current path, falling back to the overview. */
+  _viewFor() {
+    return VIEWS[this._segment] || VIEWS[""];
+  }
+
   connectedCallback() {
     // `hass` may have been set before the element was in the document, in which
     // case `_start` deferred; and an element that is detached and re-attached
@@ -356,6 +456,20 @@ class Rtl433Panel extends HTMLElement {
       this._subscribe();
     }
     this._startClock();
+    // The frontend router re-assigns `route` for navigations it makes, but a
+    // browser back button between two of this panel's own paths does not
+    // always reach it. Reading the URL back on `popstate` keeps the view and
+    // the address bar in step either way.
+    this._onPopState = () => {
+      const prefix = `/${DOMAIN}`;
+      if (window.location.pathname.startsWith(prefix)) {
+        this._segment = window.location.pathname.slice(prefix.length).replace(/^\//, "");
+        if (this._el) {
+          this._render();
+        }
+      }
+    };
+    window.addEventListener("popstate", this._onPopState);
   }
 
   /**
@@ -369,6 +483,10 @@ class Rtl433Panel extends HTMLElement {
   disconnectedCallback() {
     this._teardownSubscription();
     this._stopClock();
+    if (this._onPopState) {
+      window.removeEventListener("popstate", this._onPopState);
+      this._onPopState = null;
+    }
   }
 
   /** Begin once, as soon as there is both a `hass` and a document to render into. */
@@ -810,16 +928,205 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * The three settings entries, preferring Home Assistant's own buttons.
+   * One navigation row, preferring `ha-md-list-item`.
+   *
+   * This is the row core uses for a link into a subpage -- an icon, a headline,
+   * an optional supporting line and a chevron -- and it is what makes these
+   * read as pages to open rather than buttons to press. The class is kept on
+   * whichever element comes back so the rest of this file (and the screenshot
+   * harness) can still find and click it.
    */
-  _buildPageActions(row) {
-    const made = {
-      openHub: haButton("Receiver settings", "ghost open-hub-settings"),
-      openDevice: haButton("Device settings", "ghost open-device-settings"),
-      openMappings: haButton("Device mappings", "ghost open-mappings"),
-    };
-    row.append(made.openHub, made.openDevice, made.openMappings);
+  _navRow({ className, icon, headline, supporting, onClick }) {
+    const item = haControl("ha-md-list-item", () => {
+      const native = document.createElement("button");
+      native.type = "button";
+      return native;
+    });
+    item.className = className;
+    if (item.localName === "ha-md-list-item") {
+      item.type = "button";
+    }
+
+    if (icon) {
+      const glyph = haControl("ha-svg-icon", () =>
+        document.createElement("span")
+      );
+      glyph.slot = "start";
+      glyph.className = "row-icon";
+      if (glyph.localName === "ha-svg-icon") {
+        glyph.path = icon;
+      }
+      item.append(glyph);
+    }
+
+    const head = document.createElement("span");
+    head.slot = "headline";
+    head.className = "row-headline";
+    head.textContent = headline;
+    item.append(head);
+
+    if (supporting !== undefined) {
+      const sub = document.createElement("span");
+      sub.slot = "supporting-text";
+      sub.className = "row-supporting";
+      sub.textContent = supporting;
+      item.append(sub);
+    }
+
+    // The chevron is decoration: it says "this opens something" and the row
+    // itself is the control, so it is never the click target.
+    const chevron = haControl("ha-icon-next", () =>
+      document.createElement("span")
+    );
+    chevron.slot = "end";
+    chevron.className = "row-chevron";
+    item.append(chevron);
+
+    item.addEventListener("click", onClick);
+    return item;
+  }
+
+  /** A card with a heading and a list of rows inside it. */
+  _buildCard(slot, className, rows, heading) {
+    const card = haControl("ha-card", () => document.createElement("div"));
+    card.className = className;
+    if (heading) {
+      if (card.localName === "ha-card") {
+        card.header = heading;
+      } else {
+        const title = document.createElement("h2");
+        title.className = "card-heading";
+        title.textContent = heading;
+        card.append(title);
+      }
+    }
+    const list = haControl("ha-md-list", () => document.createElement("div"));
+    list.className = "card-list";
+    for (const row of rows) {
+      list.append(row);
+    }
+    card.append(list);
+    slot.append(card);
+    return card;
+  }
+
+  /**
+   * The receiver's status, as core's integration pages lead with it.
+   *
+   * The connection state is the one fact worth the top of the page: everything
+   * below it is meaningless while the receiver is unreachable, and "is it
+   * connected?" is the first question anyone opens this page with.
+   */
+  _buildStatusCard(slot) {
+    const card = haControl("ha-card", () => document.createElement("div"));
+    card.className = "status-card";
+    const row = document.createElement("div");
+    row.className = "status-row";
+    const badge = document.createElement("div");
+    badge.className = "status-badge";
+    const glyph = haControl("ha-svg-icon", () =>
+      document.createElement("span")
+    );
+    glyph.className = "status-icon";
+    badge.append(glyph);
+    const text = document.createElement("div");
+    text.className = "status-text";
+    const headline = document.createElement("div");
+    headline.className = "status-headline";
+    const supporting = document.createElement("div");
+    supporting.className = "status-supporting";
+    text.append(headline, supporting);
+    row.append(badge, text);
+    card.append(row);
+    slot.append(card);
+    return { card, glyph, badge, headline, supporting };
+  }
+
+  /**
+   * The overview's two lists: what this receiver has, and what can be changed.
+   *
+   * Devices and entities link out to the registry pages filtered to this
+   * integration, which is where Home Assistant already lists them -- there is
+   * nothing this panel could add by drawing that list again. There is no
+   * groups row because rtl_433 has no grouping, and no map because a receiver
+   * has no topology to draw.
+   */
+  _buildOverview(root) {
+    const made = {};
+    made.status0 = this._buildStatusCard(root.querySelector(".status-slot"));
+    made.rowDevices = this._navRow({
+      className: "nav-devices",
+      icon: ICON_DEVICES,
+      headline: "Devices",
+      supporting: "",
+      onClick: () => this._openConfigPage("devices"),
+    });
+    made.rowEntities = this._navRow({
+      className: "nav-entities",
+      icon: ICON_ENTITIES,
+      headline: "Entities",
+      supporting: "",
+      onClick: () => this._openConfigPage("entities"),
+    });
+    made.rowDiscovered = this._navRow({
+      className: "nav-discovered",
+      icon: ICON_DISCOVERED,
+      headline: "Discovered devices",
+      supporting: "",
+      onClick: () => this._navigate("discovered"),
+    });
+    this._buildCard(
+      root.querySelector(".network-slot"),
+      "network-card",
+      [made.rowDevices, made.rowEntities, made.rowDiscovered],
+      "My network"
+    );
+
+    made.openHub = this._navRow({
+      className: "open-hub-settings",
+      icon: ICON_RECEIVER,
+      headline: "Receiver settings",
+      supporting: "Availability timeout and whether Home Assistant manages the receiver",
+      onClick: () => this._navigate("options"),
+    });
+    made.openDevice = this._navRow({
+      className: "open-device-settings",
+      icon: ICON_DEVICE_SETTINGS,
+      headline: "Device settings",
+      supporting: "Per-device timeout overrides and utility-meter calibration",
+      onClick: () => this._navigate("device-settings"),
+    });
+    made.openMappings = this._navRow({
+      className: "open-mappings",
+      icon: ICON_MAPPINGS,
+      headline: "Device mappings",
+      supporting: "YAML overrides for how fields become entities",
+      onClick: () => this._navigate("mappings"),
+    });
+    this._buildCard(
+      root.querySelector(".page-actions"),
+      "settings-card",
+      [made.openHub, made.openDevice, made.openMappings],
+      null
+    );
     return made;
+  }
+
+  /**
+   * Open one of Home Assistant's own registry pages, scoped to this hub.
+   *
+   * The config-entry filter is the same one the integration page's own
+   * "N devices" link uses, so this lands on exactly that list.
+   */
+  _openConfigPage(which) {
+    if (!this._entryId) {
+      return;
+    }
+    const path = `/config/${which}/dashboard?historyBack=1&config_entry=${this._entryId}`;
+    window.history.pushState(null, "", path);
+    window.dispatchEvent(
+      new CustomEvent("location-changed", { detail: { replace: false } })
+    );
   }
 
   /**
@@ -892,15 +1199,17 @@ class Rtl433Panel extends HTMLElement {
       openHub: null,
       openDevice: null,
       openMappings: null,
-      settings: root.querySelector(".settings-dialog"),
-      settingsTitle: root.querySelector(".settings-title"),
+      title: root.querySelector(".toolbar-title"),
+      viewOverview: root.querySelector(".view-overview"),
+      viewDiscovered: root.querySelector(".view-discovered"),
+      viewSettings: root.querySelector(".view-settings"),
       settingsIntro: root.querySelector(".settings-intro"),
       settingsProblem: root.querySelector(".settings-problem"),
       settingsBody: root.querySelector(".settings-body"),
       settingsCancel: null,
       settingsSave: null,
     };
-    Object.assign(this._el, this._buildPageActions(root.querySelector(".page-actions")));
+    Object.assign(this._el, this._buildOverview(root));
     // Cancel is `plain` and Save `accent`: core's weighting for a dialog's
     // dismiss-versus-commit pair.
     this._el.settingsCancel = haButton(
@@ -987,24 +1296,10 @@ class Rtl433Panel extends HTMLElement {
       this._el.dialog.addEventListener(name, onClosed);
     }
 
-    this._el.openHub.addEventListener("click", () => this._openSettings("hub"));
-    this._el.openDevice.addEventListener("click", () =>
-      this._openSettings("device")
-    );
-    this._el.openMappings.addEventListener("click", () =>
-      this._openSettings("mappings")
-    );
     this._el.settingsCancel.addEventListener("click", () => {
-      this._el.settings.close();
+      this._navigate("");
     });
     this._el.settingsSave.addEventListener("click", () => this._saveSettings());
-    this._el.settings.addEventListener("close", () => {
-      this._settingsForm = null;
-      this._settingsData = null;
-      // Dropped so the next open builds a fresh form: the schema it needs
-      // depends on the payload, which is re-fetched after every save.
-      this._el.settingsFormEl = null;
-    });
   }
 
   _renderHubPicker() {
@@ -1038,6 +1333,28 @@ class Rtl433Panel extends HTMLElement {
       return;
     }
     const now = Date.now();
+    const view = this._viewFor();
+
+    // One view is on screen at a time, and the toolbar names it -- which is
+    // what makes the back arrow read as "up a level" rather than "leave".
+    this._el.viewOverview.hidden = view.view !== "overview";
+    this._el.viewDiscovered.hidden = view.view !== "discovered";
+    this._el.viewSettings.hidden = view.view !== "settings";
+    this._el.title.textContent = view.title;
+
+    if (view.form) {
+      // Fetching the payload is asynchronous, so this is fired and forgotten:
+      // it re-renders on its own when the form is built.
+      this._openSettings(view.form);
+    } else if (this._settingsForm) {
+      this._settingsForm = null;
+      this._settingsData = null;
+      // Dropped so the next visit builds a fresh form: the schema it needs
+      // depends on the payload, which is re-fetched after every save.
+      this._el.settingsFormEl = null;
+      this._el.settingsBody.textContent = "";
+      this._el.settingsProblem.hidden = true;
+    }
 
     if (this._banner) {
       this._el.banner.textContent = this._banner.text;
@@ -1077,14 +1394,17 @@ class Rtl433Panel extends HTMLElement {
     );
 
     this._el.clear.hidden = !loaded || cards.length === 0;
-    // Every settings command names a hub, so the row waits for one to resolve.
-    for (const button of [
+    // Every settings command names a hub, so the rows wait for one to resolve.
+    for (const row of [
       this._el.openHub,
       this._el.openDevice,
       this._el.openMappings,
+      this._el.rowDevices,
+      this._el.rowEntities,
     ]) {
-      button.disabled = !this._entryId;
+      row.disabled = !this._entryId;
     }
+    this._renderOverview(cards.length);
 
     const ignored = this._data && this._data.ignored ? this._data.ignored : [];
     this._el.ignoredToggle.hidden = !loaded || ignored.length === 0;
@@ -1418,6 +1738,108 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
+   * Fill the overview: the connection state, and what is behind each row.
+   *
+   * The counts come from the registries rather than from the panel's own
+   * payload, because they are counts of what Home Assistant *has* -- which is
+   * exactly what the rows link to. A count the page could not work out is left
+   * off rather than guessed at, so a row never claims "0 devices" while the
+   * subscription is still connecting.
+   */
+  _renderOverview(pendingCount) {
+    const status = this._el.status0;
+    const connected = this._data !== null && !this._banner;
+    status.glyph.className = "status-icon";
+    if (status.glyph.localName === "ha-svg-icon") {
+      status.glyph.path = connected ? ICON_ONLINE : ICON_OFFLINE;
+    }
+    status.badge.classList.toggle("offline", !connected);
+    status.headline.textContent = connected
+      ? "Online"
+      : this._data === null
+        ? "Connecting…"
+        : "Problem";
+    const devices = this._entryDeviceCount();
+    status.supporting.textContent =
+      devices === null ? "" : `${devices} ${devices === 1 ? "device" : "devices"}`;
+
+    this._setRowCount(this._el.rowDevices, devices, "device", "devices");
+    this._setRowCount(
+      this._el.rowEntities,
+      this._entryEntityCount(),
+      "entity",
+      "entities"
+    );
+    this._setRowCount(
+      this._el.rowDiscovered,
+      this._data === null ? null : pendingCount,
+      "device waiting to be added",
+      "devices waiting to be added"
+    );
+  }
+
+  /** Put "N things" on a row's supporting line, or nothing when unknown. */
+  _setRowCount(row, count, one, many) {
+    const line = row.querySelector(".row-supporting");
+    if (!line) {
+      return;
+    }
+    line.textContent =
+      count === null ? "" : `${count} ${count === 1 ? one : many}`;
+    line.hidden = count === null;
+  }
+
+  /**
+   * The device ids this hub owns, from the device registry.
+   *
+   * `hass.devices` is keyed by device id and each entry lists the config
+   * entries it belongs to, so this is a filter rather than a lookup. The
+   * receiver's own device is *included*, because the row this count sits on
+   * opens Home Assistant's device list filtered to this entry -- and that list
+   * includes it. A count that disagreed with what clicking it shows would read
+   * as a bug in the count.
+   */
+  _entryDeviceIds() {
+    const devices = this._hass && this._hass.devices;
+    if (!devices || !this._entryId) {
+      return null;
+    }
+    return Object.values(devices)
+      .filter(
+        (device) =>
+          device.config_entries &&
+          device.config_entries.includes(this._entryId)
+      )
+      .map((device) => device.id);
+  }
+
+  _entryDeviceCount() {
+    const ids = this._entryDeviceIds();
+    return ids === null ? null : ids.length;
+  }
+
+  /**
+   * How many entities this hub owns, counted through its devices.
+   *
+   * Deliberately not `entity.config_entry_id`: the registry the frontend hands
+   * a panel is the *display* registry, and it carries `device_id`, `platform`
+   * and `entity_category` but no config entry at all -- so filtering on one
+   * silently counted zero. Every entity this integration creates is attached
+   * to one of its devices, so the device set is the reliable way in.
+   */
+  _entryEntityCount() {
+    const entities = this._hass && this._hass.entities;
+    const ids = this._entryDeviceIds();
+    if (!entities || ids === null) {
+      return null;
+    }
+    const owned = new Set(ids);
+    return Object.values(entities).filter((entity) =>
+      owned.has(entity.device_id)
+    ).length;
+  }
+
+  /**
    * Leave the panel the way the user arrived at it.
    *
    * The panel is the rtl_433 entry's configuration page, so it is always
@@ -1427,6 +1849,13 @@ class Rtl433Panel extends HTMLElement {
    * only way out.
    */
   _goBack() {
+    // Inside the panel, back means up a level: a subview returns to the
+    // overview rather than out of the integration entirely, which is what the
+    // arrow means on core's own subpages.
+    if (this._segment) {
+      this._navigate("");
+      return;
+    }
     if (window.history.length > 1) {
       window.history.back();
       return;
@@ -1482,11 +1911,15 @@ class Rtl433Panel extends HTMLElement {
    * cleared something, which is the case the user most needs to see.
    */
   async _openSettings(kind) {
-    if (!this._entryId) {
+    if (!this._entryId || this._settingsForm === kind) {
       return;
     }
     this._el.settingsProblem.hidden = true;
     if (!this._settings) {
+      // The form cannot be drawn until the payload lands, and the view is
+      // already on screen by now -- so the body says so rather than sitting
+      // blank, and Save is withheld until there is something to save.
+      this._el.settingsBody.textContent = "Loading…";
       this._el.settingsSave.disabled = true;
       try {
         this._settings = await this._call({
@@ -1494,24 +1927,19 @@ class Rtl433Panel extends HTMLElement {
           entry_id: this._entryId,
         });
       } catch (error) {
-        this._setBanner(describeError(error), "error");
+        this._el.settingsBody.textContent = "";
+        this._el.settingsProblem.textContent = describeError(error);
+        this._el.settingsProblem.hidden = false;
         return;
       } finally {
         this._el.settingsSave.disabled = false;
       }
+      // Navigated away while the payload was in flight.
+      if (this._viewFor().form !== kind) {
+        return;
+      }
     }
-    this._settingsForm = kind;
     this._buildSettingsForm(kind);
-    this._el.settings.showModal();
-    // A native <dialog> moves focus to its first focusable descendant *on
-    // open*, which for the mappings form is the documentation link in the
-    // intro -- so this has to run after showModal, not as an autofocus before
-    // it. The editor is the only control that needs claiming: every other form
-    // starts with a real field, which is what the dialog would pick anyway.
-    const editor = this._el.settingsBody.querySelector(".mappings-editor");
-    if (editor && editor.focus) {
-      editor.focus();
-    }
   }
 
   /**
@@ -1770,11 +2198,9 @@ class Rtl433Panel extends HTMLElement {
     this._settingsForm = kind;
 
     if (kind === "hub") {
-      this._el.settingsTitle.textContent = "Receiver settings";
       this._el.settingsIntro.textContent =
         "Settings for this receiver as a whole. Individual devices can override the timeout.";
     } else if (kind === "device") {
-      this._el.settingsTitle.textContent = "Device settings";
       if (!this._settings.devices.length) {
         this._el.settingsIntro.textContent =
           "No devices have been added yet. Add one from this page first, and its settings will appear here.";
@@ -1785,7 +2211,6 @@ class Rtl433Panel extends HTMLElement {
       this._el.settingsIntro.textContent =
         "Overrides for one device. Blank means “use the receiver's setting”.";
     } else {
-      this._el.settingsTitle.textContent = "Device mappings";
       // The one intro that needs a link, so it is built rather than assigned.
       this._el.settingsIntro.textContent =
         "YAML overrides for how this receiver's fields become entities. Clearing the editor removes them all. ";
@@ -2031,7 +2456,7 @@ class Rtl433Panel extends HTMLElement {
     }
 
     this._settings = null;
-    this._el.settings.close();
+    this._navigate("");
     // Re-subscribe *before* the banner, not after. A hub reloads when its
     // calibration, mappings or manage-settings toggle changes, and the old
     // subscription would go on pushing a replaced coordinator's state -- but
@@ -2212,49 +2637,54 @@ const SKELETON = `
     <div class="toolbar-title">rtl_433</div>
   </div>
 
-  <div class="header">
-    <div>
-      <h1>Discovered devices</h1>
-      <div class="subtitle">
-        Devices this receiver has heard that are not in Home Assistant yet.
-        Adding one creates its device and entities; ignoring one hides it until
-        you un-ignore it. An un-ignored device comes back on its next
-        transmission.
-      </div>
-    </div>
+  <div class="banner-slot"></div>
+
+  <div class="view view-overview">
     <label class="hub-picker" hidden>
       <span>Receiver</span>
     </label>
+    <div class="status-slot"></div>
+    <div class="network-slot"></div>
+    <div class="page-actions"></div>
   </div>
 
-  <div class="page-actions"></div>
+  <div class="view view-discovered" hidden>
+    <div class="header">
+      <div>
+        <div class="subtitle">
+          Devices this receiver has heard that are not in Home Assistant yet.
+          Adding one creates its device and entities; ignoring one hides it
+          until you un-ignore it. An un-ignored device comes back on its next
+          transmission.
+        </div>
+      </div>
+    </div>
 
-  <div class="banner-slot"></div>
-  <div class="status" hidden></div>
+    <div class="status" hidden></div>
 
-  <div class="grid" hidden></div>
+    <div class="grid" hidden></div>
 
-  <div class="empty pending-empty" hidden>
-    Nothing pending. Everything this receiver has heard is either added or
-    ignored &mdash; trigger a new device so it transmits and it will appear here
-    on its own.
+    <div class="empty pending-empty" hidden>
+      Nothing pending. Everything this receiver has heard is either added or
+      ignored &mdash; trigger a new device so it transmits and it will appear
+      here on its own.
+    </div>
+
+    <div class="list-actions"></div>
+
+    <div class="grid ignored-grid" hidden></div>
   </div>
 
-  <div class="list-actions"></div>
-
-  <div class="grid ignored-grid" hidden></div>
-
-  <div class="replace-slot"></div>
-
-  <dialog class="settings-dialog panel-dialog">
-    <form method="dialog" class="panel-dialog-form">
-      <h2 class="settings-title panel-dialog-title"></h2>
-      <p class="settings-intro panel-dialog-intro"></p>
+  <div class="view view-settings" hidden>
+    <p class="settings-intro"></p>
+    <div class="settings-card-slot">
       <div class="settings-problem" hidden></div>
       <div class="settings-body"></div>
-      <div class="panel-dialog-actions settings-actions"></div>
-    </form>
-  </dialog>
+      <div class="settings-actions"></div>
+    </div>
+  </div>
+
+  <div class="replace-slot"></div>
 `;
 
 /*
@@ -2605,11 +3035,118 @@ const STYLES = `
    * because a receiver in a busy neighbourhood puts dozens of cards between the
    * two and a setting nobody can find is a setting nobody has.
    */
-  .page-actions {
+  .page-actions { margin-bottom: 16px; }
+
+  /*
+   * The overview and the settings pages are a reading column, not a grid, so
+   * they are held to a width a form is comfortable at rather than stretched
+   * across a desktop. The discovered view is deliberately left full width --
+   * it is a card grid, and it wants the room.
+   */
+  .view-overview, .view-settings { max-width: 800px; margin: 0 auto; }
+  .settings-card-slot {
+    padding: 16px;
+    border-radius: var(--ha-card-border-radius, 12px);
+    background: var(--card-background-color, #ffffff);
+    border: 1px solid var(--divider-color, #e0e0e0);
+  }
+  .settings-intro { color: var(--secondary-text-color, #727272); }
+
+  /*
+   * One view on screen at a time. An author display rule beats the user
+   * agent's [hidden] rule, so each of these needs its own hidden rule or the
+   * hidden property silently does nothing -- the same trap the hub picker hit.
+   */
+  .view { display: block; }
+  .view[hidden] { display: none; }
+
+  /*
+   * The overview, shaped like the integration pages core ships for Zigbee and
+   * Z-Wave: a status card, then cards of rows that open somewhere. Spacing is
+   * the only thing set on the cards themselves -- ha-card brings its own
+   * surface, radius and elevation, and overriding those would make this panel
+   * disagree with every other card in Settings.
+   */
+  .status-slot, .network-slot { display: block; margin-bottom: 16px; }
+  .status-card, .network-card, .settings-card { display: block; }
+  .status-row {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+  }
+  .status-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--success-color, #43a047) 18%, transparent);
+    color: var(--success-color, #43a047);
+  }
+  /*
+   * A receiver that is not connected is the one thing on this page worth
+   * colouring, so the badge carries the state rather than a line of text
+   * needing to be read.
+   */
+  .status-badge.offline {
+    background: color-mix(in srgb, var(--error-color, #db4437) 18%, transparent);
+    color: var(--error-color, #db4437);
+  }
+  .status-icon { width: 24px; height: 24px; }
+  .status-headline { font-size: 20px; font-weight: 400; }
+  .status-supporting {
+    font-size: 14px;
+    color: var(--secondary-text-color, #727272);
+  }
+
+  .card-list { display: block; }
+  .card-heading {
+    margin: 0;
+    padding: 16px 16px 0;
+    font-size: 20px;
+    font-weight: 400;
+  }
+  .row-icon { color: var(--secondary-text-color, #727272); }
+  .row-supporting[hidden] { display: none; }
+  /*
+   * The fallback row, for a frontend with no ha-md-list-item: a button laid out
+   * like the list row it stands in for, so the overview still reads as a list
+   * of things to open.
+   */
+  button.nav-devices,
+  button.nav-entities,
+  button.nav-discovered,
+  button.open-hub-settings,
+  button.open-device-settings,
+  button.open-mappings {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    padding: 16px;
+    border: none;
+    border-radius: 0;
+    background: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  button.nav-devices .row-headline,
+  button.nav-entities .row-headline,
+  button.nav-discovered .row-headline,
+  button.open-hub-settings .row-headline,
+  button.open-device-settings .row-headline,
+  button.open-mappings .row-headline { font-size: 16px; }
+
+  /* The settings subview's own action row, at the end of the page. */
+  .settings-actions {
+    display: flex;
+    justify-content: flex-end;
     gap: 8px;
-    margin-bottom: 16px;
+    margin-top: 16px;
   }
 
   /*
