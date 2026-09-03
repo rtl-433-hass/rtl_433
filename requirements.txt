@@ -11,4 +11,4 @@
 # PyYAML, voluptuous).
 #
 # Keep this list in sync with the manifest's requirements array.
-pyrtl_433==0.3.0
+pyrtl_433==0.4.0

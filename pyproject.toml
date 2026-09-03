@@ -24,7 +24,7 @@ requires-python = ">=3.14"
 [dependency-groups]
 dev = [
     "pytest-homeassistant-custom-component==0.13.357",
-    "pyrtl_433==0.3.0",
+    "pyrtl_433==0.4.0",
     "mutmut==3.7.0",
 ]
 
