@@ -815,7 +815,19 @@ def test_enforcement_failure_keeps_desired_and_event_stream_works(
             {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4}
         )
     assert "Acurite-606TX-42" in coordinator.devices
-    dispatch.assert_called_once()
+    # Count the device fan-out specifically rather than every dispatch. Since
+    # pyrtl_433 0.4.0 the client also fires ``on_hub_update`` the first time it
+    # observes the server's event ``time`` resolution -- here the frame carries no
+    # ``time`` at all, so the resolution resolves to UNUSABLE and that first
+    # observation reaches ``_emit_hub_update``. It is hub state changing, not a
+    # second delivery of this device's event, and this test is about the event
+    # stream surviving a failed enforcement.
+    device_signals = [
+        call
+        for call in dispatch.call_args_list
+        if call.args[1].startswith("rtl_433_device_update")
+    ]
+    assert len(device_signals) == 1
 
 
 # The ``/cmd`` issuance lock that serializes a user write against a reconnect
