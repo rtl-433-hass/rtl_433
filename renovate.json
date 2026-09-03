@@ -53,11 +53,12 @@
     {
       "matchPackageNames": [
         "pytest-homeassistant-custom-component",
+        "pyrtl-433",
         "pyrtl_433",
         "mutmut"
       ],
       "groupName": "test dependencies",
-      "description": "The test pins live in both requirements_test.txt (CI, pip users) and the pyproject dependency-groups dev group (so a bare `uv run pytest` bootstraps itself). Sharing one group keeps both in a single PR so they cannot drift apart"
+      "description": "The test pins live in both requirements_test.txt (CI, pip users) and the pyproject dependency-groups dev group (so a bare `uv run pytest` bootstraps itself). Sharing one group keeps both in a single PR so they cannot drift apart. Both spellings of pyrtl_433 are listed because matchPackageNames resolves against the PyPI-normalized name (pyrtl-433), while the requirements and manifest.json managers report the raw underscore form"
     },
     {
       "matchManagers": ["pre-commit"],
