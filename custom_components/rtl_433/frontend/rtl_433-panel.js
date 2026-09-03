@@ -161,6 +161,37 @@ function haControl(tag, fallback) {
 }
 
 /**
+ * One radio row, preferring Home Assistant's own.
+ *
+ * `ha-formfield` is the element core pairs a control with its label, and it is
+ * what puts the ripple, the hit area and the label-clicks-the-control behaviour
+ * on the row. Its label is plain text, so a row that wants two lines (a model
+ * over a device key) passes them as a node and lets the field wrap it.
+ */
+function haRadio(name, value, labelNode) {
+  const radio = haControl("ha-radio", () => {
+    const native = document.createElement("input");
+    native.type = "radio";
+    return native;
+  });
+  radio.name = name;
+  radio.value = value;
+  radio.className = "replace-radio";
+
+  const field = haControl("ha-formfield", () => document.createElement("label"));
+  field.className = "replace-option";
+  if (field.localName === "ha-formfield") {
+    // `ha-formfield` slots its control; the two-line text goes in the label
+    // slot so the whole row stays one click target.
+    labelNode.slot = "label";
+    field.append(radio, labelNode);
+  } else {
+    field.append(radio, labelNode);
+  }
+  return { field, radio };
+}
+
+/**
  * A button, preferring Home Assistant's own.
  *
  * `appearance`/`variant` are `ha-button`'s current styling API. The classes are
@@ -665,9 +696,23 @@ class Rtl433Panel extends HTMLElement {
       dialog: root.querySelector(".replace-dialog"),
       dialogIntro: root.querySelector(".replace-intro"),
       dialogList: root.querySelector(".replace-list"),
-      dialogCancel: root.querySelector(".replace-cancel"),
-      dialogConfirm: root.querySelector(".replace-confirm"),
+      dialogCancel: null,
+      dialogConfirm: null,
     };
+    // Built rather than templated so they can be Home Assistant's own buttons.
+    // Cancel is `plain` and Replace `accent`: that is the weighting core gives a
+    // dialog's dismiss-versus-commit pair, and Replace starts disabled because
+    // the dialog opens with nothing chosen.
+    this._el.dialogCancel = haButton("Cancel", "ghost replace-cancel", "plain");
+    this._el.dialogConfirm = haButton(
+      "Replace",
+      "primary replace-confirm",
+      "accent"
+    );
+    this._el.dialogConfirm.disabled = true;
+    root
+      .querySelector(".replace-actions")
+      .append(this._el.dialogCancel, this._el.dialogConfirm);
 
     // Which event a select fires on a pick is exactly the sort of detail that
     // has changed upstream before, so every plausible one is listened for and
@@ -1155,18 +1200,6 @@ class Rtl433Panel extends HTMLElement {
 
     this._el.dialogList.textContent = "";
     for (const target of sorted) {
-      const option = document.createElement("label");
-      option.className = "replace-option";
-
-      const input = document.createElement("input");
-      input.type = "radio";
-      input.name = "replace-target";
-      input.value = target.key;
-      input.addEventListener("change", () => {
-        this._replaceChoice = target.key;
-        this._el.dialogConfirm.disabled = false;
-      });
-
       const text = document.createElement("span");
       text.className = "replace-option-text";
       const name = document.createElement("span");
@@ -1177,8 +1210,15 @@ class Rtl433Panel extends HTMLElement {
       key.textContent = target.key;
       text.append(name, key);
 
-      option.append(input, text);
-      this._el.dialogList.append(option);
+      const { field, radio } = haRadio("replace-target", target.key, text);
+      // `change` is what both the borrowed radio and the native one fire on a
+      // pick, and picking is the only thing that enables Replace: the dialog
+      // opens with no choice made, so there is nothing safe to default to.
+      radio.addEventListener("change", () => {
+        this._replaceChoice = target.key;
+        this._el.dialogConfirm.disabled = false;
+      });
+      this._el.dialogList.append(field);
     }
 
     this._el.dialogConfirm.disabled = true;
@@ -1302,10 +1342,7 @@ const SKELETON = `
       <h2 class="replace-title">Replace a device</h2>
       <p class="replace-intro"></p>
       <div class="replace-list" role="radiogroup" aria-label="Device to replace"></div>
-      <div class="replace-actions">
-        <button class="ghost replace-cancel" type="button">Cancel</button>
-        <button class="primary replace-confirm" type="button" disabled>Replace</button>
-      </div>
+      <div class="replace-actions"></div>
     </form>
   </dialog>
 `;
@@ -1571,7 +1608,12 @@ const STYLES = `
     overflow-y: auto;
     margin-bottom: 16px;
   }
-  .replace-option {
+  ha-formfield.replace-option {
+    display: flex;
+    width: 100%;
+    padding: 4px 0;
+  }
+  label.replace-option {
     display: flex;
     align-items: center;
     gap: 12px;
