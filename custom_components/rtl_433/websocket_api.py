@@ -47,6 +47,7 @@ from datetime import timedelta
 import logging
 from typing import Any, Final
 
+from pyrtl_433.library import FieldDescriptor, Registry, apply_transform, lookup
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
@@ -74,7 +75,6 @@ from .const import (
 )
 from .coordinator import Rtl433Coordinator
 from .hub_settings import _hub_ignored_devices
-from .mapping import FieldDescriptor, Registry, apply_transform, lookup
 
 _LOGGER = logging.getLogger(__name__)
 
