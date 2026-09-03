@@ -49,3 +49,23 @@ jobs:
 
       - name: Run tests
         run: uv run pytest --cov=custom_components/rtl_433 tests/
+
+  frontend:
+    # The panel is one hand-written ES module with no build step, so this runs
+    # Node's own test runner over it: no dependencies to install, nothing to
+    # compile, and the tests import the shipped file itself rather than a copy.
+    name: "frontend (node --test)"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: false
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+
+      - name: Run frontend tests
+        run: node --test tests/frontend/*.test.mjs

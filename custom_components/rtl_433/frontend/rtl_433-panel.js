@@ -120,6 +120,35 @@ const ICON_ONLINE =
 const ICON_OFFLINE =
   "M13 13h-2V7h2m0 10h-2v-2h2M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2Z";
 
+/**
+ * What the back control should do from where the panel currently is.
+ *
+ * Pure, and exported, so the rule can be tested without a browser: it is the
+ * part that was wrong, and it is wrong in a way no screenshot shows -- the
+ * page looks right and the history underneath it is not.
+ *
+ * Entering a subview pushes an entry, so going back up has to *unwind* that
+ * push rather than push again. Pushing again is what broke it: the overview
+ * ended up stacked on top of the subview it came from, so the overview's own
+ * back control walked straight back into that subview, and there was no way
+ * out of the panel.
+ *
+ * Arriving at a subview directly -- a bookmark, a reload, a shared link -- has
+ * no push to unwind, so going up replaces instead. Either way exactly one entry
+ * represents "the panel", and back from the overview leaves it.
+ *
+ * @param {string} segment      the path segment showing, "" for the overview
+ * @param {boolean} pushed      whether this panel pushed to reach `segment`
+ * @param {number} historyLength `window.history.length`
+ * @returns {"unwind"|"replace-up"|"leave"|"exit"}
+ */
+export function backAction(segment, pushed, historyLength) {
+  if (segment) {
+    return pushed ? "unwind" : "replace-up";
+  }
+  return historyLength > 1 ? "leave" : "exit";
+}
+
 /** mdiArrowLeft, for the toolbar's back control and its native fallback. */
 const BACK_ARROW_PATH = "M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2z";
 
@@ -291,6 +320,9 @@ class Rtl433Panel extends HTMLElement {
 
     this._hubs = [];
     this._entryId = null;
+    // Whether this panel pushed a history entry to reach the view it is on,
+    // and therefore owes an unwind when it goes back up.
+    this._pushed = false;
     // The brands access token, fetched once for the status card's logo.
     this._brandToken = null;
     // The path segment this panel is showing, from `route`. Empty is the
@@ -432,16 +464,41 @@ class Rtl433Panel extends HTMLElement {
    * trip, so a frontend that stops re-assigning `route` still navigates -- the
    * URL and the view are kept in step by whichever of the two arrives.
    */
-  _navigate(segment) {
+  _navigate(segment, { replace = false } = {}) {
     const path = segment ? `/${DOMAIN}/${segment}` : `/${DOMAIN}`;
     if (window.location.pathname !== path) {
-      window.history.pushState(null, "", path);
+      if (replace) {
+        window.history.replaceState(null, "", path);
+      } else {
+        window.history.pushState(null, "", path);
+        // Only a move *into* a subview is an entry this panel has to unwind
+        // later; the rows that do it all live on the overview.
+        if (segment) {
+          this._pushed = true;
+        }
+      }
       window.dispatchEvent(
-        new CustomEvent("location-changed", { detail: { replace: false } })
+        new CustomEvent("location-changed", { detail: { replace } })
       );
     }
     this._segment = segment;
     this._render();
+  }
+
+  /**
+   * Leave a subview for the overview, without stacking an entry on top of it.
+   *
+   * Used by the back arrow and by a form's Cancel and Save alike: all three
+   * mean the same thing, and all three were pushing.
+   */
+  _goUp() {
+    if (this._pushed) {
+      this._pushed = false;
+      // `popstate` re-reads the URL and renders, so this needs no follow-up.
+      window.history.back();
+      return;
+    }
+    this._navigate("", { replace: true });
   }
 
   /** The view definition for the current path, falling back to the overview. */
@@ -465,7 +522,14 @@ class Rtl433Panel extends HTMLElement {
     this._onPopState = () => {
       const prefix = `/${DOMAIN}`;
       if (window.location.pathname.startsWith(prefix)) {
-        this._segment = window.location.pathname.slice(prefix.length).replace(/^\//, "");
+        this._segment = window.location.pathname
+          .slice(prefix.length)
+          .replace(/^\//, "");
+        // Landing back on the overview means any entry this panel pushed has
+        // been unwound by the browser, so there is nothing left to owe.
+        if (!this._segment) {
+          this._pushed = false;
+        }
         if (this._el) {
           this._render();
         }
@@ -1351,7 +1415,7 @@ class Rtl433Panel extends HTMLElement {
     }
 
     this._el.settingsCancel.addEventListener("click", () => {
-      this._navigate("");
+      this._goUp();
     });
     this._el.settingsSave.addEventListener("click", () => this._saveSettings());
   }
@@ -1906,17 +1970,22 @@ class Rtl433Panel extends HTMLElement {
     // Inside the panel, back means up a level: a subview returns to the
     // overview rather than out of the integration entirely, which is what the
     // arrow means on core's own subpages.
-    if (this._segment) {
-      this._navigate("");
-      return;
+    switch (backAction(this._segment, this._pushed, window.history.length)) {
+      case "unwind":
+        this._pushed = false;
+        window.history.back();
+        return;
+      case "replace-up":
+        this._navigate("", { replace: true });
+        return;
+      case "leave":
+        window.history.back();
+        return;
+      default:
+        // Opened directly by URL with nothing behind it. The integration's own
+        // page is where this panel belongs under.
+        window.location.assign("/config/integrations/integration/rtl_433");
     }
-    if (window.history.length > 1) {
-      window.history.back();
-      return;
-    }
-    // Opened directly by URL, so there is nothing to go back to. The
-    // integration's own page is where this panel belongs under.
-    window.location.assign("/config/integrations/integration/rtl_433");
   }
 
   /**
@@ -2511,7 +2580,7 @@ class Rtl433Panel extends HTMLElement {
     }
 
     this._settings = null;
-    this._navigate("");
+    this._goUp();
     // Re-subscribe *before* the banner, not after. A hub reloads when its
     // calibration, mappings or manage-settings toggle changes, and the old
     // subscription would go on pushing a replaced coordinator's state -- but
@@ -3341,9 +3410,13 @@ const STYLES = `
 
 `;
 
-// Guarded because a panel module can be evaluated more than once in a
-// long-lived frontend session, and `customElements.define` throws on a name
-// that is already taken.
-if (!customElements.get("rtl-433-panel")) {
+// Guarded twice over. `customElements.define` throws on a name that is already
+// taken, and a panel module can be evaluated more than once in a long-lived
+// frontend session; and the registry is absent entirely outside a browser,
+// where this module is imported to test the pure helpers above.
+if (
+  typeof customElements !== "undefined" &&
+  !customElements.get("rtl-433-panel")
+) {
   customElements.define("rtl-433-panel", Rtl433Panel);
 }
