@@ -29,6 +29,7 @@ import pytest
 
 from custom_components.rtl_433.const import signal_device_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from custom_components.rtl_433.coordinator._events import _MAX_TRACKED_DEVICES
 from homeassistant.util import dt as dt_util
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
@@ -410,3 +411,116 @@ async def test_client_receives_ha_configured_event_tz(hass, hub_entry_builder):
 
     assert coordinator._client._event_tz == configured
     assert coordinator._client._event_tz.key == "America/New_York"
+
+
+# --------------------------------------------------------------------------- #
+# Cap on never-materialized device state.                                      #
+# --------------------------------------------------------------------------- #
+def test_tracked_device_cap_is_the_documented_value():
+    """The ceiling is a deliberate number, not an incidental one.
+
+    Pinned explicitly so a change to it is a change to this test: it is sized far
+    above what a busy receiver hears, and the whole point is that it is generous
+    enough never to touch a real install.
+    """
+    assert _MAX_TRACKED_DEVICES == 512
+
+
+def _flood(coordinator, count, *, start=0, prefix="Noise"):
+    """Feed ``count`` distinct one-off device keys, as spurious decodes do."""
+    for index in range(start, start + count):
+        key = f"{prefix}-{index}"
+        coordinator._on_client_event(_event(key=key, model=prefix))
+
+
+def test_spurious_decodes_do_not_grow_state_without_bound(hass, coordinator):
+    """A shared band's junk decodes are evicted coldest-first at the cap.
+
+    433 MHz produces decodes with arbitrary ids; without a ceiling every one of
+    them would hold runtime state for the life of the config entry, and the
+    watchdog would sweep them on every tick.
+    """
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES + 10)
+
+    assert len(coordinator.devices) == _MAX_TRACKED_DEVICES
+    # Coldest gone, freshest kept.
+    assert "Noise-0" not in coordinator.devices
+    assert f"Noise-{_MAX_TRACKED_DEVICES + 9}" in coordinator.devices
+
+
+def test_eviction_clears_every_per_device_map(hass, coordinator):
+    """An evicted key leaves nothing behind in any of the parallel maps."""
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES + 1)
+
+    evicted = "Noise-0"
+    assert evicted not in coordinator.devices
+    assert evicted not in coordinator.last_seen
+    assert evicted not in coordinator.available
+    assert evicted not in coordinator.device_fields
+    assert evicted not in coordinator._logged_unmapped
+    assert evicted not in coordinator._heard_order
+
+
+def test_real_devices_are_never_evicted(hass, coordinator):
+    """Adopted and discovered keys outrank the cap; only junk is dropped.
+
+    A device with entities behind it must keep the state those entities read, so
+    the eviction pass skips anything adopted onto the config entry or registered
+    this session — even when it is the coldest thing in the map.
+    """
+    from custom_components.rtl_433.const import CONF_DEVICES
+
+    adopted_key = "Acurite-606TX-42"
+    hass.config_entries.async_update_entry(
+        coordinator.entry,
+        data={
+            **coordinator.entry.data,
+            CONF_DEVICES: {adopted_key: {"model": "Acurite-606TX"}},
+        },
+    )
+    discovered_key = "Nexus-TH-7"
+
+    with patch(DISPATCH):
+        # Both land first, so they are the coldest entries in the map.
+        coordinator._on_client_event(_event(key=adopted_key))
+        coordinator._on_client_event(_event(key=discovered_key, model="Nexus-TH"))
+        coordinator._discovered.add(discovered_key)
+        coordinator.discovery_enabled = False
+        _flood(coordinator, _MAX_TRACKED_DEVICES + 10)
+
+    assert adopted_key in coordinator.devices
+    assert discovered_key in coordinator.devices
+    assert "Noise-0" not in coordinator.devices
+
+
+def test_cap_never_evicts_the_frame_just_taken(hass, coordinator):
+    """With everything else protected, the newest key still keeps its state.
+
+    The map is left over the ceiling rather than dropping the state the current
+    frame has just written — real devices outrank the cap.
+    """
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES)
+        # Everything heard so far counts as a real device.
+        coordinator._discovered.update(coordinator.devices)
+        coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
+
+    assert "Noise-fresh" in coordinator.devices
+    assert len(coordinator.devices) == _MAX_TRACKED_DEVICES + 1
+
+
+def test_forget_device_drops_the_recency_entry(hass, coordinator):
+    """Removing a device from its device page forgets its ordering slot too."""
+    key = "Acurite-606TX-42"
+    with patch(DISPATCH):
+        coordinator._on_client_event(_event(key=key))
+    assert key in coordinator._heard_order
+
+    coordinator.forget_device(key)
+    assert key not in coordinator._heard_order
+    assert key not in coordinator.devices

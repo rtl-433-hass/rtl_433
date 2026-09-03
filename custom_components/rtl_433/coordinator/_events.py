@@ -21,8 +21,8 @@ here from the event's ``event_time`` and the coordinator's connect-edge anchor
 ``base.py``) and relies on the runtime state declared in that class's
 ``__init__`` (``devices``, ``last_seen``, ``available``, ``seen_fields``,
 ``device_fields``, ``known_field_keys``, ``_connection_time``, ``_discovered``,
-``_logged_unmapped``, ``discovery_enabled``, ``new_device_callback``) plus
-``_dispatch`` (base.py).
+``_logged_unmapped``, ``_heard_order``, ``discovery_enabled``,
+``new_device_callback``) plus ``_dispatch`` and ``forget_device`` (base.py).
 """
 
 from __future__ import annotations
@@ -32,7 +32,21 @@ from pyrtl_433.replay import DISCOVERY_BACKLOG_GRACE
 
 from homeassistant.util import dt as dt_util
 
-from ..const import LOGGER
+from ..const import CONF_DEVICES, LOGGER
+
+# Hard cap on how many device keys one hub keeps runtime state for. "One entry
+# per device the receiver hears" is not self-limiting: 433 MHz is a shared band
+# that produces spurious decodes with arbitrary ids, and several real protocols
+# roll their id on a battery change, so an uncapped map grows for the life of the
+# config entry. pyrtl_433 caps its own replay bookkeeping the same way and for
+# the same reason, but that cap covers only the library's map -- these are ours.
+#
+# Unlike the library we cannot evict blindly: a key with entities behind it must
+# keep its state or those entities lose what they read. So only keys that never
+# materialized into a device are evictable, and an install that genuinely runs
+# more than this many *real* devices simply exceeds the cap rather than breaking.
+# Sized far above the few dozen devices a busy receiver actually hears.
+_MAX_TRACKED_DEVICES = 512
 
 
 class _EventProcessingMixin:
@@ -70,6 +84,7 @@ class _EventProcessingMixin:
         now = dt_util.utcnow()
 
         self.devices[key] = normalized
+        self._note_heard(key)
 
         # Track observed field keys for diagnostics (surfaced as unmatched keys).
         # Done for every outcome so a replay-discovered device's sensors can seed.
@@ -94,6 +109,39 @@ class _EventProcessingMixin:
 
         if not is_replay and was_available is False:
             LOGGER.debug("rtl_433 device %s back online", key)
+
+    def _note_heard(self, key: str) -> None:
+        """Record this key as the most recently heard, then enforce the cap."""
+        self._heard_order[key] = None
+        self._heard_order.move_to_end(key)
+        self._evict_cold_devices()
+
+    def _evict_cold_devices(self) -> None:
+        """Drop the coldest never-materialized keys until back under the cap.
+
+        Evictable means: not adopted onto the config entry, and not registered
+        with Home Assistant this session. Those two cover every key an entity can
+        be reading, which is the state that must never be dropped -- what is left
+        is the spurious-decode population the cap exists for.
+
+        The key just heard is never a candidate, so a frame can never evict the
+        state it has this moment written. If everything else is protected the map
+        is left over the cap: real devices outrank the ceiling.
+        """
+        if len(self._heard_order) <= _MAX_TRACKED_DEVICES:
+            return
+        adopted = self.entry.data.get(CONF_DEVICES, {})
+        for key in list(self._heard_order)[:-1]:
+            if len(self._heard_order) <= _MAX_TRACKED_DEVICES:
+                return
+            if key in self._discovered or key in adopted:
+                continue
+            LOGGER.debug(
+                "rtl_433 evicting cold device state for %s (over the %d key cap)",
+                key,
+                _MAX_TRACKED_DEVICES,
+            )
+            self.forget_device(key)
 
     def _trace_unmapped_fields(self, key: str, field_keys: set[str]) -> None:
         """DEBUG-log a device's fields that resolve to no library descriptor.
