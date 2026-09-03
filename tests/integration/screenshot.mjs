@@ -703,9 +703,11 @@ async function captureHubSettings(page) {
           page,
           `(panel, timeout) => {
             const root = panel.shadowRoot;
-            const field = root.querySelector('.settings-body input[type="number"]');
-            const was = field.value;
-            field.value = timeout;
+            const was = panel._settingsData.availability_timeout;
+            panel._onSettingsChanged({
+              ...panel._settingsData,
+              availability_timeout: Number(timeout),
+            });
             root.querySelector(".settings-save").click();
             return { was, now: timeout };
           }`,
@@ -736,13 +738,18 @@ async function captureDeviceSettings(page) {
   const picked = await inPanel(
     page,
     `(panel) => {
-      const picker = panel.shadowRoot.querySelector(".settings-body select");
+      const schema = panel._settingsSchema("device");
+      const picker = schema.find((field) => field.name === "device_key");
       if (!picker) return "no picker";
-      const option = [...picker.options].find((o) => o.value.includes("SCMplus"));
+      const option = picker.selector.select.options.find((o) =>
+        o.value.includes("SCMplus"),
+      );
       if (!option) return "no SCMplus option";
-      picker.value = option.value;
-      picker.dispatchEvent(new Event("change"));
-      return option.textContent.trim();
+      panel._onSettingsChanged({
+        ...panel._settingsData,
+        device_key: option.value,
+      });
+      return option.label;
     }`,
   );
   console.log("screenshot: device settings -> " + JSON.stringify(picked));
@@ -757,10 +764,10 @@ async function captureDeviceSettings(page) {
 //
 //   05-mapping-overrides.png  the YAML editor holding two overrides
 //
-// A plain <textarea>, so the document is assigned rather than typed -- there is
-// no editor here to auto-indent it into something that no longer parses, which
-// is what the previous CodeMirror-based editor required a clipboard paste to
-// avoid. NOT saved: storing overrides reloads the hub.
+// The document is pushed into the panel's form state rather than typed, so the
+// editor cannot auto-indent it into something that no longer parses -- typing
+// YAML into CodeMirror character by character is exactly what used to need a
+// clipboard paste to avoid. NOT saved: storing overrides reloads the hub.
 async function captureMappings(page) {
   await openPanel(page, { cards: 0 });
   if (!(await openPanelSettings(page, ".open-mappings"))) {
@@ -769,7 +776,9 @@ async function captureMappings(page) {
   await inPanel(
     page,
     `(panel, text) => {
-      panel.shadowRoot.querySelector(".settings-body textarea").value = text;
+      panel._onSettingsChanged({ ...panel._settingsData, mappings: text });
+      const editor = panel.shadowRoot.querySelector(".mappings-editor");
+      if (editor) editor.value = text;
     }`,
     EXAMPLE_MAPPINGS,
   );

@@ -1503,6 +1503,15 @@ class Rtl433Panel extends HTMLElement {
     this._settingsForm = kind;
     this._buildSettingsForm(kind);
     this._el.settings.showModal();
+    // A native <dialog> moves focus to its first focusable descendant *on
+    // open*, which for the mappings form is the documentation link in the
+    // intro -- so this has to run after showModal, not as an autofocus before
+    // it. The editor is the only control that needs claiming: every other form
+    // starts with a real field, which is what the dialog would pick anyway.
+    const editor = this._el.settingsBody.querySelector(".mappings-editor");
+    if (editor && editor.focus) {
+      editor.focus();
+    }
   }
 
   /**
@@ -1893,10 +1902,6 @@ class Rtl433Panel extends HTMLElement {
       return native;
     });
     editor.className = "mappings-editor";
-    // A native <dialog> focuses its first focusable descendant, which here is
-    // the documentation link in the intro -- so without this the mappings form
-    // opened with a focus ring on a link instead of a caret in the editor.
-    editor.autofocus = true;
     if (editor.localName === "ha-code-editor") {
       editor.hass = this._hass;
       editor.mode = "yaml";
