@@ -99,13 +99,11 @@ const VIEWS = {
   mappings: { view: "settings", title: "Device mappings", form: "mappings" },
 };
 
-/** mdiDevices, mdiShape, mdiRadar: the overview's row icons. */
+/** mdiDevices, mdiShape: the overview's row icons. */
 const ICON_DEVICES =
   "M3 6h18V4H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4v-2H3V6m10 6H9v1.78c-.61.55-1 1.33-1 2.22s.39 1.67 1 2.22V20h4v-1.78c.61-.55 1-1.33 1-2.22s-.39-1.67-1-2.22V12m-2 5.5a1.5 1.5 0 0 1 0-3 1.5 1.5 0 0 1 0 3M22 8h-6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1m-1 10h-4v-8h4v8Z";
 const ICON_ENTITIES =
   "m12 2 5.5 9h-11L12 2M17.5 13a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9M3 13.5h8v8H3v-8Z";
-const ICON_DISCOVERED =
-  "M19.07 4.93A10 10 0 0 0 12 2v2a8 8 0 0 1 5.66 13.66l1.41 1.41A10 10 0 0 0 19.07 4.93M12 6v2a4 4 0 0 1 2.83 6.83l1.41 1.41A6 6 0 0 0 12 6m-8 6a8 8 0 0 1 2.34-5.66L4.93 4.93A10 10 0 0 0 12 22v-2a8 8 0 0 1-8-8m4 0a4 4 0 0 0 4 4v-2a2 2 0 0 1-2-2H8Z";
 /** mdiCog, mdiTune, mdiCodeBraces: the settings rows. */
 const ICON_RECEIVER =
   "M12 15.5A3.5 3.5 0 0 1 8.5 12A3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5a3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97c0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1c0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z";
@@ -113,6 +111,9 @@ const ICON_DEVICE_SETTINGS =
   "M3 17v2h6v-2H3M3 5v2h10V5H3m10 16v-2h8v-2h-8v-2h-2v6h2M7 9v2H3v2h4v2h2V9H7m14 4v-2H11v2h10m-6-4h2V7h4V5h-4V3h-2v6Z";
 const ICON_MAPPINGS =
   "M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-1-1.73V13a2 2 0 0 0 1-1.73V5h2V3H8m8 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 1-1.73V13a2 2 0 0 1-1-1.73V5h-2V3h2Z";
+
+/** mdiPlus, for the floating action button. */
+const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
 
 /** mdiCheckCircle / mdiAlertCircle: the status card's two states. */
 const ICON_ONLINE =
@@ -1053,6 +1054,43 @@ class Rtl433Panel extends HTMLElement {
     return item;
   }
 
+  /**
+   * The floating action button that opens the discovery page.
+   *
+   * Zigbee and Z-Wave both put the one thing you came to do in a floating
+   * button rather than a row, and adopting a device is that thing here.
+   *
+   * `ha-fab` is not registered in this frontend -- checked, not assumed -- so
+   * this is built from `ha-button`, which is, using the pill shape and accent
+   * weighting core gives the same control. The positioning is this file's,
+   * because a floating button has to be placed by whatever owns the scroll
+   * area, and here that is the panel.
+   */
+  _buildFab(slot) {
+    const fab = haControl("ha-fab", () =>
+      haButton("Add or replace device", "fab-button", "accent")
+    );
+    fab.classList.add("panel-fab");
+    if (fab.localName === "ha-fab") {
+      fab.label = "Add or replace device";
+      fab.extended = true;
+    } else if (fab.localName === "ha-button") {
+      fab.size = "large";
+      fab.pill = true;
+      const plus = haControl("ha-svg-icon", () =>
+        document.createElement("span")
+      );
+      plus.slot = "start";
+      if (plus.localName === "ha-svg-icon") {
+        plus.path = ICON_PLUS;
+      }
+      fab.prepend(plus);
+    }
+    fab.addEventListener("click", () => this._navigate("discovered"));
+    slot.append(fab);
+    return fab;
+  }
+
   /** A card with a heading and a list of rows inside it. */
   _buildCard(slot, className, rows, heading) {
     const card = haControl("ha-card", () => document.createElement("div"));
@@ -1186,19 +1224,13 @@ class Rtl433Panel extends HTMLElement {
       supporting: "",
       onClick: () => this._openConfigPage("entities"),
     });
-    made.rowDiscovered = this._navRow({
-      className: "nav-discovered",
-      icon: ICON_DISCOVERED,
-      headline: "Discovered devices",
-      supporting: "",
-      onClick: () => this._navigate("discovered"),
-    });
     this._buildCard(
       root.querySelector(".network-slot"),
       "network-card",
-      [made.rowDevices, made.rowEntities, made.rowDiscovered],
+      [made.rowDevices, made.rowEntities],
       "My network"
     );
+    made.fab = this._buildFab(root.querySelector(".fab-slot"));
 
     made.openHub = this._navRow({
       className: "open-hub-settings",
@@ -1305,7 +1337,9 @@ class Rtl433Panel extends HTMLElement {
       banner: this._buildBanner(root.querySelector(".banner-slot")),
       status: root.querySelector(".status"),
       grid: root.querySelector(".grid"),
-      empty: root.querySelector(".pending-empty"),
+      searching: root.querySelector(".searching"),
+      searchingHint: root.querySelector(".searching-hint"),
+      searchingSpinner: root.querySelector(".searching-spinner"),
       back: this._buildBack(root.querySelector(".back-slot")),
       ignoredGrid: root.querySelector(".ignored-grid"),
       dialog: this._buildReplaceDialog(root.querySelector(".replace-slot")),
@@ -1328,6 +1362,15 @@ class Rtl433Panel extends HTMLElement {
       settingsSave: null,
     };
     Object.assign(this._el, this._buildOverview(root));
+    this._el.searchingSpinner.append(
+      haControl("ha-spinner", () => {
+        // No spinner element: the heading already says what is happening, so
+        // the fallback is nothing rather than a hand-rolled animation.
+        const nothing = document.createElement("span");
+        nothing.hidden = true;
+        return nothing;
+      })
+    );
     // Cancel is `plain` and Save `accent`: core's weighting for a dialog's
     // dismiss-versus-commit pair.
     this._el.settingsCancel = haButton(
@@ -1501,7 +1544,11 @@ class Rtl433Panel extends HTMLElement {
     const cards = this._cards();
     const loaded = this._data !== null;
     this._el.grid.hidden = !loaded || cards.length === 0;
-    this._el.empty.hidden = !loaded || cards.length > 0;
+    // The search line stays put whether or not anything has been heard: this
+    // receiver is always listening, and saying so is the honest state. Only the
+    // "they will show up here" hint drops away once they have, where it would
+    // be describing something the user can already see.
+    this._el.searchingHint.hidden = cards.length > 0;
 
     this._reconcile(
       this._el.grid,
@@ -1519,10 +1566,11 @@ class Rtl433Panel extends HTMLElement {
       this._el.openMappings,
       this._el.rowDevices,
       this._el.rowEntities,
+      this._el.fab,
     ]) {
       row.disabled = !this._entryId;
     }
-    this._renderOverview(cards.length);
+    this._renderOverview();
 
     const ignored = this._data && this._data.ignored ? this._data.ignored : [];
     this._el.ignoredToggle.hidden = !loaded || ignored.length === 0;
@@ -1864,7 +1912,7 @@ class Rtl433Panel extends HTMLElement {
    * off rather than guessed at, so a row never claims "0 devices" while the
    * subscription is still connecting.
    */
-  _renderOverview(pendingCount) {
+  _renderOverview() {
     const status = this._el.status0;
     const connected = this._data !== null && !this._banner;
     status.glyph.className = "status-icon";
@@ -1887,12 +1935,6 @@ class Rtl433Panel extends HTMLElement {
       this._entryEntityCount(),
       "entity",
       "entities"
-    );
-    this._setRowCount(
-      this._el.rowDiscovered,
-      this._data === null ? null : pendingCount,
-      "device waiting to be added",
-      "devices waiting to be added"
     );
   }
 
@@ -2770,29 +2812,21 @@ const SKELETON = `
     <div class="status-slot"></div>
     <div class="network-slot"></div>
     <div class="page-actions"></div>
+    <div class="fab-slot"></div>
   </div>
 
   <div class="view view-discovered" hidden>
-    <div class="header">
-      <div>
-        <div class="subtitle">
-          Devices this receiver has decoded that are not in Home Assistant yet.
-          Adding one creates its device and entities; ignoring one hides it
-          until you un-ignore it. An un-ignored device comes back on its next
-          transmission.
-        </div>
+    <div class="searching">
+      <div class="searching-spinner"></div>
+      <h2 class="searching-title">Searching for rtl_433 devices&hellip;</h2>
+      <div class="searching-hint">
+        Devices will show up here once discovered.
       </div>
     </div>
 
     <div class="status" hidden></div>
 
     <div class="grid" hidden></div>
-
-    <div class="empty pending-empty" hidden>
-      Nothing pending. Everything this receiver has decoded is either added or
-      ignored &mdash; trigger a new device so it transmits and it will appear
-      here on its own.
-    </div>
 
     <div class="list-actions"></div>
 
@@ -2819,7 +2853,7 @@ const SKELETON = `
  * Nothing here is hard-coded to a palette, so dark themes follow automatically.
  *
  * The two heading colours carry the card's whole state. Blue is a candidate the
- * receiver has heard and Home Assistant has not adopted; green is one adopted
+ * receiver has decoded and Home Assistant has not adopted; green is one adopted
  * from this page a moment ago. They are `--info-color` and `--success-color`
  * rather than literals so a theme restyles them along with everything else.
  */
@@ -2883,16 +2917,7 @@ const STYLES = `
     gap: 8px;
     margin-bottom: 16px;
   }
-  .header {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 16px;
-  }
-  h1 { margin: 0 0 4px; font-size: 22px; font-weight: 400; }
-  .subtitle { color: var(--secondary-text-color, #727272); max-width: 68ch; }
+
   .hub-picker {
     display: flex;
     flex-direction: column;
@@ -2934,12 +2959,11 @@ const STYLES = `
     color: var(--primary-text-color, #212121);
   }
   div.banner.notice { border-left-color: var(--warning-color, #ffa600); }
-  .status, .empty {
+  .status {
     padding: 24px;
     text-align: center;
     color: var(--secondary-text-color, #727272);
   }
-  .empty { max-width: 62ch; margin: 0 auto; }
 
   /*
    * auto-fill rather than auto-fit: with a single candidate, auto-fit would
@@ -3259,7 +3283,6 @@ const STYLES = `
    */
   button.nav-devices,
   button.nav-entities,
-  button.nav-discovered,
   button.open-hub-settings,
   button.open-device-settings,
   button.open-mappings {
@@ -3277,10 +3300,59 @@ const STYLES = `
   }
   button.nav-devices .row-headline,
   button.nav-entities .row-headline,
-  button.nav-discovered .row-headline,
   button.open-hub-settings .row-headline,
   button.open-device-settings .row-headline,
   button.open-mappings .row-headline { font-size: 16px; }
+
+  /*
+   * The search state, shaped like the one core shows while a radio is looking
+   * for devices: a spinner, what it is doing, and where the results will land.
+   * It stays on screen once cards appear, because the receiver does not stop
+   * listening -- only the closing hint drops away, where it would be describing
+   * something already visible.
+   */
+  .searching {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px 16px 32px;
+    text-align: center;
+  }
+  .searching-spinner { display: flex; min-height: 28px; }
+  .searching-title { margin: 0; font-size: 20px; font-weight: 400; }
+  .searching-hint {
+    max-width: 48ch;
+    color: var(--secondary-text-color, #727272);
+  }
+  .searching-hint[hidden] { display: none; }
+
+  /*
+   * The floating action button. Fixed to the viewport rather than the page so
+   * it stays reachable while the overview scrolls, and inset far enough to
+   * clear a phone's home indicator.
+   */
+  .panel-fab {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 1;
+  }
+  ha-button.panel-fab { --ha-button-height: 56px; }
+  button.fab-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 56px;
+    padding: 0 20px;
+    border: none;
+    border-radius: 28px;
+    background: var(--primary-color, #03a9f4);
+    color: var(--text-primary-color, #ffffff);
+    font-size: 15px;
+    cursor: pointer;
+  }
 
   /* The settings subview's own action row, at the end of the page. */
   .settings-actions {
