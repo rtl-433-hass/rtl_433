@@ -55,6 +55,7 @@ accepts the pieces it needs as injectable attributes:
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Callable
 import dataclasses
 from datetime import datetime
@@ -290,6 +291,11 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # liveness/replay) so a device first seen in the backlog can still register
         # on its first genuine post-connection event. Not persisted.
         self._discovered: set[str] = set()
+        # Every ``device_key`` heard on this hub, freshest last, so the ingest
+        # path can evict the coldest never-materialized key once the population
+        # exceeds ``_events._MAX_TRACKED_DEVICES``. Only a bookkeeping order: the
+        # state itself lives in the maps above.
+        self._heard_order: OrderedDict[str, None] = OrderedDict()
 
         # --- Managed-SDR desired state (restart-surviving) -------------------
         # ``_desired`` maps a registry key -> the desired value HA wants applied;
@@ -433,14 +439,22 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         """Drop a device's runtime state so its next event is treated as new.
 
         Called when a device is removed from its device page
-        (``async_remove_config_entry_device``). Without this eviction the device
-        would stay in ``devices`` and a later event would not be treated as new,
-        so a re-transmitting device could never re-appear while discovery is on.
+        (``async_remove_config_entry_device``), and by the ingest path's cap on
+        never-materialized keys (see ``_events._MAX_TRACKED_DEVICES``). Without
+        this eviction the device would stay in ``devices`` and a later event
+        would not be treated as new, so a re-transmitting device could never
+        re-appear while discovery is on.
+
+        Drops every per-device map together, including the "already logged this
+        unmapped field" memo: a key that comes back is a device we have no
+        history for, so its fields are worth logging again.
         """
         self.devices.pop(device_key, None)
         self.last_seen.pop(device_key, None)
         self.available.pop(device_key, None)
         self.device_fields.pop(device_key, None)
+        self._logged_unmapped.pop(device_key, None)
+        self._heard_order.pop(device_key, None)
         # Re-arm discovery so a later live event re-registers the device.
         self._discovered.discard(device_key)
 
