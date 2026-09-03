@@ -329,6 +329,11 @@ class Rtl433Panel extends HTMLElement {
     // The path segment this panel is showing, from `route`. Empty is the
     // overview.
     this._segment = "";
+    // The receiver a settings path names, when it names one.
+    this._segmentEntry = null;
+    // Which receiver the cached settings payload belongs to, so a page for a
+    // different one refetches rather than showing the wrong hub's values.
+    this._settingsFor = null;
     this._narrow = false;
     // `null` until the first payload lands, which distinguishes "still loading"
     // from "loaded, and there is genuinely nothing here" -- different things to
@@ -437,14 +442,53 @@ class Rtl433Panel extends HTMLElement {
    * only records the segment; `_render` is what draws it.
    */
   set route(route) {
-    this._segment = ((route && route.path) || "").replace(/^\//, "");
+    this._readPath(((route && route.path) || "").replace(/^\//, ""));
     if (this._el) {
       this._render();
     }
   }
 
   get route() {
-    return { prefix: `/${DOMAIN}`, path: `/${this._segment || ""}` };
+    return { prefix: `/${DOMAIN}`, path: `/${this._path()}` };
+  }
+
+  /**
+   * Split a panel path into the view and, for the settings pages, its receiver.
+   *
+   * A settings page names the receiver it configures -- `options/<entry_id>` --
+   * because with more than one receiver the page is otherwise ambiguous: a
+   * reload or a bookmark would land on whichever hub happened to resolve first
+   * and quietly configure the wrong radio. The id is optional, so links written
+   * before this still work and fall back to the selected receiver.
+   */
+  _readPath(path) {
+    const [segment, entry] = path.split("/");
+    this._segment = segment || "";
+    this._segmentEntry = entry || null;
+  }
+
+  /** The current path, as `route` reports it back. */
+  _path() {
+    return this._segmentEntry
+      ? `${this._segment}/${this._segmentEntry}`
+      : this._segment || "";
+  }
+
+  /**
+   * The receiver a settings page is for.
+   *
+   * The URL wins when it names one that exists; a stale id -- an entry removed
+   * since the link was made -- falls back rather than showing a page that can
+   * only fail on save.
+   */
+  _settingsEntryId() {
+    if (
+      this._segmentEntry &&
+      this._hubs.some((hub) => hub.entry_id === this._segmentEntry)
+    ) {
+      return this._segmentEntry;
+    }
+    return this._entryId;
   }
 
   /** Narrow is handed down for the elements that lay themselves out by it. */
@@ -465,8 +509,9 @@ class Rtl433Panel extends HTMLElement {
    * trip, so a frontend that stops re-assigning `route` still navigates -- the
    * URL and the view are kept in step by whichever of the two arrives.
    */
-  _navigate(segment, { replace = false } = {}) {
-    const path = segment ? `/${DOMAIN}/${segment}` : `/${DOMAIN}`;
+  _navigate(segment, { replace = false, entry = null } = {}) {
+    const tail = entry ? `${segment}/${entry}` : segment;
+    const path = segment ? `/${DOMAIN}/${tail}` : `/${DOMAIN}`;
     if (window.location.pathname !== path) {
       if (replace) {
         window.history.replaceState(null, "", path);
@@ -483,6 +528,7 @@ class Rtl433Panel extends HTMLElement {
       );
     }
     this._segment = segment;
+    this._segmentEntry = entry;
     this._render();
   }
 
@@ -523,9 +569,9 @@ class Rtl433Panel extends HTMLElement {
     this._onPopState = () => {
       const prefix = `/${DOMAIN}`;
       if (window.location.pathname.startsWith(prefix)) {
-        this._segment = window.location.pathname
-          .slice(prefix.length)
-          .replace(/^\//, "");
+        this._readPath(
+          window.location.pathname.slice(prefix.length).replace(/^\//, "")
+        );
         // Landing back on the overview means any entry this panel pushed has
         // been unwound by the browser, so there is nothing left to owe.
         if (!this._segment) {
@@ -1232,34 +1278,71 @@ class Rtl433Panel extends HTMLElement {
     );
     made.fab = this._buildFab(root.querySelector(".fab-slot"));
 
-    made.openHub = this._navRow({
-      className: "open-hub-settings",
-      icon: ICON_RECEIVER,
-      headline: "Receiver settings",
-      supporting: "Availability timeout and whether Home Assistant manages the receiver",
-      onClick: () => this._navigate("options"),
-    });
-    made.openDevice = this._navRow({
-      className: "open-device-settings",
-      icon: ICON_DEVICE_SETTINGS,
-      headline: "Device settings",
-      supporting: "Per-device timeout overrides and utility-meter calibration",
-      onClick: () => this._navigate("device-settings"),
-    });
-    made.openMappings = this._navRow({
-      className: "open-mappings",
-      icon: ICON_MAPPINGS,
-      headline: "Device mappings",
-      supporting: "YAML overrides for how fields become entities",
-      onClick: () => this._navigate("mappings"),
-    });
-    this._buildCard(
-      root.querySelector(".page-actions"),
-      "settings-card",
-      [made.openHub, made.openDevice, made.openMappings],
-      null
-    );
     return made;
+  }
+
+  /**
+   * One settings card per receiver, rebuilt when the hub list changes.
+   *
+   * Built here rather than in the skeleton because the receivers are not known
+   * until `rtl_433/hubs` answers. With one receiver the card is unheaded and
+   * reads exactly as before; with several, each is headed by its own hub title,
+   * which is what says *which* radio a row configures -- so the pages
+   * themselves do not have to repeat it.
+   */
+  _renderSettingsCards(root) {
+    const key = this._hubs.map((hub) => `${hub.entry_id}:${hub.title}`).join("|");
+    if (key === this._settingsCardsKey) {
+      return;
+    }
+    this._settingsCardsKey = key;
+    const slot = root.querySelector(".page-actions");
+    slot.textContent = "";
+    const several = this._hubs.length > 1;
+    for (const hub of this._hubs) {
+      const rows = [
+        {
+          className: "open-hub-settings",
+          icon: ICON_RECEIVER,
+          headline: "Receiver settings",
+          supporting:
+            "Availability timeout and whether Home Assistant manages the receiver",
+          segment: "options",
+        },
+        {
+          className: "open-device-settings",
+          icon: ICON_DEVICE_SETTINGS,
+          headline: "Device settings",
+          supporting:
+            "Per-device timeout overrides and utility-meter calibration",
+          segment: "device-settings",
+        },
+        {
+          className: "open-mappings",
+          icon: ICON_MAPPINGS,
+          headline: "Device mappings",
+          supporting: "YAML overrides for how fields become entities",
+          segment: "mappings",
+        },
+      ].map((row) =>
+        this._navRow({
+          className: row.className,
+          icon: row.icon,
+          headline: row.headline,
+          supporting: row.supporting,
+          // The receiver goes in the URL even with one of them, so a link is
+          // unambiguous the moment a second is added.
+          onClick: () =>
+            this._navigate(row.segment, { entry: hub.entry_id }),
+        })
+      );
+      this._buildCard(
+        slot,
+        "settings-card",
+        rows,
+        several ? hub.title : null
+      );
+    }
   }
 
   /**
@@ -1362,6 +1445,7 @@ class Rtl433Panel extends HTMLElement {
       settingsSave: null,
     };
     Object.assign(this._el, this._buildOverview(root));
+    this._el.root = root;
     this._el.searchingSpinner.append(
       haControl("ha-spinner", () => {
         // No spinner element: the heading already says what is happening, so
@@ -1467,6 +1551,7 @@ class Rtl433Panel extends HTMLElement {
     // A single receiver is the common case, and a picker with one option is
     // just a control that does nothing.
     this._el.hubPicker.hidden = this._hubs.length < 2;
+    this._renderSettingsCards(this._el.root);
     const options = this._hubs.map((hub) => ({
       value: hub.entry_id,
       label: hub.loaded ? hub.title : `${hub.title} (not loaded)`,
@@ -1559,11 +1644,10 @@ class Rtl433Panel extends HTMLElement {
     );
 
     this._el.clear.hidden = !loaded || cards.length === 0;
-    // Every settings command names a hub, so the rows wait for one to resolve.
+    // These open Home Assistant's own pages filtered to a hub, so they wait
+    // for one to resolve. The settings rows do not: they are built per
+    // receiver, from a list that only exists once the hubs have answered.
     for (const row of [
-      this._el.openHub,
-      this._el.openDevice,
-      this._el.openMappings,
       this._el.rowDevices,
       this._el.rowEntities,
       this._el.fab,
@@ -2076,10 +2160,17 @@ class Rtl433Panel extends HTMLElement {
    * backend cleared something, which is the case the user most needs to see.
    */
   async _openSettings(kind) {
-    if (!this._entryId || this._settingsForm === kind) {
+    const entryId = this._settingsEntryId();
+    if (!entryId || (this._settingsForm === kind && this._settingsFor === entryId)) {
       return;
     }
     this._el.settingsProblem.hidden = true;
+    // A cached payload belongs to the receiver it was fetched for; opening a
+    // different one has to refetch or the form would show another hub's values
+    // and save them over this one's.
+    if (this._settingsFor !== entryId) {
+      this._settings = null;
+    }
     if (!this._settings) {
       // The form cannot be drawn until the payload lands, and the view is
       // already on screen by now -- so the body says so rather than sitting
@@ -2089,8 +2180,9 @@ class Rtl433Panel extends HTMLElement {
       try {
         this._settings = await this._call({
           type: "rtl_433/settings/get",
-          entry_id: this._entryId,
+          entry_id: entryId,
         });
+        this._settingsFor = entryId;
       } catch (error) {
         this._el.settingsBody.textContent = "";
         this._el.settingsProblem.textContent = describeError(error);
@@ -2578,7 +2670,7 @@ class Rtl433Panel extends HTMLElement {
     if (kind === "hub") {
       message = {
         type: "rtl_433/settings/hub",
-        entry_id: this._entryId,
+        entry_id: this._settingsEntryId(),
         availability_timeout:
           number("availability_timeout") ??
           this._settings.defaults.availability_timeout,
@@ -2593,7 +2685,7 @@ class Rtl433Panel extends HTMLElement {
       );
       message = {
         type: "rtl_433/settings/device",
-        entry_id: this._entryId,
+        entry_id: this._settingsEntryId(),
         device_key: data.device_key,
         timeout_override: number("timeout_override"),
         motion_clear_delay: number("motion_clear_delay"),
@@ -2604,7 +2696,7 @@ class Rtl433Panel extends HTMLElement {
     } else {
       message = {
         type: "rtl_433/settings/mappings",
-        entry_id: this._entryId,
+        entry_id: this._settingsEntryId(),
         yaml: data.mappings || "",
       };
     }
