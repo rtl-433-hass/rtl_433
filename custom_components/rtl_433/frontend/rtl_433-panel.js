@@ -291,6 +291,8 @@ class Rtl433Panel extends HTMLElement {
 
     this._hubs = [];
     this._entryId = null;
+    // The brands access token, fetched once for the status card's logo.
+    this._brandToken = null;
     // The path segment this panel is showing, from `route`. Empty is the
     // overview.
     this._segment = "";
@@ -500,6 +502,7 @@ class Rtl433Panel extends HTMLElement {
     this._render();
     this._startClock();
     this._loadHubs();
+    this._loadBrandLogo();
   }
 
   _startClock() {
@@ -1036,10 +1039,61 @@ class Rtl433Panel extends HTMLElement {
     const supporting = document.createElement("div");
     supporting.className = "status-supporting";
     text.append(headline, supporting);
-    row.append(badge, text);
+
+    // The brand mark sits opposite the state, which is where Zigbee and Z-Wave
+    // put theirs. Hidden until it actually loads: an integration whose brand
+    // images are missing should show a card with no logo, never a broken-image
+    // glyph, and the request needs a token that may not arrive.
+    const logo = document.createElement("img");
+    logo.className = "status-logo";
+    logo.alt = "";
+    logo.hidden = true;
+    logo.addEventListener("error", () => {
+      logo.hidden = true;
+    });
+    logo.addEventListener("load", () => {
+      logo.hidden = false;
+    });
+
+    row.append(badge, text, logo);
     card.append(row);
     slot.append(card);
-    return { card, glyph, badge, headline, supporting };
+    return { card, glyph, badge, headline, supporting, logo };
+  }
+
+  /**
+   * Point the status card's logo at this integration's own brand image.
+   *
+   * `/api/brands/integration/<domain>/<image>` serves a *custom* integration's
+   * in-repo `brand/` directory before it falls back to the brands CDN, which is
+   * what makes this work for an integration that is not in core's brands
+   * repository -- the files in `custom_components/rtl_433/brand/` are the ones
+   * that come back.
+   *
+   * The view is not behind the frontend's normal bearer auth, because an `<img>`
+   * cannot carry a header; it takes a short-lived token instead, which is what
+   * `brands/access_token` hands out and what Home Assistant's own frontend uses
+   * for the same images. The token rotates, so a card left open long enough
+   * will eventually 403 -- and then the logo hides itself rather than breaking
+   * the card, which is the same posture as every other borrowed thing here.
+   */
+  async _loadBrandLogo() {
+    const logo = this._el.status0 && this._el.status0.logo;
+    if (!logo || this._brandToken) {
+      return;
+    }
+    let token;
+    try {
+      token = (await this._call({ type: "brands/access_token" })).token;
+    } catch (error) {
+      // A frontend without the brands component, or an older core: the card is
+      // complete without a logo, so this is not worth a banner.
+      return;
+    }
+    this._brandToken = token;
+    logo.src = `/api/brands/integration/${DOMAIN}/icon.png?token=${encodeURIComponent(
+      token
+    )}`;
   }
 
   /**
@@ -3097,6 +3151,19 @@ const STYLES = `
     color: var(--error-color, #db4437);
   }
   .status-icon { width: 24px; height: 24px; }
+  /*
+   * Pushed to the far end by the text block taking the slack, so the mark keeps
+   * its corner whatever the state line says. Sized in ch-independent pixels
+   * because it is a fixed-aspect image, not text.
+   */
+  .status-text { flex: 1 1 auto; min-width: 0; }
+  .status-logo {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+  }
+  .status-logo[hidden] { display: none; }
   .status-headline { font-size: 20px; font-weight: 400; }
   .status-supporting {
     font-size: 14px;
