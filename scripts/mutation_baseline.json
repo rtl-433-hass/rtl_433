@@ -1,9 +1,9 @@
 {
   "files": {
     "custom_components/rtl_433/__init__.py": {
-      "killed": 220,
-      "score": 0.817844,
-      "total": 269
+      "killed": 225,
+      "score": 0.818182,
+      "total": 275
     },
     "custom_components/rtl_433/binary_sensor.py": {
       "killed": 86,
@@ -11,9 +11,9 @@
       "total": 94
     },
     "custom_components/rtl_433/calibration.py": {
-      "killed": 56,
-      "score": 0.933333,
-      "total": 60
+      "killed": 63,
+      "score": 0.940299,
+      "total": 67
     },
     "custom_components/rtl_433/config_flow.py": {
       "killed": 408,
@@ -21,9 +21,34 @@
       "total": 435
     },
     "custom_components/rtl_433/const.py": {
-      "killed": 9,
+      "killed": 12,
       "score": 1.0,
-      "total": 9
+      "total": 12
+    },
+    "custom_components/rtl_433/coordinator/_events.py": {
+      "killed": 83,
+      "score": 0.813725,
+      "total": 102
+    },
+    "custom_components/rtl_433/coordinator/_sdr.py": {
+      "killed": 127,
+      "score": 0.798742,
+      "total": 159
+    },
+    "custom_components/rtl_433/coordinator/_watchdog.py": {
+      "killed": 90,
+      "score": 0.762712,
+      "total": 118
+    },
+    "custom_components/rtl_433/coordinator/base.py": {
+      "killed": 130,
+      "score": 0.580357,
+      "total": 224
+    },
+    "custom_components/rtl_433/device_replace.py": {
+      "killed": 90,
+      "score": 0.9,
+      "total": 100
     },
     "custom_components/rtl_433/device_trigger.py": {
       "killed": 94,
@@ -31,24 +56,24 @@
       "total": 97
     },
     "custom_components/rtl_433/diagnostics.py": {
-      "killed": 118,
+      "killed": 130,
       "score": 1.0,
-      "total": 118
+      "total": 130
     },
     "custom_components/rtl_433/entity.py": {
-      "killed": 282,
-      "score": 0.849398,
-      "total": 332
+      "killed": 317,
+      "score": 0.873278,
+      "total": 363
     },
     "custom_components/rtl_433/event.py": {
-      "killed": 59,
-      "score": 0.842857,
-      "total": 70
+      "killed": 63,
+      "score": 0.913043,
+      "total": 69
     },
     "custom_components/rtl_433/hub_settings.py": {
-      "killed": 43,
-      "score": 0.934783,
-      "total": 46
+      "killed": 47,
+      "score": 0.94,
+      "total": 50
     },
     "custom_components/rtl_433/library.py": {
       "killed": 37,
@@ -61,19 +86,19 @@
       "total": 409
     },
     "custom_components/rtl_433/number.py": {
-      "killed": 27,
-      "score": 0.931034,
-      "total": 29
+      "killed": 26,
+      "score": 0.962963,
+      "total": 27
     },
     "custom_components/rtl_433/options_flow.py": {
-      "killed": 371,
-      "score": 0.843182,
-      "total": 440
+      "killed": 544,
+      "score": 0.854003,
+      "total": 637
     },
     "custom_components/rtl_433/repairs.py": {
-      "killed": 206,
+      "killed": 224,
       "score": 1.0,
-      "total": 206
+      "total": 224
     },
     "custom_components/rtl_433/sdr_settings.py": {
       "killed": 0,
@@ -82,8 +107,8 @@
     },
     "custom_components/rtl_433/select.py": {
       "killed": 24,
-      "score": 0.923077,
-      "total": 26
+      "score": 1.0,
+      "total": 24
     },
     "custom_components/rtl_433/sensor.py": {
       "killed": 107,
@@ -91,9 +116,9 @@
       "total": 114
     },
     "custom_components/rtl_433/switch.py": {
-      "killed": 28,
+      "killed": 26,
       "score": 1.0,
-      "total": 28
+      "total": 26
     }
   },
   "floor": 0.7,
