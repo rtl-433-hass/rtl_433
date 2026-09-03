@@ -233,8 +233,8 @@ def main() -> int:
         print(
             f"\nStale generated fixtures: {', '.join(stale)}\n"
             "rtl_433's output no longer matches the committed fixtures. If the "
-            "field names changed, the device library under "
-            "custom_components/rtl_433/device_library/ needs the same change. "
+            "field names changed, the device library shipped by pyrtl_433 "
+            "(pyrtl_433/library/data/) needs the same change. "
             "Refresh with: python3 scripts/regen_capture_fixtures.py",
             file=sys.stderr,
         )

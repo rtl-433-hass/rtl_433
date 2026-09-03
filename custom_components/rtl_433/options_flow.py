@@ -25,6 +25,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from pyrtl_433.library import (
+    Registry,
+    lookup,
+    normalize_overrides,
+    validate_user_mappings,
+)
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlowResult, OptionsFlow
@@ -68,7 +74,6 @@ from .const import (
     DOMAIN,
 )
 from .device_replace import DeviceReplaceError, async_replace_device
-from .mapping import Registry, lookup, normalize_overrides, validate_user_mappings
 
 # Selector key for the device picker on the options device step.
 CONF_DEVICE = "device"

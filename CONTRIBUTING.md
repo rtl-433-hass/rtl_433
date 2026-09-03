@@ -4,8 +4,10 @@ Thanks for contributing to the rtl_433 Home Assistant integration. This guide
 covers commit conventions, the release flow, and how to run the linters and
 tests so your change passes CI.
 
-- Most **device support** is a small YAML change — see
-  [docs/device-library.md](docs/device-library.md).
+- Most **device support** is a small YAML change, and it belongs in
+  [`pyrtl_433`](https://github.com/rtl-433-hass/pyrtl_433) — the shipped device
+  library lives there, not in this repository. See
+  [docs/device-library.md](docs/device-library.md) for the workflow.
 - For AI-agent / maintenance workflow notes, see [AGENTS.md](AGENTS.md).
 
 ## Conventional Commits
@@ -24,7 +26,7 @@ Format:
 
 Common types:
 
-- `feat:` — a new feature (a new device mapping, a new option). Bumps the minor
+- `feat:` — a new feature (a new option, a new platform). Bumps the minor
   version.
 - `fix:` — a bug fix. Bumps the patch version.
 - `docs:` — documentation only.
@@ -34,7 +36,7 @@ Common types:
 Examples:
 
 ```text
-feat: add wind gust mapping for Acurite-Atlas
+feat: add a per-device motion clear-delay option
 fix: restore last state before applying the availability timeout
 docs: clarify wss reverse-proxy setup in the README
 test: cover per-device timeout override resolution
@@ -192,7 +194,9 @@ CodeQL also runs (`.github/workflows/codeql.yml`).
 - [ ] `pytest tests/` passes.
 - [ ] Mutation score holds: no source file drops below its baseline in
       `scripts/mutation_baseline.json` (refresh it upward when you improve a file).
-- [ ] New device support is a YAML mapping change with the schema from
-      [docs/device-library.md](docs/device-library.md), and `object_suffix`
-      values are stable.
+- [ ] New device support is a YAML mapping change opened against
+      [`pyrtl_433`](https://github.com/rtl-433-hass/pyrtl_433) using
+      [its schema](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/),
+      with stable `object_suffix` values; a matching fixture under
+      `tests/fixtures/` belongs in this repository.
 - [ ] Docs updated if behavior or options changed.

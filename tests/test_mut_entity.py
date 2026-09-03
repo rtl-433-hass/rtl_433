@@ -11,6 +11,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from freezegun import freeze_time
+from pyrtl_433.library import FieldDescriptor
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -38,7 +39,6 @@ from custom_components.rtl_433.entity import (
     async_upsert_device,
     async_upsert_event_types,
 )
-from custom_components.rtl_433.mapping import FieldDescriptor
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send

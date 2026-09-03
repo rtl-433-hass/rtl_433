@@ -7,7 +7,9 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Repository shape
 
 - `custom_components/rtl_433/` — the integration.
-  - `device_library/*.yaml` — the shipped, data-driven device mappings.
+  - The shipped, data-driven device mappings are **not** in this repository any
+    more: the YAML library and its loader live in `pyrtl_433.library` (see
+    [Runtime dependency](#runtime-dependency-pyrtl_433) below).
   - `coordinator/` — package (`base.py`) for the push coordinator, now a **thin
     Home Assistant adapter** over `pyrtl_433.Rtl433Client` (see
     [Runtime dependency](#runtime-dependency-pyrtl_433) below). `base.py` owns and
@@ -15,21 +17,25 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     the HA-side policy (event fan-out, managed-SDR desired state, the silence
     watchdog and the hub-connection availability gate) the library deliberately
     leaves out.
-  - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`, `mapping.py`,
-    `normalizer.py`, `diagnostics.py`, `repairs.py`, `sensor.py`,
-    `binary_sensor.py`, `event.py`, `translations/en.json`. `normalizer.py` now
-    holds **only** the local `_safe_token` entity-slug helper; the actual event
-    normalizer (`normalize` / `device_key` / `NormalizedEvent` /
-    `DEFAULT_SKIP_KEYS`) lives in `pyrtl_433.normalizer`. `sdr_settings.py` is a
-    thin adapter over `pyrtl_433.sdr` (see below).
+  - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`,
+    `diagnostics.py`, `repairs.py`, `sensor.py`, `binary_sensor.py`,
+    `event.py`, `translations/en.json`. There is no local `mapping/` package or
+    `normalizer.py` any more: the device library is `pyrtl_433.library`, the
+    event normalizer (`normalize` / `device_key` / `NormalizedEvent` /
+    `DEFAULT_SKIP_KEYS`) is `pyrtl_433.normalizer`, and the entity-slug /
+    display-name helpers are `pyrtl_433.naming`. `sdr_settings.py` is a thin
+    adapter over `pyrtl_433.sdr` (see below).
   - `__init__.py` keeps only the steady-state config-entry lifecycle
     (`async_setup_entry` / `async_unload_entry` / `_async_update_listener` /
     `async_remove_config_entry_device`). Three sibling modules hold the rest:
     `migration.py` (config-entry v1→v2 migration + one-time legacy cleanups,
-    re-exported `async_migrate_entry`), `library.py` (mapping-library load/merge),
+    re-exported `async_migrate_entry`), `library.py` (device-library load/merge
+    over `pyrtl_433.library`, cached on `hass.data`),
     and `hub_settings.py` (hub-entry setting resolvers: `_hub_*`,
     `_calibration_map`).
-- `docs/device-library.md` — **authoritative** device-library reference.
+- `docs/device-library.md` — the Home-Assistant-facing device-library guide (UI
+  overrides, diagnostics, workflow). The **authoritative schema reference** is
+  upstream: <https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/>.
 - `tests/` — unit tests. `tests/integration/` — container/screenshot harness.
   `tests/fixtures/generated/` — **do not hand-edit**: golden events decoded from
   real `.cu8` captures by `scripts/regen_capture_fixtures.py` and diffed in CI,
@@ -62,12 +68,14 @@ the ordered follow-up PR sequence are tracked in
 ## Runtime dependency (pyrtl_433)
 
 The integration has **one third-party runtime dependency**:
-`pyrtl_433==0.2.0` (declared in `manifest.json` `requirements` and mirrored in
+`pyrtl_433==0.3.0` (declared in `manifest.json` `requirements` and mirrored in
 `requirements.txt`; Home Assistant installs it on load). It is the extracted
-rtl_433 protocol layer — the WebSocket connect/reconnect loop and JSON frame
-parsing, the event **normalizer**, the reconnect-**replay/stale classifier**, and
-the **SDR `/cmd`** command definitions and getters/setters. The integration no
-longer carries its own copy of any of that; it consumes the library:
+rtl_433 protocol *and data* layer — the WebSocket connect/reconnect loop and JSON
+frame parsing, the event **normalizer**, the reconnect-**replay/stale
+classifier**, the **SDR `/cmd`** command definitions and getters/setters, the
+shipped **device-mapping library**, the **device-naming** helpers, and the
+**event-driven availability** classifier. The integration no longer carries its
+own copy of any of that; it consumes the library:
 
 - **`pyrtl_433.Rtl433Client`** — owns the transport. The coordinator
   (`coordinator/base.py`) **owns and drives one client per hub**, constructed with
@@ -80,10 +88,34 @@ longer carries its own copy of any of that; it consumes the library:
   fan-out). The library owns neither the managed-SDR policy nor the availability
   watchdog, so those are driven HA-side off the connect edge and a time interval.
 - **`pyrtl_433.normalizer`** — `normalize` / `device_key` / `NormalizedEvent` /
-  `DEFAULT_SKIP_KEYS`. Consumers import these directly from the library. The only
-  remaining local shim is `normalizer._safe_token` (the private entity-slug helper
-  the library does not export), so unique_ids and dispatcher signals stay
-  byte-identical.
+  `DEFAULT_SKIP_KEYS`. Consumers import these directly from the library; there is
+  no local shim left.
+- **`pyrtl_433.library`** — the whole device-mapping layer: `FieldDescriptor` /
+  `Registry`, `load_library` / `merge_overrides`, `lookup` / `should_skip` /
+  `apply_transform` / `event_driven_field_keys`, `validate_user_mappings` /
+  `normalize_overrides`, and the reserved key names (`USER_OVERRIDE_FILENAME`,
+  `SKIP_KEYS_FIELD`, `MODELS_FIELD`). The themed YAML ships **inside the wheel**
+  as package data (`Path(pyrtl_433.library.__file__).parent / "data"`), so
+  `load_library()` with no argument finds it. `library.py` here is the thin Home
+  Assistant layer: run the blocking load in the executor, cache the shipped
+  `(registry, skip_keys)` on `hass.data[DATA_LIBRARY]`, and merge each hub's
+  stored overrides into `DATA_ENTRY_LIBRARY[entry_id]`.
+  **Log records from the library are emitted under `pyrtl_433.library._loader` /
+  `pyrtl_433.library._transform`**, not `custom_components.rtl_433` — relevant to
+  anything (a `logger:` config, a test `caplog`) that filters by logger name.
+- **`pyrtl_433.naming`** — `safe_token` / `display_name` / `identity_suffix`, the
+  presentation half of `device_key`. `entity.py` imports `display_name` and
+  `identity_suffix` for the device-registry name and serial number. `safe_token`
+  is a **frozen contract** (unique_ids, entity ids and dispatcher signals embed
+  it); the upstream implementation is byte-identical to the local one it
+  replaced.
+- **`pyrtl_433.availability`** — `is_event_driven(field_keys, event_driven_keys)`
+  and `known_field_keys(adopted, live)`, the pure classifier half of the silence
+  policy. `coordinator/_watchdog.py` supplies the two HA-side inputs (the adopted
+  fields on the config entry, the live `NormalizedEvent.fields`) and
+  `const.class_default_timeout` maps the boolean onto the integration's own
+  never-expire / periodic timeout constants — the library deliberately owns no
+  timeout policy.
 - **`pyrtl_433.replay`** — `classify_replay` / `ReplayVerdict` / `parse_event_time`
   plus `DISCOVERY_BACKLOG_GRACE` / `REPLAY_STALE_THRESHOLD`. The client applies the
   classification and stamps the verdict on the `NormalizedEvent`;
@@ -330,11 +362,11 @@ coordinator watchdog, and the devices map:
 
 Detect-only PIR/occupancy hardware (`motion`) emits an `on` and **never an
 off**, so `motion` is a `binary_sensor` (device class `occupancy`, `payload: {
-on: "1" }`, in `device_library/misc.yaml`) that **synthesizes** the off via a
+on: "1" }`, in the library's `misc.yaml`) that **synthesizes** the off via a
 timer. Contracts that must survive refactors:
 
 - **`clear_delay` descriptor attribute** (`FieldDescriptor.clear_delay: int |
-  None`, `mapping.py`). `binary_sensor`-only seconds value; a non-int is logged
+  None`, `pyrtl_433.library`). `binary_sensor`-only seconds value; a non-int is logged
   and dropped at load. Its presence is what marks a descriptor as detect-only.
 - **`Rtl433BinarySensor` timer** (`binary_sensor.py`). On each `on`, `_schedule_clear`
   **cancels and reschedules** a single `async_call_later` one-shot, so the off
@@ -639,7 +671,7 @@ End-user docs live in
 keep this contributor-facing.
 
 - **Settings-registry contract** (`sdr_settings.py`, import-disjoint like
-  `mapping.py`). The wire-protocol half — how to read each field from `meta`, the
+  `pyrtl_433.library`). The wire-protocol half — how to read each field from `meta`, the
   `/cmd` command, the `val`/`arg` kind, the value transforms, and the
   capability/availability gates — lives in **`pyrtl_433.sdr`** (`SdrCommand` /
   `SDR_COMMANDS`), which drops all HA entity metadata. `sdr_settings.py` is the
@@ -757,9 +789,10 @@ keep this contributor-facing.
 ## Device-library YAML format (summary)
 
 Device support is data, not code: each rtl_433 JSON field name maps to one Home
-Assistant entity descriptor. Files live in
-`custom_components/rtl_433/device_library/`; the loader merges every `*.yaml`
-(except `_skip_keys.yaml`) into one field-keyed table cached in `DATA_LIBRARY`.
+Assistant entity descriptor. The files ship **inside the `pyrtl_433` wheel**
+(`pyrtl_433/library/data/*.yaml`), not in this repository; the loader merges
+every `*.yaml` (except `_skip_keys.yaml`) into one field-keyed table cached in
+`DATA_LIBRARY`.
 `DATA_LIBRARY` now caches the **shipped library only** — per-hub user overrides
 are merged separately per entry (see [Per-hub user overrides](#per-hub-user-overrides-data-flow)).
 
@@ -789,7 +822,7 @@ stringified to the fired `event_type` and `device_class` is an
 section above. `_skip_keys.yaml` lists fields that must never become entities.
 
 An optional reserved top-level **`models:`** block (`model → {field_key →
-descriptor}`, same per-field schema; `mapping.py` `Registry.models`) carries
+descriptor}`, same per-field schema; `pyrtl_433.library` `Registry.models`) carries
 **model-scoped** overrides — `lookup(field_key, model, registry)` resolves
 model-scoped → global → `None`. Precedence is **specificity-first**: per-device
 calibration > model-scoped (user > shipped) > global (user > shipped), so a
@@ -799,10 +832,13 @@ illustrative non-real-model worked example) is in `docs/device-library.md`; do
 not duplicate it here.
 
 **Do not invent attributes here.** The full schema — every attribute, the
-`value_transform` keys and their application order, binary payloads, the
-skip-keys file, and the per-hub user-override semantics — is defined in:
+`value_transform` keys and their application order, binary payloads, and the
+skip-keys file — is defined upstream, where the library now lives:
 
-- **[docs/device-library.md](docs/device-library.md)** (authoritative).
+- **<https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/>**
+  (authoritative schema reference).
+- **[docs/device-library.md](docs/device-library.md)** — the Home-Assistant-facing
+  half: per-hub user overrides, the options-flow editor, diagnostics.
 
 ## Per-hub user overrides (data flow)
 
@@ -837,18 +873,21 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
 1. **Find the exact field name.** rtl_433 field names are case-sensitive and
    unit-suffixed (`temperature_C`, not `temperature`). Get them from the device
    diagnostics (next step) or the live rtl_433 stream.
-2. **Edit the themed file** under
-   `custom_components/rtl_433/device_library/` that matches the field's domain
-   (e.g. `temperature.yaml`, `humidity_moisture.yaml`, `wind.yaml`), or
-   `misc.yaml` if nothing fits. Add an entry keyed by the field name following
-   the schema in `docs/device-library.md`. Copy a similar existing entry as a
-   template. If the field is identity/noise, add it to `_skip_keys.yaml`
-   instead.
+2. **Open a PR against [pyrtl_433](https://github.com/rtl-433-hass/pyrtl_433)**,
+   not this repository — the shipped library lives there now. Edit the themed
+   file under `pyrtl_433/library/data/` that matches the field's domain (e.g.
+   `temperature.yaml`, `humidity_moisture.yaml`, `wind.yaml`), or `misc.yaml` if
+   nothing fits. Add an entry keyed by the field name following the
+   [schema reference](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/).
+   Copy a similar existing entry as a template. If the field is identity/noise,
+   add it to `_skip_keys.yaml` instead. A new mapping reaches users here on the
+   next pyrtl_433 release + requirement bump.
 3. **Run the unit tests** (see below). They cover library loading and entity
    creation, so a malformed entry fails fast. Add a fixture under
    `tests/fixtures/` too: `tests/test_fixture_coverage.py` sweeps every fixture
    and fails on any field with neither a descriptor nor a skip-key entry, which
-   is the only automated check that a key actually matches. Field names are
+   is the only automated check that a key actually matches against the installed
+   library. Field names are
    case-sensitive and a mismatch is **silent** — no entity, no warning, no error
    (SCMplus emits `Consumption`, ERT-SCM emits `consumption_data`).
 4. **Read the diagnostics' unmatched keys.** The hub diagnostics export contains
@@ -928,8 +967,8 @@ exception tuples:
 except OSError, yaml.YAMLError:   # valid on 3.14+, SyntaxError on <= 3.13
 ```
 
-This appears in `calibration.py`, `coordinator/_sdr.py`, `mapping/_loader.py`,
-`mapping/_transform.py`, `migration.py`, and `sensor.py`. Running `python -m
+This appears in `calibration.py`, `coordinator/_sdr.py`, `migration.py`, and
+`sensor.py`. Running `python -m
 compileall`, a linter, or a type checker under 3.13 or earlier reports
 `SyntaxError: multiple exception types must be parenthesized` on these files.
 That is a stale interpreter, **not** a defect — check `python --version` before
@@ -947,12 +986,12 @@ mutmut copies the package plus `tests/` into a `mutants/` working tree (git-igno
 and forks once per mutant.
 
 **Scope note (post-`pyrtl_433` extraction).** The transport, event normalizer,
-replay/stale classifier, and SDR `/cmd` protocol logic now live in the
-`pyrtl_433` library, which carries **its own** test + mutation coverage. Those
-extracted shards are therefore **retired from this repo's mutation scope** — the
-in-scope modules (`normalizer.py`'s `_safe_token`, `sdr_settings.py`'s HA-metadata
-adapter, and the coordinator's HA-side policy) are the thin seams that remain
-here. The baseline/timings reflect only what still ships in
+replay/stale classifier, SDR `/cmd` protocol logic, device-mapping library,
+naming helpers, and event-driven classifier now live in the `pyrtl_433` library,
+which carries **its own** test + mutation coverage. Those extracted shards are
+therefore **retired from this repo's mutation scope** — the in-scope modules
+(`library.py`'s hass.data cache, `sdr_settings.py`'s HA-metadata adapter, and
+the coordinator's HA-side policy) are the thin seams that remain here. The baseline/timings reflect only what still ships in
 `custom_components/rtl_433/`.
 
 ```bash
@@ -1020,7 +1059,7 @@ Because a full run is slow (~50 min), CI splits the work two ways — by **scope
   from `scripts/mutation_timings.json` (count-balancing is wrong — per-mutant time
   varies ~2.5x across modules, e.g. `entity.py` vs `coordinator/base.py`), then
   `--restrict` keeps only this shard's in-scope modules. So a full run fans out
-  down to roughly the slowest single module (`mapping.py`); a scoped PR fans its
+  down to roughly the slowest single module (`entity.py`); a scoped PR fans its
   handful of modules out too. Six shards (not more) because only ~5 modules
   dominate the time — extra shards sit near-idle and widen the spread without
   lowering the pole. The union of the shard checks equals a single whole-scope

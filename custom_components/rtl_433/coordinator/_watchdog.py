@@ -52,6 +52,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from pyrtl_433.availability import is_event_driven, known_field_keys
+
 from homeassistant.core import callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
@@ -164,24 +166,24 @@ class _AvailabilityMixin:
     def _known_field_keys(self, device_key: str) -> set[str]:
         """Restart-safe set of a device's measurement field keys.
 
-        Unions the persisted adopted fields
-        (``entry.data[CONF_DEVICES][key][fields]`` — survives a restart) with the
+        Thin Home Assistant adapter over
+        :func:`pyrtl_433.availability.known_field_keys`: it supplies the two
+        sides — the persisted adopted fields
+        (``entry.data[CONF_DEVICES][key][fields]`` — survives a restart) and the
         latest live payload's fields (``self.devices[key].fields`` — the rtl_433
-        payload with identity and skip-keys removed), so a device that has been
-        silent since startup is still classified from what it reported before.
-        Shared by the availability class-default and the event-driven check so the
-        two can never diverge: reading only the live payload was the bug that left
-        an event device silent since a restart on the periodic class default and
-        let its battery (and other) sensors expire to unavailable.
+        payload with identity and skip-keys removed) — and the library unions
+        them, so a device that has been silent since startup is still classified
+        from what it reported before. Shared by the availability class-default
+        and the event-driven check so the two can never diverge: reading only the
+        live payload was the bug that left an event device silent since a restart
+        on the periodic class default and let its battery (and other) sensors
+        expire to unavailable.
         """
-        keys: set[str] = set()
         device_cfg = self.entry.data.get(CONF_DEVICES, {}).get(device_key)
-        if device_cfg:
-            keys.update(device_cfg.get(DEVICE_FIELDS, []) or [])
+        adopted = device_cfg.get(DEVICE_FIELDS) or [] if device_cfg else None
         normalized = self.devices.get(device_key)
-        if normalized is not None:
-            keys.update(normalized.fields)
-        return keys
+        live = None if normalized is None else normalized.fields
+        return known_field_keys(adopted, live)
 
     def _class_default_timeout(self, device_key: str) -> int:
         """Return the device-class default timeout for a device.
@@ -203,7 +205,8 @@ class _AvailabilityMixin:
     def is_event_driven_device(self, device_key: str) -> bool:
         """Whether the device's known fields mark it event-driven (no check-in).
 
-        True when any of the device's field keys is in ``self.event_driven_keys``
+        Delegates to :func:`pyrtl_433.availability.is_event_driven`: ``True``
+        when any of the device's field keys is in ``self.event_driven_keys``
         (open/close/motion/button/doorbell — transmits only on a state change, so
         availability never expires and conveys no freshness). Considers both the
         restart-safe adopted fields and the latest live payload (via
@@ -213,9 +216,9 @@ class _AvailabilityMixin:
         signal once availability stops expiring) and to resolve the never-expire
         availability class default.
         """
-        if not self.event_driven_keys:
-            return False
-        return not self.event_driven_keys.isdisjoint(self._known_field_keys(device_key))
+        return is_event_driven(
+            self._known_field_keys(device_key), self.event_driven_keys
+        )
 
     def _resolve_timeout(self, device_key: str) -> tuple[int, str]:
         """Resolve the effective timeout and the tier that produced it.

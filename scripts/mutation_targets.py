@@ -21,9 +21,12 @@ Mapping rules (given changed paths on argv):
   several modules (``test_diagnostics_repairs``), the ``coordinator`` package
   root, and the ``__init__`` root (no ``init.py`` exists for the resolver to
   find). They are listed in ``EXPLICIT_TEST_SOURCES`` with the exact modules
-  they cover, so touching them scopes rather than escalates. Genuinely broad
-  integration tests (e.g. ``test_lifecycle.py``) are deliberately left out, so
-  they still escalate — a full run is correct when they change.
+  they cover, so touching them scopes rather than escalates. An entry may map to
+  an *empty* list, meaning the test exercises no package source at all (it
+  validates behaviour that now lives in the ``pyrtl_433`` dependency), so it
+  scopes to nothing instead of escalating. Genuinely broad integration tests
+  (e.g. ``test_lifecycle.py``) are deliberately left out, so they still
+  escalate — a full run is correct when they change.
 * Any change to mutation infrastructure or shared test scaffolding
   (``pyproject.toml``, ``requirements_test.txt``, ``tests/conftest.py``,
   ``scripts/mutation_*.py``, the mutation workflow) escalates to a full run,
@@ -87,39 +90,12 @@ EXPLICIT_TEST_SOURCES: dict[str, list[str]] = {
     # The sdr_settings HA adapter mapping (``test_sdr_settings_adapter`` does not
     # auto-resolve to a source module via the naming convention).
     "tests/test_sdr_settings_adapter.py": ["sdr_settings.py"],
-    # The ``mapping`` package: its test files exercise the whole package, and the
-    # package root (``mapping/__init__.py``) is unreachable via the naming
-    # convention (there is no ``mapping.py``), so map all three explicitly.
-    "tests/test_mapping.py": [
-        "mapping/__init__.py",
-        "mapping/_loader.py",
-        "mapping/_model.py",
-        "mapping/_overrides.py",
-        "mapping/_transform.py",
-    ],
-    "tests/test_mut_mapping.py": [
-        "mapping/__init__.py",
-        "mapping/_loader.py",
-        "mapping/_model.py",
-        "mapping/_overrides.py",
-        "mapping/_transform.py",
-    ],
-    "tests/test_mut_mapping_floor.py": [
-        "mapping/__init__.py",
-        "mapping/_loader.py",
-        "mapping/_model.py",
-        "mapping/_overrides.py",
-        "mapping/_transform.py",
-    ],
-    # The fixture mapping-coverage sweep: data-driven, and what it exercises in
-    # code is library loading plus descriptor resolution. It never calls
-    # ``apply_transform`` or the override path, so ``_transform.py`` /
-    # ``_overrides.py`` are deliberately absent.
-    "tests/test_fixture_coverage.py": [
-        "mapping/__init__.py",
-        "mapping/_loader.py",
-        "mapping/_model.py",
-    ],
+    # The fixture mapping-coverage sweep: data-driven, and everything it
+    # exercises in code (library loading plus descriptor resolution) now lives in
+    # ``pyrtl_433.library``, which mutmut does not mutate. Mapped to an empty
+    # list so touching it scopes to *no* source rather than escalating to a full
+    # run; the library's own mutation gate lives in the pyrtl_433 repository.
+    "tests/test_fixture_coverage.py": [],
     # Mutation-floor test files: their ``_floor`` suffix does not auto-resolve to
     # a source module via the naming convention, so each is mapped explicitly.
     "tests/test_mut_calibration_floor.py": ["calibration.py"],

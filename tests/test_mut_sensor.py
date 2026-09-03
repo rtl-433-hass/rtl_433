@@ -40,6 +40,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from freezegun import freeze_time
+from pyrtl_433.library import FieldDescriptor
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -57,7 +58,6 @@ from custom_components.rtl_433.const import (
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
-from custom_components.rtl_433.mapping import FieldDescriptor
 from custom_components.rtl_433.sensor import (
     _LAST_SEEN_FIELD,
     _NON_RESTORABLE,

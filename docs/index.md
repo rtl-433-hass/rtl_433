@@ -26,7 +26,8 @@ integration can connect to any rtl_433 server with HTTP output enabled.
   polling.
 - **Data-driven device library**: add support for additional devices by writing
   YAML snippets in the Home Assistant UI, without having to wait for a new
-  version of the integration.
+  version of the integration. The shipped library is maintained upstream in
+  [`pyrtl_433`](https://github.com/rtl-433-hass/pyrtl_433).
 - **Automatic device discovery**: newly observed devices are added automatically,
   and discovery can be disabled to avoid adding unwanted devices.
 - **Configurable availability**: silence-based availability with hub defaults,

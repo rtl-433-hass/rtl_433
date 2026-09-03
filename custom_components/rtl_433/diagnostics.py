@@ -15,13 +15,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from pyrtl_433.library import Registry, lookup
+
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_HOST, CONF_PATH, CONF_PORT, DATA_ENTRY_LIBRARY, DOMAIN
 from .coordinator import Rtl433Coordinator
-from .mapping import Registry, lookup
 
 # Keys redacted from the exported connection params. The host can reveal a
 # private network address / hostname, so it is redacted; port/path are benign.
@@ -45,7 +46,7 @@ def _unmatched_field_keys(
 ) -> list[str]:
     """Compute observed fields that have neither a descriptor nor a skip-entry.
 
-    A field is "matched" if :func:`mapping.lookup` resolves it against the
+    A field is "matched" if :func:`pyrtl_433.library.lookup` resolves it against the
     merged registry; a field is intentionally dropped if it is in ``skip_keys``.
     Everything else the hub has seen is a candidate for new library coverage.
     The check is model-agnostic (``model=None``): ``seen_fields`` is a flat set

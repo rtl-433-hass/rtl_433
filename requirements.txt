@@ -3,10 +3,12 @@
 # These are installed by Home Assistant when the integration is loaded.
 # See custom_components/rtl_433/manifest.json for the authoritative list.
 #
-# The integration depends on pyrtl_433 for the rtl_433 protocol layer: the
-# WebSocket client, event normalizer, replay classifier, and SDR command
-# definitions live in that library. Home Assistant core still provides the
-# supporting packages it builds on (aiohttp, PyYAML, voluptuous).
+# The integration depends on pyrtl_433 for the rtl_433 protocol and data layer:
+# the WebSocket client, event normalizer, replay classifier, SDR command
+# definitions, the shipped device-mapping library, the device-naming helpers and
+# the event-driven availability classifier all live in that library. Home
+# Assistant core still provides the supporting packages it builds on (aiohttp,
+# PyYAML, voluptuous).
 #
 # Keep this list in sync with the manifest's requirements array.
 pyrtl_433==0.3.0

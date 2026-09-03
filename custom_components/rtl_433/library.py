@@ -1,18 +1,19 @@
-"""Mapping-library loading for the rtl_433 integration's config-entry setup.
+"""Device-library loading for the rtl_433 integration's config-entry setup.
 
-The Home-Assistant-aware layer over the pure ``mapping`` module: load the shipped
-library once (cached on ``hass.data``) and merge a hub's stored user overrides
-over it. ``async_setup_entry`` calls both during setup; kept here so ``__init__``
+The Home-Assistant-aware layer over the pure :mod:`pyrtl_433.library` package:
+load the shipped library once (cached on ``hass.data``) and merge a hub's stored
+user overrides over it. ``async_setup_entry`` calls both during setup; kept here so ``__init__``
 stays focused on the lifecycle wiring.
 """
 
 from __future__ import annotations
 
+from pyrtl_433.library import Registry, load_library, merge_overrides
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_USER_MAPPINGS, DATA_LIBRARY, DOMAIN, LOGGER
-from .mapping import Registry, load_library, merge_overrides
 
 
 async def _async_load_library(

@@ -1,10 +1,16 @@
 """Mapping-coverage sweep over every JSON event fixture in ``tests/fixtures``.
 
-Each event is run through the normalizer with the shipped skip-keys, and every
-field key that survives must resolve to a library descriptor. A field that
-resolves to nothing is precisely what the diagnostics export reports as
-``unmatched_field_keys``: it builds no entity, so a user with that device sees a
-sensor that never appears.
+Each event is run through the normalizer with the skip-keys of the *installed*
+``pyrtl_433.library``, and every field key that survives must resolve to a
+descriptor in that library. A field that resolves to nothing is precisely what
+the diagnostics export reports as ``unmatched_field_keys``: it builds no entity,
+so a user with that device sees a sensor that never appears.
+
+The library itself lives in ``pyrtl_433`` (``pyrtl_433/library/data/*.yaml``),
+but the sweep stays here because it is what proves the *installed* library still
+covers the devices this integration builds entities for: a library release that
+renames or drops a field key turns into a failing test in this repository rather
+than a silently missing sensor.
 
 This exists as a regression net for one recurring class of bug. Library keys are
 transcribed by hand from upstream rtl_433 ``data_make()`` calls in C, and field
@@ -25,10 +31,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pyrtl_433.library import load_library, lookup
 from pyrtl_433.normalizer import normalize
 import pytest
-
-from custom_components.rtl_433.mapping import load_library, lookup
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -41,7 +46,7 @@ FIXTURE_NAMES = sorted(
 
 @pytest.fixture(scope="module")
 def library():
-    """Load the shipped device library once for the module."""
+    """Load the installed ``pyrtl_433`` device library once for the module."""
     return load_library()
 
 
@@ -78,6 +83,6 @@ def test_fixture_fields_all_resolve_to_descriptors(fixture_name, library, events
         f"{fixture_name}: fields with no library descriptor "
         f"{sorted(unmatched)}. Field names are case-sensitive and must match the "
         "upstream rtl_433 decoder verbatim: add a descriptor under "
-        "custom_components/rtl_433/device_library/, or add the key to "
-        "_skip_keys.yaml if it is identity or transport data."
+        "pyrtl_433/library/data/ in the pyrtl_433 repository, or add the key to "
+        "its _skip_keys.yaml if it is identity or transport data."
     )

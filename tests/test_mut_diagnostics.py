@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from pyrtl_433.library import FieldDescriptor, Registry, load_library
+
 from custom_components.rtl_433.const import (
     CONF_HOST,
     CONF_PATH,
@@ -27,7 +29,6 @@ from custom_components.rtl_433.diagnostics import (
     _unmatched_field_keys,
     async_get_config_entry_diagnostics,
 )
-from custom_components.rtl_433.mapping import FieldDescriptor, Registry, load_library
 from homeassistant.core import HomeAssistant
 
 # ---------------------------------------------------------------------------

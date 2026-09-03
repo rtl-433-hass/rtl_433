@@ -65,7 +65,7 @@ async def test_diagnostics_redacts_host_and_reports_unmatched(
 
     coordinator = _FakeCoordinator()
     # The shipped library so lookup() resolves the real fields.
-    from custom_components.rtl_433.mapping import load_library
+    from pyrtl_433.library import load_library
 
     registry, skip_keys = load_library()
     hass.data.setdefault(DOMAIN, {})

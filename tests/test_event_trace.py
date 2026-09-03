@@ -19,12 +19,12 @@ from __future__ import annotations
 import logging
 from unittest.mock import patch
 
+from pyrtl_433.library import FieldDescriptor
 from pyrtl_433.normalizer import NormalizedEvent
 import pytest
 
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.event import Rtl433Event
-from custom_components.rtl_433.mapping import FieldDescriptor
 
 _TRACE_LOGGER = "custom_components.rtl_433"
 _DEVICE_KEY = "Honeywell-Doorbell-7"

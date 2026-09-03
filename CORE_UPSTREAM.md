@@ -20,11 +20,14 @@ Status values:
 - **in-PR** — included in an open or scoped upstream PR (see the PR tag).
 - **upstreamed** — merged into Home Assistant Core (record the landing PR/commit).
 - **HACS-only** — ships in this repo only; not yet scoped for upstream.
+- **in `pyrtl_433`** — no longer a module of this integration at all: it lives in
+  the `pyrtl_433` PyPI requirement, so core gets it for free the moment the
+  requirement lands. Nothing to upstream.
 
 ## Per-module status
 
 Inventory derived from the actual contents of `custom_components/rtl_433/` (top-level
-modules plus the `coordinator/`, `mapping/`, and `device_library/` subpackages).
+modules plus the `coordinator/` subpackage).
 
 | Module | Status | Landing PR/commit |
 | --- | --- | --- |
@@ -47,10 +50,11 @@ modules plus the `coordinator/`, `mapping/`, and `device_library/` subpackages).
 | `repairs.py` | HACS-only | |
 | `options_flow.py` | HACS-only | |
 | `calibration.py` | HACS-only | |
-| `device_library/` (per-domain YAML: `temperature`, `humidity_moisture`, `pressure`, `rain`, `wind`, `air_quality`, `light_uv`, `power_electrical`, `binary_states`, `events`, `misc`, `_skip_keys`) | HACS-only | |
-| `library.py` (device-library loader) | HACS-only | |
-| `mapping/` (`_loader.py`, `_model.py`, `_overrides.py`, `_transform.py`, `__init__.py`) | HACS-only | |
-| `normalizer.py` | HACS-only | |
+| device-library YAML (per-domain: `temperature`, `humidity_moisture`, `pressure`, `rain`, `wind`, `air_quality`, `light_uv`, `power_electrical`, `binary_states`, `events`, `misc`, `_skip_keys`) | in `pyrtl_433` (`pyrtl_433.library`, shipped as package data) | pyrtl_433 0.3.0 |
+| `library.py` (HA-side load/merge + `hass.data` cache over `pyrtl_433.library`) | HACS-only | |
+| descriptor loader / override / transform layer | in `pyrtl_433` (`pyrtl_433.library`) | pyrtl_433 0.3.0 |
+| entity-slug and device-naming helpers | in `pyrtl_433` (`pyrtl_433.naming`) | pyrtl_433 0.3.0 |
+| event-driven availability classifier | in `pyrtl_433` (`pyrtl_433.availability`) | pyrtl_433 0.3.0 |
 | `migration.py` (config-entry migration) | HACS-only | |
 | `translations/` | in-PR (PR1, Bronze) — scoped alongside config flow | |
 | `brand/` (in-repo brand assets) | out of scope — see brands PR note below | |
@@ -58,8 +62,13 @@ modules plus the `coordinator/`, `mapping/`, and `device_library/` subpackages).
 Notes:
 - `entity.py`, `translations/`, `const.py`, and `coordinator/` are shared infrastructure
   pulled into PR1 because the Bronze `sensor` slice cannot function without them.
-- `library.py`/`device_library/`, `mapping/`, and `normalizer.py` are the data-normalization
-  layer; they land with the PRs whose platforms first depend on their richer output.
+- The data-normalization layer (the YAML library, its loader/override/transform code,
+  the naming helpers and the event-driven classifier) is **no longer a module of this
+  integration**: it moved into the `pyrtl_433` requirement in 0.3.0, so core inherits it
+  with the dependency and there is nothing left to upstream. Only `library.py` — the
+  thin Home Assistant wrapper that runs the load in the executor and caches the merged
+  registry on `hass.data` — remains HACS-only, and it lands with the PRs whose platforms
+  first depend on the richer descriptor output.
 - `migration.py` follows once the core config-entry shape is fixed and needs versioning.
 
 ## Ordered follow-up PR sequence
@@ -86,10 +95,15 @@ preference. Each PR builds on the domain/coordinator established by PR1.
    paths in place to have actionable issues to raise.
 9. **`calibration`** — Gold. Per-device calibration UX; a refinement layer over the sensor
    platforms, so it follows the platforms it adjusts.
-10. **`device_library`** — Gold. Richer per-domain normalization/entity metadata; expands
-    the entity descriptions once the platforms consuming them are upstream.
-11. **`mapping`** — Gold. User-facing field-mapping/override layer built on top of the
-    device library; depends on the normalization data landing first.
+10. **`library.py`** — Gold. The Home Assistant load/merge wrapper that turns the
+    `pyrtl_433` device library into the per-entry merged registry the platforms look
+    descriptors up in; expands the entity descriptions once the platforms consuming them
+    are upstream. The library data and loader themselves arrive with the `pyrtl_433`
+    requirement, so this PR is only the `hass.data` caching seam.
+11. **user mapping overrides** — Gold. The user-facing field-mapping/override surface
+    (`CONF_USER_MAPPINGS`, the options-flow editor step, `merge_overrides`); depends on
+    (10) landing first. Validation/normalization is `pyrtl_433.library`'s, so this is the
+    storage + UI half only.
 12. **`options_flow`** — Gold. Configuration UX that tunes behavior across the platforms;
     lands once the platforms and settings surfaces it configures all exist.
 13. **`hub_settings`** — Gold. Shared hub-level settings model; formalized alongside/after
@@ -99,7 +113,7 @@ preference. Each PR builds on the domain/coordinator established by PR1.
 
 > Ordering guidance: `diagnostics` (Silver) is intentionally pulled forward; the remaining
 > Silver items (`event`, `device_trigger`, `repairs`) precede the Gold refinement layer
-> (`calibration`, `device_library`, `mapping`, `options_flow`, `hub_settings`,
+> (`calibration`, `library.py`, user mapping overrides, `options_flow`, `hub_settings`,
 > `sdr_settings`). `hub_settings`/`sdr_settings` are listed last as tracked line items even
 > though their supporting code lands with the `number`/`select`/`switch` control PRs.
 

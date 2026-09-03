@@ -20,6 +20,11 @@ lifecycle in ``__init__.py``:
 
 from __future__ import annotations
 
+from pyrtl_433.library import (
+    USER_OVERRIDE_FILENAME,
+    event_driven_field_keys,
+    normalize_overrides,
+)
 import yaml
 
 from homeassistant.config_entries import ConfigEntry
@@ -45,11 +50,6 @@ from .const import (
     LOGGER,
 )
 from .library import _async_load_library, _merge_entry_library
-from .mapping import (
-    USER_OVERRIDE_FILENAME,
-    event_driven_field_keys,
-    normalize_overrides,
-)
 
 # The 0.1.0 per-device config entries stored the set of observed mapped field
 # keys under this literal options key. It is intentionally *not* exported from
