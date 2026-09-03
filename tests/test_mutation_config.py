@@ -25,7 +25,7 @@ import json
 from pathlib import Path
 
 from mutmut_ratchet import Config, load_config
-from mutmut_ratchet.shards import shard_for
+from mutmut_ratchet.shards import mutable_modules, shard_for
 from mutmut_ratchet.targets import source_for_test
 import pytest
 
@@ -62,6 +62,17 @@ _NO_SINGLE_MODULE = {
 # The number of shards the mutation workflow's matrix uses. Checked explicitly
 # so a change to the matrix width without a re-check here is visible.
 _WORKFLOW_SHARDS = 6
+
+# Modules mutmut walks but generates no mutants for, so they legitimately appear
+# in neither the timings profile nor the baseline. A pure re-export shim has
+# nothing to mutate. Listed explicitly rather than detected, because generating
+# mutants to find out would cost a full mutmut run; the two coverage tests below
+# close the loop from the other side -- if one of these ever *gains* mutants, the
+# next profile refresh adds it and their "stale entry" half fails until it is
+# removed from here.
+_NO_MUTANTS = {
+    "custom_components/rtl_433/coordinator/__init__.py",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -180,3 +191,84 @@ def test_every_baseline_file_lands_in_exactly_one_shard(
     for path in baseline["files"]:
         hits = sum(path in shard for shard in shards)
         assert hits == 1, f"{path} is in {hits} of {of} shards, expected 1"
+
+
+def _expected_profiled_modules() -> set[str]:
+    """Every module mutmut mutates, minus the ones that produce no mutants."""
+    return set(mutable_modules()) - _NO_MUTANTS
+
+
+def test_timings_profile_covers_every_mutable_module(config: Config) -> None:
+    """A module missing from the timings profile silently unbalances the matrix.
+
+    The sharder bin-packs by measured seconds. A module with no entry falls back
+    to ``mutant_count * avg_seconds_per_mutant``, but that count comes from the
+    *baseline* -- so a module missing from both (the normal case for anything
+    added since the last profile refresh) is weighted as a single mutant and the
+    packer treats it as very nearly free. It then lands wherever the bins happen
+    to be lightest, and the shard that receives it runs far past the others while
+    the gate waits on it.
+
+    This is invisible without the check: the split is still correct, just badly
+    balanced, so nothing fails -- CI simply gets slower. It is how five modules
+    (repairs.py, device_replace.py and the three coordinator submodules, together
+    ~15% of the package's mutants) came to carry no weight at all after the
+    coordinator was split up.
+
+    Refresh with a full ``mutmut run`` followed by ``mutmut-ratchet timings``.
+    """
+    profiled = set(json.loads(config.timings.read_text(encoding="utf-8"))["files"])
+    expected = _expected_profiled_modules()
+
+    missing = sorted(expected - profiled)
+    assert not missing, (
+        "these modules have no entry in scripts/mutation_timings.json, so the "
+        "sharder weights them as ~free and the matrix is unbalanced; refresh "
+        f"with `mutmut run && mutmut-ratchet timings`: {missing}"
+    )
+    stale = sorted(profiled - expected)
+    assert not stale, (
+        "scripts/mutation_timings.json profiles modules mutmut no longer mutates "
+        f"(renamed, deleted, or now mutant-free): {stale}"
+    )
+
+
+def test_baseline_covers_every_mutable_module(config: Config) -> None:
+    """A module missing from the baseline is not gated by the floor at all.
+
+    ``ratchet --mode floor`` compares each file in the *current* results against
+    its baseline entry; a file with no entry is reported as ``+ new file (not yet
+    in baseline)`` and passes. That is the right behaviour for a genuinely new
+    module on the PR that adds it, but it means a module which never makes it
+    into the committed baseline is permanently exempt from the gate -- its score
+    can fall to zero without failing anything.
+
+    Kept as a separate assertion from the timings check because the two rot for
+    the same reason but have different consequences: a missing timing costs CI
+    minutes, a missing baseline entry costs coverage.
+    """
+    recorded = set(json.loads(_BASELINE.read_text(encoding="utf-8"))["files"])
+    expected = _expected_profiled_modules()
+
+    missing = sorted(expected - recorded)
+    assert not missing, (
+        "these modules are mutated but absent from scripts/mutation_baseline.json, "
+        "so the per-file floor never gates them; add them with "
+        f"`mutmut run && mutmut-ratchet stats > s.json && mutmut-ratchet ratchet "
+        f"--mode floor --stats s.json --update`: {missing}"
+    )
+    stale = sorted(recorded - expected)
+    assert not stale, (
+        "scripts/mutation_baseline.json records modules mutmut no longer mutates; "
+        f"a stale floor here can never be met: {stale}"
+    )
+
+
+def test_declared_mutant_free_modules_still_exist() -> None:
+    """A stale ``_NO_MUTANTS`` entry would exempt a real module from both checks."""
+    walked = set(mutable_modules())
+    for rel in sorted(_NO_MUTANTS):
+        assert (_REPO_ROOT / rel).is_file(), f"declared mutant-free but missing: {rel}"
+        assert rel in walked, (
+            f"{rel} is declared mutant-free but mutmut no longer walks it; drop it"
+        )
