@@ -3105,7 +3105,11 @@ const STYLES = `
     background: var(--card-background-color, #ffffff);
     border: 1px solid var(--divider-color, #e0e0e0);
   }
-  .settings-intro { color: var(--secondary-text-color, #727272); }
+  .settings-intro {
+    margin: 0 0 16px;
+    max-width: 68ch;
+    color: var(--secondary-text-color, #727272);
+  }
 
   /*
    * One view on screen at a time. An author display rule beats the user
@@ -3284,15 +3288,12 @@ const STYLES = `
   .field[hidden] { display: none; }
 
   /*
-   * The borrowed form. ha-form lays out and labels its own rows, so all that
-   * is set here is the gap between them -- anything more would be this panel
-   * second-guessing the spacing core uses for the same fields.
+   * The borrowed form is left to lay itself out. ha-form puts every row inside
+   * a single wrapper of its own, so a flex gap here would apply to that one
+   * child and space nothing -- and the row rhythm it already has is core's,
+   * for the same fields, which is the whole reason for going through it.
    */
-  ha-form.settings-form {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
+  ha-form.settings-form { display: block; }
   /*
    * The YAML editor needs a height: ha-code-editor sizes to its content, and
    * an empty mappings file would otherwise open as a one-line box that grows
@@ -3328,6 +3329,16 @@ const STYLES = `
     white-space: pre-wrap;
   }
   .settings-problem[hidden] { display: none; }
+  /*
+   * The page padding and a card's own padding stack. That is comfortable on a
+   * desktop and wasteful on a phone, where it cost the form 66px of a 412px
+   * screen, so the outer one gives way and the card keeps its own.
+   */
+  @media (max-width: 600px) {
+    :host { padding: 8px; }
+    .settings-card-slot { padding: 12px; }
+  }
+
 `;
 
 // Guarded because a panel module can be evaluated more than once in a
