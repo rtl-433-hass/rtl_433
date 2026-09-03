@@ -120,10 +120,20 @@
       "score": 0.938596,
       "total": 114
     },
+    "custom_components/rtl_433/settings.py": {
+      "killed": 205,
+      "score": 0.891304,
+      "total": 230
+    },
     "custom_components/rtl_433/switch.py": {
       "killed": 26,
       "score": 1.0,
       "total": 26
+    },
+    "custom_components/rtl_433/websocket_api.py": {
+      "killed": 141,
+      "score": 0.671429,
+      "total": 210
     }
   },
   "floor": 0.7,
