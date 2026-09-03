@@ -27,6 +27,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
+from pyrtl_433 import TimePrecision
 import voluptuous as vol
 
 from homeassistant.components.repairs import ConfirmRepairFlow, RepairsFlow
@@ -38,6 +39,7 @@ from homeassistant.helpers.event import async_track_time_interval
 
 from .config_flow import CONF_SECURE, async_rebind_hub
 from .const import (
+    CONF_EVENT_TIME_DISMISSED,
     CONF_HOST,
     CONF_PATH,
     CONF_PORT,
@@ -73,6 +75,15 @@ ISSUE_MOTION_MOVED = "motion_moved_to_binary_sensor"
 # band" advisory.
 ISSUE_SAMPLE_RATE_LOW = "sample_rate_low_for_band"
 
+# translation_key / issue_id prefix for the "event timestamps are unusable"
+# advisory. Raised when the server stamps events in a form pyrtl_433 cannot parse
+# (``report_meta time:off``, a missing key, or an unrecognised format), which
+# switches off replay suppression entirely: every frame then takes the
+# no-timestamp "treat as live" short-circuit, so on each reconnect the server's
+# re-broadcast buffer is replayed as fresh traffic -- reviving devices that are
+# actually silent, and re-firing their event entities and device triggers.
+ISSUE_EVENT_TIME_UNUSABLE = "event_time_unusable"
+
 # Conservative band heuristic for the sample-rate advisory. rtl_433 does not
 # auto-widen the sample rate when retuned via ``/cmd`` (unlike some CLI startup
 # paths), so a receiver moved into the upper ISM bands can be left at the bare
@@ -93,6 +104,11 @@ def _unreachable_issue_id(entry: ConfigEntry) -> str:
 def _sample_rate_issue_id(entry: ConfigEntry) -> str:
     """Return the per-hub issue id for the low-sample-rate advisory."""
     return f"{ISSUE_SAMPLE_RATE_LOW}_{entry.entry_id}"
+
+
+def _event_time_issue_id(entry: ConfigEntry) -> str:
+    """Return the per-hub issue id for the unusable-event-time advisory."""
+    return f"{ISSUE_EVENT_TIME_UNUSABLE}_{entry.entry_id}"
 
 
 def _sample_rate_advisory_dismissed(entry: ConfigEntry) -> bool:
@@ -121,6 +137,31 @@ def _async_dismiss_sample_rate_advisory(
         return
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_SAMPLE_RATE_DISMISSED: True}
+    )
+
+
+def _event_time_advisory_dismissed(entry: ConfigEntry) -> bool:
+    """Return whether the user acknowledged unusable event timestamps for this hub.
+
+    Read from ``entry.data`` for the same reason as the sample-rate flag: the
+    tracker is edge-triggered and its in-memory state resets on every restart and
+    reload, so only a persisted answer can keep the advisory quiet.
+    """
+    return bool(entry.data.get(CONF_EVENT_TIME_DISMISSED))
+
+
+@callback
+def _async_dismiss_event_time_advisory(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Durably record that the user accepted unusable event timestamps.
+
+    Mirrors :func:`_async_dismiss_sample_rate_advisory`: the flag changes none of
+    the reload-triggering settings, so writing it does not tear the hub down, and
+    the write is skipped entirely when the flag is already set.
+    """
+    if _event_time_advisory_dismissed(entry):
+        return
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_EVENT_TIME_DISMISSED: True}
     )
 
 
@@ -226,6 +267,70 @@ def async_track_sample_rate(
             async_clear_sample_rate_low(hass, entry)
 
     _evaluate()  # meta may already be populated by the time we wire up
+    return async_dispatcher_connect(hass, signal_hub_update(entry.entry_id), _evaluate)
+
+
+@callback
+def async_raise_event_time_unusable(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Raise the dismissible unusable-event-time advisory for a hub.
+
+    ``is_fixable`` so the card carries the explanation and an acknowledgement;
+    the edge-triggered tracker will not re-raise it while the condition persists,
+    and the acknowledgement is durable so a restart does not resurrect it.
+    """
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _event_time_issue_id(entry),
+        is_fixable=True,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_EVENT_TIME_UNUSABLE,
+        translation_placeholders={"title": entry.title},
+    )
+
+
+@callback
+def async_clear_event_time_unusable(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the unusable-event-time advisory for a hub (no-op if absent)."""
+    ir.async_delete_issue(hass, DOMAIN, _event_time_issue_id(entry))
+
+
+@callback
+def async_track_event_time_precision(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: Rtl433Coordinator,
+) -> Callable[[], None]:
+    """Raise / clear the unusable-event-time advisory as the hub reports in.
+
+    Edge-triggered off ``signal_hub_update``, which is the right edge for free:
+    pyrtl_433 fires its ``on_hub_update`` callback the first time it observes the
+    server's event-time resolution, and again whenever that observation changes
+    (an operator editing ``report_meta`` mid-run). Nothing here polls.
+
+    Only :attr:`~pyrtl_433.TimePrecision.UNUSABLE` is flagged. ``SECOND`` — the
+    rtl_433 default — was a genuine weakness while frames from one device inside
+    a single second were indistinguishable by time alone, but pyrtl_433 0.4.0
+    separates them by payload instead, so flagging it now would be noise for a
+    setting that works. Returns an unsubscribe callable.
+    """
+    state: dict[str, bool] = {"flagged": False}
+
+    @callback
+    def _evaluate(*_: Any) -> None:
+        if _event_time_advisory_dismissed(entry):
+            # User deliberately runs without parseable stamps; never nag again.
+            return
+        unusable = coordinator.time_precision is TimePrecision.UNUSABLE
+        if unusable and not state["flagged"]:
+            state["flagged"] = True
+            async_raise_event_time_unusable(hass, entry)
+        elif not unusable and state["flagged"]:
+            state["flagged"] = False
+            async_clear_event_time_unusable(hass, entry)
+
+    _evaluate()  # a precision may already have been observed by the time we wire up
     return async_dispatcher_connect(hass, signal_hub_update(entry.entry_id), _evaluate)
 
 
@@ -421,6 +526,35 @@ class SampleRateRepairFlow(RepairsFlow):
         return self.async_create_entry(title="", data={})
 
 
+class EventTimeRepairFlow(RepairsFlow):
+    """Fix flow for the unusable-event-time advisory: acknowledge and silence.
+
+    There is no "apply" branch to offer. The remedy is the server's
+    ``report_meta time:...`` setting, and the ``/cmd`` surface this integration
+    drives has no setter for it — rtl_433 takes it from its own configuration. So
+    the card explains the change to make, and confirming records the durable
+    per-hub flag that keeps the edge-triggered tracker quiet across restarts for
+    a user who deliberately runs without parseable timestamps.
+    """
+
+    def __init__(self, entry: ConfigEntry) -> None:
+        self._entry = entry
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
+        return await self.async_step_confirm()
+
+    async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> Any:
+        if user_input is None:
+            return self.async_show_form(
+                step_id="confirm",
+                data_schema=vol.Schema({}),
+                description_placeholders={"title": self._entry.title},
+            )
+        _async_dismiss_event_time_advisory(self.hass, self._entry)
+        async_clear_event_time_unusable(self.hass, self._entry)
+        return self.async_create_entry(title="", data={})
+
+
 async def async_create_fix_flow(
     hass: HomeAssistant,
     issue_id: str,
@@ -447,17 +581,25 @@ async def async_create_fix_flow(
         entry = hass.config_entries.async_get_entry(entry_id)
         if entry is not None:
             return SampleRateRepairFlow(entry)
+    if issue_id.startswith(ISSUE_EVENT_TIME_UNUSABLE):
+        entry_id = issue_id[len(ISSUE_EVENT_TIME_UNUSABLE) + 1 :]
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is not None:
+            return EventTimeRepairFlow(entry)
     return ConfirmRepairFlow()
 
 
 # Re-exported so the wiring module's intent is explicit at the import site.
 __all__: list[str] = [
+    "async_clear_event_time_unusable",
     "async_clear_hub_unreachable",
     "async_clear_sample_rate_low",
     "async_create_fix_flow",
+    "async_raise_event_time_unusable",
     "async_raise_hub_unreachable",
     "async_raise_motion_moved",
     "async_raise_sample_rate_low",
+    "async_track_event_time_precision",
     "async_track_hub_reachability",
     "async_track_sample_rate",
 ]

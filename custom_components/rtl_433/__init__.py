@@ -254,6 +254,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     # Advise when a single high-band frequency is left at the default sample rate.
     entry.async_on_unload(repairs.async_track_sample_rate(hass, entry, coordinator))
+    # Advise when the server stamps events in a form that cannot be parsed, which
+    # leaves the library's reconnect-replay suppression switched off.
+    entry.async_on_unload(
+        repairs.async_track_event_time_precision(hass, entry, coordinator)
+    )
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 

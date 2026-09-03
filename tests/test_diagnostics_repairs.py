@@ -11,6 +11,8 @@ from __future__ import annotations
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
+from pyrtl_433 import TimePrecision
+
 from custom_components.rtl_433 import repairs
 from custom_components.rtl_433.const import (
     CONF_HOST,
@@ -50,6 +52,8 @@ class _FakeCoordinator:
         self.device_fields = {}
         self.last_seen = {}
         self.available = {}
+        # Hub state as of the last event frame; ``None`` before the first one.
+        self.time_precision = TimePrecision.SECOND
 
     @property
     def ws_url(self) -> str:
@@ -82,6 +86,14 @@ async def test_diagnostics_redacts_host_and_reports_unmatched(
     # temperature_C / humidity are mapped; only the made-up field is unmatched.
     assert diag["unmatched_field_keys"] == ["made_up_field"]
     assert "temperature_C" not in diag["unmatched_field_keys"]
+    # The server's event-time resolution is exported as its plain string value,
+    # so a support dump shows whether replay suppression is even active.
+    assert diag["event_time_precision"] == "second"
+
+    # Before the first event frame the client has observed nothing yet.
+    coordinator.time_precision = None
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["event_time_precision"] is None
 
 
 async def test_diagnostics_when_coordinator_absent(
@@ -214,6 +226,142 @@ async def test_sample_rate_advisory_edge_triggered(
 
 
 # --------------------------------------------------------------------------- #
+# Unusable-event-time advisory                                                #
+# --------------------------------------------------------------------------- #
+async def test_event_time_advisory_edge_triggered(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """The advisory raises only for UNUSABLE, and clears when stamps return."""
+    from custom_components.rtl_433.const import signal_hub_update
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._event_time_issue_id(entry)
+
+    # Wire up with whole-second stamps: usable, so nothing is raised. SECOND is
+    # the rtl_433 default and pyrtl_433 separates same-second frames by payload,
+    # so it must not be flagged.
+    coordinator._client.time_precision = TimePrecision.SECOND
+    unsub = repairs.async_track_event_time_precision(hass, entry, coordinator)
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+
+    # The operator turns timestamps off -> replay suppression is dead -> advise.
+    coordinator._client.time_precision = TimePrecision.UNUSABLE
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    issue = issue_reg.async_get_issue(DOMAIN, issue_id)
+    assert issue is not None
+    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.translation_placeholders["title"] == entry.title
+
+    # Dismissing the card while still unusable must not immediately re-raise it.
+    repairs.async_clear_event_time_unusable(hass, entry)
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+
+    # Timestamps come back, then go away again: the edge re-triggers.
+    coordinator._client.time_precision = TimePrecision.MICROSECOND
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    coordinator._client.time_precision = TimePrecision.UNUSABLE
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
+
+    unsub()
+
+
+async def test_event_time_advisory_silent_before_first_frame(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """``None`` (no event frame seen yet) is not a verdict and must not advise."""
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    assert coordinator.time_precision is None
+
+    unsub = repairs.async_track_event_time_precision(hass, entry, coordinator)
+    assert (
+        ir.async_get(hass).async_get_issue(DOMAIN, repairs._event_time_issue_id(entry))
+        is None
+    )
+    unsub()
+
+
+async def test_event_time_fix_flow_acknowledges_and_silences(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """The flow shows an explanation, then persists the acknowledgement.
+
+    There is nothing to apply — the remedy is a server-side setting — so the
+    single confirm step exists to record that the user has seen it.
+    """
+    from custom_components.rtl_433.const import CONF_EVENT_TIME_DISMISSED
+
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+
+    repairs.async_raise_event_time_unusable(hass, entry)
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._event_time_issue_id(entry)
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
+
+    flow = repairs.EventTimeRepairFlow(entry)
+    flow.hass = hass
+
+    # First pass renders the card's explanation rather than acting.
+    form = await flow.async_step_init()
+    assert form["type"] == FlowResultType.FORM
+    assert form["step_id"] == "confirm"
+    assert form["description_placeholders"]["title"] == entry.title
+    assert entry.data.get(CONF_EVENT_TIME_DISMISSED) is None
+
+    result = await flow.async_step_confirm({})
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+    assert entry.data.get(CONF_EVENT_TIME_DISMISSED) is True
+
+
+async def test_dismissed_event_time_advisory_is_not_re_raised(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """A persisted acknowledgement survives the restart the tracker's state does not."""
+    from custom_components.rtl_433.const import (
+        CONF_EVENT_TIME_DISMISSED,
+        signal_hub_update,
+    )
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        entry, data={**entry.data, CONF_EVENT_TIME_DISMISSED: True}
+    )
+
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator._client.time_precision = TimePrecision.UNUSABLE
+
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._event_time_issue_id(entry)
+
+    unsub = repairs.async_track_event_time_precision(hass, entry, coordinator)
+    # The immediate wire-up evaluation stays silent despite the flagged state.
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+
+    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    await hass.async_block_till_done()
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+    unsub()
+
+
+# --------------------------------------------------------------------------- #
 # Unreachable-hub repair: rebind fix flow                                     #
 # --------------------------------------------------------------------------- #
 async def test_create_fix_flow_routes_by_issue_id(
@@ -232,6 +380,11 @@ async def test_create_fix_flow_routes_by_issue_id(
         hass, repairs._sample_rate_issue_id(entry), None
     )
     assert isinstance(sample_rate, repairs.SampleRateRepairFlow)
+
+    event_time = await repairs.async_create_fix_flow(
+        hass, repairs._event_time_issue_id(entry), None
+    )
+    assert isinstance(event_time, repairs.EventTimeRepairFlow)
 
     # An unknown issue id still falls back to the plain dismiss flow.
     other = await repairs.async_create_fix_flow(hass, "some_other_issue", None)
