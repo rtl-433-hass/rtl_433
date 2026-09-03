@@ -154,11 +154,20 @@ Beyond line coverage, the project uses [mutmut](https://github.com/boxed/mutmut)
 to check that tests actually *detect* wrong behaviour. CI fails if a source
 file's mutation score drops below its committed baseline.
 
+The gate around mutmut is
+[`mutmut-ratchet`](https://github.com/rtl-433-hass/mutmut-ratchet), a shared
+package (this repository and `pyrtl_433` both use it): it scopes a PR's mutation
+run to the modules the diff could affect, fans the work across time-balanced
+shards, and fails only on a real per-file regression. Its per-repo settings —
+the package path, the paths that escalate a scoped run to a full one, and the
+test -> source overrides for tests whose name does not map 1:1 to a module —
+live in `[tool.mutmut_ratchet]` in `pyproject.toml`.
+
 ```bash
 uv run mutmut run                                   # mutate custom_components/rtl_433/
 uv run mutmut results                               # list surviving mutants
-uv run python scripts/mutation_stats.py > stats.json
-uv run python scripts/mutation_ratchet.py --mode floor --stats stats.json
+uv run mutmut-ratchet stats > stats.json            # per-file killed/total
+uv run mutmut-ratchet ratchet --mode floor --stats stats.json
 ```
 
 To kill a surviving mutant, add a **test** that asserts the exact behaviour it

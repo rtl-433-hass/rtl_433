@@ -1016,14 +1016,28 @@ Hard rules:
   mutant. Genuinely-equivalent survivors are simply recorded in the baseline.
 - The committed baseline `scripts/mutation_baseline.json` ratchets **upward only**.
 
-The baseline and gate are driven by two stdlib-only helpers:
+The baseline and gate are driven by
+[`mutmut-ratchet`](https://github.com/rtl-433-hass/mutmut-ratchet), a shared
+package used by this repository and `pyrtl_433` (it is the de-duplicated form of
+the `scripts/mutation_*.py` helpers that used to be copy-pasted between them).
+Its per-repo settings live in `[tool.mutmut_ratchet]` in `pyproject.toml`: the
+package path, the `escalate_paths` that force a full run, and the
+`explicit_test_sources` table mapping tests whose name does not resolve 1:1 to a
+module. Everything else (the tolerance band, the baseline/timings paths) keeps
+the tool's defaults, which are this repo's historical values.
 
 ```bash
-uv run python scripts/mutation_stats.py > stats.json          # per-file killed/total
-uv run python scripts/mutation_ratchet.py --mode floor  --stats stats.json   # CI gate (PR + main)
-uv run python scripts/mutation_ratchet.py --mode strict --stats stats.json   # local: is the baseline still representative?
-uv run python scripts/mutation_ratchet.py --mode floor  --stats stats.json --update  # ratchet baseline upward
+uv run mutmut-ratchet stats > stats.json                              # per-file killed/total
+uv run mutmut-ratchet ratchet --mode floor  --stats stats.json        # CI gate (PR + main)
+uv run mutmut-ratchet ratchet --mode strict --stats stats.json        # local: is the baseline still representative?
+uv run mutmut-ratchet ratchet --mode floor  --stats stats.json --update  # ratchet baseline upward
+uv run mutmut-ratchet timings                                         # refresh the shard weights (after a FULL run)
 ```
+
+`tests/test_mutation_config.py` guards this repo's half of that configuration:
+every `tests/test_*.py` resolves to a module (or is deliberately declared broad),
+every explicit mapping points at files that still exist, and every baseline file
+lands in exactly one shard. The tooling itself is tested in its own repository.
 
 CI (`.github/workflows/mutation.yml`) enforces the per-file **floor**: a file
 fails only if its score drops below its recorded value by more than a tolerance
@@ -1044,17 +1058,19 @@ Because a full run is slow (~50 min), CI splits the work two ways — by **scope
 
 - **Scope is chosen by trigger.** **Pull requests** mutate only the modules the PR
   could affect — changed package modules, plus the source module a changed
-  `tests/test_*.py` exercises (`scripts/mutation_targets.py` does the mapping).
-  Typical PRs finish in a couple of minutes and still block on a per-file
-  regression in touched code. A change to mutation infra (`pyproject.toml`,
-  `requirements_test.txt`, `scripts/mutation_*`, `tests/conftest.py`, the workflow)
-  or a broad/unmappable test escalates the PR to the full package. **Pushes to
-  `main` and a nightly schedule** always run the **full** package, so the whole
-  baseline stays honest and the "a test was weakened but its source is unchanged"
-  blind spot is caught within a day. For a scoped run, the touched files are passed
-  to `scripts/mutation_stats.py --paths` so unscoped (un-run) mutants aren't counted.
+  `tests/test_*.py` exercises (`mutmut-ratchet targets` does the mapping, from
+  the `explicit_test_sources` table plus the `test[_mut]_<name>.py` -> `<name>.py`
+  convention). Typical PRs finish in a couple of minutes and still block on a
+  per-file regression in touched code. A change to a configured `escalate_paths`
+  entry (`pyproject.toml`, `requirements_test.txt`, `tests/conftest.py`, the
+  workflow) or a broad/unmappable test escalates the PR to the full package.
+  **Pushes to `main` and a nightly schedule** always run the **full** package, so
+  the whole baseline stays honest and the "a test was weakened but its source is
+  unchanged" blind spot is caught within a day. For a scoped run, the touched
+  files are passed to `mutmut-ratchet stats --paths` so unscoped (un-run) mutants
+  aren't counted.
 - **Whatever is in scope is split across a 6-way matrix** (one `mutation` job,
-  shards 0–5). `scripts/mutation_shards.py` does a deterministic LPT partition of
+  shards 0–5). `mutmut-ratchet shards` does a deterministic LPT partition of
   the whole package, weighting each module by its **measured mutmut run time**
   from `scripts/mutation_timings.json` (count-balancing is wrong — per-mutant time
   varies ~2.5x across modules, e.g. `entity.py` vs `coordinator/base.py`), then
@@ -1069,13 +1085,14 @@ Because a full run is slow (~50 min), CI splits the work two ways — by **scope
   the job level. A `mutation-gate` job (status check name "Mutation floor") fans
   the matrix back into one stable signal that fails if any shard failed.
   - `scripts/mutation_timings.json` is a committed profile, refreshed like the
-    baseline: after a full `mutmut run`, `python scripts/mutation_timings.py`
-    rewrites it. A module absent from it falls back to a count-based estimate, so
-    a stale profile degrades gracefully (a slightly suboptimal split, never wrong).
+    baseline: after a full `mutmut run`, `uv run mutmut-ratchet timings` rewrites
+    it. A module absent from it falls back to a count-based estimate, so a stale
+    profile degrades gracefully (a slightly suboptimal split, never wrong).
   - Note: mutmut strips the `__init__` segment from mutant names, so a package
-    `__init__.py`'s mutants live directly under the package's dotted name. The
-    sharder matches those via the `x_*`/`xǁ*` trampoline prefixes (not the naive
-    `<pkg>.__init__.*`, which matches nothing and would leave them unrun).
+    `__init__.py`'s mutants live directly under the package's dotted name. Both
+    `shards` and `targets` match those via the `x_*`/`xǁ*` trampoline prefixes
+    (not the naive `<pkg>.__init__.*`, which matches nothing and would leave all
+    275 of `__init__.py`'s mutants unrun).
 
 ## Running the container / screenshot harness
 

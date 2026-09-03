@@ -3,12 +3,19 @@ name: Mutation
 # Mutation testing with mutmut, enforcing a per-file score ratchet against the
 # committed baseline (scripts/mutation_baseline.json).
 #
+# The scoping/sharding/stats/ratchet tooling is `mutmut-ratchet`, a shared
+# package (https://github.com/rtl-433-hass/mutmut-ratchet) used by this repo and
+# rtl-433-hass/pyrtl_433. Its per-repo settings — the package path, the paths
+# that escalate a scoped run to a full one, and the test -> source overrides for
+# tests whose name does not map 1:1 to a module — live in
+# [tool.mutmut_ratchet] in pyproject.toml.
+#
 # A full-package run is slow (~50 min on a 2-core runner), so the work is split
 # two ways: by *scope* (how many modules) and by *shard* (parallel across modules).
 #
 #   * Scope is chosen by trigger. Pull requests mutate only the source modules the
 #     PR could have affected (changed package modules, plus the source module a
-#     changed test exercises; see scripts/mutation_targets.py), keeping the common
+#     changed test exercises; see `mutmut-ratchet targets`), keeping the common
 #     PR to a few minutes while still BLOCKING on a per-file regression in touched
 #     code. A change to mutation infra or a broad/unmappable test escalates the PR
 #     to the full package. Pushes to main and a nightly schedule always run the
@@ -17,14 +24,14 @@ name: Mutation
 #
 #   * Whatever is in scope is then split across a 6-way matrix (job `mutation`):
 #     each shard mutates a disjoint, TIME-balanced subset of the in-scope modules
-#     (scripts/mutation_shards.py does a deterministic LPT partition over the whole
+#     (`mutmut-ratchet shards` does a deterministic LPT partition over the whole
 #     package, weighting each module by its measured mutmut run time from
 #     scripts/mutation_timings.json — count-balancing is wrong because per-mutant
 #     time varies ~2.5x across modules — then `--restrict` keeps only this shard's
 #     in-scope modules). The union of the six shard checks equals a whole-scope check — mutmut
 #     copies the whole package into mutants/ regardless of the filter (so imports
 #     resolve), the filter only restricts which mutants execute, and
-#     `mutation_stats.py --paths` plus the per-file floor scope the gate to each
+#     `mutmut-ratchet stats --paths` plus the per-file floor scope the gate to each
 #     shard's files, so no file is double-counted or skipped. A full run drops from
 #     ~50 min to roughly the cost of its heaviest single module (the six shards
 #     run in parallel), and a scoped PR fans its handful of modules out too. Six (not
@@ -100,7 +107,7 @@ jobs:
             git fetch --no-tags origin "${{ github.base_ref }}"
             changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
             echo "Changed files:"; echo "$changed"
-            uv run python scripts/mutation_targets.py $changed > targets.txt
+            uv run mutmut-ratchet targets $changed > targets.txt
             cat targets.txt
             {
               echo "mode=$(sed -n '1p' targets.txt)"
@@ -116,9 +123,9 @@ jobs:
         id: shard
         run: |
           if [ "${{ steps.scope.outputs.mode }}" = "all" ]; then
-            uv run python scripts/mutation_shards.py --shard ${{ matrix.shard }} --of 6 > shard.txt
+            uv run mutmut-ratchet shards --shard ${{ matrix.shard }} --of 6 > shard.txt
           elif [ -n "${{ steps.scope.outputs.paths }}" ]; then
-            uv run python scripts/mutation_shards.py --shard ${{ matrix.shard }} --of 6 --restrict ${{ steps.scope.outputs.paths }} > shard.txt
+            uv run mutmut-ratchet shards --shard ${{ matrix.shard }} --of 6 --restrict ${{ steps.scope.outputs.paths }} > shard.txt
           else
             # Scoped run with nothing in scope (e.g. a docs-only PR): no work.
             printf '\n\n' > shard.txt
@@ -133,11 +140,11 @@ jobs:
         if: steps.shard.outputs.patterns != ''
         run: |
           uv run mutmut run ${{ steps.shard.outputs.patterns }}
-          uv run python scripts/mutation_stats.py --paths ${{ steps.shard.outputs.paths }} > mutation-stats.json
+          uv run mutmut-ratchet stats --paths ${{ steps.shard.outputs.paths }} > mutation-stats.json
 
       - name: Enforce per-file floor vs baseline
         if: steps.shard.outputs.patterns != ''
-        run: uv run python scripts/mutation_ratchet.py --mode floor --stats mutation-stats.json
+        run: uv run mutmut-ratchet ratchet --mode floor --stats mutation-stats.json
 
       - name: No modules in this shard
         if: steps.shard.outputs.patterns == ''
