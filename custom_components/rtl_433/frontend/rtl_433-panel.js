@@ -36,7 +36,7 @@
  * and `rtl_433/devices/replace` re-points an existing device onto a candidate.
  * None of the adopt/ignore/replace *logic* is reimplemented here; every button
  * is one command call, so this panel cannot drift from what the integration
- * does. The same holds for the three settings dialogs: `rtl_433/settings/get`
+ * does. The same holds for the three settings pages: `rtl_433/settings/get`
  * answers with everything they render -- including which units are valid for
  * which commodity -- and `.../hub`, `.../device` and `.../mappings` store it.
  * A form here knows how to lay a control out and nothing about what a value
@@ -1905,10 +1905,10 @@ class Rtl433Panel extends HTMLElement {
    * Open one of the three settings forms.
    *
    * The payload behind all three is fetched once and reused, because the three
-   * dialogs are one screenful and the alternative is a round trip per open. It
-   * is re-fetched after every save so the next open shows what was stored
-   * rather than what was typed -- the two differ exactly where the backend
-   * cleared something, which is the case the user most needs to see.
+   * pages are one screenful between them and the alternative is a round trip
+   * per visit. It is re-fetched after every save so the next visit shows what
+   * was stored rather than what was typed -- the two differ exactly where the
+   * backend cleared something, which is the case the user most needs to see.
    */
   async _openSettings(kind) {
     if (!this._entryId || this._settingsForm === kind) {
@@ -2390,10 +2390,11 @@ class Rtl433Panel extends HTMLElement {
   /**
    * Save the open form.
    *
-   * A rejected save keeps the dialog open and reports the reason inside it: the
-   * page's banner is behind the backdrop, and a dialog that closes on a refusal
-   * throws away what the user typed. On success the payload is dropped so the
-   * next open re-reads it, and the subscription is re-established -- a hub
+   * A rejected save stays on the form and reports the reason next to it: the
+   * overview's banner is not where the user is standing, and navigating away on
+   * a refusal would throw away what they typed. On success the payload is
+   * dropped so the next visit re-reads it, the panel returns to the overview,
+   * and the subscription is re-established -- a hub
    * reloads when its calibration, mappings or manage-settings toggle changes,
    * and the old subscription would then be pushing a replaced coordinator's
    * state.
@@ -3150,13 +3151,13 @@ const STYLES = `
   }
 
   /*
-   * Form controls, sized and coloured like Home Assistant's own so the dialogs
-   * read as part of the frontend rather than as a page that happens to be
-   * inside it. Deliberately native input/select/textarea elements and not the
-   * frontend's own ha-* ones: this file imports nothing, and a control that is
-   * merely styled like core's cannot break when core's internals move. (No
-   * backticks in here -- this comment is inside a template literal, and one
-   * would end it.)
+   * The native fallback's form controls, for a frontend with no ha-form. Sized
+   * and coloured like Home Assistant's own so a page that has to fall back to
+   * them still reads as part of the frontend. Every rule here is scoped to the
+   * element it styles, so none of it reaches the borrowed controls: those
+   * arrive already themed, and restyling them from outside is how a panel ends
+   * up disagreeing with the rest of Settings. (No backticks in here -- this
+   * comment is inside a template literal, and one would end it.)
    */
   .field { margin-bottom: 16px; }
   .field > label {
@@ -3240,11 +3241,16 @@ const STYLES = `
   /* The label above a borrowed control is the panel's, so it keeps its own. */
   .field > ha-code-editor { margin-top: 4px; }
 
-  .settings-body { max-height: 55vh; overflow-y: auto; }
   /*
-   * A rejected save reports what was wrong *inside* the dialog. The page's own
-   * banner is behind the backdrop, so putting it there would hide the reason
-   * the dialog is still open.
+   * No height cap: this is a page now, so the page scrolls. Capping it was for
+   * a dialog, where the form had to fit inside a box that could not grow.
+   */
+  .settings-body { display: block; }
+  /*
+   * A rejected save reports what was wrong next to the form that was refused,
+   * not in the page banner: the banner is at the top of the overview, which is
+   * not where the user is standing, and a form that lost its reason would look
+   * like it simply did nothing.
    */
   .settings-problem {
     margin-bottom: 16px;
