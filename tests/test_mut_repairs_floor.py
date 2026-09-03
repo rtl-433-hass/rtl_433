@@ -10,16 +10,15 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from pyrtl_433 import TimePrecision
+import pytest
 
 from custom_components.rtl_433 import repairs
 from custom_components.rtl_433.const import (
+    CONF_EVENT_TIME_DISMISSED,
     CONF_HOST,
     CONF_PATH,
     CONF_PORT,
-    CONF_EVENT_TIME_DISMISSED,
     CONF_RADIO_ID,
     DEFAULT_PATH,
     DEFAULT_PORT,
@@ -1846,9 +1845,7 @@ class TestEventTimeDismissalFlag:
         )
         assert repairs._event_time_advisory_dismissed(entry) is False
 
-    def test_set_flag_reads_as_dismissed(
-        self, hass: HomeAssistant, hub_entry_builder
-    ):
+    def test_set_flag_reads_as_dismissed(self, hass: HomeAssistant, hub_entry_builder):
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
         hass.config_entries.async_update_entry(
