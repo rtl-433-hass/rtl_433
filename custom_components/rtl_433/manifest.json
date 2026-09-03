@@ -12,5 +12,5 @@
   "requirements": [
     "pyrtl_433==0.3.0"
   ],
-  "version": "0.20.0"
+  "version": "0.20.1"
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.20.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.20.0...v0.20.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* map Neptune-R900 bare consumption field ([#213](https://github.com/rtl-433-hass/rtl_433/issues/213)) ([da6d840](https://github.com/rtl-433-hass/rtl_433/commit/da6d84029738f9738313cb04bddaabfaacafdfff))
+* mark detect_wet as event_driven ([2eddd52](https://github.com/rtl-433-hass/rtl_433/commit/2eddd527b24684b4ec997f2eaca14f1f9d110c4b)), closes [#207](https://github.com/rtl-433-hass/rtl_433/issues/207)
+* **sensor:** restore the native value, not the displayed one ([#209](https://github.com/rtl-433-hass/rtl_433/issues/209)) ([6221c95](https://github.com/rtl-433-hass/rtl_433/commit/6221c95369e5d69836821fa0629da1065a1c1480))
+
 ## [0.20.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.19.3...v0.20.0) (2026-09-01)
 
 
