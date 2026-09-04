@@ -21,7 +21,9 @@ here from the event's ``event_time`` and the coordinator's connect-edge anchor
 ``base.py``) and relies on the runtime state declared in that class's
 ``__init__`` (``devices``, ``last_seen``, ``available``, ``seen_fields``,
 ``device_fields``, ``known_field_keys``, ``_connection_time``, ``_discovered``,
-``_logged_unmapped``, ``discovery_enabled``, ``new_device_callback``) plus ``_dispatch`` and ``forget_device`` (base.py).
+``_logged_unmapped``, ``_evict_floor``, ``discovery_enabled``,
+``new_device_callback``) plus ``entry``, ``_dispatch`` and ``forget_device``
+(base.py).
 """
 
 from __future__ import annotations
@@ -126,8 +128,14 @@ class _EventProcessingMixin:
         ceiling. The frame just taken is excluded, so an ingest can never evict
         the state it has this moment written; and if everything else is protected
         the map is simply left over the cap, because real devices outrank it.
+
+        A pass that finds nothing to drop records the size it gave up at, and the
+        next frame at that size skips the walk. Without it, a hub whose devices
+        are all real -- which is every hub running with discovery on, since each
+        key registers as it arrives -- would rescan a map that only grows, on
+        every frame, forever, to reach the same answer.
         """
-        if len(self.devices) <= _MAX_TRACKED_DEVICES:
+        if len(self.devices) <= self._evict_floor:
             return
         adopted = self.entry.data.get(CONF_DEVICES, {})
         for key in list(self.devices)[:-1]:
@@ -138,9 +146,11 @@ class _EventProcessingMixin:
                 key,
                 _MAX_TRACKED_DEVICES,
             )
+            # ``forget_device`` lowers the floor back to the cap for us.
             self.forget_device(key)
             if len(self.devices) <= _MAX_TRACKED_DEVICES:
                 return
+        self._evict_floor = len(self.devices)
 
     def _trace_unmapped_fields(self, key: str, field_keys: set[str]) -> None:
         """DEBUG-log a device's fields that resolve to no library descriptor.

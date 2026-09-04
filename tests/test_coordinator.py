@@ -567,18 +567,77 @@ def test_everything_protected_leaves_the_map_over_the_cap(hass, coordinator):
     assert "Noise-fresh" in coordinator.devices
 
 
-def test_forget_device_clears_the_unmapped_field_memo(hass, coordinator):
-    """A device that comes back is new to us, so its fields log again.
+def test_forget_device_clears_the_log_once_memos(hass, coordinator):
+    """A device that comes back is new to us, so both memos log again.
 
     ``forget_device`` serves both the device-page deletion and the cap, and it
-    used to leave this memo behind.
+    used to leave these behind — so a device that returned never re-logged its
+    unmapped fields or its resolved timeout, and the timeout memo was one map the
+    cap could not bound.
     """
     coordinator.known_field_keys = frozenset({"temperature_C"})
     key = "Acurite-606TX-42"
     with patch(DISPATCH):
         coordinator._on_client_event(_event(key=key, fields={"made_up_field": 1}))
+    coordinator._log_timeout_change(key, 600, "hub")
     assert coordinator._logged_unmapped.get(key)
+    assert key in coordinator._logged_timeouts
 
     coordinator.forget_device(key)
     assert key not in coordinator._logged_unmapped
+    assert key not in coordinator._logged_timeouts
     assert key not in coordinator.devices
+
+
+def test_a_fully_protected_map_is_not_rescanned_on_every_frame(hass, coordinator):
+    """Giving up is remembered, so the walk does not repeat for the same answer.
+
+    With discovery on, every key that arrives registers, so nothing is ever
+    evictable — and without this the ingest path would walk a map that only grows
+    on every single frame, forever, to reach the same conclusion.
+    """
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES)
+        coordinator._discovered.update(coordinator.devices)
+        coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
+
+    # The pass ran, found everything protected, and recorded the size it gave up
+    # at rather than the cap.
+    assert coordinator._evict_floor == len(coordinator.devices)
+
+    # A repeat frame from a device already in the map cannot change that answer,
+    # so the floor still stands.
+    with patch(DISPATCH):
+        coordinator._on_client_event(_event(key="Noise-0", model="Noise"))
+    assert coordinator._evict_floor == len(coordinator.devices)
+
+
+def test_giving_up_once_does_not_wedge_eviction(hass, coordinator):
+    """The floor defers the walk; it never cancels it.
+
+    Junk arriving after a fruitless pass is still collected — on the frame after
+    it lands, since the key just heard is never its own candidate.
+    """
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES)
+        coordinator._discovered.update(coordinator.devices)
+        coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
+        assert coordinator._evict_floor > _MAX_TRACKED_DEVICES
+
+        # Two junk frames: the first is exempt as the newest, the second evicts it.
+        coordinator._on_client_event(_event(key="Junk-1", model="Junk"))
+        coordinator._on_client_event(_event(key="Junk-2", model="Junk"))
+
+    assert "Junk-1" not in coordinator.devices
+    assert "Junk-2" in coordinator.devices
+
+
+def test_an_eviction_lowers_the_floor_back_to_the_cap(hass, coordinator):
+    """Once something is dropped, the map is under the cap and the shortcut ends."""
+    coordinator.discovery_enabled = False
+    with patch(DISPATCH):
+        _flood(coordinator, _MAX_TRACKED_DEVICES + 1)
+
+    assert coordinator._evict_floor == _MAX_TRACKED_DEVICES
