@@ -899,11 +899,19 @@ def _mappings_yaml(entry: ConfigEntry) -> str:
     An empty override set renders as the empty string rather than ``{}``, so a
     hub that has never overridden anything opens an empty editor instead of one
     holding a token the user has to delete before typing.
+
+    ``allow_unicode=True`` matters more here than it looks. Units are exactly
+    where non-ASCII characters live -- degrees, cubic metres, micrograms -- and
+    without it PyYAML escapes them. A user who set one would re-open the editor
+    to ``"\\xB0C"`` and have to decode their own setting before they could
+    safely edit the line.
     """
     overrides = entry.data.get(CONF_USER_MAPPINGS) or {}
     if not overrides:
         return ""
-    return yaml.safe_dump(overrides, default_flow_style=False, sort_keys=True)
+    return yaml.safe_dump(
+        overrides, default_flow_style=False, sort_keys=True, allow_unicode=True
+    )
 
 
 @websocket_api.websocket_command(

@@ -842,7 +842,7 @@ async def test_clear_empties_the_list_without_undoing_any_decision(
     assert events[-1]["event"]["pending"] == []
 
     # The ignore list is a persisted decision and is left exactly as it was.
-    assert events[-1]["event"]["ignored"] == [{"key": _MID_KEY, "model": ""}]
+    assert [row["key"] for row in events[-1]["event"]["ignored"]] == [_MID_KEY]
     assert hub.data[CONF_IGNORED_DEVICES] == [_MID_KEY]
     assert coordinator.ignored == {_MID_KEY}
 
@@ -1498,6 +1498,69 @@ async def test_a_device_clear_delay_lands_where_the_resolver_reads_it(
     assert _METER_KEY not in settings_hub.options.get(CONF_DEVICES, {})
 
 
+async def test_a_clear_delay_left_in_data_by_the_migration_can_be_cleared(
+    hass, hub_entry_builder, hass_ws_client, no_socket
+):
+    """A hub that came from per-device entries can still blank the delay.
+
+    The migration from per-device config entries writes the clear-delay into
+    ``entry.data``; every edit since writes it to ``entry.options``, and
+    :func:`~custom_components.rtl_433.settings.device_clear_delay` reads options
+    first and falls back to data. Blanking the field only empties the options
+    half, so while the leftover stayed in data the old number came straight back
+    -- the user cleared it, saved, re-opened the form, and there it was again.
+
+    Saving now retires the leftover, which is what makes the second half of this
+    test the interesting one: the form reads back empty, so the device falls back
+    to the descriptor's own default.
+    """
+    migrated = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            _METER_KEY: {
+                CONF_MODEL: _METER_MODEL,
+                DEVICE_FIELDS: ["consumption_data"],
+                # What the migration left behind.
+                DEVICE_MOTION_CLEAR_DELAY: 90,
+            }
+        },
+    )
+    client = await hass_ws_client(hass)
+
+    # The form opens showing the migrated value, so the user sees what they set.
+    reply, _ = await _call(
+        client, {"type": "rtl_433/settings/get", "entry_id": migrated.entry_id}
+    )
+    (device,) = reply["result"]["devices"]
+    assert device[DEVICE_MOTION_CLEAR_DELAY] == 90
+
+    # Blanking the field and saving really clears it.
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        reply, _ = await _call(
+            client,
+            {
+                "type": "rtl_433/settings/device",
+                "entry_id": migrated.entry_id,
+                "device_key": _METER_KEY,
+                DEVICE_MOTION_CLEAR_DELAY: None,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    assert reply["result"][DEVICE_MOTION_CLEAR_DELAY] is None
+    assert DEVICE_MOTION_CLEAR_DELAY not in migrated.data[CONF_DEVICES][_METER_KEY]
+    assert _METER_KEY not in migrated.options.get(CONF_DEVICES, {})
+
+    # And it stays cleared when the form is re-opened.
+    reply, _ = await _call(
+        client, {"type": "rtl_433/settings/get", "entry_id": migrated.entry_id}
+    )
+    (device,) = reply["result"]["devices"]
+    assert device[DEVICE_MOTION_CLEAR_DELAY] is None
+
+
 async def test_settings_for_an_unknown_device_are_refused(
     hass, settings_hub, hass_ws_client
 ):
@@ -1537,9 +1600,9 @@ async def test_mapping_overrides_round_trip_as_yaml_text(
     document = (
         "temperature_C:\n"
         "  platform: sensor\n"
-        "  name: Kelvin Temp\n"
-        "  object_suffix: K\n"
-        "  unit_of_measurement: K\n"
+        "  name: Outside Temp\n"
+        "  object_suffix: outside\n"
+        "  unit_of_measurement: \N{DEGREE SIGN}C\n"
     )
 
     with patch.object(hass.config_entries, "async_schedule_reload"):
@@ -1555,9 +1618,16 @@ async def test_mapping_overrides_round_trip_as_yaml_text(
 
     assert reply["success"] is True
     stored = settings_hub.data[CONF_USER_MAPPINGS]
-    assert stored["temperature_C"]["unit_of_measurement"] == "K"
-    # And it renders back as a document the same editor can re-submit.
-    assert "temperature_C:" in reply["result"]["mappings"]
+    assert stored["temperature_C"]["unit_of_measurement"] == "\N{DEGREE SIGN}C"
+    # And it renders back as a document the same editor can re-submit. The unit
+    # is deliberately not plain ASCII: units are where non-ASCII characters live,
+    # and PyYAML escapes them by default, so without ``allow_unicode`` the user
+    # would re-open the editor to ``"\\xB0C"`` and have to decode their own
+    # setting before they could edit the line.
+    document_back = reply["result"]["mappings"]
+    assert "temperature_C:" in document_back
+    assert "unit_of_measurement: \N{DEGREE SIGN}C" in document_back
+    assert "\\x" not in document_back
 
     # Clearing the editor removes every override rather than being a parse error.
     with patch.object(hass.config_entries, "async_schedule_reload"):

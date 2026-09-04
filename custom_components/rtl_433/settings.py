@@ -236,6 +236,18 @@ def build_device_data(
     descriptor. Every level is copied, so the caller's ``async_update_entry`` is
     handed a genuinely new mapping and the nested dicts are not shared with the
     live entry.
+
+    Saving also drops any clear-delay left in ``data`` by the migration from
+    per-device entries. That value is only ever a leftover -- every edit writes
+    the delay to ``options`` (see :func:`build_device_options`), and
+    :func:`device_clear_delay` reads options first and falls back to data. Leave
+    the leftover in place and a user on a migrated hub could never clear the
+    delay: blanking the field empties options, the read falls back to data, and
+    the old number reappears. Retiring it here makes options the only copy from
+    the first save onwards.
+
+    Both builders are always called together for one ``async_update_entry``, so
+    the delay is written to options in the same breath this drops it from data.
     """
     data = dict(entry.data)
     devices = dict(data.get(CONF_DEVICES, {}))
@@ -248,6 +260,7 @@ def build_device_data(
         record.pop(DEVICE_CALIBRATION, None)
     else:
         record[DEVICE_CALIBRATION] = calibration
+    record.pop(DEVICE_MOTION_CLEAR_DELAY, None)
     devices[device_key] = record
     data[CONF_DEVICES] = devices
     return data
