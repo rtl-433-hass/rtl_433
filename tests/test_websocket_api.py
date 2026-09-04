@@ -275,6 +275,12 @@ async def test_pending_returns_the_columns_the_panel_renders(hass, hub, hass_ws_
     # Nothing has been ignored yet, and the key is present rather than absent so
     # a caller never has to guard for it.
     assert result["ignored"] == []
+    # The receiver's own connection to the rtl_433 server, which the panel's
+    # status card reads. The panel cannot work this out for itself: its
+    # subscription keeps delivering payloads while the receiver is offline, so a
+    # card that inferred it from "am I getting pushes?" would say Online through
+    # an outage.
+    assert result["connected"] is True
 
     rows = {row["key"]: row for row in result["pending"]}
 

@@ -320,10 +320,8 @@ function haRadio(name, value, labelNode) {
     // `ha-formfield` slots its control; the two-line text goes in the label
     // slot so the whole row stays one click target.
     labelNode.slot = "label";
-    field.append(radio, labelNode);
-  } else {
-    field.append(radio, labelNode);
   }
+  field.append(radio, labelNode);
   return { field, radio };
 }
 
@@ -423,12 +421,10 @@ class Rtl433Panel extends HTMLElement {
     // Devices adopted from this panel, in this session:
     // `key -> {row, deviceId}`.
     //
-    // An adopted device leaves the pending list immediately, so without this
-    // its card would simply vanish at the moment of the click -- the one moment
-    // the user is looking straight at it, and with the device page it just
-    // created still one unexplained navigation away. Keeping the snapshot lets
-    // the card stay exactly where it was and turn green, which is also what
-    // makes "you added these five" readable at a glance.
+    // Adopting removes a device from the pending list straight away, so
+    // without this snapshot its card would disappear the instant the user
+    // clicked Add. Keeping it lets the card stay where it is and turn green,
+    // so the user can see everything they just added.
     this._added = new Map();
 
     // `key -> area_id` for adds whose area has not been applied yet.
@@ -792,10 +788,10 @@ class Rtl433Panel extends HTMLElement {
       if (this._entryId !== entryId) {
         return;
       }
-      // A hub that is reloading is a wait, not a failure -- and it is the
-      // *expected* answer for a second or so after saving a setting that
-      // requires a reload. Reporting it would show an error banner at the one
-      // moment the user has just succeeded at something.
+      // A `not_loaded` error means the hub is reloading, so retry rather than
+      // report it. It is the expected answer for a second or so after saving a
+      // setting that requires a reload -- exactly when an error banner would be
+      // most confusing, since the save actually worked.
       if (error && error.code === "not_loaded" && this._retries < RELOAD_RETRY_LIMIT) {
         this._retries += 1;
         this._status = "Waiting for the receiver to reload…";
@@ -1016,33 +1012,38 @@ class Rtl433Panel extends HTMLElement {
    * the feature.
    */
   _buildReplaceDialog(slot) {
-    const dialog = haControl("ha-dialog", () => {
-      const native = document.createElement("dialog");
-      native.innerHTML = `
-        <form method="dialog" class="replace-form">
-          <h2 class="replace-title">Replace a device</h2>
-          <p class="replace-intro"></p>
-          <div class="replace-list" role="radiogroup" aria-label="Device to replace"></div>
-          <div class="replace-actions"></div>
-        </form>`;
-      return native;
-    });
+    const dialog = haControl("ha-dialog", () =>
+      document.createElement("dialog")
+    );
     dialog.className = "replace-dialog";
+
+    // The same three children either way, so `_buildDom` finds them by
+    // `querySelector` without caring which element it got.
+    const intro = document.createElement("p");
+    intro.className = "replace-intro";
+    const list = document.createElement("div");
+    list.className = "replace-list";
+    list.setAttribute("role", "radiogroup");
+    list.setAttribute("aria-label", "Device to replace");
+    const actions = document.createElement("div");
+    actions.className = "replace-actions";
 
     if (dialog.localName === "ha-dialog") {
       dialog.hass = this._hass;
-      // The heading is the element's own, so the fallback's <h2> is not needed.
+      // The heading is the element's own, so no <h2> of ours.
       dialog.headerTitle = "Replace a device";
-      const intro = document.createElement("p");
-      intro.className = "replace-intro";
-      const list = document.createElement("div");
-      list.className = "replace-list";
-      list.setAttribute("role", "radiogroup");
-      list.setAttribute("aria-label", "Device to replace");
-      const actions = document.createElement("div");
-      actions.className = "replace-actions";
       actions.slot = "footer";
       dialog.append(intro, list, actions);
+    } else {
+      // `method="dialog"` is what makes Esc and the buttons close a native one.
+      const form = document.createElement("form");
+      form.method = "dialog";
+      form.className = "replace-form";
+      const heading = document.createElement("h2");
+      heading.className = "replace-title";
+      heading.textContent = "Replace a device";
+      form.append(heading, intro, list, actions);
+      dialog.append(form);
     }
 
     slot.append(dialog);
@@ -1486,9 +1487,6 @@ class Rtl433Panel extends HTMLElement {
       dialogActions: root.querySelector(".replace-actions"),
       dialogCancel: null,
       dialogConfirm: null,
-      openHub: null,
-      openDevice: null,
-      openMappings: null,
       title: root.querySelector(".toolbar-title"),
       viewOverview: root.querySelector(".view-overview"),
       viewDiscovered: root.querySelector(".view-discovered"),
@@ -1675,20 +1673,42 @@ class Rtl433Panel extends HTMLElement {
     this._el.status.textContent = this._status;
     this._el.status.hidden = !this._status;
 
+    const loaded = this._data !== null;
+
+    // Only the view on screen is drawn. The subscription stays open on all
+    // three, and pushes arrive every few seconds, so without this the panel
+    // would keep rebuilding a card per candidate -- timestamps, readings and
+    // all -- into DOM nobody can see, for as long as the user sat on the
+    // overview or a settings page. Entering a view re-renders, so what is
+    // skipped here is drawn on arrival.
+    if (view.view === "discovered") {
+      this._renderDiscovered(now, loaded);
+    } else if (view.view === "overview") {
+      this._renderOverview();
+    }
+  }
+
+  /**
+   * Draw the discovered-devices view: the cards, and the controls around them.
+   *
+   * Split out of `_render` so it can be skipped while the view is hidden.
+   */
+  _renderDiscovered(now, loaded) {
     // The frontend swaps this object only when the area registry changes, so
     // an identity compare answers "did areas move?" without touching its
-    // contents on every push, banner change and clock tick.
+    // contents on every push, banner change and clock tick. It is only updated
+    // when the cards are actually redrawn, so a change that lands while this
+    // view is hidden is still noticed on the way back in.
     const areas = this._hass ? this._hass.areas : null;
     const areasChanged = areas !== this._lastAreas;
     this._lastAreas = areas;
 
     const cards = this._cards();
-    const loaded = this._data !== null;
     this._el.grid.hidden = !loaded || cards.length === 0;
-    // The search line stays put whether or not anything has been heard: this
-    // receiver is always listening, and saying so is the honest state. Only the
-    // "they will show up here" hint drops away once they have, where it would
-    // be describing something the user can already see.
+    // The "Searching for rtl_433 devices…" block stays on screen even after
+    // devices appear, because the receiver really is still listening. Only the
+    // hint under it is hidden once there are cards, where it would be
+    // describing something the user can already see.
     this._el.searchingHint.hidden = cards.length > 0;
 
     this._reconcile(
@@ -1700,17 +1720,6 @@ class Rtl433Panel extends HTMLElement {
     );
 
     this._el.clear.hidden = !loaded || cards.length === 0;
-    // These open Home Assistant's own pages filtered to a hub, so they wait
-    // for one to resolve. The settings rows do not: they are built per
-    // receiver, from a list that only exists once the hubs have answered.
-    for (const row of [
-      this._el.rowDevices,
-      this._el.rowEntities,
-      this._el.fab,
-    ]) {
-      row.disabled = !this._entryId;
-    }
-    this._renderOverview();
 
     const ignored = this._data && this._data.ignored ? this._data.ignored : [];
     this._el.ignoredToggle.hidden = !loaded || ignored.length === 0;
@@ -1856,10 +1865,11 @@ class Rtl433Panel extends HTMLElement {
     const row = card.row;
     element.card = card;
 
-    // The model and key are the card's identity, promoted into the coloured
-    // heading: without an interview step there is nothing else to lead with,
-    // and between them they are what a user matches against the box in their
-    // hand.
+    // Put the model and device key in the coloured heading. rtl_433 devices
+    // are never interrogated the way a Zigbee or Z-Wave device is when it
+    // joins, so these two strings are everything we know about a candidate --
+    // and they are what the user compares against the label on the sensor
+    // itself.
     this._text(parts.model, row.model || "Unknown model");
     this._text(parts.key, row.key);
     element.classList.toggle("added", card.added);
@@ -1899,9 +1909,10 @@ class Rtl433Panel extends HTMLElement {
         added.deviceId = device.id;
       }
     }
-    // Once the device exists it owns its own area, and the card's picker would
-    // be a second control claiming to set the same thing while actually only
-    // recording an intent that has already been carried out.
+    // Hide the area picker once the device has been added. From then on the
+    // device registry holds the device's area, so leaving the picker would give
+    // the user a second control that looks like it sets the area but only
+    // records a choice that has already been applied.
     parts.area.hidden = card.added;
     if (parts.areaControl) {
       parts.areaControl.disabled = card.added;
@@ -1980,21 +1991,6 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * Build one card's area control, preferring Home Assistant's own picker.
-   *
-   * `ha-area-picker` is the control the device page itself uses to set an area,
-   * so borrowing it is what makes this field look and behave like the one the
-   * user will meet a minute later -- with the same search, the same "add a new
-   * area", and the same 56px outlined field. It is used by tag name and never
-   * imported: nothing here reaches into a frontend module path, and the element
-   * is only touched if the frontend has already registered it.
-   *
-   * When it has not, the card falls back to a native `<select>` populated from
-   * `hass.areas`. That is plainer, but it is a working control rather than an
-   * empty box, and this file's whole posture is that frontend internals may move
-   * and the page should degrade rather than break.
-   */
-  /**
    * Build one card's area field.
    *
    * `ha-area-picker` is the control Home Assistant's own device page uses to
@@ -2053,8 +2049,28 @@ class Rtl433Panel extends HTMLElement {
    * subscription is still connecting.
    */
   _renderOverview() {
+    // These open Home Assistant's own pages filtered to a hub, and the FAB
+    // needs one too, so all three wait for a receiver to resolve. The settings
+    // rows do not: they are built per receiver, from a list that only exists
+    // once `rtl_433/hubs` has answered.
+    for (const row of [
+      this._el.rowDevices,
+      this._el.rowEntities,
+      this._el.fab,
+    ]) {
+      row.disabled = !this._entryId;
+    }
+
+    // One walk of the device registry, shared by the status card and both rows.
+    // `_render` reaches here on every push from the receiver and on the clock
+    // tick, and the registry is the user's whole instance -- thousands of
+    // entries on a big one -- so walking it once per count added up.
+    const deviceIds = this._entryDeviceIds();
+    const devices = deviceIds === null ? null : deviceIds.length;
     const status = this._el.status0;
-    const connected = this._data !== null && !this._banner;
+    // The receiver's own connection, as the payload reports it -- not
+    // "is my subscription working?", which stays true through an outage.
+    const connected = Boolean(this._data && this._data.connected);
     status.glyph.className = "status-icon";
     if (status.glyph.localName === "ha-svg-icon") {
       status.glyph.path = connected ? ICON_ONLINE : ICON_OFFLINE;
@@ -2065,14 +2081,13 @@ class Rtl433Panel extends HTMLElement {
       : this._data === null
         ? "Connecting…"
         : "Problem";
-    const devices = this._entryDeviceCount();
     status.supporting.textContent =
       devices === null ? "" : `${devices} ${devices === 1 ? "device" : "devices"}`;
 
     this._setRowCount(this._el.rowDevices, devices, "device", "devices");
     this._setRowCount(
       this._el.rowEntities,
-      this._entryEntityCount(),
+      this._entryEntityCount(deviceIds),
       "entity",
       "entities"
     );
@@ -2113,10 +2128,6 @@ class Rtl433Panel extends HTMLElement {
       .map((device) => device.id);
   }
 
-  _entryDeviceCount() {
-    const ids = this._entryDeviceIds();
-    return ids === null ? null : ids.length;
-  }
 
   /**
    * How many entities this hub owns, counted through its devices.
@@ -2127,13 +2138,12 @@ class Rtl433Panel extends HTMLElement {
    * silently counted zero. Every entity this integration creates is attached
    * to one of its devices, so the device set is the reliable way in.
    */
-  _entryEntityCount() {
+  _entryEntityCount(deviceIds) {
     const entities = this._hass && this._hass.entities;
-    const ids = this._entryDeviceIds();
-    if (!entities || ids === null) {
+    if (!entities || deviceIds === null) {
       return null;
     }
-    const owned = new Set(ids);
+    const owned = new Set(deviceIds);
     return Object.values(entities).filter((entity) =>
       owned.has(entity.device_id)
     ).length;
@@ -2154,11 +2164,10 @@ class Rtl433Panel extends HTMLElement {
     // arrow means on core's own subpages.
     switch (backAction(this._segment, this._pushed, window.history.length)) {
       case "unwind":
-        this._pushed = false;
-        window.history.back();
-        return;
       case "replace-up":
-        this._navigate("", { replace: true });
+        // Both of these are "go up a level", which is exactly `_goUp` -- and
+        // `backAction` has already chosen between its two halves.
+        this._goUp();
         return;
       case "leave":
         window.history.back();
@@ -2220,17 +2229,18 @@ class Rtl433Panel extends HTMLElement {
     if (!entryId) {
       return;
     }
-    // `_render` calls this on every repaint, and there are a lot of those: each
-    // push from the receiver, plus the clock tick. So the attempt is claimed
-    // here, *before* the fetch, rather than after the form is built. Claiming
-    // it afterwards meant a slow fetch was started again underneath itself --
-    // and when the second reply landed it rebuilt the form and threw away
-    // whatever had been typed in the meantime -- while a failed one was retried
-    // on every repaint for as long as the user sat on the page.
+    // Claim this attempt *before* fetching, and leave it claimed even if the
+    // fetch fails. `_render` calls this on every repaint -- every push from the
+    // receiver, plus the clock tick -- and without those two rules:
     //
-    // A failed attempt stays claimed so the error the user is reading holds
-    // still. Leaving the settings view releases it, which is what makes going
-    // back and opening the form again the way to retry.
+    //  - claiming only after the form was built let a slow fetch start again on
+    //    top of itself; when the second reply landed it rebuilt the form and
+    //    discarded whatever the user had typed;
+    //  - releasing the claim on failure retried the fetch on every repaint, so
+    //    the error message flickered while the user was reading it.
+    //
+    // Leaving the settings view releases the claim, so going back and reopening
+    // the form is how a user retries.
     const attempt = `${kind}:${entryId}`;
     if (this._settingsAttempt === attempt) {
       return;
@@ -2279,10 +2289,9 @@ class Rtl433Panel extends HTMLElement {
    * keeps the markup and the read-back next to each other -- the two things
    * that drift when a field is added.
    */
-  _field(parent, { label, control, hint, hidden }) {
+  _field(parent, { label, control, hint }) {
     const wrapper = document.createElement("div");
     wrapper.className = control.type === "checkbox" ? "field checkbox" : "field";
-    wrapper.hidden = Boolean(hidden);
     const id = `field-${Math.random().toString(36).slice(2)}`;
     control.id = id;
     const labelEl = document.createElement("label");
@@ -2301,7 +2310,6 @@ class Rtl433Panel extends HTMLElement {
       wrapper.append(hintEl);
     }
     parent.append(wrapper);
-    control.fieldEl = wrapper;
     return control;
   }
 
@@ -2749,12 +2757,11 @@ class Rtl433Panel extends HTMLElement {
         manage_settings: Boolean(data.manage_settings),
       };
     } else if (kind === "device") {
-      // The unit and scale fields only exist for a calibrated commodity, so
-      // their absence from the schema is what says "send nothing" -- the same
-      // fact the hidden fields used to carry.
-      const calibrated = this._settingsSchema("device").some(
-        (field) => field.name === "unit"
-      );
+      // A commodity with no convertible units is not a calibrated one, so it
+      // sends no unit and no scale. This is the same test the schema builder
+      // uses to decide whether to show those two fields at all.
+      const calibrated = (this._settings.commodity_units[data.commodity] || [])
+        .length > 0;
       message = {
         type: "rtl_433/settings/device",
         entry_id: this._settingsEntryId(),
@@ -3131,8 +3138,7 @@ const STYLES = `
 
   /*
    * auto-fill rather than auto-fit: with a single candidate, auto-fit would
-   * stretch its card the full width of a desktop window, which reads as a
-   * layout bug rather than as one device.
+   * stretch its card across the whole window, which just looks broken.
    */
   .grid {
     display: grid;
@@ -3260,7 +3266,7 @@ const STYLES = `
   button:disabled { opacity: 0.5; cursor: default; }
   button[hidden] { display: none; }
   ha-button[hidden] { display: none; }
-  .list-actions { display: flex; gap: 8px; flex-wrap: wrap; }  button.primary {
+  button.primary {
     background: var(--primary-color, #03a9f4);
     color: var(--text-primary-color, #ffffff);
   }
@@ -3275,17 +3281,20 @@ const STYLES = `
   }
 
   /*
-   * Both dialogs. Native <dialog>s, so the backdrop, the stacking and the focus
-   * trap are the platform's; only the surface needs dressing, in the same
-   * tokens as the cards.
+   * The replace dialog, in its two forms.
+   *
+   * When ha-dialog is available it brings its own surface, corner radius, scrim
+   * and full-screen phone layout, and none of that is restyled here: rules of
+   * ours on top would leave it looking half like Home Assistant's dialogs and
+   * half like ours. It needs only the spacing below the header that core's own
+   * dialog bodies have.
+   *
+   * The plain <dialog> fallback gets the surface instead, because nothing else
+   * gives it one. The backdrop, stacking and focus trap are the browser's; only
+   * the surface needs dressing, in the same theme tokens as the cards.
    */
-  /*
-   * Only the native dialog is styled here. The replace dialog is ha-dialog now
-   * and arrives with its own surface, radius, scrim and phone treatment;
-   * painting over those from out here is how a borrowed dialog ends up looking
-   * like neither one thing nor the other.
-   */
-  dialog.panel-dialog {
+  ha-dialog.replace-dialog .replace-list { margin-top: 8px; }
+  dialog.replace-dialog {
     padding: 0;
     border: none;
     border-radius: var(--ha-card-border-radius, 12px);
@@ -3294,21 +3303,19 @@ const STYLES = `
     max-width: 480px;
     width: calc(100vw - 32px);
   }
-  dialog.panel-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-  /* The borrowed dialog only needs its body to breathe like core's do. */
-  ha-dialog.replace-dialog .replace-list { margin-top: 8px; }
-  .panel-dialog-form {
+  dialog.replace-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+  dialog.replace-dialog .replace-form {
     margin: 0;
     padding: 20px;
     font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif);
     font-size: 14px;
   }
-  .panel-dialog-title { margin: 0 0 8px; font-size: 20px; font-weight: 400; }
-  .panel-dialog-intro {
+  .replace-title { margin: 0 0 8px; font-size: 20px; font-weight: 400; }
+  .replace-intro {
     margin: 0 0 16px;
     color: var(--secondary-text-color, #727272);
   }
-  .panel-dialog-intro a { color: var(--primary-color, #03a9f4); }
+  .replace-intro a { color: var(--primary-color, #03a9f4); }
   .replace-list {
     max-height: 45vh;
     overflow-y: auto;
@@ -3334,7 +3341,7 @@ const STYLES = `
     color: var(--secondary-text-color, #727272);
     overflow-wrap: anywhere;
   }
-  .panel-dialog-actions {
+  .replace-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
@@ -3590,7 +3597,6 @@ const STYLES = `
     font-size: 14px;
   }
   .field.checkbox .hint { flex: 1 0 100%; margin-top: 0; }
-  .field[hidden] { display: none; }
 
   /*
    * The borrowed form is left to lay itself out. ha-form puts every row inside
@@ -3646,10 +3652,11 @@ const STYLES = `
 
 `;
 
-// Guarded twice over. `customElements.define` throws on a name that is already
-// taken, and a panel module can be evaluated more than once in a long-lived
-// frontend session; and the registry is absent entirely outside a browser,
-// where this module is imported to test the pure helpers above.
+// Two guards, for two different situations. `customElements.define` throws on
+// a name that is already taken, and a panel module can be evaluated more than
+// once in a long-lived frontend session. And there is no registry at all
+// outside a browser, where this module is imported to test the pure helpers
+// above.
 if (
   typeof customElements !== "undefined" &&
   !customElements.get("rtl-433-panel")

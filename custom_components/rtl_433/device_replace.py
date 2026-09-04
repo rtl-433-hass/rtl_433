@@ -148,14 +148,19 @@ async def async_replace_device(
         entry, data={**entry.data, CONF_DEVICES: devices}
     )
 
-    # Step 5 — reload so the platforms rebuild every entity from the updated
-    # devices map and the coordinator's runtime dicts (``devices``, ``last_seen``,
-    # ``available``, ``_discovered``, ``pending``) are rebuilt from scratch — which
-    # is why no separate runtime-state transfer is needed, and why re-keying onto
-    # a pending candidate needs no separate eviction: the whole in-memory pending
-    # list goes with the old coordinator, and ``new_key`` is in the stored devices
-    # map by now, so its next transmission is routed as an adopted device. Kept even though
-    # ``async_update_entry`` may itself trigger the update listener: the reload is
-    # idempotent and makes the helper correct when called from a context that
-    # does not reload.
+    # Step 5 -- reload the entry. The platforms rebuild every entity from the
+    # updated devices map, and the coordinator's runtime dicts (``devices``,
+    # ``last_seen``, ``available``, ``_discovered``, ``pending``) are rebuilt
+    # from scratch.
+    #
+    # That is why no runtime state has to be copied across by hand, and why
+    # re-keying onto a pending candidate does not need the candidate evicted
+    # first: the old coordinator's in-memory pending list is discarded with it,
+    # and ``new_key`` is in the stored devices map by now, so the next frame for
+    # it is routed as an adopted device.
+    #
+    # The reload is kept even though ``async_update_entry`` may trigger the
+    # update listener itself: reloading twice is harmless, and doing it here
+    # makes the helper correct when called from a context that does not
+    # reload.
     await hass.config_entries.async_reload(entry.entry_id)

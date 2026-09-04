@@ -22,7 +22,7 @@ would double-classify what the client already decided. The one verdict the
 library does not carry on the event object is ``is_backlog`` (the
 pre-connection-backlog flag that keeps a reconnect re-broadcast out of the
 pending list), so it is re-derived here from the event's ``event_time`` and the
-coordinator's connect-edge anchor (``_connection_time``, set in ``base.py``'s
+time this connection came up (``_connection_time``, recorded in ``base.py``'s
 ``_emit_hub_update``) using the same :data:`DISCOVERY_BACKLOG_GRACE` boundary the
 library applied.
 
@@ -93,12 +93,11 @@ class PendingDevice:
     first_seen: datetime
     last_seen: datetime
     # Every field this device has reported since it was first heard, newest
-    # value winning. Not the same as ``event.fields``: a weather station splits
-    # its readings across transmissions (an Acurite-5n1 sends wind and
-    # temperature in one message and rainfall in another), so any single frame
-    # is a partial view of the device. Judging a candidate from one frame means
-    # judging it on whichever half happened to arrive last, and adopting from
-    # one means creating half its entities and waiting for the rest.
+    # value winning. This is wider than ``event.fields``, which holds only the
+    # latest frame: a weather station spreads its readings over several
+    # transmissions (an Acurite-5n1 sends wind and temperature in one message
+    # and rainfall in another). Accumulating them means the user sees the whole
+    # device before deciding, and adoption creates all of its entities at once.
     fields: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -146,12 +145,15 @@ class _EventProcessingMixin:
         key = normalized.device_key
         is_replay = normalized.is_replay
 
-        # Re-derive the pre-connection-backlog flag (not carried on the event
-        # object) from the event's timestamp and this connection's anchor, using
-        # the same boundary the library applied. ``_connection_time`` is the
-        # HA-side connect anchor set on the connect edge in ``_emit_hub_update``;
-        # it is ``None`` while disconnected, which (like a frame with no usable
-        # ``event_time``) keeps ``is_backlog`` False -- "never drop a real one".
+        # Work out whether this frame is part of the backlog the rtl_433 server
+        # replays when a connection comes up. The event object does not carry
+        # that flag, so re-derive it from the event's timestamp and
+        # ``_connection_time`` -- the time this connection was established,
+        # recorded in ``_emit_hub_update`` -- using the same cut-off the library
+        # uses. ``_connection_time`` is ``None`` while disconnected; that case,
+        # and a frame with no usable ``event_time``, both leave ``is_backlog``
+        # False, so a frame we cannot place is treated as live rather than
+        # discarded.
         conn = self._connection_time
         is_backlog = (
             conn is not None
@@ -337,10 +339,11 @@ class _EventProcessingMixin:
         Registration is still held back for a pre-connection backlog frame
         (``is_backlog``), which belongs to the server's reconnect replay and only
         seeds runtime state. A frame with no parseable ``time`` is treated as
-        post-connection ("never drop a real one"), as is any frame once
-        disconnected (``_connection_time is None``) -- both leave ``is_backlog``
-        False -- so a device first seen in the backlog still registers on its
-        first true live event.
+        post-connection, as is any frame once disconnected
+        (``_connection_time is None``) -- both leave ``is_backlog`` False, so a
+        frame we cannot place is treated as live rather than discarded, and a
+        device first seen in the backlog still registers on its first true live
+        event.
 
         The callback fires for a replay frame too, so a device whose first frame
         after a reconnect is a re-broadcast still gets its entities and can seed;
