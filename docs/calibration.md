@@ -29,7 +29,7 @@ The base unit and scale only appear once you have chosen a real commodity, and
 the units offered change with it — so the calibration you can build is always
 one the Energy dashboard will accept.
 
-![The Device settings dialog for the SCMplus gas meter, with the commodity pre-filled to gas and the base-unit and scale controls it reveals](images/08-device-settings.png)
+![The Device settings page for the SCMplus gas meter, with the commodity pre-filled to gas and the base-unit and scale controls it reveals](images/08-device-settings.png)
 
 Once calibrated, the consumption sensor gets a real device class, native unit,
 and `state_class: total_increasing`. You do not need to pick the display unit in

@@ -11,16 +11,38 @@ integration waits for you to choose.
 Doorbells, remotes, and motion sensors only transmit when something happens, so
 trigger them once to make them show up.
 
+## The rtl_433 Page
+
+Open **Settings → Devices & Services → rtl_433 → Configure**. This is the
+rtl_433 page, and it works like the Zigbee and Z-Wave pages: it opens on an
+overview of the receiver, with everything else one click away. It is available
+to administrators only.
+
+The overview has three parts:
+
+- a card at the top saying whether the receiver is **Online**, and how many
+  devices you have added to it
+- **My network**, with links to this receiver's devices and entities on the
+  usual Home Assistant pages
+- **Receiver settings**, **Device settings** and **Device mappings**, which each
+  open their own page
+
+and, bottom right, an **Add or replace device** button. That is the one that
+takes you to the discovered devices.
+
+If you have more than one receiver, each gets its own settings card, headed by
+the receiver it belongs to.
+
 ## Adding Devices
 
-Open **Settings → Devices & Services → rtl_433 → Configure**. That is the
-rtl_433 page: it lists every device the receiver has heard and you have not
-added, and it is where the receiver's own settings live too. It is available to
-administrators only.
+Click **Add or replace device**. Every device your receiver has heard and you
+have not added is here, newest first. If nothing has transmitted yet the page
+says it is still searching — which is normal, and the next section explains
+why.
 
 ![The rtl_433 page: a toolbar, a row of Receiver settings / Device settings / Device mappings buttons, then a grid of device cards, each with a blue heading giving the model and device key, its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Ignore and Add buttons](images/17-discovery-panel.png)
 
-Each candidate gets a card, newest discovery first. Cards keep their place as
+Each candidate gets a card. Cards keep their place as
 devices transmit, so a card does not move under the cursor while you are reading
 it.
 
@@ -43,9 +65,9 @@ device page, so neither is listed here.
 Pick an **Area** before adding to have the new device filed there straight away.
 Leave it on *No area* to sort it out later on the device page.
 
-**Add** creates that device and its entities immediately, and starts recording
-history from that point. The card stays where it is and turns green, with a link
-to the device that was just created:
+**Add** creates that device and its entities straight away, and starts
+recording history from that point. The card stays where it is and turns green,
+with a link to the device that was just created:
 
 ![An Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics](images/02-device-page.png)
 
@@ -55,9 +77,6 @@ Devices](#ignoring-devices).
 The page is live. A device heard while it is open appears on its own, sighting
 counts climb as devices transmit, and nothing needs a reload. So trigger a
 doorbell or open a door sensor and watch it arrive.
-
-The page is for administrators only. Home Assistant hides it from other users
-and refuses its commands.
 
 Everything the page does is also a Home Assistant WebSocket command, so the same
 list and the same actions are available to a script — see [Home Assistant
@@ -76,8 +95,9 @@ ignored — that is a decision, and this is not the control for undoing it.
 
 ## Receiver and Device Settings
 
-The same page carries this receiver's settings, as three dialogs above the
-discovered devices.
+The three rows on the overview each open a settings page. Each one has its own
+address, so you can bookmark it or link someone straight to it, and the back
+arrow returns you to the overview.
 
 **Receiver settings** is the default availability timeout for every device on
 this receiver, and whether Home Assistant manages the server's own SDR settings
@@ -104,8 +124,8 @@ good.
 Ignoring is not deleting: an ignored device is simply not offered, and its
 messages are dropped as they arrive.
 
-To undo it, click **Show ignored devices** under the cards and then
-**Un-ignore**:
+To undo it, go back to **Add or replace device**, click **Show ignored
+devices** under the cards, and then **Un-ignore**:
 
 ![The rtl_433 page with the ignored-devices section revealed, showing one ignored device and its Un-ignore button](images/16-ignored-devices.png)
 
