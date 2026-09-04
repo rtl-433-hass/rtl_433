@@ -714,7 +714,7 @@ class Rtl433Panel extends HTMLElement {
     // healthy one is the one worth opening on.
     const initial = this._hubs.find((hub) => hub.loaded) || this._hubs[0];
     this._entryId = initial.entry_id;
-    this._renderHubPicker();
+    this._renderSettingsCards(this._el.root);
     this._subscribe();
   }
 
@@ -1440,19 +1440,6 @@ class Rtl433Panel extends HTMLElement {
    * skeleton's `<span>Receiver</span>` caption is dropped rather than stacked
    * on top of a second one.
    */
-  _buildHubSelect(picker) {
-    const select = haControl("ha-select", () =>
-      document.createElement("select")
-    );
-    select.className = "hub-select";
-    if (select.localName === "ha-select") {
-      select.label = "Receiver";
-      picker.textContent = "";
-    }
-    picker.append(select);
-    return select;
-  }
-
   /**
    * Build the shadow tree once.
    *
@@ -1471,8 +1458,6 @@ class Rtl433Panel extends HTMLElement {
     this.shadowRoot.append(style, root);
 
     this._el = {
-      hubPicker: root.querySelector(".hub-picker"),
-      hubSelect: this._buildHubSelect(root.querySelector(".hub-picker")),
       banner: this._buildBanner(root.querySelector(".banner-slot")),
       status: root.querySelector(".status"),
       grid: root.querySelector(".grid"),
@@ -1552,22 +1537,6 @@ class Rtl433Panel extends HTMLElement {
     this._el.dialogConfirm.disabled = true;
     this._el.dialogActions.append(this._el.dialogCancel, this._el.dialogConfirm);
 
-    // Which event a select fires on a pick is exactly the sort of detail that
-    // has changed upstream before, so every plausible one is listened for and
-    // the handler is made idempotent instead: it returns unless the value it
-    // reads is genuinely new, which also covers a popup closed without a pick.
-    const onPick = () => {
-      const picked = this._el.hubSelect.value;
-      if (!picked || picked === this._entryId) {
-        return;
-      }
-      this._entryId = picked;
-      this._subscribe();
-    };
-    for (const name of ["change", "input", "selected", "closed"]) {
-      this._el.hubSelect.addEventListener(name, onPick);
-    }
-
     this._el.ignoredToggle.addEventListener("click", () => {
       this._showIgnored = !this._showIgnored;
       this._render();
@@ -1598,33 +1567,6 @@ class Rtl433Panel extends HTMLElement {
       this._goUp();
     });
     this._el.settingsSave.addEventListener("click", () => this._saveSettings());
-  }
-
-  _renderHubPicker() {
-    // A single receiver is the common case, and a picker with one option is
-    // just a control that does nothing.
-    this._el.hubPicker.hidden = this._hubs.length < 2;
-    this._renderSettingsCards(this._el.root);
-    const options = this._hubs.map((hub) => ({
-      value: hub.entry_id,
-      label: hub.loaded ? hub.title : `${hub.title} (not loaded)`,
-    }));
-    const select = this._el.hubSelect;
-    if (select.localName === "ha-select") {
-      // `ha-select` is driven by its `options` property; the list-item children
-      // its predecessor took are no longer read.
-      select.options = options;
-      select.value = this._entryId;
-      return;
-    }
-    select.textContent = "";
-    for (const { value, label } of options) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      option.selected = value === this._entryId;
-      select.append(option);
-    }
   }
 
   _render() {
@@ -2979,9 +2921,6 @@ const SKELETON = `
   <div class="status" hidden></div>
 
   <div class="view view-overview">
-    <label class="hub-picker" hidden>
-      <span>Receiver</span>
-    </label>
     <div class="status-slot"></div>
     <div class="network-slot"></div>
     <div class="page-actions"></div>
@@ -3089,36 +3028,12 @@ const STYLES = `
     margin-bottom: 16px;
   }
 
-  .hub-picker {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 12px;
-    color: var(--secondary-text-color, #727272);
-  }
   /*
    * An author display rule beats the user agent's "[hidden] { display: none }",
    * so every element this file gives a display to needs its own hidden rule or
-   * the hidden property silently does nothing. The picker, the grids and the
+   * the hidden property silently does nothing. The views, the grids and the
    * card's own flex children all need one.
    */
-  .hub-picker[hidden] { display: none; }
-  /*
-   * Only the native fallback is styled here. ha-select arrives with Home
-   * Assistant's own field -- floating label, 56px height, theme colours -- and
-   * restyling it from outside would be this panel disagreeing with the rest of
-   * Settings about what a field looks like.
-   */
-  select.hub-select {
-    font: inherit;
-    font-size: 14px;
-    padding: 6px 8px;
-    color: var(--primary-text-color, #212121);
-    background: var(--card-background-color, #ffffff);
-    border: 1px solid var(--divider-color, #e0e0e0);
-    border-radius: 4px;
-  }
-  ha-select.hub-select { min-width: 240px; }
   ha-alert.banner { display: block; margin-bottom: 16px; }
   ha-alert.banner[hidden] { display: none; }
   div.banner {
@@ -3354,7 +3269,6 @@ const STYLES = `
    * because a receiver in a busy neighbourhood puts dozens of cards between the
    * two and a setting nobody can find is a setting nobody has.
    */
-  .page-actions { margin-bottom: 16px; }
 
   /*
    * The overview and the settings pages are a reading column, not a grid, so
@@ -3363,6 +3277,26 @@ const STYLES = `
    * it is a card grid, and it wants the room.
    */
   .view-overview, .view-settings { max-width: 800px; margin: 0 auto; }
+  /*
+   * One gap rule for the whole column, rather than a margin on each thing that
+   * happens to sit in it. Every card on the overview is then spaced the same,
+   * including the second and third receiver's settings cards -- which had no
+   * margin of their own and sat flush against each other.
+   *
+   * 16px is what Home Assistant's own integration pages put between cards, so
+   * this page keeps step with the Zigbee and Z-Wave ones either side of it.
+   */
+  .view-overview, .page-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  /*
+   * The FAB is fixed to the viewport, so its wrapper is only in the flow long
+   * enough to add a trailing gap. Setting it to display:contents takes the
+   * wrapper back out, leaving the fixed button exactly where it was.
+   */
+  .fab-slot { display: contents; }
   .settings-card-slot {
     padding: 16px;
     border-radius: var(--ha-card-border-radius, 12px);
@@ -3378,7 +3312,7 @@ const STYLES = `
   /*
    * One view on screen at a time. An author display rule beats the user
    * agent's [hidden] rule, so each of these needs its own hidden rule or the
-   * hidden property silently does nothing -- the same trap the hub picker hit.
+   * hidden property silently does nothing.
    */
   .view { display: block; }
   .view[hidden] { display: none; }
@@ -3390,7 +3324,7 @@ const STYLES = `
    * surface, radius and elevation, and overriding those would make this panel
    * disagree with every other card in Settings.
    */
-  .status-slot, .network-slot { display: block; margin-bottom: 16px; }
+  .status-slot, .network-slot { display: block; }
   .status-card, .network-card, .settings-card { display: block; }
   .status-row {
     display: flex;
