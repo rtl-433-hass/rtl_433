@@ -524,6 +524,12 @@ class Rtl433Panel extends HTMLElement {
 
   /** Add one candidate, keeping its card on screen in the adopted state. */
   _addDevice(row) {
+    // Read the area *before* sending the command. Adding a device makes the
+    // backend push an updated pending list, and that push arrives ahead of the
+    // command's own reply -- rendering it removes this card and forgets its
+    // picker. Reading the area in the reply handler therefore always found
+    // nothing, and the area the user chose was silently dropped.
+    const areaId = this._areaChoiceFor(row.key);
     this._act(
       "rtl_433/devices/add",
       row.key,
@@ -532,7 +538,6 @@ class Rtl433Panel extends HTMLElement {
         // Snapshot the row: it is about to leave the pending list, and this is
         // the only copy of what the card should keep showing.
         this._added.set(row.key, { row, deviceId: null });
-        const areaId = this._areaChoiceFor(row.key);
         if (areaId) {
           this._pendingAreas.set(row.key, areaId);
           this._applyPendingAreas();
