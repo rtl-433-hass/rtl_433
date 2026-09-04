@@ -55,12 +55,13 @@ accepts the pieces it needs as injectable attributes:
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Callable
 import dataclasses
 from datetime import datetime
 from typing import Any
 
-from pyrtl_433 import CannotConnect as CannotConnect, Rtl433Client
+from pyrtl_433 import CannotConnect as CannotConnect, Rtl433Client, TimePrecision
 from pyrtl_433.normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent
 
 from homeassistant.config_entries import ConfigEntry
@@ -80,7 +81,7 @@ from ..const import (
     signal_device_update,
     signal_hub_update,
 )
-from ._events import _EventProcessingMixin
+from ._events import _MAX_TRACKED_DEVICE_STATES, _EventProcessingMixin
 from ._sdr import _SdrSettingsMixin, _SdrStore
 from ._watchdog import _WATCHDOG_INTERVAL, _AvailabilityMixin
 
@@ -241,7 +242,10 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.device_removers: list[Callable[[str], None]] = []
 
         # --- Runtime state, all scoped to this config entry ------------------
-        self.devices: dict[str, NormalizedEvent] = {}
+        # Ordered oldest-heard first: ``_events`` moves a key to the end on
+        # every frame, so the cap there can evict from the cold end. An
+        # ``OrderedDict`` is a ``dict``, so every reader is unaffected.
+        self.devices: OrderedDict[str, NormalizedEvent] = OrderedDict()
         self.last_seen: dict[str, datetime] = {}
         self.available: dict[str, bool] = {}
         self.seen_fields: set[str] = set()
@@ -290,6 +294,9 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # liveness/replay) so a device first seen in the backlog can still register
         # on its first genuine post-connection event. Not persisted.
         self._discovered: set[str] = set()
+        # Size the last eviction pass gave up at; see ``_events`` for why it is
+        # worth remembering.
+        self._evict_floor = _MAX_TRACKED_DEVICE_STATES
 
         # --- Managed-SDR desired state (restart-surviving) -------------------
         # ``_desired`` maps a registry key -> the desired value HA wants applied;
@@ -372,6 +379,16 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         return self._client.stats
 
     @property
+    def time_precision(self) -> TimePrecision | None:
+        """Resolution of the server's event ``time`` stamps, as seen on the wire.
+
+        ``None`` until the first event frame is classified. Hub state rather than
+        per-device: it follows the server's ``report_meta time:...`` setting, and
+        the client fires ``on_hub_update`` when it changes.
+        """
+        return self._client.time_precision
+
+    @property
     def dev_info(self) -> dict[str, Any]:
         """The SDR's librtlsdr USB device label (client-sourced)."""
         return self._client.dev_info
@@ -433,14 +450,25 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         """Drop a device's runtime state so its next event is treated as new.
 
         Called when a device is removed from its device page
-        (``async_remove_config_entry_device``). Without this eviction the device
-        would stay in ``devices`` and a later event would not be treated as new,
-        so a re-transmitting device could never re-appear while discovery is on.
+        (``async_remove_config_entry_device``), and by the ingest path's cap on
+        never-materialized keys (see ``_events._MAX_TRACKED_DEVICE_STATES``). Without
+        this eviction the device would stay in ``devices`` and a later event
+        would not be treated as new, so a re-transmitting device could never
+        re-appear while discovery is on.
+
+        Drops every per-device map together, including the two "already logged
+        this" memos: a key that comes back is a device we have no history for, so
+        its unmapped fields and its resolved timeout are worth logging again.
         """
         self.devices.pop(device_key, None)
         self.last_seen.pop(device_key, None)
         self.available.pop(device_key, None)
         self.device_fields.pop(device_key, None)
+        self._logged_unmapped.pop(device_key, None)
+        self._logged_timeouts.pop(device_key, None)
+        # A removal can only shrink the map, so "nothing was evictable at this
+        # size" no longer describes it.
+        self._evict_floor = _MAX_TRACKED_DEVICE_STATES
         # Re-arm discovery so a later live event re-registers the device.
         self._discovered.discard(device_key)
 

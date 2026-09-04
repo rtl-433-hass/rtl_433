@@ -2512,3 +2512,31 @@ async def test_migration_reenables_last_seen_for_event_driven_devices(hass):
     # Idempotent: a second run leaves the re-enabled sensor enabled.
     assert await async_migrate_entry(hass, entry) is True
     assert ent_reg.async_get(motion_ls).disabled_by is None
+
+
+# --------------------------------------------------------------------------- #
+# Repairs wiring: the event-time advisory is connected by entry setup.         #
+# --------------------------------------------------------------------------- #
+async def test_setup_wires_the_event_time_advisory(hass, hub_entry_builder):
+    """A loaded hub raises the advisory on its own, with nothing wired by hand.
+
+    The tracker's behaviour is covered in test_diagnostics_repairs; what this
+    pins is that ``async_setup_entry`` actually connects it, which is only
+    observable end to end.
+    """
+    from pyrtl_433 import TimePrecision
+
+    from custom_components.rtl_433 import repairs
+    from homeassistant.helpers import issue_registry as ir
+
+    hub = await _setup_hub(hass, hub_entry_builder)
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._event_time_issue_id(hub)
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+
+    # The first event frame tells the client the server stamps nothing readable.
+    _coordinator(hass, hub)._client.time_precision = TimePrecision.UNUSABLE
+    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    await hass.async_block_till_done()
+
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
