@@ -83,11 +83,7 @@ from ..const import (
     signal_device_update,
     signal_hub_update,
 )
-from ._events import (
-    _MAX_TRACKED_DEVICE_STATES,
-    PendingDevice,
-    _EventProcessingMixin,
-)
+from ._events import PendingDevice, _EventProcessingMixin
 from ._sdr import _SdrSettingsMixin, _SdrStore
 from ._watchdog import _WATCHDOG_INTERVAL, _AvailabilityMixin
 
@@ -268,17 +264,18 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # device never outlives the session that heard it.
         self.adopted: set[str] = set(adopted_keys or ())
         self.ignored: set[str] = set(ignored_keys or ())
-        self.pending: dict[str, PendingDevice] = {}
+        # Least-recently-heard first, so the cap in ``_events`` can drop from
+        # the cold end. An ``OrderedDict`` is a ``dict``, so readers are
+        # unaffected.
+        self.pending: OrderedDict[str, PendingDevice] = OrderedDict()
 
         # --- Runtime state, all scoped to this config entry ------------------
         # Every map below describes *adopted* devices only, so the availability
         # watchdog, diagnostics, and the entity platforms keep operating on
-        # exactly the set of devices that exists in Home Assistant.
-        #
-        # Ordered oldest-heard first: ``_events`` moves a key to the end on
-        # every frame, so the cap there can evict from the cold end. An
-        # ``OrderedDict`` is a ``dict``, so every reader is unaffected.
-        self.devices: OrderedDict[str, NormalizedEvent] = OrderedDict()
+        # exactly the set of devices that exists in Home Assistant. Adopted
+        # devices are not capped: each one exists because the user asked for it,
+        # and its entities are reading the state held here.
+        self.devices: dict[str, NormalizedEvent] = {}
         self.last_seen: dict[str, datetime] = {}
         self.available: dict[str, bool] = {}
         self.seen_fields: set[str] = set()
@@ -327,9 +324,6 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # liveness/replay) so a device first seen in the backlog can still register
         # on its first genuine post-connection event. Not persisted.
         self._discovered: set[str] = set()
-        # Size the last eviction pass gave up at; see ``_events`` for why it is
-        # worth remembering.
-        self._evict_floor = _MAX_TRACKED_DEVICE_STATES
 
         # --- Managed-SDR desired state (restart-surviving) -------------------
         # ``_desired`` maps a registry key -> the desired value HA wants applied;
@@ -483,8 +477,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         """Un-adopt a device, dropping it back to "heard but not approved".
 
         Called when a device is removed from its device page
-        (``async_remove_config_entry_device``), and by the ingest path's cap on
-        never-materialized keys (see ``_events._MAX_TRACKED_DEVICE_STATES``).
+        (``async_remove_config_entry_device``).
 
         Discarding the key from ``adopted`` is what makes a deletion stick: the
         device's next transmission is routed to the pending list instead of
@@ -505,9 +498,6 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.device_fields.pop(device_key, None)
         self._logged_unmapped.pop(device_key, None)
         self._logged_timeouts.pop(device_key, None)
-        # A removal can only shrink the map, so "nothing was evictable at this
-        # size" no longer describes it.
-        self._evict_floor = _MAX_TRACKED_DEVICE_STATES
         # Re-arm registration so re-adopting the device wires its entities up.
         self._discovered.discard(device_key)
 

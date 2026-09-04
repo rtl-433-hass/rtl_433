@@ -30,7 +30,7 @@ library applied.
 ``base.py``) and relies on the runtime state declared in that class's
 ``__init__`` (``adopted``, ``ignored``, ``pending``, ``devices``, ``last_seen``,
 ``available``, ``seen_fields``, ``device_fields``, ``known_field_keys``,
-``_connection_time``, ``_discovered``, ``_logged_unmapped``, ``_evict_floor``,
+``_connection_time``, ``_discovered``, ``_logged_unmapped``,
 ``new_device_callback``) plus ``entry``, ``_dispatch`` and ``forget_device``
 (base.py).
 
@@ -49,27 +49,25 @@ from pyrtl_433.replay import DISCOVERY_BACKLOG_GRACE
 
 from homeassistant.util import dt as dt_util
 
-from ..const import CONF_DEVICES, LOGGER
+from ..const import LOGGER
 
-# Hard cap on how many device keys one hub keeps runtime state for. "One entry
-# per device the receiver hears" is not self-limiting: 433 MHz is a shared band
-# that produces spurious decodes with arbitrary ids, and several real protocols
-# roll their id on a battery change, so an uncapped map grows for the life of the
-# config entry.
+# Hard cap on how many candidates one hub holds at once. "One entry per device
+# the receiver hears" is not self-limiting: 433 MHz is a shared band that
+# produces spurious decodes with arbitrary ids, and several real protocols roll
+# their id on a battery change, so an uncapped list grows for the life of the
+# config entry -- and every entry in it is rendered into the payload pushed to
+# every open panel.
 #
-# What it can bound is narrower than that, and worth being plain about: a key
-# with entities behind it must keep its state or those entities lose what they
-# read, so only keys that never materialized into a device are evictable. With
-# discovery on, every key that arrives registers, so the cap holds nothing back
-# and the map still grows with the device registry -- discovery off (which the
-# docs already recommend in urban areas) is where this does its work. An install
-# genuinely running more real devices than this simply exceeds the cap.
+# Only candidates are capped. A device the user has adopted has entities behind
+# it and keeps its state for as long as it exists in Home Assistant; it is never
+# in this list to begin with, so nothing here can reach it. And dropping a
+# candidate costs the user nothing: the list is memory-only, and the device
+# returns to it on its next transmission.
 #
 # Distinct from ``pyrtl_433.client._MAX_TRACKED_DEVICES``, the identically-sized
-# cap the library puts on its own replay bookkeeping for the same reason. That
-# one is a blind LRU over the library's map; this one is ours and protects real
-# devices. Raising one does not raise the other.
-_MAX_TRACKED_DEVICE_STATES = 512
+# cap the library puts on its own replay bookkeeping for the same reason.
+# Raising one does not raise the other.
+_MAX_PENDING_CANDIDATES = 512
 
 
 @dataclass(slots=True)
@@ -137,12 +135,7 @@ class _EventProcessingMixin:
 
         now = dt_util.utcnow()
 
-        # ``devices`` doubles as the recency order the cap evicts from, so a
-        # key that transmits again moves to the fresh end rather than staying
-        # where it first landed.
         self.devices[key] = normalized
-        self.devices.move_to_end(key)
-        self._evict_cold_devices()
 
         # Track observed field keys for diagnostics (surfaced as unmatched keys).
         # Done for every outcome so a replay-discovered device's sensors can seed.
@@ -168,56 +161,30 @@ class _EventProcessingMixin:
         if not is_replay and was_available is False:
             LOGGER.debug("rtl_433 device %s back online", key)
 
-    def _evict_cold_devices(self) -> None:
-        """Drop the coldest never-materialized keys until back under the cap.
+    def _evict_cold_candidates(self) -> None:
+        """Drop the least recently heard candidates until back under the cap.
 
-        Evictable means: not adopted onto the config entry, and not registered
-        with Home Assistant this session. Those two cover every key an entity can
-        be reading, which is the state that must never be dropped -- what is left
-        is the spurious-decode population the cap exists for.
+        ``pending`` is kept in least-recently-heard order (a repeat sighting
+        moves its key to the fresh end), so this drops from the cold end: the
+        keys heard once and never again, which is exactly the spurious-decode
+        population the cap exists for. A device that keeps transmitting keeps
+        moving away from the chopping block.
 
-        ``devices`` is ordered oldest-heard first, so this walks from the coldest
-        key towards the freshest and stops the moment the map is back under the
-        ceiling. The frame just taken is excluded, so an ingest can never evict
-        the state it has this moment written; and if everything else is protected
-        the map is simply left over the cap, because real devices outrank it.
+        Nothing here is protected, and nothing needs to be. An adopted device is
+        not in this list at all, so this cannot reach one; and a candidate that
+        is dropped comes back on its next transmission, because the list is
+        rebuilt from live traffic anyway.
 
-        A pass that finds nothing to drop records the size it gave up at, and the
-        next frame at that size skips the walk. Without it, a hub whose devices
-        are all real -- which is every hub running with discovery on, since each
-        key registers as it arrives -- would rescan a map that only grows, on
-        every frame, forever, to reach the same answer.
-
-        The walk itself is read-only, with the victims dropped afterwards: the
-        map cannot be mutated while it is being iterated, and taking a snapshot
-        to iterate instead would copy every key on a path that usually drops one.
+        The frame just taken is safe by construction: it has just been moved to
+        the fresh end, and the cap is far above one.
         """
-        if len(self.devices) <= self._evict_floor:
-            return
-        adopted = self.entry.data.get(CONF_DEVICES, {})
-        newest = next(reversed(self.devices))
-        remaining = len(self.devices)
-        victims: list[str] = []
-        for key in self.devices:
-            if remaining <= _MAX_TRACKED_DEVICE_STATES:
-                break
-            # The frame just taken is never its own candidate.
-            if key == newest or key in self._discovered or key in adopted:
-                continue
-            victims.append(key)
-            remaining -= 1
-
-        if not victims:
-            self._evict_floor = len(self.devices)
-            return
-        for key in victims:
+        while len(self.pending) > _MAX_PENDING_CANDIDATES:
+            key, _record = self.pending.popitem(last=False)
             LOGGER.debug(
-                "rtl_433 evicting cold device state for %s (over the %d key cap)",
+                "rtl_433 dropping the coldest candidate %s (over the %d key cap)",
                 key,
-                _MAX_TRACKED_DEVICE_STATES,
+                _MAX_PENDING_CANDIDATES,
             )
-            # ``forget_device`` lowers the floor back to the cap for us.
-            self.forget_device(key)
 
     def _trace_unmapped_fields(self, key: str, field_keys: set[str]) -> None:
         """DEBUG-log a device's fields that resolve to no library descriptor.
@@ -285,6 +252,7 @@ class _EventProcessingMixin:
                 key,
                 normalized.model,
             )
+            self._evict_cold_candidates()
             return
 
         # A repeat sighting sharpens the existing candidate instead of creating a
@@ -295,6 +263,8 @@ class _EventProcessingMixin:
         existing.model = normalized.model or existing.model
         existing.count += 1
         existing.last_seen = now
+        # Warm again, so the cap drops something colder than this.
+        self.pending.move_to_end(key)
 
     def _maybe_register_device(
         self,

@@ -29,9 +29,9 @@ from pyrtl_433.normalizer import NormalizedEvent
 from pyrtl_433.replay import DISCOVERY_BACKLOG_GRACE
 import pytest
 
-from custom_components.rtl_433.const import CONF_DEVICES, signal_device_update
+from custom_components.rtl_433.const import signal_device_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
-from custom_components.rtl_433.coordinator._events import _MAX_TRACKED_DEVICE_STATES
+from custom_components.rtl_433.coordinator._events import _MAX_PENDING_CANDIDATES
 from homeassistant.util import dt as dt_util
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
@@ -415,16 +415,16 @@ async def test_client_receives_ha_configured_event_tz(hass, hub_entry_builder):
 
 
 # --------------------------------------------------------------------------- #
-# Cap on never-materialized device state.                                      #
+# Cap on the pending-candidate list.                                           #
 # --------------------------------------------------------------------------- #
-def test_tracked_device_cap_is_the_documented_value():
+def test_pending_candidate_cap_is_the_documented_value():
     """The ceiling is a deliberate number, not an incidental one.
 
     Pinned explicitly so a change to it is a change to this test: it is sized far
     above what a busy receiver hears, and the whole point is that it is generous
     enough never to touch a real install.
     """
-    assert _MAX_TRACKED_DEVICE_STATES == 512
+    assert _MAX_PENDING_CANDIDATES == 512
 
 
 def _assert_nothing_tracks(coordinator, key):
@@ -455,134 +455,116 @@ def _flood(coordinator, count):
         coordinator._on_client_event(_event(key=f"Noise-{index}", model="Noise"))
 
 
-def test_spurious_decodes_do_not_grow_state_without_bound(hass, coordinator):
-    """A shared band's junk decodes are evicted coldest-first at the cap.
+def test_spurious_decodes_do_not_grow_the_list_without_bound(hass, coordinator):
+    """A shared band's junk decodes are dropped coldest-first at the cap.
 
-    433 MHz produces decodes with arbitrary ids; without a ceiling every one of
-    them would hold runtime state for the life of the config entry, and the
-    watchdog would sweep them on every tick.
+    433 MHz produces decodes with arbitrary ids. Without a ceiling every one of
+    them would sit on the pending list for the life of the config entry -- and
+    every one would be rendered into the payload pushed to every open panel.
     """
-    coordinator.discovery_enabled = False
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_TRACKED_DEVICE_STATES + 10)
+        _flood(coordinator, _MAX_PENDING_CANDIDATES + 10)
 
-    # Exactly at the cap: evicting further would discard state nothing asked us
-    # to discard.
-    assert len(coordinator.devices) == _MAX_TRACKED_DEVICE_STATES
-    assert "Noise-0" not in coordinator.devices
-    assert f"Noise-{_MAX_TRACKED_DEVICE_STATES + 9}" in coordinator.devices
+    # Exactly at the cap: dropping further would discard candidates nothing
+    # asked us to discard.
+    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert "Noise-0" not in coordinator.pending
+    assert f"Noise-{_MAX_PENDING_CANDIDATES + 9}" in coordinator.pending
 
 
-def test_nothing_is_evicted_at_exactly_the_cap(hass, coordinator):
+def test_nothing_is_dropped_at_exactly_the_cap(hass, coordinator):
     """The ceiling is a maximum to stay at, not one to fall below."""
-    coordinator.discovery_enabled = False
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_TRACKED_DEVICE_STATES)
+        _flood(coordinator, _MAX_PENDING_CANDIDATES)
 
-    assert len(coordinator.devices) == _MAX_TRACKED_DEVICE_STATES
-    assert "Noise-0" in coordinator.devices
+    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert "Noise-0" in coordinator.pending
 
 
-def test_a_device_heard_again_is_no_longer_the_coldest(hass, coordinator):
+def test_a_candidate_heard_again_is_no_longer_the_coldest(hass, coordinator):
     """Recency is what "cold" means, so a repeat transmission buys a reprieve.
 
-    Without this the map would evict by first-sighting order, which would drop a
-    device that is still transmitting in favour of one that stopped long ago.
+    Without this the list would drop by first-sighting order, which would discard
+    a device that is still transmitting -- and still worth offering -- in favour
+    of one that stopped long ago.
     """
-    coordinator.discovery_enabled = False
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_TRACKED_DEVICE_STATES)
+        _flood(coordinator, _MAX_PENDING_CANDIDATES)
         # The oldest key transmits again, so the *second* oldest is now coldest.
         coordinator._on_client_event(_event(key="Noise-0", model="Noise"))
         coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
 
-    assert "Noise-0" in coordinator.devices
-    assert "Noise-1" not in coordinator.devices
+    assert "Noise-0" in coordinator.pending
+    assert "Noise-1" not in coordinator.pending
 
 
-def test_eviction_never_considers_the_frame_just_taken(hass, coordinator):
-    """The newest key is out of scope, and only the newest.
+def test_the_candidate_just_heard_is_never_the_one_dropped(hass, coordinator):
+    """The frame that pushes the list over the cap is not what pays for it.
 
-    A cold key sitting immediately behind it is still fair game — the exclusion
-    is one frame wide, not a general amnesty for recent arrivals.
+    It has just been moved to the warm end, so the drop comes off the cold end --
+    which is the whole point, since the newest arrival is the one the user is
+    most likely waiting to see.
     """
-    coordinator.discovery_enabled = False
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_TRACKED_DEVICE_STATES - 1)
-        coordinator._discovered.update(coordinator.devices)
-        # Cold and unprotected, then the frame that pushes us over the cap.
-        coordinator._on_client_event(_event(key="Noise-cold", model="Noise"))
+        _flood(coordinator, _MAX_PENDING_CANDIDATES)
         coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
 
-    assert "Noise-cold" not in coordinator.devices
-    assert "Noise-fresh" in coordinator.devices
-    assert len(coordinator.devices) == _MAX_TRACKED_DEVICE_STATES
+    assert "Noise-fresh" in coordinator.pending
+    assert "Noise-0" not in coordinator.pending
+    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
 
 
-def test_eviction_clears_every_per_device_map(hass, coordinator):
-    """An evicted key leaves nothing behind, and the shortcut is back at the cap.
+def test_a_dropped_candidate_leaves_nothing_behind(hass, coordinator):
+    """A candidate holds no runtime state, so dropping it strands nothing.
 
-    Eviction routes through ``forget_device``, so this pins that the cap actually
-    uses it rather than popping ``devices`` on its own and stranding the rest.
+    Asserted reflectively rather than against a list of maps: a candidate is
+    only ever supposed to exist in ``pending``, and this is what says so.
     """
-    coordinator.discovery_enabled = False
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_TRACKED_DEVICE_STATES + 1)
+        _flood(coordinator, _MAX_PENDING_CANDIDATES + 1)
 
     _assert_nothing_tracks(coordinator, "Noise-0")
-    assert coordinator._evict_floor == _MAX_TRACKED_DEVICE_STATES
 
 
-def test_eviction_logs_the_key_and_the_cap(hass, coordinator, caplog):
+def test_dropping_a_candidate_logs_the_key_and_the_cap(hass, coordinator, caplog):
     """The DEBUG line names what went and why, or it explains nothing."""
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
-    coordinator.discovery_enabled = False
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_TRACKED_DEVICE_STATES + 1)
+        _flood(coordinator, _MAX_PENDING_CANDIDATES + 1)
 
-    lines = [m for m in caplog.messages if m.startswith("rtl_433 evicting cold device")]
+    lines = [m for m in caplog.messages if m.startswith("rtl_433 dropping the coldest")]
     assert len(lines) == 1
     assert "Noise-0" in lines[0]
-    assert str(_MAX_TRACKED_DEVICE_STATES) in lines[0]
+    assert str(_MAX_PENDING_CANDIDATES) in lines[0]
 
 
-def test_real_devices_are_never_evicted(hass, coordinator):
-    """Adopted and discovered keys outrank the cap; only junk is dropped.
+def test_adopted_devices_are_out_of_the_caps_reach(hass, coordinator):
+    """A device the user added cannot be dropped by the cap, at any volume.
 
-    A device with entities behind it must keep the state those entities read, so
-    the eviction pass skips anything adopted onto the config entry or registered
-    this session — even when it is the coldest thing in the map.
+    Not because the cap skips it, but because it is not on the pending list at
+    all: an adopted key is routed into runtime state and never becomes a
+    candidate. That is what makes the cap safe to apply without any notion of a
+    protected key -- the state a user's entities read is simply not in the map
+    being capped.
     """
     adopted_key = "Acurite-606TX-42"
-    hass.config_entries.async_update_entry(
-        coordinator.entry,
-        data={
-            **coordinator.entry.data,
-            CONF_DEVICES: {adopted_key: {"model": "Acurite-606TX"}},
-        },
-    )
-    discovered_key = "Nexus-TH-7"
+    coordinator.adopted.add(adopted_key)
 
     with patch(DISPATCH):
-        # Both land first, so they are the coldest entries in the map.
         coordinator._on_client_event(_event(key=adopted_key))
-        coordinator._on_client_event(_event(key=discovered_key, model="Nexus-TH"))
-        coordinator._discovered.add(discovered_key)
-        coordinator.discovery_enabled = False
-        _flood(coordinator, _MAX_TRACKED_DEVICE_STATES + 10)
+        _flood(coordinator, _MAX_PENDING_CANDIDATES + 10)
 
     assert adopted_key in coordinator.devices
-    assert discovered_key in coordinator.devices
-    assert "Noise-0" not in coordinator.devices
+    assert adopted_key in coordinator.last_seen
+    assert adopted_key not in coordinator.pending
+    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
 
 
 def test_forget_device_clears_the_log_once_memos(hass, coordinator):
     """A device that comes back is new to us, so both memos log again.
 
-    ``forget_device`` serves both the device-page deletion and the cap, and it
-    used to leave these behind — so a device that returned never re-logged its
-    unmapped fields or its resolved timeout, and the timeout memo was one map the
-    cap could not bound.
+    ``forget_device`` used to leave these behind, so a device that was deleted
+    and came back never re-logged its unmapped fields or its resolved timeout.
     """
     coordinator.known_field_keys = frozenset({"temperature_C"})
     key = "Acurite-606TX-42"
@@ -594,50 +576,3 @@ def test_forget_device_clears_the_log_once_memos(hass, coordinator):
 
     coordinator.forget_device(key)
     _assert_nothing_tracks(coordinator, key)
-
-
-def test_everything_protected_leaves_the_map_over_the_cap(hass, coordinator):
-    """Real devices outrank the ceiling, and giving up is remembered.
-
-    With discovery on every arriving key registers, so this is the shape of a
-    stock install once the map passes the cap: nothing is evictable. Nothing with
-    entities behind it is dropped, and the futile walk is not repeated for the
-    same answer on every subsequent frame.
-    """
-    coordinator.discovery_enabled = False
-    with patch(DISPATCH):
-        _flood(coordinator, _MAX_TRACKED_DEVICE_STATES)
-        coordinator._discovered.update(coordinator.devices)
-        coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
-
-    assert len(coordinator.devices) == _MAX_TRACKED_DEVICE_STATES + 1
-    assert "Noise-fresh" in coordinator.devices
-    # The pass gave up at this size rather than at the cap.
-    assert coordinator._evict_floor == len(coordinator.devices)
-
-    # A repeat frame from a device already in the map cannot change that answer,
-    # so the floor still stands.
-    with patch(DISPATCH):
-        coordinator._on_client_event(_event(key="Noise-0", model="Noise"))
-    assert coordinator._evict_floor == len(coordinator.devices)
-
-
-def test_giving_up_once_does_not_wedge_eviction(hass, coordinator):
-    """The floor defers the walk; it never cancels it.
-
-    Junk arriving after a fruitless pass is still collected — on the frame after
-    it lands, since the key just heard is never its own candidate.
-    """
-    coordinator.discovery_enabled = False
-    with patch(DISPATCH):
-        _flood(coordinator, _MAX_TRACKED_DEVICE_STATES)
-        coordinator._discovered.update(coordinator.devices)
-        coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
-        assert coordinator._evict_floor > _MAX_TRACKED_DEVICE_STATES
-
-        # Two junk frames: the first is exempt as the newest, the second evicts it.
-        coordinator._on_client_event(_event(key="Junk-1", model="Junk"))
-        coordinator._on_client_event(_event(key="Junk-2", model="Junk"))
-
-    assert "Junk-1" not in coordinator.devices
-    assert "Junk-2" in coordinator.devices

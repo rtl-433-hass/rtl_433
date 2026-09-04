@@ -167,8 +167,14 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   reconnect must not repopulate the list), which is the post-connection
   registration gate applied to candidacy — see the coordinator's
   replay/registration notes. The pending map is **memory-only by design**: empty
-  after a restart or reload, refilled by live traffic. Do not add persistence, a
-  TTL, or an eviction policy.
+  after a restart or reload, refilled by live traffic. Do not add persistence or
+  a TTL. It *is* capped, at `_events._MAX_PENDING_CANDIDATES` (512), dropping
+  the least recently heard candidate first: 433 MHz is a shared band where a bad
+  decode mints a device key of its own, so without a ceiling the list grows for
+  the life of the config entry and every entry in it is rendered into the payload
+  pushed to every open panel. Adopted devices are never in this map, so the cap
+  needs no notion of a protected key and cannot reach state an entity is
+  reading.
   A device becomes real only through `coordinator.adopt_device` (from the
   options flow, below), which promotes the stored event into runtime state and
   fires the **same** `new_device_callback` / `SIGNAL_NEW_DEVICE` seam a live
