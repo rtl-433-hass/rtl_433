@@ -1,6 +1,6 @@
 /**
- * rtl_433 discovery panel: a live view of what the receiver is hearing, with
- * per-row Add and Ignore.
+ * rtl_433 discovery panel: a live view of what the receiver is hearing, as one
+ * card per candidate device with Add and Ignore on the card itself.
  *
  * This file is deliberately plain. It is one custom element in one ES module
  * with **no imports at all**, and there is no build step anywhere in this
@@ -10,9 +10,9 @@
  * - Home Assistant's frontend internals are not a public API. Its Lit version
  *   and its internal module paths are free to change in any release, and a
  *   panel that *imports* them breaks silently on upgrade for everyone. So this
- *   file imports nothing: it touches `hass.connection` for messaging, CSS
- *   custom properties for theming, and the `ha-*` elements only ever **by tag
- *   name**, the way `ha-icon` is used below.
+ *   file imports nothing: it touches `hass.connection` for messaging,
+ *   `hass.areas` and `hass.devices` for the two registries it reads, CSS custom
+ *   properties for theming, and the `ha-*` elements only ever **by tag name**.
  * - Borrowing those elements by tag name is what makes the panel look and
  *   behave like the rest of Settings -- the same fields, the same buttons, the
  *   same focus rings -- instead of like a page that reimplements them and gets
@@ -24,7 +24,7 @@
  *   to the native control when an element is not registered, so a frontend that
  *   has moved on degrades to plain-but-working rather than to an inert box.
  * - A bundler would mean a second release pipeline (npm, a lockfile, a publish
- *   step) for a single table. If this panel ever outgrows one hand-written
+ *   step) for a single screen. If this panel ever outgrows one hand-written
  *   file, that is a decision to take deliberately rather than to drift into.
  *
  * The backend contract lives in `custom_components/rtl_433/websocket_api.py`:
@@ -33,32 +33,15 @@
  * `rtl_433/devices/add` / `.../ignore` / `.../unignore` are the three actions.
  * None of the adopt/ignore *logic* is reimplemented here; every button is one
  * command call, so the panel and the options flow cannot diverge.
- */
-
-/**
- * Frame keys the "latest values" column suppresses.
  *
- * These are frame metadata rather than readings: the model and id are already
- * the row's key, the signal figures have their own column, and the rest
- * describe the radio instead of the device. Dropping them is what makes the
- * column readable at a glance -- it exists to answer "is this the sensor on my
- * patio?", and a temperature answers that where a modulation scheme does not.
+ * **Why cards rather than a table.** A candidate is judged on evidence that is
+ * not columnar: how often it has been heard, how strong it was, and above all
+ * *what it reports*. A row can hold one truncated line of that; a card holds
+ * the readings laid out the way the device's own page will lay them out after
+ * adoption, which is the actual question ("is this the sensor on my patio?").
+ * The card also has somewhere to put an area picker and, once added, the link
+ * to the device that was created.
  */
-const HIDDEN_FIELDS = new Set([
-  "time",
-  "model",
-  "id",
-  "mic",
-  "protocol",
-  "rssi",
-  "snr",
-  "noise",
-  "freq",
-  "freq1",
-  "freq2",
-  "mod",
-  "duration",
-]);
 
 /**
  * How often the rendered relative timestamps ("12s ago") are recomputed.
@@ -66,24 +49,14 @@ const HIDDEN_FIELDS = new Set([
  * The subscription only pushes when the payload changes, so on an idle hub
  * "2s ago" would otherwise stay on screen indefinitely and quietly lie about
  * how long it has been since anything was heard. Re-rendering is cheap because
- * rendering reconciles the existing rows rather than rebuilding them.
+ * rendering reconciles the existing cards rather than rebuilding them.
  */
 const CLOCK_INTERVAL_MS = 15000;
 
-/** The columns the header offers to sort by, and the value each one sorts on. */
-const SORTERS = {
-  model: (row) => row.model || "",
-  key: (row) => row.key || "",
-  count: (row) => row.count || 0,
-  // A hub started without `-M level` reports no signal at all. Sorting those as
-  // negative infinity keeps them together at the weak end of the list rather
-  // than scattering them through the real readings.
-  signal: (row) =>
-    row.signal === null || row.signal === undefined ? -Infinity : row.signal,
-  last_seen: (row) => Date.parse(row.last_seen) || 0,
-};
+/** The integration domain, as it appears in a device registry identifier. */
+const DOMAIN = "rtl_433";
 
-/** Format a signal level for the table, or an em dash when there is none. */
+/** Format a signal level for a card, or an em dash when there is none. */
 function formatSignal(value) {
   if (value === null || value === undefined) {
     return "—";
@@ -110,26 +83,41 @@ function formatAge(iso, now) {
   return `${Math.floor(seconds / 86400)}d ago`;
 }
 
-/** Format an ISO timestamp in the viewer's own locale, for a cell tooltip. */
+/**
+ * Formatter for the exact timestamps in a card's tooltip.
+ *
+ * Built once at module scope rather than per call. `toLocaleString()`
+ * constructs a fresh `Intl.DateTimeFormat` every time it runs, and this is
+ * called for every card of every render -- on a hub with dozens of candidates
+ * that is a lot of formatter construction to produce a string nobody may ever
+ * hover over.
+ */
+const EXACT_TIME_FORMAT = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "medium",
+});
+
+/** Format an ISO timestamp in the viewer's own locale, for a tooltip. */
 function formatExact(iso) {
   const parsed = Date.parse(iso);
-  return Number.isNaN(parsed) ? "" : new Date(parsed).toLocaleString();
+  return Number.isNaN(parsed) ? "" : EXACT_TIME_FORMAT.format(new Date(parsed));
 }
 
-/** Render a frame's readings as one compact `key: value` line. */
-function formatFields(fields) {
-  if (!fields) {
-    return "";
-  }
-  return Object.keys(fields)
-    .filter((name) => !HIDDEN_FIELDS.has(name))
-    .map((name) => {
-      const value = fields[name];
-      const shown =
-        typeof value === "number" ? Math.round(value * 100) / 100 : value;
-      return `${name}: ${shown}`;
-    })
-    .join(" · ");
+/**
+ * Render one reading's state.
+ *
+ * There is nothing to format: `display` arrives finished, built in the payload
+ * from the same descriptor, the same unit and the same translated vocabulary
+ * the entity itself will use. That is deliberate. Every formatting rule this
+ * function used to hold was a rule invented here because the payload did not
+ * carry one, and each was wrong in a way only a real device page revealed --
+ * "On" where core says "Wet", "99" where the state is "99.0", a unit spaced
+ * where core joins it.
+ */
+function formatReadingValue(reading) {
+  return reading.display === null || reading.display === undefined
+    ? "—"
+    : reading.display;
 }
 
 /**
@@ -207,13 +195,11 @@ class Rtl433Panel extends HTMLElement {
     this._entryId = null;
     // `null` until the first payload lands, which distinguishes "still loading"
     // from "loaded, and there is genuinely nothing here" -- different things to
-    // tell someone staring at an empty table.
+    // tell someone staring at an empty page.
     this._data = null;
     this._unsubscribe = null;
     this._clock = null;
 
-    this._sortColumn = "last_seen";
-    this._sortDescending = true;
     this._showIgnored = false;
 
     // Device keys with a command in flight, so their buttons can be disabled.
@@ -221,11 +207,36 @@ class Rtl433Panel extends HTMLElement {
     this._banner = null;
     this._status = "";
 
-    // key -> <tr>, so a push updates the rows already on screen instead of
-    // replacing them. Rebuilding the table wholesale on every update would
-    // throw away focus, text selection and (in a long list) scroll position.
-    this._pendingRows = new Map();
-    this._ignoredRows = new Map();
+    // Devices adopted from this panel, in this session:
+    // `key -> {row, deviceId}`.
+    //
+    // An adopted device leaves the pending list immediately, so without this
+    // its card would simply vanish at the moment of the click -- the one moment
+    // the user is looking straight at it, and with the device page it just
+    // created still one unexplained navigation away. Keeping the snapshot lets
+    // the card stay exactly where it was and turn green, which is also what
+    // makes "you added these five" readable at a glance.
+    this._added = new Map();
+
+    // `key -> area_id` for adds whose area has not been applied yet.
+    //
+    // Adoption writes the hub's device map; the device *registry* entry only
+    // appears once the platforms have built the entities, which is a later turn
+    // of the event loop. Rather than poll for it, these are drained whenever a
+    // new `hass` arrives (see the setter) -- the registry landing is itself one
+    // of the things that produces a new `hass`.
+    this._pendingAreas = new Map();
+
+    // key -> card element, so a push updates the cards already on screen
+    // instead of replacing them. Rebuilding wholesale on every update would
+    // throw away focus, an open area dropdown, and the page's scroll position.
+    this._deviceCards = new Map();
+    this._ignoredCards = new Map();
+
+    // The `hass.areas` object the pickers were last handed. The frontend
+    // replaces it only when the registry changes, so comparing by identity is
+    // both cheaper and more accurate than rebuilding a signature per render.
+    this._lastAreas = null;
   }
 
   /**
@@ -235,12 +246,20 @@ class Rtl433Panel extends HTMLElement {
    * many times a second on a busy one -- so this setter must stay a cheap
    * assignment. Re-rendering, or far worse re-subscribing, here would turn
    * every light switch in the house into work on this page and hammer the
-   * WebSocket. All it does is capture the reference and let `_start` decide,
-   * once, whether there is now enough to begin.
+   * WebSocket.
+   *
+   * The one piece of work it does do is drain `_pendingAreas`, and only when
+   * that map is non-empty -- which is true for a few hundred milliseconds after
+   * an add and never otherwise. That is deliberate: a new `hass` is exactly the
+   * signal that a registry may have changed, so this is the cheapest correct
+   * place to notice that the device now exists.
    */
   set hass(hass) {
     this._hass = hass;
     this._start();
+    if (this._pendingAreas.size) {
+      this._applyPendingAreas();
+    }
   }
 
   get hass() {
@@ -306,7 +325,7 @@ class Rtl433Panel extends HTMLElement {
     return this._hass.connection.sendMessagePromise(message);
   }
 
-  /** Show a message above the table: an error, or a neutral notice. */
+  /** Show a message above the cards: an error, or a neutral notice. */
   _setBanner(text, kind) {
     this._banner = text ? { text, kind: kind || "error" } : null;
     this._render();
@@ -353,6 +372,14 @@ class Rtl433Panel extends HTMLElement {
     const entryId = this._entryId;
     this._data = null;
     this._banner = null;
+    // The green cards describe adoptions made against *this* hub, so they are
+    // meaningless once the panel is pointed at another one.
+    this._added.clear();
+    // Left behind, a queued key can never drain: `_deviceFor` builds its
+    // identifier from the *current* entry, so an entry from the old hub would
+    // never match, and the `hass` setter would scan the whole device registry
+    // on every state change in the instance for the life of the page.
+    this._pendingAreas.clear();
     this._status = "Loading…";
     this._render();
 
@@ -390,17 +417,89 @@ class Rtl433Panel extends HTMLElement {
     this._unsubscribe = unsubscribe;
   }
 
+  // -- Registry lookups ------------------------------------------------------
+
+  /**
+   * The device registry entry adoption created for `key`, or `null`.
+   *
+   * Matched on the identifier the entities are built with
+   * (`entity.py`: `(DOMAIN, f"{hub_entry_id}:{device_key}")`), which is the only
+   * stable join between a pending candidate and the device it becomes.
+   *
+   * `hass.devices` is read defensively: it is a documented part of the frontend
+   * `hass` object, but this file's whole posture is that frontend internals may
+   * move, and the cost of it being absent should be a missing link rather than
+   * a page that throws on every render.
+   */
+  _deviceFor(key) {
+    const devices = this._hass && this._hass.devices;
+    if (!devices) {
+      return null;
+    }
+    const identifier = `${this._entryId}:${key}`;
+    for (const device of Object.values(devices)) {
+      if (!device.identifiers) {
+        continue;
+      }
+      for (const pair of device.identifiers) {
+        if (pair[0] === DOMAIN && pair[1] === identifier) {
+          return device;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Assign the requested area to every add whose device has since appeared.
+   *
+   * Runs off the `hass` setter, so "has the device been created yet?" is
+   * answered by the registry update that created it rather than by a timer. A
+   * key is dropped from the queue as soon as its call is *issued*: a failure
+   * here means the device exists but kept its default area, which is a mild,
+   * visible, user-fixable outcome, and retrying forever on a permission error
+   * would be worse than leaving it alone.
+   */
+  _applyPendingAreas() {
+    for (const [key, areaId] of [...this._pendingAreas]) {
+      const device = this._deviceFor(key);
+      if (!device) {
+        continue;
+      }
+      this._pendingAreas.delete(key);
+      if (device.area_id === areaId) {
+        continue;
+      }
+      this._call({
+        type: "config/device_registry/update",
+        device_id: device.id,
+        area_id: areaId,
+      }).catch((error) => {
+        this._setBanner(
+          `${key} was added, but its area could not be set: ${describeError(
+            error
+          )}`,
+          "notice"
+        );
+      });
+    }
+  }
+
+  // -- Actions ---------------------------------------------------------------
+
   /**
    * Run one action against one device key.
    *
    * The buttons are disabled while the call is in flight and re-enabled
-   * whatever happens, so a slow hub cannot be double-clicked into two
-   * adoptions and a failure never leaves a dead control on screen. The row
-   * itself disappears (or moves to the ignored list) when the backend pushes
-   * the new membership, not here -- the panel shows what the hub says, never
-   * what it hopes.
+   * whatever happens, so a slow hub cannot be double-clicked into two adoptions
+   * and a failure never leaves a dead control on screen.
+   *
+   * `onApplied` runs only when the backend confirms this key was one it acted
+   * on. A key that comes back skipped was already adopted, already ignored, or
+   * no longer a candidate at all -- so turning its card green on the strength of
+   * the click alone would show the user an adoption they did not make.
    */
-  async _act(commandType, deviceKey, skippedMessage) {
+  async _act(commandType, deviceKey, skippedMessage, onApplied) {
     this._busy.add(deviceKey);
     this._banner = null;
     this._render();
@@ -412,6 +511,8 @@ class Rtl433Panel extends HTMLElement {
       });
       if (result.skipped && result.skipped.length) {
         this._setBanner(skippedMessage, "notice");
+      } else if (onApplied) {
+        onApplied();
       }
     } catch (error) {
       this._setBanner(describeError(error), "error");
@@ -421,40 +522,70 @@ class Rtl433Panel extends HTMLElement {
     }
   }
 
-  _sortedPending() {
-    const rows =
-      this._data && this._data.pending ? this._data.pending.slice() : [];
-    const value = SORTERS[this._sortColumn] || SORTERS.last_seen;
-    const direction = this._sortDescending ? -1 : 1;
-    rows.sort((left, right) => {
-      const a = value(left);
-      const b = value(right);
-      if (a < b) {
-        return -direction;
+  /** Add one candidate, keeping its card on screen in the adopted state. */
+  _addDevice(row) {
+    // Read the area *before* sending the command. Adding a device makes the
+    // backend push an updated pending list, and that push arrives ahead of the
+    // command's own reply -- rendering it removes this card and forgets its
+    // picker. Reading the area in the reply handler therefore always found
+    // nothing, and the area the user chose was silently dropped.
+    const areaId = this._areaChoiceFor(row.key);
+    this._act(
+      "rtl_433/devices/add",
+      row.key,
+      `${row.key} is no longer pending — it may already have been added.`,
+      () => {
+        // Snapshot the row: it is about to leave the pending list, and this is
+        // the only copy of what the card should keep showing.
+        this._added.set(row.key, { row, deviceId: null });
+        if (areaId) {
+          this._pendingAreas.set(row.key, areaId);
+          this._applyPendingAreas();
+        }
       }
-      if (a > b) {
-        return direction;
+    );
+  }
+
+  /**
+   * The cards to show, newest discovery first.
+   *
+   * Sorted on `first_seen` rather than on last contact so a card holds its
+   * place: a device that transmits every thirty seconds would otherwise climb
+   * back to the top over and over, moving every other card under the cursor.
+   * Newest-first because the reason to open this page is usually a device just
+   * triggered to make it appear, and that one should not be at the bottom of a
+   * long list.
+   *
+   * Adopted cards are merged in over the pending list at their original
+   * position, so pressing Add moves nothing on screen -- the card the user is
+   * looking at simply changes colour.
+   */
+  _cards() {
+    const cards = new Map();
+    const pending = this._data && this._data.pending ? this._data.pending : [];
+    for (const row of pending) {
+      cards.set(row.key, { key: row.key, row, added: false });
+    }
+    for (const [key, added] of this._added) {
+      cards.set(key, { key, row: added.row, added: true });
+    }
+    // Decorated before the sort so each timestamp is parsed once rather than
+    // once per comparison.
+    for (const card of cards.values()) {
+      card.firstSeen = Date.parse(card.row.first_seen) || 0;
+    }
+    return [...cards.values()].sort((left, right) => {
+      const delta = right.firstSeen - left.firstSeen;
+      if (delta) {
+        return delta;
       }
-      // A stable tiebreak on the key stops rows swapping places under the
-      // cursor every time two devices tie on sighting count or signal.
+      // A stable tiebreak on the key stops cards swapping places under the
+      // cursor when two devices are first heard in the same millisecond.
       return left.key < right.key ? -1 : left.key > right.key ? 1 : 0;
     });
-    return rows;
   }
 
-  _onSort(column) {
-    if (this._sortColumn === column) {
-      this._sortDescending = !this._sortDescending;
-    } else {
-      this._sortColumn = column;
-      // The numeric and time columns are interesting from the top: strongest
-      // signal, most sightings, most recently heard. Text is not.
-      this._sortDescending = column !== "model" && column !== "key";
-    }
-    this._render();
-  }
-
-  // -- DOM -----------------------------------------------------------------
+  // -- DOM -------------------------------------------------------------------
 
   /**
    * The problem banner, preferring `ha-alert`.
@@ -513,29 +644,16 @@ class Rtl433Panel extends HTMLElement {
       hubSelect: this._buildHubSelect(root.querySelector(".hub-picker")),
       banner: this._buildBanner(root.querySelector(".banner-slot")),
       status: root.querySelector(".status"),
-      pendingCard: root.querySelector(".pending-card"),
-      pendingBody: root.querySelector(".pending-body"),
-      pendingEmpty: root.querySelector(".pending-empty"),
-      pendingCount: root.querySelector(".pending-count"),
+      grid: root.querySelector(".grid"),
+      empty: root.querySelector(".pending-empty"),
       ignoredToggle: (() => {
         const toggle = haButton("", "ghost ignored-toggle");
         toggle.hidden = true;
         root.querySelector(".list-actions").append(toggle);
         return toggle;
       })(),
-      ignoredCard: root.querySelector(".ignored-card"),
-      ignoredBody: root.querySelector(".ignored-body"),
+      ignoredGrid: root.querySelector(".ignored-grid"),
     };
-
-    for (const header of root.querySelectorAll("th[data-sort]")) {
-      header.addEventListener("click", () => this._onSort(header.dataset.sort));
-      header.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          this._onSort(header.dataset.sort);
-        }
-      });
-    }
 
     // Which event a select fires on a pick is exactly the sort of detail that
     // has changed upstream before, so every plausible one is listened for and
@@ -608,32 +726,24 @@ class Rtl433Panel extends HTMLElement {
     this._el.status.textContent = this._status;
     this._el.status.hidden = !this._status;
 
-    for (const header of this.shadowRoot.querySelectorAll("th[data-sort]")) {
-      const active = header.dataset.sort === this._sortColumn;
-      header.classList.toggle("sorted", active);
-      header.setAttribute(
-        "aria-sort",
-        active ? (this._sortDescending ? "descending" : "ascending") : "none"
-      );
-      header.querySelector(".arrow").textContent = active
-        ? this._sortDescending
-          ? "▼"
-          : "▲"
-        : "";
-    }
+    // The frontend swaps this object only when the area registry changes, so
+    // an identity compare answers "did areas move?" without touching its
+    // contents on every push, banner change and clock tick.
+    const areas = this._hass ? this._hass.areas : null;
+    const areasChanged = areas !== this._lastAreas;
+    this._lastAreas = areas;
 
-    const pending = this._sortedPending();
+    const cards = this._cards();
     const loaded = this._data !== null;
-    this._el.pendingCard.hidden = !loaded || pending.length === 0;
-    this._el.pendingEmpty.hidden = !loaded || pending.length > 0;
-    this._el.pendingCount.textContent = loaded ? String(pending.length) : "";
+    this._el.grid.hidden = !loaded || cards.length === 0;
+    this._el.empty.hidden = !loaded || cards.length > 0;
 
     this._reconcile(
-      this._el.pendingBody,
-      pending,
-      this._pendingRows,
-      (row) => this._createPendingRow(row),
-      (element, row) => this._updatePendingRow(element, row, now)
+      this._el.grid,
+      cards,
+      this._deviceCards,
+      (card) => this._createDeviceCard(card),
+      (element, card) => this._updateDeviceCard(element, card, now, areasChanged)
     );
 
     const ignored = this._data && this._data.ignored ? this._data.ignored : [];
@@ -641,23 +751,24 @@ class Rtl433Panel extends HTMLElement {
     this._el.ignoredToggle.textContent = `${
       this._showIgnored ? "Hide" : "Show"
     } ignored devices (${ignored.length})`;
-    this._el.ignoredCard.hidden = !this._showIgnored || ignored.length === 0;
+    this._el.ignoredGrid.hidden = !this._showIgnored || ignored.length === 0;
 
     this._reconcile(
-      this._el.ignoredBody,
+      this._el.ignoredGrid,
       ignored,
-      this._ignoredRows,
-      (row) => this._createIgnoredRow(row),
-      (element, row) => this._updateIgnoredRow(element, row)
+      this._ignoredCards,
+      (row) => this._createIgnoredCard(row),
+      (element, row) => this._updateIgnoredCard(element, row)
     );
   }
 
   /**
    * Bring `container`'s children in line with `items`, keyed by `item.key`.
    *
-   * Rows that already exist are updated and moved rather than recreated, which
-   * is what keeps a button's focus and the page's scroll position across a
-   * live push -- the whole point of subscribing rather than reloading.
+   * Cards that already exist are updated and moved rather than recreated, which
+   * is what keeps a button's focus, an open dropdown and the page's scroll
+   * position across a live push -- the whole point of subscribing rather than
+   * reloading.
    */
   _reconcile(container, items, cache, create, update) {
     const seen = new Set();
@@ -691,80 +802,287 @@ class Rtl433Panel extends HTMLElement {
     }
   }
 
-  _createPendingRow(row) {
-    const element = document.createElement("tr");
+  /** Set `title` only on a real change -- the tooltip twin of `_text`. */
+  _title(node, value) {
+    if (node.title !== value) {
+      node.title = value;
+    }
+  }
+
+  _createDeviceCard(card) {
+    const element = document.createElement("div");
+    element.className = "device-card";
     element.innerHTML = `
-      <td class="model"></td>
-      <td class="key mono"></td>
-      <td class="num count"></td>
-      <td class="num signal"></td>
-      <td class="age"></td>
-      <td><div class="fields mono"></div></td>
-      <td class="actions"></td>`;
+      <div class="device-head">
+        <div class="device-model"></div>
+        <div class="device-key mono"></div>
+      </div>
+      <div class="device-body">
+        <div class="stats">
+          <div class="stat">
+            <span class="stat-label">Sightings</span>
+            <span class="stat-value stat-count"></span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Signal</span>
+            <span class="stat-value stat-signal"></span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Last seen</span>
+            <span class="stat-value stat-age"></span>
+          </div>
+        </div>
+        <div class="readings"></div>
+        <div class="area"></div>
+      </div>
+      <div class="device-actions">
+        <a class="device-link" hidden>Open device</a>
+      </div>`;
     element
-      .querySelector(".actions")
+      .querySelector(".device-actions")
       .append(
-        haButton("Add", "primary add", "accent"),
-        haButton("Ignore", "ghost ignore")
+        haButton("Ignore", "ghost ignore"),
+        haButton("Add", "primary add", "accent")
       );
+
     const parts = {
-      model: element.querySelector(".model"),
-      key: element.querySelector(".key"),
-      count: element.querySelector(".count"),
-      signal: element.querySelector(".signal"),
-      age: element.querySelector(".age"),
-      fields: element.querySelector(".fields"),
+      model: element.querySelector(".device-model"),
+      key: element.querySelector(".device-key"),
+      count: element.querySelector(".stat-count"),
+      signal: element.querySelector(".stat-signal"),
+      age: element.querySelector(".stat-age"),
+      readings: element.querySelector(".readings"),
+      area: element.querySelector(".area"),
+      link: element.querySelector(".device-link"),
       add: element.querySelector(".add"),
       ignore: element.querySelector(".ignore"),
+      // Keyed like `_deviceCards`, so the readings reconcile through the same
+      // helper the cards do rather than through a second implementation.
+      readingRows: new Map(),
     };
     element.parts = parts;
-    parts.add.addEventListener("click", () =>
-      this._act(
-        "rtl_433/devices/add",
-        row.key,
-        `${row.key} is no longer pending — it may already have been added.`
-      )
-    );
+    // `_cards()` builds a fresh descriptor object every render, so the handlers
+    // below must read the *current* one off the element rather than close over
+    // the one this card was created from -- that one's `row` freezes at the
+    // moment the card first appeared, and Add would snapshot a sighting count,
+    // signal and set of readings minutes out of date.
+    element.card = card;
+
+    this._buildAreaControl(parts);
+    parts.add.addEventListener("click", () => this._addDevice(element.card.row));
     parts.ignore.addEventListener("click", () =>
       this._act(
         "rtl_433/devices/ignore",
-        row.key,
-        `${row.key} was already ignored.`
+        element.card.key,
+        `${element.card.key} was already ignored.`
       )
     );
     return element;
   }
 
-  _updatePendingRow(element, row, now) {
+  _updateDeviceCard(element, card, now, areasChanged) {
     const parts = element.parts;
-    this._text(parts.model, row.model || "Unknown");
+    const row = card.row;
+    element.card = card;
+
+    // The model and key are the card's identity, promoted into the coloured
+    // heading: without an interview step there is nothing else to lead with,
+    // and between them they are what a user matches against the box in their
+    // hand.
+    this._text(parts.model, row.model || "Unknown model");
     this._text(parts.key, row.key);
+    element.classList.toggle("added", card.added);
+
     this._text(parts.count, String(row.count));
     this._text(parts.signal, formatSignal(row.signal));
     this._text(parts.age, formatAge(row.last_seen, now));
-    parts.age.title = `First seen ${formatExact(
-      row.first_seen
-    )}\nLast seen ${formatExact(row.last_seen)}`;
-    const fields = formatFields(row.fields);
-    this._text(parts.fields, fields);
-    parts.fields.title = fields;
-    const busy = this._busy.has(row.key);
+    this._title(
+      parts.age,
+      `First seen ${formatExact(row.first_seen)}\nLast seen ${formatExact(
+        row.last_seen
+      )}`
+    );
+
+    this._renderReadings(parts, row.readings || []);
+
+    // `areasChanged` alone would only ever populate the cards that existed on
+    // the render the area registry last changed on. A candidate heard while the
+    // panel is open -- the whole point of subscribing -- is created on a render
+    // where the registry has not moved, so its `<select>` would stay empty and
+    // the user could not give the new device an area at all. An empty select is
+    // therefore always (re)built: `_renderAreaOptions` writes "No area" first,
+    // so a populated one is never empty, even with no areas configured.
+    if (areasChanged) {
+      this._refreshAreaControl(parts);
+    }
+
+    // Resolved once and kept on the snapshot: a device id never changes, and
+    // re-scanning the registry for every green card on every render is a lot of
+    // work to rebuild an href that is already known.
+    let device = null;
+    if (card.added) {
+      const added = this._added.get(card.key);
+      if (added && added.deviceId) {
+        device = { id: added.deviceId };
+      } else if ((device = this._deviceFor(card.key)) && added) {
+        added.deviceId = device.id;
+      }
+    }
+    // Once the device exists it owns its own area, and the card's picker would
+    // be a second control claiming to set the same thing while actually only
+    // recording an intent that has already been carried out.
+    parts.area.hidden = card.added;
+    if (parts.areaControl) {
+      parts.areaControl.disabled = card.added;
+    }
+
+    parts.link.hidden = !device;
+    if (device) {
+      parts.link.href = `/config/devices/device/${device.id}`;
+    }
+
+    const busy = this._busy.has(card.key);
+    parts.add.hidden = card.added;
+    parts.ignore.hidden = card.added;
     parts.add.disabled = busy;
     parts.ignore.disabled = busy;
   }
 
-  _createIgnoredRow(row) {
-    const element = document.createElement("tr");
+  /**
+   * Render a frame's readings as the rows a device page would show.
+   *
+   * Icon, name, value -- the same three columns, in the same order, as an entity
+   * row on a device page. The payload has already ordered them the way that page
+   * orders them (readings first, then diagnostics), and resolved each icon from
+   * Home Assistant's own device-class table, so this method only lays them out.
+   *
+   * They are one list rather than the device page's two cards because the split
+   * exists there to give each group its own "Add to dashboard" action, and there
+   * is no dashboard to add to from a device that does not exist yet.
+   *
+   * Keyed reconciliation again, for the same reason as the cards: a device that
+   * reports the same six fields every thirty seconds should update six values,
+   * not rebuild six rows.
+   */
+  _renderReadings(parts, readings) {
+    this._reconcile(
+      parts.readings,
+      readings,
+      parts.readingRows,
+      () => this._createReadingRow(),
+      (element, reading) => this._updateReadingRow(element, reading)
+    );
+  }
+
+  /** One entity row: icon, name, value. */
+  _createReadingRow() {
+    const row = document.createElement("div");
+    row.className = "reading";
+    // `ha-icon` is created by tag name and never imported. If the frontend has
+    // not registered it yet the browser upgrades the element when it does, and
+    // if it never does the element stays inert at its reserved size -- a row
+    // with a blank icon column rather than a broken layout.
+    row.innerHTML = `<ha-icon class="reading-icon"></ha-icon><span class="reading-name"></span><span class="reading-value"></span>`;
+    row.iconEl = row.querySelector(".reading-icon");
+    row.nameEl = row.querySelector(".reading-name");
+    row.valueEl = row.querySelector(".reading-value");
+    return row;
+  }
+
+  _updateReadingRow(row, reading) {
+    // The icon is set as an attribute, not a property: an element that has not
+    // been upgraded yet has no property to set, but the attribute is read
+    // whenever it is.
+    if (reading.icon) {
+      if (row.iconEl.getAttribute("icon") !== reading.icon) {
+        row.iconEl.setAttribute("icon", reading.icon);
+      }
+    } else {
+      row.iconEl.removeAttribute("icon");
+    }
+    this._text(row.nameEl, reading.name);
+    this._text(row.valueEl, formatReadingValue(reading));
+  }
+
+  /**
+   * Build one card's area control, preferring Home Assistant's own picker.
+   *
+   * `ha-area-picker` is the control the device page itself uses to set an area,
+   * so borrowing it is what makes this field look and behave like the one the
+   * user will meet a minute later -- with the same search, the same "add a new
+   * area", and the same 56px outlined field. It is used by tag name and never
+   * imported: nothing here reaches into a frontend module path, and the element
+   * is only touched if the frontend has already registered it.
+   *
+   * When it has not, the card falls back to a native `<select>` populated from
+   * `hass.areas`. That is plainer, but it is a working control rather than an
+   * empty box, and this file's whole posture is that frontend internals may move
+   * and the page should degrade rather than break.
+   */
+  /**
+   * Build one card's area field.
+   *
+   * `ha-area-picker` is the control Home Assistant's own device page uses to
+   * set an area, so borrowing it is what makes this field look and behave like
+   * the one the user meets a minute later -- the same search, the same "add a
+   * new area", the same outlined field. It is used *by tag name* and never
+   * imported: nothing here reaches into a frontend module path.
+   *
+   * Creating it before the frontend has registered it is safe. An unknown
+   * element is inert until the definition arrives and the browser then upgrades
+   * it in place, and Lit re-applies properties set beforehand -- so the picker
+   * fills itself in whenever it becomes available. If it never does, the card
+   * keeps a blank field and the rest of it still works.
+   */
+  _buildAreaControl(parts) {
+    const picker = document.createElement("ha-area-picker");
+    picker.hass = this._hass;
+    picker.label = "Area";
+    parts.area.append(picker);
+    parts.areaControl = picker;
+  }
+
+  /**
+   * Hand an existing picker a fresh `hass` so it sees a changed registry.
+   *
+   * Only when the registry actually moved: assigning the property schedules a
+   * Lit update, and this runs for every card on screen.
+   */
+  _refreshAreaControl(parts) {
+    if (parts.areaControl) {
+      parts.areaControl.hass = this._hass;
+    }
+  }
+
+  /**
+   * The area chosen on one card, or `undefined`.
+   *
+   * Read off the control at the moment of the click rather than mirrored into a
+   * Map as it changes: the control already holds this fact, and cards are
+   * reconciled rather than recreated, so it survives every live push. A second
+   * copy could only ever be a way for the two to disagree.
+   */
+  _areaChoiceFor(key) {
+    const element = this._deviceCards.get(key);
+    const control = element && element.parts.areaControl;
+    return control ? control.value : undefined;
+  }
+
+  _createIgnoredCard(row) {
+    const element = document.createElement("div");
+    element.className = "device-card ignored";
     element.innerHTML = `
-      <td class="model"></td>
-      <td class="key mono"></td>
-      <td class="actions"></td>`;
+      <div class="device-head">
+        <div class="device-model"></div>
+        <div class="device-key mono"></div>
+      </div>
+      <div class="device-actions"></div>`;
     element
-      .querySelector(".actions")
+      .querySelector(".device-actions")
       .append(haButton("Un-ignore", "ghost unignore"));
     const parts = {
-      model: element.querySelector(".model"),
-      key: element.querySelector(".key"),
+      model: element.querySelector(".device-model"),
+      key: element.querySelector(".device-key"),
       unignore: element.querySelector(".unignore"),
     };
     element.parts = parts;
@@ -778,11 +1096,11 @@ class Rtl433Panel extends HTMLElement {
     return element;
   }
 
-  _updateIgnoredRow(element, row) {
+  _updateIgnoredCard(element, row) {
     const parts = element.parts;
     // A device is usually ignored while still pending, long before anything is
     // stored about it, so its model is often simply not known yet.
-    this._text(parts.model, row.model || "Unknown");
+    this._text(parts.model, row.model || "Unknown model");
     this._text(parts.key, row.key);
     parts.unignore.disabled = this._busy.has(row.key);
   }
@@ -794,9 +1112,9 @@ const SKELETON = `
       <h1>Discovered devices</h1>
       <div class="subtitle">
         Devices this receiver has heard that are not in Home Assistant yet.
-        Adding one creates its device and entities; ignoring one hides it for
-        good. Un-ignoring is not retroactive &mdash; an un-ignored device comes
-        back on its next transmission.
+        Adding one creates its device and entities; ignoring one hides it until
+        you un-ignore it. An un-ignored device comes back on its next
+        transmission.
       </div>
     </div>
     <label class="hub-picker" hidden>
@@ -807,27 +1125,7 @@ const SKELETON = `
   <div class="banner-slot"></div>
   <div class="status" hidden></div>
 
-  <div class="card pending-card" hidden>
-    <div class="card-head">
-      Pending <span class="pill pending-count"></span>
-    </div>
-    <div class="scroll">
-      <table>
-        <thead>
-          <tr>
-            <th class="sortable" data-sort="model" tabindex="0" role="button">Model <span class="arrow"></span></th>
-            <th class="sortable" data-sort="key" tabindex="0" role="button">Device key <span class="arrow"></span></th>
-            <th class="sortable num" data-sort="count" tabindex="0" role="button">Sightings <span class="arrow"></span></th>
-            <th class="sortable num" data-sort="signal" tabindex="0" role="button">Signal <span class="arrow"></span></th>
-            <th class="sortable" data-sort="last_seen" tabindex="0" role="button">Last seen <span class="arrow"></span></th>
-            <th>Latest values</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody class="pending-body"></tbody>
-      </table>
-    </div>
-  </div>
+  <div class="grid" hidden></div>
 
   <div class="empty pending-empty" hidden>
     Nothing pending. Everything this receiver has heard is either added or
@@ -837,17 +1135,7 @@ const SKELETON = `
 
   <div class="list-actions"></div>
 
-  <div class="card ignored-card" hidden>
-    <div class="card-head">Ignored</div>
-    <div class="scroll">
-      <table>
-        <thead>
-          <tr><th>Model</th><th>Device key</th><th></th></tr>
-        </thead>
-        <tbody class="ignored-body"></tbody>
-      </table>
-    </div>
-  </div>
+  <div class="grid ignored-grid" hidden></div>
 `;
 
 /*
@@ -856,6 +1144,11 @@ const SKELETON = `
  * (or a future frontend) stops defining one of these, and a missing colour
  * should degrade to "readable" rather than to black text on a black card.
  * Nothing here is hard-coded to a palette, so dark themes follow automatically.
+ *
+ * The two heading colours carry the card's whole state. Blue is a candidate the
+ * receiver has heard and Home Assistant has not adopted; green is one adopted
+ * from this page a moment ago. They are `--info-color` and `--success-color`
+ * rather than literals so a theme restyles them along with everything else.
  */
 const STYLES = `
   :host {
@@ -891,9 +1184,8 @@ const STYLES = `
   /*
    * An author display rule beats the user agent's "[hidden] { display: none }",
    * so every element this file gives a display to needs its own hidden rule or
-   * the hidden property silently does nothing. The picker is the only one --
-   * and without this it stayed on screen for a single receiver, which is
-   * exactly the useless one-option control _renderHubPicker means to hide.
+   * the hidden property silently does nothing. The picker, the grids and the
+   * card's own flex children all need one.
    */
   .hub-picker[hidden] { display: none; }
   /*
@@ -929,76 +1221,139 @@ const STYLES = `
     color: var(--secondary-text-color, #727272);
   }
   .empty { max-width: 62ch; margin: 0 auto; }
-  .card {
+
+  /*
+   * auto-fill rather than auto-fit: with a single candidate, auto-fit would
+   * stretch its card the full width of a desktop window, which reads as a
+   * layout bug rather than as one device.
+   */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
     margin-bottom: 16px;
+  }
+  .grid[hidden] { display: none; }
+
+  .device-card {
+    display: flex;
+    flex-direction: column;
     background: var(--card-background-color, #ffffff);
     border: 1px solid var(--divider-color, #e0e0e0);
     border-radius: var(--ha-card-border-radius, 12px);
     overflow: hidden;
   }
-  .card-head {
+  .device-head {
     padding: 12px 16px;
-    font-size: 16px;
-    border-bottom: 1px solid var(--divider-color, #e0e0e0);
-  }
-  .pill {
-    display: inline-block;
-    min-width: 20px;
-    padding: 0 8px;
-    margin-left: 4px;
-    border-radius: 10px;
-    font-size: 12px;
-    text-align: center;
-    background: var(--primary-color, #03a9f4);
+    background: var(--info-color, #039be5);
     color: var(--text-primary-color, #ffffff);
   }
-  .scroll { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; }
-  th, td {
-    padding: 8px 16px;
-    text-align: left;
-    white-space: nowrap;
-    border-bottom: 1px solid var(--divider-color, #e0e0e0);
+  .device-card.added .device-head {
+    background: var(--success-color, #0f9d58);
   }
-  tbody tr:last-child td { border-bottom: none; }
-  th {
-    font-size: 12px;
+  .device-card.ignored .device-head {
+    background: var(--disabled-text-color, #bdbdbd);
+  }
+  .device-model {
+    font-size: 16px;
     font-weight: 500;
-    letter-spacing: 0.02em;
+    overflow-wrap: anywhere;
+  }
+  .device-key {
+    font-size: 12px;
+    opacity: 0.9;
+    overflow-wrap: anywhere;
+  }
+  .device-body {
+    flex: 1;
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .stats { display: flex; flex-wrap: wrap; gap: 16px; }
+  .stat { display: flex; flex-direction: column; }
+  .stat-label {
+    font-size: 11px;
     text-transform: uppercase;
+    letter-spacing: 0.02em;
     color: var(--secondary-text-color, #727272);
   }
-  th.num, td.num { text-align: right; }
-  th.sortable { cursor: pointer; user-select: none; }
-  th.sortable:hover, th.sorted { color: var(--primary-color, #03a9f4); }
-  th.sortable:focus-visible {
-    outline: 2px solid var(--primary-color, #03a9f4);
-    outline-offset: -2px;
+  .stat-value { font-size: 15px; }
+
+  /*
+   * An entity row, laid out like the ones on a device page: a state-coloured
+   * icon, the name, and the value against the right edge. No rules between
+   * rows -- a device page does not draw them, and at this row height they made
+   * three readings look like a table again.
+   */
+  .reading {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-height: 40px;
   }
-  .arrow { font-size: 10px; }
+  .reading-icon {
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    color: var(--state-icon-color, #44739e);
+  }
+  .reading-name {
+    flex: 1;
+    overflow-wrap: anywhere;
+  }
+  .reading-value {
+    text-align: right;
+    white-space: nowrap;
+    color: var(--secondary-text-color, #727272);
+  }
+
+  /*
+   * Pushed to the foot of the body so the pickers line up across a row of
+   * cards. Cards in a grid row stretch to the tallest, and a device with one
+   * reading would otherwise leave its picker stranded in mid-card with the
+   * slack below it.
+   */
+  .area { display: block; margin-top: auto; }
+  .area[hidden] { display: none; }
+  /*
+   * ha-area-picker brings its own label and its own 56px outlined field, so it
+   * needs no styling here -- only the room to use it.
+   */
+
+  .device-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--divider-color, #e0e0e0);
+  }
+  .device-link {
+    margin-right: auto;
+    color: var(--primary-color, #03a9f4);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .device-link:hover { text-decoration: underline; }
+  .device-link[hidden] { display: none; }
+
   .mono {
     font-family: var(--ha-font-family-code, ui-monospace, Menlo, Consolas, monospace);
     font-size: 13px;
   }
-  .fields {
-    max-width: 340px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    color: var(--secondary-text-color, #727272);
-  }
-  td.actions { text-align: right; }
   button {
     font: inherit;
     cursor: pointer;
     padding: 6px 14px;
-    margin-left: 8px;
     border: 1px solid transparent;
     border-radius: 4px;
   }
   button:disabled { opacity: 0.5; cursor: default; }
+  button[hidden] { display: none; }
   ha-button[hidden] { display: none; }
-  .list-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  button.primary {
+  .list-actions { display: flex; gap: 8px; flex-wrap: wrap; }  button.primary {
     background: var(--primary-color, #03a9f4);
     color: var(--text-primary-color, #ffffff);
   }

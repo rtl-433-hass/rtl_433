@@ -258,7 +258,17 @@ async def test_pending_returns_the_columns_the_panel_renders(hass, hub, hass_ws_
     assert newest["model"] == "EnergyMeter-2000"
     assert newest["count"] == 2
     assert newest["signal"] == 11.5  # snr, not the rssi in the same frame
-    assert newest["fields"]["power_W"] == 1450.5
+    # Readings are the frame previewed as the entities adoption would create:
+    # named the way Home Assistant will name them rather than the way the radio
+    # sent them, and carrying the unit the entity would show.
+    readings = {reading["key"]: reading for reading in newest["readings"]}
+    assert readings["power_W"]["value"] == 1450.5
+    assert readings["power_W"]["name"] == "Power"
+    assert readings["power_W"]["unit"] == "W"
+    # The frame metadata the card shows in its own right (or not at all) maps to
+    # no descriptor, so it never reaches the readings list.
+    assert "snr" not in readings
+    assert "rssi" not in readings
     first_seen = dt_util.parse_datetime(newest["first_seen"])
     last_seen = dt_util.parse_datetime(newest["last_seen"])
     assert first_seen is not None and last_seen is not None
@@ -267,6 +277,217 @@ async def test_pending_returns_the_columns_the_panel_renders(hass, hub, hass_ws_
     assert rows[_MID_KEY]["signal"] == -8.5  # rssi, the fallback
     assert rows[_OLD_KEY]["signal"] is None  # neither reported: no reading at all
     assert rows[_OLD_KEY]["count"] == 1
+
+
+async def test_pending_readings_preview_the_entities_adoption_would_create(
+    hass, hub, hass_ws_client
+):
+    """A candidate's readings are named and valued the way its entities will be.
+
+    This is the whole point of previewing a frame rather than dumping it: the
+    user is deciding whether the thing on the patio is the thing in the list,
+    and "Temperature 21.4 °C" answers that where ``temperature_C: 21.4`` makes
+    them translate. So the name comes from the library descriptor exactly as
+    :class:`~.entity.Rtl433Entity` takes it -- here via the device-class
+    fallback, since none of these fields carries an explicit ``name`` -- and the
+    unit comes with it.
+
+    Binary fields stay real booleans over the wire. The panel owns the on/off
+    vocabulary; sending it a rendered string would put half the presentation in
+    Python and half in JavaScript.
+
+    The two exclusions are the load-bearing part. ``snr`` and ``rssi`` *do* have
+    descriptors, so "has a descriptor" alone would show them -- they are dropped
+    because the library marks them ``enabled_by_default: false``, which is its
+    own statement that adoption creates them disabled and the user will not see
+    them. An unmapped field creates no entity at all and is dropped for the
+    simpler reason.
+    """
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+
+    old = {reading["key"]: reading for reading in rows[_OLD_KEY]["readings"]}
+    assert old["temperature_C"]["name"] == "Temperature"
+    assert old["temperature_C"]["value"] == 21.4
+    assert old["temperature_C"]["unit"] == "°C"
+    assert old["humidity"]["name"] == "Humidity"
+    assert old["humidity"]["unit"] == "%"
+
+    # ``display`` is the finished state string, unit and all, so the panel
+    # prints it rather than re-deriving it: the humidity transform floats an
+    # integer, and a device page shows that as "55.0%" -- JavaScript rendering
+    # the same value would say "55" and drop the unit's spacing rule.
+    assert old["humidity"]["value"] == 55.0
+    assert old["humidity"]["display"] == "55.0%"
+    # A percentage joins its unit; everything else is spaced from it.
+    assert old["temperature_C"]["display"] == "21.4 °C"
+
+    # The icon is Home Assistant's own, resolved from the device class through
+    # core's ``icons.json`` rather than from a table maintained here.
+    assert old["temperature_C"]["icon"] == "mdi:thermometer"
+    assert old["humidity"]["icon"] == "mdi:water-percent"
+
+    mid = {reading["key"]: reading for reading in rows[_MID_KEY]["readings"]}
+    # ``closed: 0`` is a binary field: it arrives as a bool, not as the 0 the
+    # radio sent nor as a string this module chose to render.
+    assert mid["closed"]["platform"] == "binary_sensor"
+    assert isinstance(mid["closed"]["value"], bool)
+    # A binary state is a *word*, and which word is core's to say: an
+    # ``opening`` sensor reads Open/Closed, never On/Off. The library maps this
+    # field ``payload: {on: "0"}``, so the ``closed: 0`` in the frame is an open
+    # contact and the entity reads "Open" -- exactly the pair of translations a
+    # hand-written On/Off could not have produced.
+    assert mid["closed"]["display"] == "Open"
+    # A binary device class has one icon per state, which is what makes an open
+    # door look different from a shut one.
+    assert mid["closed"]["icon"] in ("mdi:square", "mdi:square-outline")
+    # Disabled by default in the library, so never previewed -- even though both
+    # resolve to a descriptor and one of them is in this very frame.
+    assert "rssi" not in mid
+    assert "snr" not in mid
+
+
+async def test_binary_readings_use_the_device_class_vocabulary(
+    hass, hub, hass_ws_client
+):
+    """Safety reads Safe/Unsafe and moisture Dry/Wet, not On/Off.
+
+    Home Assistant names a binary entity's states from its device class, and
+    this library leans on that: the leak detector is ``moisture`` and the tamper
+    contact is ``safety``. A card that renders every binary field as On/Off
+    previews a word the device page will never show, which is the one thing the
+    preview exists not to do.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {"model": "Wet-1", "id": 9, "detect_wet": 1, "tamper": 0},
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    readings = {r["key"]: r for r in rows["Wet-1-9"]["readings"]}
+
+    assert readings["detect_wet"]["display"] == "Wet"
+    assert readings["tamper"]["display"] == "Safe"
+
+
+async def test_an_event_field_previews_its_mapped_event_type(hass, hub, hass_ws_client):
+    """A doorbell previews the event type its entity will fire, not the raw code.
+
+    An ``event`` descriptor does not become a sensor: its entity's state is the
+    mapped event type from the library's ``event_map``. Treating it like a
+    numeric field showed the digit off the wire -- a value the created entity
+    never holds.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {"model": "Honeywell-Doorbell", "id": 77, "secret_knock": 0},
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    readings = {r["key"]: r for r in rows["Honeywell-Doorbell-77"]["readings"]}
+
+    knock = readings["secret_knock"]
+    assert knock["platform"] == "event"
+    # The library maps this field's ``0`` to a named event type, and that name
+    # is the entity's state -- not the digit that arrived on the wire.
+    assert knock["display"] == "ring"
+    assert knock["value"] == "ring"
+
+
+async def test_a_device_class_name_comes_from_core_not_from_spelling(
+    hass, hub, hass_ws_client
+):
+    """Names are looked up in core's table, not derived from the class string.
+
+    ``pm25`` is "PM2.5" to Home Assistant; no underscore-replacing rule produces
+    that. Pinning one such class keeps the lookup from quietly regressing to a
+    spelling heuristic, which would also silently drop translation.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {"model": "Air-1", "id": 4, "pm2_5_ug_m3": 12.0, "temperature_C": 18.0},
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    readings = {r["key"]: r for r in rows["Air-1-4"]["readings"]}
+
+    # Temperature carries no library ``name``, so this is core's table talking.
+    assert readings["temperature_C"]["name"] == "Temperature"
+
+
+async def test_readings_are_ordered_like_a_device_page(hass, hub, hass_ws_client):
+    """Readings first, diagnostics last, alphabetical within each group.
+
+    A device page puts the readings a user came for above the diagnostics, and
+    the card is meant to be recognisable as that page. The ordering is settled
+    in the payload rather than in the panel so the rule lives with the module
+    that knows each field's entity category.
+
+    ``battery_ok`` is the case worth pinning: it is a genuine reading a user
+    judges a candidate by, but Home Assistant files it under diagnostics, so it
+    must sort *after* a humidity that is alphabetically later than it.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {
+            "model": "Ordered-1",
+            "id": 3,
+            "temperature_C": 20.0,
+            "battery_ok": 1,
+            "humidity": 40,
+        },
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    names = [reading["name"] for reading in rows["Ordered-1-3"]["readings"]]
+
+    assert names == ["Humidity", "Temperature", "Battery"]
+
+
+async def test_a_field_with_no_library_mapping_is_not_previewed(
+    hass, hub, hass_ws_client
+):
+    """An unmapped field creates no entity, so the card must not promise one.
+
+    A bad decode is exactly how an unrecognised field key turns up, and it is
+    also one of the things the pending list exists to help a user spot. Showing
+    it among the readings would suggest adoption produces an entity for it,
+    which it does not.
+    """
+    _hear(
+        _coordinator(hass, hub),
+        {"model": "Oddball-1", "id": 5, "temperature_C": 9.0, "not_a_real_field": 7},
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+    rows = {row["key"]: row for row in reply["result"]["pending"]}
+    readings = {reading["key"]: reading for reading in rows["Oddball-1-5"]["readings"]}
+
+    assert "temperature_C" in readings
+    assert "not_a_real_field" not in readings
 
 
 # --------------------------------------------------------------------------- #

@@ -41,16 +41,23 @@ UI.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import timedelta
+import logging
 from typing import Any, Final
 
+from pyrtl_433.library import FieldDescriptor, Registry, apply_transform, lookup
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.icon import async_get_icons
+from homeassistant.helpers.translation import async_get_translations
 
 from .adoption import (
     AdoptionResult,
@@ -60,20 +67,16 @@ from .adoption import (
 )
 from .const import (
     CONF_DEVICES,
-    CONF_IGNORED_DEVICES,
     CONF_MODEL,
+    DATA_ENTITY_META,
+    DATA_ENTRY_LIBRARY,
     DOMAIN,
     signal_pending_update,
 )
 from .coordinator import Rtl433Coordinator
+from .hub_settings import _hub_ignored_devices
 
-# Sentinel on ``hass.data[DOMAIN]`` marking that the commands are registered.
-# Registration is per Home Assistant *run*, not per config entry -- a second hub
-# must not register the same command names again -- and this integration has no
-# ``async_setup``, so the guard rides along with the per-entry data the same way
-# ``DATA_LIBRARY`` does. The leading underscore keeps it out of the entry-id
-# namespace that shares this dict.
-DATA_WS_REGISTERED: Final = "_websocket_api_registered"
+_LOGGER = logging.getLogger(__name__)
 
 # How often an open subscription re-renders its payload to catch changes that
 # fire no signal: the sighting count and last-seen of a candidate already on the
@@ -90,18 +93,16 @@ ERR_NOT_LOADED: Final = "not_loaded"
 
 @callback
 def async_register_commands(hass: HomeAssistant) -> None:
-    """Register the discovery commands once per Home Assistant run.
+    """Register the discovery commands.
 
     Called from every hub's ``async_setup_entry`` because this integration is
-    entry-only, and guarded with a sentinel because command names are global:
-    registering the same name twice raises. A user with two receivers must not
-    lose the second one to that.
+    entry-only. Command names are global and registration is really per Home
+    Assistant *run*, but it needs no guard of its own:
+    ``async_register_command`` is a dict assignment keyed by command name, so a
+    second hub -- or the same hub reloading -- rewrites the same six entries with
+    the same handlers. Registering is idempotent, so the simplest thing that
+    works is to just register.
     """
-    domain_data = hass.data.setdefault(DOMAIN, {})
-    if domain_data.get(DATA_WS_REGISTERED):
-        return
-    domain_data[DATA_WS_REGISTERED] = True
-
     websocket_api.async_register_command(hass, ws_hubs)
     websocket_api.async_register_command(hass, ws_pending_devices)
     websocket_api.async_register_command(hass, ws_add_devices)
@@ -149,28 +150,281 @@ def _async_get_coordinator(
     return entry, coordinator
 
 
-@callback
-def _signal_level(fields: dict[str, Any]) -> float | None:
-    """Return the frame's signal level in dB, preferring SNR over RSSI.
+async def async_preload_entity_metadata(hass: HomeAssistant) -> None:
+    """Warm the tables Home Assistant describes its own entities with.
 
-    SNR is preferred because it is the figure that tracks decodability, which is
-    what a user judging a marginal device actually wants to know. A receiver
-    started without ``-M level`` reports neither, and that yields ``None`` rather
-    than a zero the panel would render as a real (and terrible) reading. A
-    non-numeric value is treated the same way: the API's contract is a number or
-    nothing, so a caller never has to type-check the field.
+    Two of them, both keyed by device class and both shipped by the platform
+    integrations themselves: ``icons.json`` for the icon, and the
+    ``entity_component`` strings for the name and for a binary entity's on/off
+    words. They are what the frontend renders a device page from, so reading
+    them is what lets this payload promise "these are the entities you are
+    about to get" rather than an approximation of them.
+
+    Loaded once during hub setup because both accessors do file I/O on first
+    use, and cached so ``_pending_payload`` -- a sync ``@callback`` -- can
+    resolve without awaiting. Failure is not fatal: the preview degrades to
+    un-iconed, un-translated rows rather than failing a hub's setup.
+
+    The strings are fetched for the language configured *now*. A hub reload
+    picks up a language change; nothing else does.
     """
-    level = fields.get("snr")
-    if level is None:
-        level = fields.get("rssi")
-    if isinstance(level, bool) or not isinstance(level, (int, float)):
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if DATA_ENTITY_META in domain_data:
+        return
+
+    platforms = ["sensor", "binary_sensor", "event"]
+    try:
+        icons = await async_get_icons(hass, "entity_component", platforms)
+    except Exception:  # noqa: BLE001 - decoration must never fail a setup
+        _LOGGER.debug("Could not load entity icons; the panel will show none")
+        icons = {}
+    try:
+        strings = await async_get_translations(
+            hass, hass.config.language, "entity_component", platforms
+        )
+    except Exception:  # noqa: BLE001 - as above
+        _LOGGER.debug("Could not load entity strings; the panel will derive names")
+        strings = {}
+
+    domain_data[DATA_ENTITY_META] = _EntityMeta(
+        icons=_with_sorted_ranges(icons), strings=strings
+    )
+
+
+def _with_sorted_ranges(icons: dict[str, Any]) -> dict[str, Any]:
+    """Pre-sort every device class's icon bands, once, at load.
+
+    Core keys a ``range`` by its lower bound as a *string* (``battery`` has
+    eleven of them). Sorting and float-parsing that on every reading of every
+    candidate of every push is pure recomputation of a constant, so it is done
+    here instead and stored as ``[(bound, icon), ...]`` ascending.
+    """
+    converted: dict[str, Any] = {}
+    for platform, classes in icons.items():
+        converted[platform] = {}
+        for device_class, entry in classes.items():
+            if ranges := entry.get("range"):
+                entry = {
+                    **entry,
+                    "range": sorted(
+                        ((float(bound), icon) for bound, icon in ranges.items()),
+                        key=lambda pair: pair[0],
+                    ),
+                }
+            converted[platform][device_class] = entry
+    return converted
+
+
+@dataclass(frozen=True, slots=True)
+class _EntityMeta:
+    """Core's icon and string tables, as the preview reads them."""
+
+    icons: dict[str, Any]
+    strings: dict[str, str]
+
+    def string(
+        self, platform: str, device_class: str | None, suffix: str
+    ) -> str | None:
+        """One ``entity_component`` string, or ``None`` when core has none."""
+        if not device_class:
+            return None
+        return self.strings.get(
+            f"component.{platform}.entity_component.{device_class}.{suffix}"
+        )
+
+
+_EMPTY_META: Final = _EntityMeta(icons={}, strings={})
+
+
+def _reading_icon(
+    descriptor: FieldDescriptor, value: Any, meta: _EntityMeta
+) -> str | None:
+    """The icon Home Assistant would give this field's entity, or ``None``.
+
+    Resolved the way core resolves it, in core's own order of precedence:
+
+    * an ``icon`` on the library descriptor wins outright, because that is this
+      repository deliberately overriding the device class;
+    * a binary field takes the device class's ``state`` icon for ``on`` when it
+      is true, which is what makes an open door and a closed one look different;
+    * a numeric field whose device class declares ``range`` takes the band its
+      value falls in -- this is why a battery at 1% shows an empty battery and
+      one at 90% shows a full one;
+    * otherwise the device class's ``default``.
+
+    A field with no device class, or one core does not describe, gets ``None``
+    and the panel leaves the space empty rather than inventing a glyph.
+    """
+    if descriptor.icon:
+        return descriptor.icon
+    if not descriptor.device_class:
         return None
-    return float(level)
+    entry = meta.icons.get(descriptor.platform, {}).get(descriptor.device_class)
+    if not entry:
+        return None
+
+    if isinstance(value, bool):
+        if value:
+            return entry.get("state", {}).get("on") or entry.get("default")
+        return entry.get("default")
+
+    if (ranges := entry.get("range")) and isinstance(value, (int, float)):
+        chosen = None
+        for bound, icon in ranges:
+            if value >= bound:
+                chosen = icon
+        if chosen:
+            return chosen
+    return entry.get("default")
+
+
+def _reading_name(descriptor: FieldDescriptor, meta: _EntityMeta) -> str:
+    """The entity name Home Assistant would show for this field.
+
+    Mirrors what :class:`~.entity.Rtl433Entity` does with the same descriptor:
+    an explicit library ``name`` wins, and a descriptor that deliberately
+    leaves it unset is one whose name core derives from the device class.
+
+    That derivation is a *lookup*, not a spelling rule -- core's table says
+    ``pm25`` is "PM2.5" and ``aqi`` is "Air quality index", which no amount of
+    underscore-replacing produces -- and it is translated, so a German hub
+    previews the same word its device page will show.
+
+    A field with neither a name nor a device class core knows is titled after
+    its field key. That is this module's choice rather than core's (core would
+    fall back to the device's own name), because a row labelled with the key
+    the radio sent is more use than a row labelled with the device.
+    """
+    if descriptor.name is not None:
+        return descriptor.name
+    if translated := meta.string(descriptor.platform, descriptor.device_class, "name"):
+        return translated
+    spaced = descriptor.field_key.replace("_", " ").strip()
+    return spaced[:1].upper() + spaced[1:]
+
+
+def _reading_state(
+    descriptor: FieldDescriptor, raw: Any, meta: _EntityMeta
+) -> tuple[Any, str | None]:
+    """The value the entity will hold, and the string its state will read as.
+
+    One function for both because the two are the same question asked twice,
+    and splitting them is what let the panel invent its own vocabulary:
+
+    * a **binary** field's state is a *word*, and which word depends on the
+      device class -- core calls a ``safety`` sensor Safe/Unsafe and a
+      ``moisture`` one Dry/Wet, not On/Off. Rendering "On" for a tamper
+      contact previewed something the device page would never say.
+    * an **event** field's state is its mapped event type, so ``secret_knock``
+      reads "ring" rather than the ``1`` on the wire. The raw value is mapped
+      here exactly as :class:`~.event.Rtl433Event` maps it.
+    * a **sensor**'s state is ``str()`` of its value, which is why a humidity
+      of ``float(99)`` reads "99.0", and the unit is joined to a percentage
+      and spaced from everything else -- core's own rule.
+
+    Returning the finished string means the panel prints what it is given and
+    holds no formatting rules of its own. Known gap: core converts a handful of
+    device classes to the configured unit system (wind speed, rainfall and
+    pressure, for this library). That is not applied here, because the
+    precision core would then display depends on entity-registry options this
+    integration does not set, and a converted preview could disagree about the
+    digits where today it disagrees about the unit.
+    """
+    if descriptor.platform == "event":
+        event_map = descriptor.event_map
+        event_type = event_map.get(str(raw), str(raw)) if event_map else str(raw)
+        return event_type, event_type
+
+    value = apply_transform(descriptor, raw)
+
+    if descriptor.platform == "binary_sensor":
+        if not isinstance(value, bool):
+            return value, None
+        word = meta.string(
+            "binary_sensor",
+            descriptor.device_class,
+            f"state.{'on' if value else 'off'}",
+        )
+        return value, word or ("On" if value else "Off")
+
+    if value is None:
+        return None, None
+    shown = str(value)
+    unit = descriptor.unit_of_measurement
+    if not unit:
+        return value, shown
+    return value, f"{shown}{unit}" if unit == "%" else f"{shown} {unit}"
+
+
+@callback
+def _entry_registry(hass: HomeAssistant, entry: ConfigEntry) -> Registry | None:
+    """This hub's merged library (shipped + its own overrides), or ``None``.
+
+    The same cache the entity platforms read, so a reading previewed here is
+    resolved through exactly the descriptor that would create the entity. Absent
+    only if the library failed to load, in which case the preview degrades to
+    "no readings" rather than to a guess.
+    """
+    return (
+        hass.data.get(DOMAIN, {})
+        .get(DATA_ENTRY_LIBRARY, {})
+        .get(entry.entry_id, (None, None))[0]
+    )
+
+
+@callback
+def _readings(
+    fields: dict[str, Any],
+    model: str,
+    registry: Registry | None,
+    meta: _EntityMeta,
+) -> list[dict[str, Any]]:
+    """Preview a frame as the entities adopting it would create.
+
+    Two filters, both the library's own statements rather than a blocklist this
+    module maintains. A field that resolves to no descriptor creates no entity,
+    so showing it would promise something adoption will not deliver. A
+    descriptor marked ``enabled_by_default: false`` creates an entity that
+    arrives disabled, so it is not a reading the user would see either -- which
+    is what drops ``time``, ``freq``, ``rssi``, ``snr`` and ``noise`` without
+    naming any of them here. The signal figures the card already shows in their
+    own right fall out of that second rule for free.
+
+    Ordered the way Home Assistant orders a device page: the readings proper
+    first, then the diagnostics, each group alphabetical. Sorting here rather
+    than in the panel keeps "what the device page will look like" a property of
+    the one module that resolves descriptors. It is also stable -- following the
+    frame's own field order would reshuffle a card whenever a device dropped an
+    optional field from one transmission.
+    """
+    if registry is None:
+        return []
+    readings: list[dict[str, Any]] = []
+    for field_key, raw in fields.items():
+        descriptor = lookup(field_key, model or None, registry)
+        if descriptor is None or not descriptor.enabled_by_default:
+            continue
+        value, display = _reading_state(descriptor, raw, meta)
+        readings.append(
+            {
+                "key": field_key,
+                "name": _reading_name(descriptor, meta),
+                "value": value,
+                "display": display,
+                "unit": descriptor.unit_of_measurement,
+                "platform": descriptor.platform,
+                "entity_category": descriptor.entity_category,
+                "icon": _reading_icon(descriptor, value, meta),
+            }
+        )
+    diagnostic = EntityCategory.DIAGNOSTIC.value
+    readings.sort(key=lambda r: (r["entity_category"] == diagnostic, r["name"]))
+    return readings
 
 
 @callback
 def _pending_payload(
-    entry: ConfigEntry, coordinator: Rtl433Coordinator
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: Rtl433Coordinator
 ) -> dict[str, Any]:
     """Render one hub's approval state: the candidates and the ignore list.
 
@@ -179,50 +433,82 @@ def _pending_payload(
     which changes only the second half, still reaches an open panel through the
     same push.
 
-    Candidates are ordered most-recently-heard first, matching the options form:
-    a long list is worked from the top, and the device the user just triggered to
-    make it transmit is the one they came here for. Timestamps go out as ISO
+    Candidates are ordered by
+    :meth:`~.coordinator.Rtl433Coordinator.pending_candidates`, which is also
+    what the options form renders, so the two surfaces cannot put a different
+    device at the top of the same list. Timestamps go out as ISO
     strings because JSON has no datetime and the panel wants to format them in the
     viewer's locale anyway. The ignore list carries a model only when one is known
     -- a device is usually ignored while pending, long before it has a stored
     record -- so the panel falls back to the key.
     """
     stored: dict[str, Any] = entry.data.get(CONF_DEVICES, {})
+    registry = _entry_registry(hass, entry)
+    meta: _EntityMeta = hass.data.get(DOMAIN, {}).get(DATA_ENTITY_META, _EMPTY_META)
     return {
         "pending": [
             {
                 "key": record.key,
                 "model": record.model,
                 "count": record.count,
-                "signal": _signal_level(record.event.fields),
+                "signal": record.signal,
                 "first_seen": record.first_seen.isoformat(),
                 "last_seen": record.last_seen.isoformat(),
-                "fields": dict(record.event.fields),
+                "readings": _readings(
+                    record.event.fields, record.model, registry, meta
+                ),
             }
-            for record in sorted(
-                coordinator.pending.values(),
-                key=lambda record: record.last_seen,
-                reverse=True,
-            )
+            for record in coordinator.pending_candidates()
         ],
         "ignored": [
             {
                 "key": device_key,
                 "model": stored.get(device_key, {}).get(CONF_MODEL, ""),
             }
-            for device_key in sorted(entry.data.get(CONF_IGNORED_DEVICES, []))
+            for device_key in sorted(_hub_ignored_devices(entry))
         ],
     }
 
 
-@callback
-def _result_payload(result: AdoptionResult) -> dict[str, list[str]]:
-    """Shape an :class:`~.adoption.AdoptionResult` as the action commands' reply.
+# The parameters every action command takes. Spread into each command's schema
+# rather than repeated, so ``entry_id`` and ``device_keys`` cannot come to mean
+# something subtly different on one of the three. The ``type`` is added per
+# command because ``websocket_command`` reads the command name out of it.
+_ACTION_PARAMS: Final[dict[Any, Any]] = {
+    vol.Required("entry_id"): str,
+    vol.Required("device_keys"): [str],
+}
 
-    Both halves are always present, even when empty, so a caller never has to
-    guard a missing key to find out that everything it asked for went through.
+
+async def _async_run_action(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+    action: Callable[
+        [HomeAssistant, ConfigEntry, Rtl433Coordinator, list[str]],
+        Awaitable[AdoptionResult],
+    ],
+) -> None:
+    """Resolve the hub, run one :mod:`.adoption` verb, and reply with the result.
+
+    The three action commands differ only in which verb they call: each resolves
+    the same ``entry_id``, hands the same ``device_keys`` to its function, and
+    replies with the same two lists. Keeping that body in one place is what makes
+    "the reply shape is identical across the three" a fact rather than a promise
+    -- there is one place to change when it moves.
+
+    Both halves of the reply are always present, even when empty, so a caller
+    never has to guard a missing key to find out that everything it asked for
+    went through.
     """
-    return {"applied": result.applied, "skipped": result.skipped}
+    resolved = _async_get_coordinator(hass, connection, msg)
+    if resolved is None:
+        return
+    entry, coordinator = resolved
+    result = await action(hass, entry, coordinator, msg["device_keys"])
+    connection.send_result(
+        msg["id"], {"applied": result.applied, "skipped": result.skipped}
+    )
 
 
 @websocket_api.websocket_command({vol.Required("type"): "rtl_433/hubs"})
@@ -278,15 +564,11 @@ def ws_pending_devices(
     if resolved is None:
         return
     entry, coordinator = resolved
-    connection.send_result(msg["id"], _pending_payload(entry, coordinator))
+    connection.send_result(msg["id"], _pending_payload(hass, entry, coordinator))
 
 
 @websocket_api.websocket_command(
-    {
-        vol.Required("type"): "rtl_433/devices/add",
-        vol.Required("entry_id"): str,
-        vol.Required("device_keys"): [str],
-    }
+    {vol.Required("type"): "rtl_433/devices/add", **_ACTION_PARAMS}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -303,20 +585,11 @@ async def ws_add_devices(
     arrived, which is the difference the panel has to be able to explain to the
     person who clicked.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
-        return
-    entry, coordinator = resolved
-    result = await async_adopt_devices(hass, entry, coordinator, msg["device_keys"])
-    connection.send_result(msg["id"], _result_payload(result))
+    await _async_run_action(hass, connection, msg, async_adopt_devices)
 
 
 @websocket_api.websocket_command(
-    {
-        vol.Required("type"): "rtl_433/devices/ignore",
-        vol.Required("entry_id"): str,
-        vol.Required("device_keys"): [str],
-    }
+    {vol.Required("type"): "rtl_433/devices/ignore", **_ACTION_PARAMS}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -330,20 +603,11 @@ async def ws_ignore_devices(
     ``skipped`` here means "already ignored" rather than "could not", so a
     double-click on a row is reported honestly without being an error.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
-        return
-    entry, coordinator = resolved
-    result = await async_ignore_devices(hass, entry, coordinator, msg["device_keys"])
-    connection.send_result(msg["id"], _result_payload(result))
+    await _async_run_action(hass, connection, msg, async_ignore_devices)
 
 
 @websocket_api.websocket_command(
-    {
-        vol.Required("type"): "rtl_433/devices/unignore",
-        vol.Required("entry_id"): str,
-        vol.Required("device_keys"): [str],
-    }
+    {vol.Required("type"): "rtl_433/devices/unignore", **_ACTION_PARAMS}
 )
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -360,12 +624,7 @@ async def ws_unignore_devices(
     off the ignore list", not "back on the pending list", and a panel should say
     so rather than waiting for a row that is not coming yet.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
-        return
-    entry, coordinator = resolved
-    result = await async_unignore_devices(hass, entry, coordinator, msg["device_keys"])
-    connection.send_result(msg["id"], _result_payload(result))
+    await _async_run_action(hass, connection, msg, async_unignore_devices)
 
 
 @websocket_api.websocket_command(
@@ -404,40 +663,49 @@ def ws_subscribe_devices(
     one callable, so closing the panel -- or the socket dropping -- takes the
     timer down with the listener and never leaves an orphaned interval firing
     against a dead connection.
+
+    The **coordinator is re-resolved on every render**, never captured. A hub
+    reload replaces the object in ``hass.data`` while the subscription lives on
+    (the config entry, and so the dispatcher signal, survive the reload), so a
+    captured coordinator would be a stopped one whose pending map never changes
+    again -- the panel would sit on a frozen list for the rest of the session
+    without ever reporting an error. Re-reading it means the first render after
+    the new coordinator lands shows what the running hub is actually hearing.
+    While the entry is mid-reload there is briefly no coordinator at all; that is
+    a gap of milliseconds with nothing truthful to say, so the render is skipped
+    and the last payload stands until the hub is back.
     """
     resolved = _async_get_coordinator(hass, connection, msg)
     if resolved is None:
         return
     entry, coordinator = resolved
 
-    last_sent: dict[str, Any] = _pending_payload(entry, coordinator)
+    last_sent: dict[str, Any] = _pending_payload(hass, entry, coordinator)
 
     @callback
-    def _push_if_changed() -> None:
-        """Re-render and send, unless nothing a subscriber can see has changed."""
+    def _push_if_changed(_now: Any = None) -> None:
+        """Re-render and send, unless nothing a subscriber can see has changed.
+
+        Serves both triggers directly. They differ in *when* they fire, not in
+        what they do, so the timer's unused tick argument is defaulted away
+        rather than absorbed by a second wrapper per trigger.
+        """
         nonlocal last_sent
-        payload = _pending_payload(entry, coordinator)
+        live: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if live is None:
+            return
+        payload = _pending_payload(hass, entry, live)
         if payload == last_sent:
             return
         last_sent = payload
         connection.send_message(websocket_api.event_message(msg["id"], payload))
 
-    @callback
-    def _on_membership_change() -> None:
-        """Handle the coordinator's membership signal: push without waiting."""
-        _push_if_changed()
-
-    @callback
-    def _on_refresh_tick(_now: Any) -> None:
-        """Handle the throttle tick: push only the drift the signal never reports."""
-        _push_if_changed()
-
     remove_signal = async_dispatcher_connect(
-        hass, signal_pending_update(entry.entry_id), _on_membership_change
+        hass, signal_pending_update(entry.entry_id), _push_if_changed
     )
     remove_timer = async_track_time_interval(
         hass,
-        _on_refresh_tick,
+        _push_if_changed,
         _REFRESH_INTERVAL,
         name=f"rtl_433 discovery refresh {entry.entry_id}",
     )
