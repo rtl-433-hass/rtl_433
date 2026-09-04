@@ -74,6 +74,7 @@ from .const import (
     signal_pending_update,
 )
 from .coordinator import Rtl433Coordinator
+from .device_replace import DeviceReplaceError, async_replace_device
 from .hub_settings import _hub_ignored_devices
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,6 +90,10 @@ _REFRESH_INTERVAL: Final = timedelta(seconds=5)
 # ``ERR_NOT_FOUND`` (no such entry) because the two need different answers: a
 # not-loaded hub is a hub to retry against or repair, not a typo.
 ERR_NOT_LOADED: Final = "not_loaded"
+# A replace the user asked for that the helper refused: an unknown survivor, or
+# the same key on both sides. Its own code rather than ``not_loaded`` so a script
+# can tell "your hub is mid-reload, retry" from "that request cannot work".
+ERR_REPLACE_FAILED: Final = "replace_failed"
 
 
 @callback
@@ -108,6 +113,8 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_add_devices)
     websocket_api.async_register_command(hass, ws_ignore_devices)
     websocket_api.async_register_command(hass, ws_unignore_devices)
+    websocket_api.async_register_command(hass, ws_replace_device)
+    websocket_api.async_register_command(hass, ws_clear_devices)
     websocket_api.async_register_command(hass, ws_subscribe_devices)
 
 
@@ -454,9 +461,7 @@ def _pending_payload(
                 "signal": record.signal,
                 "first_seen": record.first_seen.isoformat(),
                 "last_seen": record.last_seen.isoformat(),
-                "readings": _readings(
-                    record.event.fields, record.model, registry, meta
-                ),
+                "readings": _readings(record.fields, record.model, registry, meta),
             }
             for record in coordinator.pending_candidates()
         ],
@@ -466,6 +471,14 @@ def _pending_payload(
                 "model": stored.get(device_key, {}).get(CONF_MODEL, ""),
             }
             for device_key in sorted(_hub_ignored_devices(entry))
+        ],
+        # The devices this hub already has, offered as the thing a candidate can
+        # replace. Sent with the candidates rather than fetched when the dialog
+        # opens so the list cannot be stale against the card beside it: both
+        # halves of "which of these is the same hardware?" come from one payload.
+        "devices": [
+            {"key": device_key, "model": record.get(CONF_MODEL, "")}
+            for device_key, record in sorted(stored.items())
         ],
     }
 
@@ -604,6 +617,96 @@ async def ws_ignore_devices(
     double-click on a row is reported honestly without being an error.
     """
     await _async_run_action(hass, connection, msg, async_ignore_devices)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rtl_433/devices/clear",
+        vol.Required("entry_id"): str,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_clear_devices(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Forget every candidate heard so far, so the list can refill from scratch.
+
+    A receiver left running in a dense neighbourhood accumulates hundreds of
+    candidates, and the one the user came to add is somewhere in them. Clearing
+    turns the list back into a live question -- trigger the doorbell, and it is
+    the only thing on the screen.
+
+    Nothing is persisted and nothing is ignored: the pending list has always
+    been memory-only and rebuilt from live traffic, so this discards a working
+    set rather than making a decision. Every device cleared comes back on its
+    next transmission, which is precisely what makes it safe to offer as a
+    one-click button with no confirmation to read.
+
+    A device the user *has* ignored stays ignored -- that list is persisted and
+    is a decision, and this is not the control for undoing it.
+    """
+    resolved = _async_get_coordinator(hass, connection, msg)
+    if resolved is None:
+        return
+    entry, coordinator = resolved
+    cleared = len(coordinator.pending)
+    coordinator.pending.clear()
+    # A membership change, so every open panel is told at once -- including the
+    # other admin's, who is looking at a list that just emptied.
+    coordinator.emit_pending_update()
+    connection.send_result(msg["id"], {"cleared": cleared})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rtl_433/devices/replace",
+        vol.Required("entry_id"): str,
+        vol.Required("device_key"): str,
+        vol.Required("replaces"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_replace_device(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Re-point an existing device onto a candidate's identity.
+
+    The battery-swap recovery, addressed from the direction the user meets it:
+    ``device_key`` is the candidate they are looking at -- the new transmitter id
+    the hardware started using -- and ``replaces`` names the device they already
+    have, whose history, settings and entity ids should carry across to it. That
+    is the inverse of the argument order in
+    :func:`~.device_replace.async_replace_device`, which thinks in terms of the
+    survivor first, so the mapping is made explicit at the call rather than by
+    naming the parameters here to match.
+
+    Not routed through :func:`_async_run_action`: the three list-taking verbs are
+    identical to each other and this one is not one of them. It takes two single
+    keys, it cannot be batched, and it either happens or fails as a whole.
+
+    A :class:`~.device_replace.DeviceReplaceError` is a user-facing outcome -- a
+    panel held open across a reload can easily ask to replace a device that is no
+    longer there -- so it comes back as a WebSocket error the panel renders in
+    its banner, not as a traceback in the log.
+    """
+    resolved = _async_get_coordinator(hass, connection, msg)
+    if resolved is None:
+        return
+    entry, _coordinator = resolved
+    try:
+        await async_replace_device(
+            hass, entry, old_key=msg["replaces"], new_key=msg["device_key"]
+        )
+    except DeviceReplaceError as err:
+        connection.send_error(msg["id"], ERR_REPLACE_FAILED, str(err))
+        return
+    connection.send_result(msg["id"], {"replaced": msg["replaces"]})
 
 
 @websocket_api.websocket_command(

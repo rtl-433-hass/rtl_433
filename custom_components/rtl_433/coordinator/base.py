@@ -533,7 +533,13 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.devices[device_key] = event
         self.last_seen[device_key] = record.last_seen
         self.available[device_key] = True
-        field_keys = set(event.fields)
+        # Every field seen since this candidate was first heard, not just the
+        # ones in the last frame. A weather station splits its readings across
+        # frames -- wind in one, rain in the next -- so seeding from the last
+        # frame alone built half the device's entities and left the rest missing
+        # until another frame happened to carry them. That union is exactly what
+        # ``PendingDevice.fields`` is for.
+        field_keys = set(record.fields) or set(event.fields)
         self.seen_fields |= field_keys
         self.device_fields.setdefault(device_key, set()).update(field_keys)
 

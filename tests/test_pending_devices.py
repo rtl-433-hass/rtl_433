@@ -334,6 +334,31 @@ async def test_adopt_device_promotes_the_stored_event(hass, make_coordinator):
     dispatch.assert_called_once()
 
 
+async def test_adopt_device_seeds_every_field_seen_not_just_the_last_frame(
+    hass, make_coordinator
+):
+    """A device that splits its readings across frames gets all its entities.
+
+    A weather station sends wind in one frame and rain in the next. The card
+    shows both, because the candidate accumulates every field it has seen. If
+    adoption seeded from the last frame alone, the user would press Add while a
+    rain frame happened to be latest and get only the rain entities -- the rest
+    appearing minutes later, whenever a frame carrying them arrived.
+    """
+    coordinator = make_coordinator()
+    with patch(DISPATCH):
+        coordinator._on_client_event(_event(fields={"wind_avg_km_h": 12.0}))
+        coordinator._on_client_event(_event(fields={"rain_mm": 3.5}))
+
+    # The candidate remembers both, though only the newest frame is stored.
+    assert set(coordinator.pending[_KEY].fields) == {"wind_avg_km_h", "rain_mm"}
+
+    coordinator.adopt_device(_KEY)
+
+    assert coordinator.device_fields[_KEY] == {"wind_avg_km_h", "rain_mm"}
+    assert coordinator.seen_fields >= {"wind_avg_km_h", "rain_mm"}
+
+
 async def test_adopt_device_on_a_key_that_is_not_pending_creates_nothing(
     hass, make_coordinator
 ):

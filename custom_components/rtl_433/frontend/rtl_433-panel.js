@@ -30,9 +30,11 @@
  * The backend contract lives in `custom_components/rtl_433/websocket_api.py`:
  * `rtl_433/hubs` names the receivers, `rtl_433/devices/subscribe` pushes one
  * hub's `{pending, ignored}` state whenever it changes, and
- * `rtl_433/devices/add` / `.../ignore` / `.../unignore` are the three actions.
- * None of the adopt/ignore *logic* is reimplemented here; every button is one
- * command call, so the panel and the options flow cannot diverge.
+ * `rtl_433/devices/add` / `.../ignore` / `.../unignore` are the three actions,
+ * and `rtl_433/devices/replace` re-points an existing device onto a candidate.
+ * None of the adopt/ignore/replace *logic* is reimplemented here; every button
+ * is one command call, so this panel cannot drift from what the integration
+ * does.
  *
  * **Why cards rather than a table.** A candidate is judged on evidence that is
  * not columnar: how often it has been heard, how strong it was, and above all
@@ -159,6 +161,37 @@ function haControl(tag, fallback) {
 }
 
 /**
+ * One radio row, preferring Home Assistant's own.
+ *
+ * `ha-formfield` is the element core pairs a control with its label, and it is
+ * what puts the ripple, the hit area and the label-clicks-the-control behaviour
+ * on the row. Its label is plain text, so a row that wants two lines (a model
+ * over a device key) passes them as a node and lets the field wrap it.
+ */
+function haRadio(name, value, labelNode) {
+  const radio = haControl("ha-radio", () => {
+    const native = document.createElement("input");
+    native.type = "radio";
+    return native;
+  });
+  radio.name = name;
+  radio.value = value;
+  radio.className = "replace-radio";
+
+  const field = haControl("ha-formfield", () => document.createElement("label"));
+  field.className = "replace-option";
+  if (field.localName === "ha-formfield") {
+    // `ha-formfield` slots its control; the two-line text goes in the label
+    // slot so the whole row stays one click target.
+    labelNode.slot = "label";
+    field.append(radio, labelNode);
+  } else {
+    field.append(radio, labelNode);
+  }
+  return { field, radio };
+}
+
+/**
  * A button, preferring Home Assistant's own.
  *
  * `appearance`/`variant` are `ha-button`'s current styling API. The classes are
@@ -201,6 +234,13 @@ class Rtl433Panel extends HTMLElement {
     this._clock = null;
 
     this._showIgnored = false;
+
+    // The card the replace dialog was opened from, and the device chosen in it.
+    // Held on the panel rather than on the card because the dialog is one
+    // element for the whole page: a modal is singular by definition, and one
+    // per card would be dozens of hidden dialogs in the tree.
+    this._replaceFor = null;
+    this._replaceChoice = "";
 
     // Device keys with a command in flight, so their buttons can be disabled.
     this._busy = new Set();
@@ -588,6 +628,71 @@ class Rtl433Panel extends HTMLElement {
   // -- DOM -------------------------------------------------------------------
 
   /**
+   * The replace dialog, preferring Home Assistant's own.
+   *
+   * `ha-dialog` brings the chrome a user recognises: the header with its close
+   * control, the scrim, the card shape, and the full-screen treatment on a
+   * phone. A hand-rolled `<dialog>` gets none of that and has to approximate all
+   * of it in CSS, which is what made this one read as somebody else's UI.
+   *
+   * Its actions go in the `footer` slot -- checked against a running frontend,
+   * along with the two behaviours below, because neither is guessable:
+   *
+   * * dismissing it emits `closed` (`wa-hide` / `wa-after-hide` are the Web
+   *   Awesome element underneath talking to itself), and
+   * * `open` stays **true** after a dismiss. It has to be set back to false, or
+   *   the next `open = true` is a no-op and the dialog never reappears.
+   *
+   * The native `<dialog>` stays as the fallback. It is genuinely good at this --
+   * the platform gives focus trapping, Esc and a backdrop for free -- so where
+   * `ha-dialog` is missing the page keeps a working dialog rather than losing
+   * the feature.
+   */
+  _buildReplaceDialog(slot) {
+    const dialog = haControl("ha-dialog", () => {
+      const native = document.createElement("dialog");
+      native.innerHTML = `
+        <form method="dialog" class="replace-form">
+          <h2 class="replace-title">Replace a device</h2>
+          <p class="replace-intro"></p>
+          <div class="replace-list" role="radiogroup" aria-label="Device to replace"></div>
+          <div class="replace-actions"></div>
+        </form>`;
+      return native;
+    });
+    dialog.className = "replace-dialog";
+
+    if (dialog.localName === "ha-dialog") {
+      dialog.hass = this._hass;
+      // The heading is the element's own, so the fallback's <h2> is not needed.
+      dialog.headerTitle = "Replace a device";
+      const intro = document.createElement("p");
+      intro.className = "replace-intro";
+      const list = document.createElement("div");
+      list.className = "replace-list";
+      list.setAttribute("role", "radiogroup");
+      list.setAttribute("aria-label", "Device to replace");
+      const actions = document.createElement("div");
+      actions.className = "replace-actions";
+      actions.slot = "footer";
+      dialog.append(intro, list, actions);
+    }
+
+    slot.append(dialog);
+    return dialog;
+  }
+
+  /** Show the replace dialog, whichever element is standing in for it. */
+  _showReplaceDialog() {
+    const dialog = this._el.dialog;
+    if (dialog.localName === "ha-dialog") {
+      dialog.open = true;
+      return;
+    }
+    dialog.showModal();
+  }
+
+  /**
    * The problem banner, preferring `ha-alert`.
    *
    * `ha-alert` is the element every core panel uses to say something went
@@ -653,7 +758,25 @@ class Rtl433Panel extends HTMLElement {
         return toggle;
       })(),
       ignoredGrid: root.querySelector(".ignored-grid"),
+      dialog: this._buildReplaceDialog(root.querySelector(".replace-slot")),
+      dialogIntro: root.querySelector(".replace-intro"),
+      dialogList: root.querySelector(".replace-list"),
+      dialogActions: root.querySelector(".replace-actions"),
+      dialogCancel: null,
+      dialogConfirm: null,
     };
+    // Built rather than templated so they can be Home Assistant's own buttons.
+    // Cancel is `plain` and Replace `accent`: that is the weighting core gives a
+    // dialog's dismiss-versus-commit pair, and Replace starts disabled because
+    // the dialog opens with nothing chosen.
+    this._el.dialogCancel = haButton("Cancel", "ghost replace-cancel", "plain");
+    this._el.dialogConfirm = haButton(
+      "Replace",
+      "primary replace-confirm",
+      "accent"
+    );
+    this._el.dialogConfirm.disabled = true;
+    this._el.dialogActions.append(this._el.dialogCancel, this._el.dialogConfirm);
 
     // Which event a select fires on a pick is exactly the sort of detail that
     // has changed upstream before, so every plausible one is listened for and
@@ -675,6 +798,25 @@ class Rtl433Panel extends HTMLElement {
       this._showIgnored = !this._showIgnored;
       this._render();
     });
+
+    this._el.dialogCancel.addEventListener("click", () => this._closeReplace());
+    this._el.dialogConfirm.addEventListener("click", () => this._confirmReplace());
+    // Esc and the backdrop both close a native dialog on their own; this keeps
+    // the panel's own state from surviving a close it did not initiate.
+    // `close` is the native element's; `closed` is ha-dialog's. Listening for
+    // both keeps one handler for either, and the handler forces `open` back to
+    // false because ha-dialog leaves it true after a dismiss -- without that the
+    // next open is a no-op and the dialog never returns.
+    const onClosed = () => {
+      if (this._el.dialog.localName === "ha-dialog") {
+        this._el.dialog.open = false;
+      }
+      this._replaceFor = null;
+      this._replaceChoice = "";
+    };
+    for (const name of ["close", "closed"]) {
+      this._el.dialog.addEventListener(name, onClosed);
+    }
   }
 
   _renderHubPicker() {
@@ -841,6 +983,7 @@ class Rtl433Panel extends HTMLElement {
     element
       .querySelector(".device-actions")
       .append(
+        haButton("Replace", "ghost replace"),
         haButton("Ignore", "ghost ignore"),
         haButton("Add", "primary add", "accent")
       );
@@ -856,6 +999,7 @@ class Rtl433Panel extends HTMLElement {
       link: element.querySelector(".device-link"),
       add: element.querySelector(".add"),
       ignore: element.querySelector(".ignore"),
+      replace: element.querySelector(".replace"),
       // Keyed like `_deviceCards`, so the readings reconcile through the same
       // helper the cards do rather than through a second implementation.
       readingRows: new Map(),
@@ -870,6 +1014,9 @@ class Rtl433Panel extends HTMLElement {
 
     this._buildAreaControl(parts);
     parts.add.addEventListener("click", () => this._addDevice(element.card.row));
+    parts.replace.addEventListener("click", () =>
+      this._openReplaceDialog(element.card.row)
+    );
     parts.ignore.addEventListener("click", () =>
       this._act(
         "rtl_433/devices/ignore",
@@ -944,8 +1091,12 @@ class Rtl433Panel extends HTMLElement {
     const busy = this._busy.has(card.key);
     parts.add.hidden = card.added;
     parts.ignore.hidden = card.added;
+    // Replace needs something to replace. On a hub whose first device this is,
+    // the button would open a dialog with an empty list, so it is not offered.
+    parts.replace.hidden = card.added || !this._replaceTargets().length;
     parts.add.disabled = busy;
     parts.ignore.disabled = busy;
+    parts.replace.disabled = busy;
   }
 
   /**
@@ -1068,6 +1219,133 @@ class Rtl433Panel extends HTMLElement {
     return control ? control.value : undefined;
   }
 
+  // -- Replace ---------------------------------------------------------------
+
+  /**
+   * The devices this candidate could be standing in for.
+   *
+   * Everything the hub already has, minus the candidate itself -- a device
+   * cannot replace itself, and `async_replace_device` rejects that anyway.
+   */
+  _replaceTargets(exceptKey) {
+    const devices = this._data && this._data.devices ? this._data.devices : [];
+    return exceptKey ? devices.filter((d) => d.key !== exceptKey) : devices;
+  }
+
+  /**
+   * Open the replace dialog for one candidate.
+   *
+   * The dialog element itself is built by `_buildReplaceDialog`, which prefers
+   * Home Assistant's own; this method only fills it and shows it.
+   *
+   * Same-model devices are listed first. A battery change keeps the model, so
+   * the device the user is looking for is nearly always one of those; the rest
+   * stay listed because a model string can change between firmware revisions of
+   * the same hardware.
+   */
+  _openReplaceDialog(row) {
+    const targets = this._replaceTargets(row.key);
+    if (!targets.length) {
+      return;
+    }
+    this._replaceFor = row;
+    this._replaceChoice = "";
+
+    const model = row.model || "";
+    const sorted = [...targets].sort((left, right) => {
+      const leftMatch = model && left.model === model ? 0 : 1;
+      const rightMatch = model && right.model === model ? 0 : 1;
+      if (leftMatch !== rightMatch) {
+        return leftMatch - rightMatch;
+      }
+      return left.key < right.key ? -1 : left.key > right.key ? 1 : 0;
+    });
+
+    this._text(
+      this._el.dialogIntro,
+      `${row.model || "This device"} (${row.key}) is new to Home Assistant. ` +
+        "If it is a device you already have — the same sensor after a battery " +
+        "change, say — pick it below. Its history, settings and entity ids move " +
+        "across to the new transmitter id, and the candidate is merged into it."
+    );
+
+    this._el.dialogList.textContent = "";
+    for (const target of sorted) {
+      const text = document.createElement("span");
+      text.className = "replace-option-text";
+      const name = document.createElement("span");
+      name.className = "replace-option-name";
+      name.textContent = target.model || "Unknown model";
+      const key = document.createElement("span");
+      key.className = "replace-option-key mono";
+      key.textContent = target.key;
+      text.append(name, key);
+
+      const { field, radio } = haRadio("replace-target", target.key, text);
+      // `change` is what both the borrowed radio and the native one fire on a
+      // pick, and picking is the only thing that enables Replace: the dialog
+      // opens with no choice made, so there is nothing safe to default to.
+      radio.addEventListener("change", () => {
+        this._replaceChoice = target.key;
+        this._el.dialogConfirm.disabled = false;
+      });
+      this._el.dialogList.append(field);
+    }
+
+    this._el.dialogConfirm.disabled = true;
+    this._showReplaceDialog();
+  }
+
+  _closeReplace() {
+    const dialog = this._el.dialog;
+    if (!dialog.open) {
+      return;
+    }
+    if (dialog.localName === "ha-dialog") {
+      // Setting `open` false is the dismiss; the `closed` handler still runs.
+      dialog.open = false;
+      return;
+    }
+    dialog.close();
+  }
+
+  /**
+   * Run the replace the dialog was opened to make.
+   *
+   * The card disappears on its own: the merge reloads the entry, which rebuilds
+   * the pending list without this candidate in it, and that arrives as an
+   * ordinary push. Nothing is hidden optimistically here -- the panel shows what
+   * the hub says.
+   */
+  async _confirmReplace() {
+    const row = this._replaceFor;
+    const target = this._replaceChoice;
+    if (!row || !target) {
+      return;
+    }
+    this._closeReplace();
+    this._busy.add(row.key);
+    this._banner = null;
+    this._render();
+    try {
+      await this._call({
+        type: "rtl_433/devices/replace",
+        entry_id: this._entryId,
+        device_key: row.key,
+        replaces: target,
+      });
+      this._setBanner(
+        `${target} now uses the transmitter id ${row.key}. Its history and settings came with it.`,
+        "notice"
+      );
+    } catch (error) {
+      this._setBanner(describeError(error), "error");
+    } finally {
+      this._busy.delete(row.key);
+      this._render();
+    }
+  }
+
   _createIgnoredCard(row) {
     const element = document.createElement("div");
     element.className = "device-card ignored";
@@ -1136,6 +1414,8 @@ const SKELETON = `
   <div class="list-actions"></div>
 
   <div class="grid ignored-grid" hidden></div>
+
+  <div class="replace-slot"></div>
 `;
 
 /*
@@ -1367,6 +1647,70 @@ const STYLES = `
     outline-offset: 2px;
   }
   .ignored-toggle { margin: 0 0 16px; }
+
+  /*
+   * The replace dialog. A native <dialog>, so the backdrop, the stacking and
+   * the focus trap are the platform's; only the surface needs dressing, in the
+   * same tokens as the cards.
+   */
+  /*
+   * Only the native fallback is styled. ha-dialog brings its own surface,
+   * radius, scrim and phone treatment, and painting over them from out here is
+   * how a borrowed dialog ends up looking like neither one thing nor the other.
+   */
+  dialog.replace-dialog {
+    padding: 0;
+    border: none;
+    border-radius: var(--ha-card-border-radius, 12px);
+    background: var(--card-background-color, #ffffff);
+    color: var(--primary-text-color, #212121);
+    max-width: 480px;
+    width: calc(100vw - 32px);
+  }
+  dialog.replace-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+  /* The borrowed dialog only needs its body to breathe like core's do. */
+  ha-dialog.replace-dialog .replace-list { margin-top: 8px; }
+  .replace-form {
+    margin: 0;
+    padding: 20px;
+    font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif);
+    font-size: 14px;
+  }
+  .replace-title { margin: 0 0 8px; font-size: 20px; font-weight: 400; }
+  .replace-intro {
+    margin: 0 0 16px;
+    color: var(--secondary-text-color, #727272);
+  }
+  .replace-list {
+    max-height: 45vh;
+    overflow-y: auto;
+    margin-bottom: 16px;
+  }
+  ha-formfield.replace-option {
+    display: flex;
+    width: 100%;
+    padding: 4px 0;
+  }
+  label.replace-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 4px;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .replace-option:hover { background: var(--secondary-background-color, #f5f5f5); }
+  .replace-option-text { display: flex; flex-direction: column; }
+  .replace-option-key {
+    font-size: 12px;
+    color: var(--secondary-text-color, #727272);
+    overflow-wrap: anywhere;
+  }
+  .replace-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
 `;
 
 // Guarded because a panel module can be evaluated more than once in a

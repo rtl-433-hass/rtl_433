@@ -107,6 +107,7 @@ _ENTRY_COMMANDS = [
     "rtl_433/devices/add",
     "rtl_433/devices/ignore",
     "rtl_433/devices/unignore",
+    "rtl_433/devices/clear",
     "rtl_433/devices/subscribe",
 ]
 _ALL_COMMANDS = ["rtl_433/hubs", *_ENTRY_COMMANDS]
@@ -490,6 +491,103 @@ async def test_a_field_with_no_library_mapping_is_not_previewed(
     assert "not_a_real_field" not in readings
 
 
+async def test_replace_repoints_an_existing_device_onto_a_candidate(
+    hass, hub, hass_ws_client
+):
+    """The battery-swap recovery, driven from the candidate the user is looking at.
+
+    ``device_key`` is the new transmitter id heard on the air and ``replaces``
+    is the device already in Home Assistant whose history should survive, which
+    is the inverse of :func:`async_replace_device`'s own argument order -- so
+    this pins the mapping, not just the outcome. A silent swap of the two would
+    re-key the wrong device and strand exactly the history the feature exists to
+    keep.
+    """
+    client = await hass_ws_client(hass)
+    await _call(
+        client,
+        {
+            "type": "rtl_433/devices/add",
+            "entry_id": hub.entry_id,
+            "device_keys": [_OLD_KEY],
+        },
+    )
+    await hass.async_block_till_done()
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/devices/replace",
+            "entry_id": hub.entry_id,
+            "device_key": _NEW_KEY,
+            "replaces": _OLD_KEY,
+        },
+    )
+
+    assert reply["success"]
+    assert reply["result"] == {"replaced": _OLD_KEY}
+    # The survivor now lives under the candidate's key, and the old one is gone.
+    stored = hub.data[CONF_DEVICES]
+    assert _NEW_KEY in stored
+    assert _OLD_KEY not in stored
+
+
+async def test_replace_reports_a_refused_request_as_an_error(hass, hub, hass_ws_client):
+    """A replace the helper refuses comes back as an error, not a traceback.
+
+    A panel is held open across reloads and adoptions, so asking to replace a
+    device that is no longer there is an ordinary stale-UI outcome. It carries
+    its own error code so a caller can tell it from "the hub is not loaded",
+    which is retryable and this is not.
+    """
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/devices/replace",
+            "entry_id": hub.entry_id,
+            "device_key": _NEW_KEY,
+            "replaces": "Nothing-Like-This-99",
+        },
+    )
+
+    assert not reply["success"]
+    assert reply["error"]["code"] == "replace_failed"
+
+
+async def test_the_payload_lists_the_devices_a_candidate_could_replace(
+    hass, hub, hass_ws_client
+):
+    """The hub's own devices ride along with the candidates.
+
+    The replace dialog is built from this list, and it travels in the same
+    payload as the cards so the two halves of "which of these is the same
+    hardware?" can never disagree about what the hub has.
+    """
+    client = await hass_ws_client(hass)
+    await _call(
+        client,
+        {
+            "type": "rtl_433/devices/add",
+            "entry_id": hub.entry_id,
+            "device_keys": [_OLD_KEY],
+        },
+    )
+    await hass.async_block_till_done()
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+    )
+
+    devices = {row["key"]: row for row in reply["result"]["devices"]}
+    assert _OLD_KEY in devices
+    assert devices[_OLD_KEY]["model"] == "Acurite-606TX"
+    # An adopted device is no longer a candidate, so it appears in exactly one
+    # of the two lists.
+    assert _OLD_KEY not in {row["key"] for row in reply["result"]["pending"]}
+
+
 # --------------------------------------------------------------------------- #
 # The three actions.                                                          #
 # --------------------------------------------------------------------------- #
@@ -618,6 +716,76 @@ async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
     _hear(coordinator, _MID_FRAME)
     await hass.async_block_till_done()
     assert _MID_KEY in coordinator.pending
+
+
+async def test_clear_empties_the_list_without_undoing_any_decision(
+    hass, hub, hass_ws_client
+):
+    """Clearing forgets candidates, keeps ignores, and refills from live traffic.
+
+    The button exists because a receiver in a dense neighbourhood ends up with
+    hundreds of candidates and the one the user came to add is lost among them.
+    Clearing turns the list back into a live question, so the three things worth
+    pinning down are: the count reported back matches what was on screen, an open
+    panel is repainted at once, and nothing the user actually *decided* is undone
+    -- an ignored device stays ignored, because that list is persisted and this is
+    not the control for changing it.
+
+    The last step is what makes clearing safe to offer with no confirmation: the
+    pending list has always been memory-only, so a cleared device comes straight
+    back on its next transmission.
+    """
+    client = await hass_ws_client(hass)
+    coordinator = _coordinator(hass, hub)
+
+    # Ignore one candidate first, so the clear has a decision to leave alone.
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/devices/ignore",
+            "entry_id": hub.entry_id,
+            "device_keys": [_MID_KEY],
+        },
+    )
+    assert reply["success"]
+
+    await client.send_json_auto_id(
+        {"type": "rtl_433/devices/subscribe", "entry_id": hub.entry_id}
+    )
+    ack = await client.receive_json()
+    assert ack["success"]
+    snapshot = await client.receive_json()
+    listed = [row["key"] for row in snapshot["event"]["pending"]]
+    assert listed == [_NEW_KEY, _OLD_KEY]
+
+    reply, events = await _call(
+        client, {"type": "rtl_433/devices/clear", "entry_id": hub.entry_id}
+    )
+    # The count is what the user was looking at, so the panel can say "cleared 2".
+    assert reply["result"] == {"cleared": len(listed)}
+    assert coordinator.pending == {}
+    assert events, "clearing the list must repaint an open panel"
+    assert events[-1]["event"]["pending"] == []
+
+    # The ignore list is a persisted decision and is left exactly as it was.
+    assert events[-1]["event"]["ignored"] == [{"key": _MID_KEY, "model": ""}]
+    assert hub.data[CONF_IGNORED_DEVICES] == [_MID_KEY]
+    assert coordinator.ignored == {_MID_KEY}
+
+    # Nothing was persisted, so the next transmission re-lists the candidate --
+    # while the ignored one stays dropped.
+    _hear(coordinator, _NEW_FRAME)
+    _hear(coordinator, _MID_FRAME)
+    await hass.async_block_till_done()
+    assert _NEW_KEY in coordinator.pending
+    assert _MID_KEY not in coordinator.pending
+
+    # Clearing an already-empty list is a no-op that reports it honestly.
+    coordinator.pending.clear()
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/clear", "entry_id": hub.entry_id}
+    )
+    assert reply["result"] == {"cleared": 0}
 
 
 async def test_hubs_lists_every_configured_receiver_loaded_or_not(
