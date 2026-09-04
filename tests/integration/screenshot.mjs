@@ -281,11 +281,29 @@ async function openPanel(page, { cards = 1, tries = 30, path = "" } = {}) {
 // forms have lost their entry point, which is the failure mode this page
 // exists to avoid -- so it is said loudly rather than captured blank.
 async function openPanelSettings(page, rowClass) {
-  await inPanel(
-    page,
-    `(panel, cls) => panel.shadowRoot.querySelector(cls).click()`,
-    rowClass,
-  );
+  // The rows are not in the skeleton: they are built once `rtl_433/hubs`
+  // answers. Clicking before then would be a click on `null`, and the
+  // TypeError would come back out of `page.evaluate` and abort the whole run
+  // with a stack trace -- instead of the warning below, which is the thing
+  // this page is here to report.
+  let clicked = false;
+  for (let i = 0; i < 20 && !clicked; i++) {
+    clicked = await inPanel(
+      page,
+      `(panel, cls) => {
+        const row = panel.shadowRoot.querySelector(cls);
+        if (!row) return false;
+        row.click();
+        return true;
+      }`,
+      rowClass,
+    );
+    if (clicked !== true) await page.waitForTimeout(1000);
+  }
+  if (clicked !== true) {
+    console.log(`screenshot: WARNING ${rowClass} never appeared to click`);
+    return false;
+  }
   for (let i = 0; i < 20; i++) {
     const ready = await inPanel(
       page,

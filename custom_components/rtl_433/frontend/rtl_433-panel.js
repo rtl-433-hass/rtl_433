@@ -99,6 +99,47 @@ const VIEWS = {
   mappings: { view: "settings", title: "Device mappings", form: "mappings" },
 };
 
+/**
+ * The view definition for one path segment, falling back to the overview.
+ *
+ * `hasOwnProperty` rather than a plain lookup: `VIEWS` is an object literal, so
+ * `/rtl_433/toString` (or `constructor`, or `valueOf`) would otherwise find
+ * something on `Object.prototype` -- truthy, but with no `view` on it, which
+ * hides every view and puts the word "undefined" in the toolbar. Any ordinary
+ * unknown segment already fell back to the overview correctly; those few names
+ * were the exception.
+ */
+export function viewFor(segment) {
+  return Object.prototype.hasOwnProperty.call(VIEWS, segment)
+    ? VIEWS[segment]
+    : VIEWS[""];
+}
+
+/**
+ * Whether the back arrow still owes the browser an unwind, after a route change.
+ *
+ * Moving from the overview into a subview always leaves the overview one entry
+ * behind us -- whoever drove it: a row click, the frontend router, or the
+ * browser's Forward button after a Back. Landing back on the overview means
+ * there is nothing left to unwind.
+ *
+ * `seen` is false for the very first path the panel is handed, which is an
+ * arrival rather than a move: a bookmarked or typed subview URL has no overview
+ * behind it, and going back from one would leave the panel entirely.
+ */
+export function pushedAfter(previous, next, pushed, seen) {
+  if (!seen) {
+    return pushed;
+  }
+  if (next && !previous) {
+    return true;
+  }
+  if (!next) {
+    return false;
+  }
+  return pushed;
+}
+
 /** mdiDevices, mdiShape: the overview's row icons. */
 const ICON_DEVICES =
   "M3 6h18V4H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4v-2H3V6m10 6H9v1.78c-.61.55-1 1.33-1 2.22s.39 1.67 1 2.22V20h4v-1.78c.61-.55 1-1.33 1-2.22s-.39-1.67-1-2.22V12m-2 5.5a1.5 1.5 0 0 1 0-3 1.5 1.5 0 0 1 0 3M22 8h-6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1m-1 10h-4v-8h4v8Z";
@@ -324,6 +365,9 @@ class Rtl433Panel extends HTMLElement {
     // Whether this panel pushed a history entry to reach the view it is on,
     // and therefore owes an unwind when it goes back up.
     this._pushed = false;
+    // No route has been assigned yet, so the first one is an arrival
+    // rather than a move (see `_readPath`).
+    this._routeSeen = false;
     // The brands access token, fetched once for the status card's logo.
     this._brandToken = null;
     // The path segment this panel is showing, from `route`. Empty is the
@@ -334,6 +378,9 @@ class Rtl433Panel extends HTMLElement {
     // Which receiver the cached settings payload belongs to, so a page for a
     // different one refetches rather than showing the wrong hub's values.
     this._settingsFor = null;
+    // The form + receiver whose payload has been asked for, so a repaint does
+    // not ask again (see `_openSettings`).
+    this._settingsAttempt = null;
     this._narrow = false;
     // `null` until the first payload lands, which distinguishes "still loading"
     // from "loaded, and there is genuinely nothing here" -- different things to
@@ -463,7 +510,20 @@ class Rtl433Panel extends HTMLElement {
    */
   _readPath(path) {
     const [segment, entry] = path.split("/");
-    this._segment = segment || "";
+    const next = segment || "";
+    // Whether the back arrow should unwind a history entry or replace one is a
+    // fact about how we got here, so it is decided on every route change rather
+    // than only in the few places that navigate -- the browser's Forward button
+    // is a route change this panel never sees as a navigation. See
+    // `pushedAfter`.
+    this._pushed = pushedAfter(
+      this._segment,
+      next,
+      this._pushed,
+      this._routeSeen
+    );
+    this._routeSeen = true;
+    this._segment = next;
     this._segmentEntry = entry || null;
   }
 
@@ -550,7 +610,7 @@ class Rtl433Panel extends HTMLElement {
 
   /** The view definition for the current path, falling back to the overview. */
   _viewFor() {
-    return VIEWS[this._segment] || VIEWS[""];
+    return viewFor(this._segment);
   }
 
   connectedCallback() {
@@ -572,11 +632,6 @@ class Rtl433Panel extends HTMLElement {
         this._readPath(
           window.location.pathname.slice(prefix.length).replace(/^\//, "")
         );
-        // Landing back on the overview means any entry this panel pushed has
-        // been unwound by the browser, so there is nothing left to owe.
-        if (!this._segment) {
-          this._pushed = false;
-        }
         if (this._el) {
           this._render();
         }
@@ -1592,7 +1647,8 @@ class Rtl433Panel extends HTMLElement {
       // Fetching the payload is asynchronous, so this is fired and forgotten:
       // it re-renders on its own when the form is built.
       this._openSettings(view.form);
-    } else if (this._settingsForm) {
+    } else if (this._settingsForm || this._settingsAttempt) {
+      this._settingsAttempt = null;
       this._settingsForm = null;
       this._settingsData = null;
       // Dropped so the next visit builds a fresh form: the schema it needs
@@ -2161,9 +2217,25 @@ class Rtl433Panel extends HTMLElement {
    */
   async _openSettings(kind) {
     const entryId = this._settingsEntryId();
-    if (!entryId || (this._settingsForm === kind && this._settingsFor === entryId)) {
+    if (!entryId) {
       return;
     }
+    // `_render` calls this on every repaint, and there are a lot of those: each
+    // push from the receiver, plus the clock tick. So the attempt is claimed
+    // here, *before* the fetch, rather than after the form is built. Claiming
+    // it afterwards meant a slow fetch was started again underneath itself --
+    // and when the second reply landed it rebuilt the form and threw away
+    // whatever had been typed in the meantime -- while a failed one was retried
+    // on every repaint for as long as the user sat on the page.
+    //
+    // A failed attempt stays claimed so the error the user is reading holds
+    // still. Leaving the settings view releases it, which is what makes going
+    // back and opening the form again the way to retry.
+    const attempt = `${kind}:${entryId}`;
+    if (this._settingsAttempt === attempt) {
+      return;
+    }
+    this._settingsAttempt = attempt;
     this._el.settingsProblem.hidden = true;
     // A cached payload belongs to the receiver it was fetched for; opening a
     // different one has to refetch or the form would show another hub's values
@@ -2897,6 +2969,8 @@ const SKELETON = `
 
   <div class="banner-slot"></div>
 
+  <div class="status" hidden></div>
+
   <div class="view view-overview">
     <label class="hub-picker" hidden>
       <span>Receiver</span>
@@ -2915,8 +2989,6 @@ const SKELETON = `
         Devices will show up here once discovered.
       </div>
     </div>
-
-    <div class="status" hidden></div>
 
     <div class="grid" hidden></div>
 
