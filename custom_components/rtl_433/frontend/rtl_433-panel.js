@@ -3278,23 +3278,28 @@ const STYLES = `
    */
   .view-overview, .view-settings { max-width: 800px; margin: 0 auto; }
   /*
-   * One gap rule for the whole column, rather than a margin on each thing that
-   * happens to sit in it. Every card on the overview is then spaced the same,
-   * including the second and third receiver's settings cards -- which had no
-   * margin of their own and sat flush against each other.
+   * One spacing rule for the whole column, rather than a margin on each thing
+   * that happens to sit in it. Every card on the overview is then spaced the
+   * same, including the second and third receiver's settings cards -- which had
+   * no margin of their own and sat flush against each other.
+   *
+   * A margin between siblings rather than a flex gap, deliberately: the views
+   * are handed their display by ".view" / ".view[hidden]" further down, and a
+   * "display: flex" up here loses to them on source order and silently does
+   * nothing -- which is exactly how this page ended up with no spacing at all.
+   * A margin needs no display of its own, so it cannot be overruled that way.
    *
    * 16px is what Home Assistant's own integration pages put between cards, so
    * this page keeps step with the Zigbee and Z-Wave ones either side of it.
    */
-  .view-overview, .page-actions {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+  .view-overview > * + *,
+  .page-actions > * + * {
+    margin-top: 16px;
   }
   /*
-   * The FAB is fixed to the viewport, so its wrapper is only in the flow long
-   * enough to add a trailing gap. Setting it to display:contents takes the
-   * wrapper back out, leaving the fixed button exactly where it was.
+   * The FAB is fixed to the viewport, so its wrapper only ever sat in the flow
+   * to collect a trailing margin. Setting it to display:contents generates no
+   * box for it at all, leaving the fixed button exactly where it was.
    */
   .fab-slot { display: contents; }
   .settings-card-slot {
