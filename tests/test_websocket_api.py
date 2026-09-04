@@ -1363,18 +1363,39 @@ async def test_settings_get_answers_with_what_the_three_forms_render(
     assert result["mappings_docs_url"].startswith("https://")
 
 
-async def test_the_hub_default_timeout_is_dropped_rather_than_stored(
+async def test_the_hub_timeout_is_dropped_only_when_the_panel_says_none(
     hass, settings_hub, hass_ws_client
 ):
-    """Saving the plain default stores no timeout; any other value is kept.
+    """``None`` stores no timeout; every number is kept, the plain default too.
 
-    Persisting the default as an *explicit* hub-wide timeout would mask the
-    per-device-class defaults, and the device that suffers is the one that
-    should never expire on silence: a doorbell that has not rung in ten minutes
-    is not unavailable, it is a doorbell. So the sentinel is dropped, and ``0``
-    -- "never expire", a deliberate choice that happens to be falsy -- is not.
+    Storing a timeout where the user meant "use the per-device-type defaults"
+    would mask those defaults, and the device that suffers is the one that should
+    never expire on silence: a doorbell that has not rung in ten minutes is not
+    unavailable, it is a doorbell. So "defaults" is said outright, as ``None``,
+    and dropped.
+
+    What is *not* dropped is a number that happens to equal
+    :data:`DEFAULT_AVAILABILITY_TIMEOUT`. Reading that as "defaults" made it the
+    one value the form could not store -- and, a ten-minute default being what it
+    is, the value someone setting a ten-minute timeout would type. ``0`` --
+    "never expire", a deliberate choice that happens to be falsy -- is kept for
+    the same reason.
     """
     client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/settings/hub",
+            "entry_id": settings_hub.entry_id,
+            CONF_AVAILABILITY_TIMEOUT: None,
+            CONF_MANAGE_SETTINGS: True,
+        },
+    )
+    await hass.async_block_till_done()
+    assert reply["success"] is True
+    assert CONF_AVAILABILITY_TIMEOUT not in settings_hub.options
+    assert settings_hub.options[CONF_MANAGE_SETTINGS] is True
 
     reply, _ = await _call(
         client,
@@ -1387,8 +1408,17 @@ async def test_the_hub_default_timeout_is_dropped_rather_than_stored(
     )
     await hass.async_block_till_done()
     assert reply["success"] is True
-    assert CONF_AVAILABILITY_TIMEOUT not in settings_hub.options
-    assert settings_hub.options[CONF_MANAGE_SETTINGS] is True
+    assert settings_hub.options[CONF_AVAILABILITY_TIMEOUT] == (
+        DEFAULT_AVAILABILITY_TIMEOUT
+    )
+    # And it reads back as a set value, so the form reopens on it rather than on
+    # "defaults" -- which is what would silently undo it on the next save.
+    reply, _ = await _call(
+        client, {"type": "rtl_433/settings/get", "entry_id": settings_hub.entry_id}
+    )
+    assert reply["result"]["hub"][CONF_AVAILABILITY_TIMEOUT] == (
+        DEFAULT_AVAILABILITY_TIMEOUT
+    )
 
     reply, _ = await _call(
         client,

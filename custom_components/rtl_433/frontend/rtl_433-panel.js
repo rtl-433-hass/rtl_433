@@ -156,6 +156,59 @@ const ICON_MAPPINGS =
 /** mdiPlus, for the floating action button. */
 const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
 
+/** mdiContentSave, for the settings pages' save button. */
+const ICON_SAVE =
+  "M15 9H5V5h10m-3 14a3 3 0 0 1-3-3 3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3m5-16H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4Z";
+
+/**
+ * How the hub's availability timeout is chosen, as three named choices.
+ *
+ * The timeout has three states and only one of them is a number: "let each
+ * device type decide", "never expire", and a count of seconds. A bare number
+ * field can only spell the first two as magic values -- and it did, which made
+ * the plain default unstorable and turned a typed 600 into "defaults" without
+ * saying so. Naming them means the number field means exactly what it says.
+ */
+const TIMEOUT_MODES = [
+  { value: "defaults", label: "Per-device-type defaults" },
+  { value: "never", label: "Never expire" },
+  { value: "custom", label: "A fixed timeout" },
+];
+
+/**
+ * Which of `TIMEOUT_MODES` a stored hub timeout is in.
+ *
+ * `null` is "nothing stored", which is what leaves the per-device-type defaults
+ * in charge; `0` is the stored value that means never-expire. Every other number
+ * is a timeout the user chose, `DEFAULT_AVAILABILITY_TIMEOUT` included -- the
+ * backend stores that like any other now, so it must not read back as "unset".
+ */
+export function timeoutMode(explicit) {
+  if (explicit === null || explicit === undefined) {
+    return "defaults";
+  }
+  return explicit === 0 ? "never" : "custom";
+}
+
+/**
+ * What to send for a mode and the seconds beside it: `null`, `0`, or a count.
+ *
+ * A blank or unparseable custom field falls back to `null` rather than to a
+ * number of its own: "defaults" is the state the hub was in before anyone opened
+ * the form, so an empty field cannot silently pin a timeout onto every device.
+ */
+export function timeoutValue(mode, seconds) {
+  if (mode === "never") {
+    return 0;
+  }
+  if (mode !== "custom") {
+    return null;
+  }
+  return typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0
+    ? seconds
+    : null;
+}
+
 /** mdiCheckCircle / mdiAlertCircle: the status card's two states. */
 const ICON_ONLINE =
   "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9Z";
@@ -1157,10 +1210,14 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * The floating action button that opens the discovery page.
+   * A floating action button: the one thing you came to this page to do.
    *
-   * Zigbee and Z-Wave both put the one thing you came to do in a floating
-   * button rather than a row, and adopting a device is that thing here.
+   * Zigbee and Z-Wave both put that in a floating button rather than a row --
+   * adopting a device on the overview, and committing the form on a settings
+   * page, which is core's own editor pattern. Floating rather than sitting at
+   * the end of the page because a two-field form leaves the button stranded
+   * halfway up a phone screen, and a long one pushes it off the bottom; fixed,
+   * it is in the same place either way.
    *
    * `ha-fab` is not registered in this frontend -- checked, not assumed -- so
    * this is built from `ha-button`, which is, using the pill shape and accent
@@ -1168,27 +1225,27 @@ class Rtl433Panel extends HTMLElement {
    * because a floating button has to be placed by whatever owns the scroll
    * area, and here that is the panel.
    */
-  _buildFab(slot) {
+  _buildFab(slot, { label, icon, onClick }) {
     const fab = haControl("ha-fab", () =>
-      haButton("Add or replace device", "fab-button", "accent")
+      haButton(label, "fab-button", "accent")
     );
     fab.classList.add("panel-fab");
     if (fab.localName === "ha-fab") {
-      fab.label = "Add or replace device";
+      fab.label = label;
       fab.extended = true;
     } else if (fab.localName === "ha-button") {
       fab.size = "large";
       fab.pill = true;
-      const plus = haControl("ha-svg-icon", () =>
+      const glyph = haControl("ha-svg-icon", () =>
         document.createElement("span")
       );
-      plus.slot = "start";
-      if (plus.localName === "ha-svg-icon") {
-        plus.path = ICON_PLUS;
+      glyph.slot = "start";
+      if (glyph.localName === "ha-svg-icon") {
+        glyph.path = icon;
       }
-      fab.prepend(plus);
+      fab.prepend(glyph);
     }
-    fab.addEventListener("click", () => this._navigate("discovered"));
+    fab.addEventListener("click", onClick);
     slot.append(fab);
     return fab;
   }
@@ -1332,7 +1389,11 @@ class Rtl433Panel extends HTMLElement {
       [made.rowDevices, made.rowEntities],
       "My network"
     );
-    made.fab = this._buildFab(root.querySelector(".fab-slot"));
+    made.fab = this._buildFab(root.querySelector(".fab-slot"), {
+      label: "Add or replace device",
+      icon: ICON_PLUS,
+      onClick: () => this._navigate("discovered"),
+    });
 
     return made;
   }
@@ -1477,9 +1538,9 @@ class Rtl433Panel extends HTMLElement {
       viewDiscovered: root.querySelector(".view-discovered"),
       viewSettings: root.querySelector(".view-settings"),
       settingsIntro: root.querySelector(".settings-intro"),
+      settingsHub: root.querySelector(".settings-hub"),
       settingsProblem: root.querySelector(".settings-problem"),
       settingsBody: root.querySelector(".settings-body"),
-      settingsCancel: null,
       settingsSave: null,
     };
     Object.assign(this._el, this._buildOverview(root));
@@ -1493,21 +1554,18 @@ class Rtl433Panel extends HTMLElement {
         return nothing;
       })
     );
-    // Cancel is `plain` and Save `accent`: core's weighting for a dialog's
-    // dismiss-versus-commit pair.
-    this._el.settingsCancel = haButton(
-      "Cancel",
-      "ghost settings-cancel",
-      "plain"
+    // Save alone, and floating: these stopped being dialogs when they became
+    // pages, and a page is dismissed by the toolbar's back arrow. A Cancel
+    // beside it was a second control for what the arrow already does -- core's
+    // own settings subpages ship the commit and nothing else.
+    this._el.settingsSave = this._buildFab(
+      root.querySelector(".settings-fab-slot"),
+      { label: "Save", icon: ICON_SAVE, onClick: () => this._saveSettings() }
     );
-    this._el.settingsSave = haButton(
-      "Save",
-      "primary settings-save",
-      "accent"
-    );
-    root
-      .querySelector(".settings-actions")
-      .append(this._el.settingsCancel, this._el.settingsSave);
+    // There are two floating buttons in this shadow root now, so the one that
+    // commits a form keeps a name of its own: the screenshot harness clicks it
+    // by class, and ".panel-fab" would find the overview's as readily.
+    this._el.settingsSave.classList.add("settings-save");
 
     // The two list actions are built rather than templated so they can be Home
     // Assistant's buttons. They are appended in the order they read on the page,
@@ -1562,11 +1620,6 @@ class Rtl433Panel extends HTMLElement {
     for (const name of ["close", "closed"]) {
       this._el.dialog.addEventListener(name, onClosed);
     }
-
-    this._el.settingsCancel.addEventListener("click", () => {
-      this._goUp();
-    });
-    this._el.settingsSave.addEventListener("click", () => this._saveSettings());
   }
 
   _render() {
@@ -1584,6 +1637,7 @@ class Rtl433Panel extends HTMLElement {
     this._el.title.textContent = view.title;
 
     if (view.form) {
+      this._showSettingsHub();
       // Fetching the payload is asynchronous, so this is fired and forgotten:
       // it re-renders on its own when the form is built.
       this._openSettings(view.form);
@@ -2279,6 +2333,24 @@ class Rtl433Panel extends HTMLElement {
     return input;
   }
 
+  /**
+   * Name the receiver a settings page is editing, when there are several.
+   *
+   * All three settings pages are per receiver, and the toolbar can only name the
+   * page -- so with two receivers configured, "Receiver settings" was two
+   * identical-looking screens editing different hubs. The receiver is in the
+   * URL, it just was not on the page. One receiver needs no heading: there is
+   * nothing to tell it apart from.
+   */
+  _showSettingsHub() {
+    const heading = this._el.settingsHub;
+    const entryId = this._settingsEntryId();
+    const hub = this._hubs.find((entry) => entry.entry_id === entryId);
+    const show = this._hubs.length > 1 && Boolean(hub);
+    heading.textContent = show ? hub.title : "";
+    heading.hidden = !show;
+  }
+
   /** The settings row for one device key, from the last fetched payload. */
   _deviceSettings(deviceKey) {
     return (
@@ -2304,13 +2376,25 @@ class Rtl433Panel extends HTMLElement {
   _settingsSchema(kind) {
     const settings = this._settings;
     if (kind === "hub") {
-      return [
+      // The seconds field belongs to one of the three modes, so it appears with
+      // it rather than sitting there greyed out -- the same recompute-on-change
+      // the device form uses for its unit and scale.
+      const schema = [
         {
-          name: "availability_timeout",
-          selector: { number: { min: 0, mode: "box" } },
+          name: "availability_mode",
+          selector: { select: { mode: "dropdown", options: TIMEOUT_MODES } },
         },
-        { name: "manage_settings", selector: { boolean: {} } },
       ];
+      if (this._settingsData.availability_mode === "custom") {
+        schema.push({
+          name: "availability_timeout",
+          selector: {
+            number: { min: 0, mode: "box", unit_of_measurement: "seconds" },
+          },
+        });
+      }
+      schema.push({ name: "manage_settings", selector: { boolean: {} } });
+      return schema;
     }
     if (kind === "mappings") {
       // Deliberately not an `object` selector: that one parses the YAML and
@@ -2336,7 +2420,9 @@ class Rtl433Panel extends HTMLElement {
       },
       {
         name: "timeout_override",
-        selector: { number: { min: 0, mode: "box" } },
+        selector: {
+          number: { min: 0, mode: "box", unit_of_measurement: "seconds" },
+        },
       },
     ];
     if (!device) {
@@ -2347,7 +2433,9 @@ class Rtl433Panel extends HTMLElement {
     if (device.motion) {
       schema.push({
         name: "motion_clear_delay",
-        selector: { number: { min: 1, mode: "box" } },
+        selector: {
+          number: { min: 1, mode: "box", unit_of_measurement: "seconds" },
+        },
       });
     }
     schema.push({
@@ -2391,26 +2479,27 @@ class Rtl433Panel extends HTMLElement {
   _settingsCopy(name) {
     const defaults = this._settings.defaults;
     const copy = {
+      availability_mode: [
+        "Availability timeout",
+        "How long a device may go unheard before it is marked unavailable. " +
+          "The defaults never expire doorbells, motion and contacts.",
+      ],
       availability_timeout: [
-        "Availability timeout (seconds)",
-        `Leave at ${defaults.availability_timeout} to use the per-device-type ` +
-          "defaults, which is what keeps event-driven devices — doorbells, " +
-          "motion, contacts — from going unavailable on silence. Use 0 to " +
-          "never expire.",
+        "Timeout",
+        "Applies to every device without an override of its own.",
       ],
       manage_settings: [
         "Manage the receiver's own settings",
-        "Adds the frequency, gain and sample-rate controls, and lets Home " +
-          "Assistant apply them. Turning this off leaves the receiver exactly " +
-          "as configured elsewhere.",
+        "Adds frequency, gain and sample-rate entities to this receiver's " +
+          "device page.",
       ],
       device_key: ["Device", ""],
       timeout_override: [
-        "Availability timeout override (seconds)",
+        "Availability timeout override",
         "Blank uses the receiver's timeout. 0 means never expire.",
       ],
       motion_clear_delay: [
-        "Motion clear delay (seconds)",
+        "Motion clear delay",
         "How long after a detection this device is reported clear. Blank uses " +
           `${defaults.motion_clear_delay} seconds.`,
       ],
@@ -2434,8 +2523,15 @@ class Rtl433Panel extends HTMLElement {
   _settingsDefaults(kind) {
     const settings = this._settings;
     if (kind === "hub") {
+      const explicit = settings.hub.availability_timeout;
+      const mode = timeoutMode(explicit);
       return {
-        availability_timeout: settings.hub.availability_timeout,
+        availability_mode: mode,
+        // The seconds field is pre-filled even in the two modes that hide it,
+        // so switching to "a fixed timeout" offers the plain default rather
+        // than an empty box the user has to guess a number into.
+        availability_timeout:
+          mode === "custom" ? explicit : settings.defaults.availability_timeout,
         manage_settings: Boolean(settings.hub.manage_settings),
       };
     }
@@ -2559,9 +2655,14 @@ class Rtl433Panel extends HTMLElement {
    * One native control for a schema field, for the no-`ha-form` fallback.
    */
   _buildNativeField(body, field) {
-    const [label, hint] = this._settingsCopy(field.name);
+    const [name, hint] = this._settingsCopy(field.name);
     const value = this._settingsData[field.name];
     const selector = field.selector || {};
+    // `ha-form` draws a number selector's unit as a suffix inside the field;
+    // a bare `<input type="number">` has nowhere to put one, so the label says
+    // it instead. Either way the unit is written once, on the schema.
+    const unit = selector.number && selector.number.unit_of_measurement;
+    const label = unit ? `${name} (${unit})` : name;
     let control;
     if (selector.boolean) {
       control = document.createElement("input");
@@ -2634,6 +2735,15 @@ class Rtl433Panel extends HTMLElement {
   _onSettingsChanged(next) {
     const previous = this._settingsData;
     if (
+      this._settingsForm === "hub" &&
+      next.availability_mode !== previous.availability_mode
+    ) {
+      // Only "a fixed timeout" has a seconds field, so the schema changes.
+      this._settingsData = next;
+      this._renderSettingsForm();
+      return;
+    }
+    if (
       this._settingsForm === "device" &&
       next.device_key !== previous.device_key
     ) {
@@ -2693,9 +2803,13 @@ class Rtl433Panel extends HTMLElement {
       message = {
         type: "rtl_433/settings/hub",
         entry_id: this._settingsEntryId(),
-        availability_timeout:
-          number("availability_timeout") ??
-          this._settings.defaults.availability_timeout,
+        // `null` is "use the per-device-type defaults", which the backend reads
+        // as "store nothing". The mode says which of the three this is; the
+        // seconds field is only consulted for the one that shows it.
+        availability_timeout: timeoutValue(
+          data.availability_mode,
+          number("availability_timeout")
+        ),
         manage_settings: Boolean(data.manage_settings),
       };
     } else if (kind === "device") {
@@ -2946,10 +3060,11 @@ const SKELETON = `
   <div class="view view-settings" hidden>
     <p class="settings-intro"></p>
     <div class="settings-card-slot">
+      <h2 class="settings-hub" hidden></h2>
       <div class="settings-problem" hidden></div>
       <div class="settings-body"></div>
-      <div class="settings-actions"></div>
     </div>
+    <div class="settings-fab-slot"></div>
   </div>
 
   <div class="replace-slot"></div>
@@ -3301,7 +3416,12 @@ const STYLES = `
    * to collect a trailing margin. Setting it to display:contents generates no
    * box for it at all, leaving the fixed button exactly where it was.
    */
-  .fab-slot { display: contents; }
+  .fab-slot, .settings-fab-slot { display: contents; }
+  /*
+   * Room under a settings form for the floating Save to sit over: without it
+   * the button covers the last field of a long one (the mappings editor).
+   */
+  .view-settings { padding-bottom: 88px; }
   .settings-card-slot {
     padding: 16px;
     border-radius: var(--ha-card-border-radius, 12px);
@@ -3450,6 +3570,13 @@ const STYLES = `
     z-index: 1;
   }
   ha-button.panel-fab { --ha-button-height: 56px; }
+  /*
+   * ha-fab and ha-button both set their own display, which beats the user
+   * agent's [hidden] rule -- so the settings Save, which hides itself on a form
+   * with nothing to save, needs this to actually disappear. (No backticks in
+   * here: this comment is inside a template literal, and one would end it.)
+   */
+  .panel-fab[hidden] { display: none; }
   button.fab-button {
     display: inline-flex;
     align-items: center;
@@ -3464,13 +3591,17 @@ const STYLES = `
     cursor: pointer;
   }
 
-  /* The settings subview's own action row, at the end of the page. */
-  .settings-actions {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 16px;
+  /*
+   * The receiver a settings page is editing, shown only when there is more than
+   * one to confuse it with -- which is the same rule, and the same heading, the
+   * overview's own per-receiver cards use.
+   */
+  .settings-hub {
+    margin: 0 0 16px;
+    font-size: 20px;
+    font-weight: 400;
   }
+  .settings-hub[hidden] { display: none; }
 
   /*
    * The native fallback's form controls, for a frontend with no ha-form. Sized

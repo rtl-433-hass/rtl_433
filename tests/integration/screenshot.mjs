@@ -743,8 +743,13 @@ async function captureHubSettings(page) {
           `(panel, timeout) => {
             const root = panel.shadowRoot;
             const was = panel._settingsData.availability_timeout;
+            // The mode has to move too: the seconds are only read for the one
+            // choice that shows a number field, so setting them alone would
+            // save "per-device-type defaults" and leave the timeout untouched
+            // -- and the unavailable stage would then wait out ten minutes.
             panel._onSettingsChanged({
               ...panel._settingsData,
+              availability_mode: "custom",
               availability_timeout: Number(timeout),
             });
             root.querySelector(".settings-save").click();
