@@ -32,7 +32,7 @@ pyrtl_433==0.4.0
 # this package, which would take every hub-setup test down with it.
 # pytest-homeassistant-custom-component does not pull it in, so it is pinned here
 # to the version the installed Home Assistant's frontend manifest requires.
-home-assistant-frontend==20260729.7
+home-assistant-frontend==20260826.2
 
 # Mutation testing. mutmut 3.x copies the package into a mutants/ working tree
 # and forks once per mutant, running the pytest suite with coverage-based test
