@@ -17,7 +17,9 @@ device registry with devices that transmitted before Home Assistant connected.
 
 A previously unknown device is added the first time it transmits after the
 connection. This assumes the rtl_433 server and Home Assistant clocks are roughly
-in sync.
+in sync, and that the server stamps its events with a readable timestamp — see
+[Event Timestamps](configuration.md#event-timestamps) for the accepted forms and
+what changes without one.
 
 ## Discovery Toggle
 

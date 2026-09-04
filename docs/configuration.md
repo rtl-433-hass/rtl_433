@@ -59,6 +59,46 @@ bind address such as:
 rtl_433 -F http://127.0.0.1:8433
 ```
 
+### Event Timestamps
+
+Every time Home Assistant connects, rtl_433 re-broadcasts a short buffer of
+recent events. The integration reads the `time` field on each frame to tell that
+backlog apart from traffic it is hearing live, so devices that have gone quiet
+are not marked available again and their event entities and device triggers do
+not fire a second time.
+
+That only works if the timestamps can be read. rtl_433 emits `time` as a JSON
+string in every mode, and these forms are understood:
+
+| rtl_433 setting | Example `time` | |
+| --- | --- | --- |
+| default | `2026-05-25 10:00:00` | Local wall clock, whole seconds. |
+| `time:iso` | `2026-05-25T10:00:00` | ISO-8601. Local, unless you add `tz` or `utc`. |
+| `time:unix` | `1779703200` | Epoch seconds, always UTC. |
+| `time:off` | *(no field)* | **Timestamps off — see below.** |
+
+Adding `usec` to any of them (`time:iso:usec`) adds a fractional part, and `tz`
+(or `utc`) makes the zone explicit. Be explicit if you can: a bare local stamp is
+read in Home Assistant's own time zone, so a server in a different zone puts
+every event hours away from where it belongs. When that lands in the past, each
+frame looks like an event from an old disconnection: values still seed, but
+devices stop refreshing their last-seen and go unavailable, and event entities
+and device triggers stop firing.
+
+With **no readable timestamp** the integration cannot distinguish a replay from
+a live transmission, so it treats every frame as live — the safe direction for a
+real event, but it means the re-broadcast backlog is ingested afresh on each
+reconnect.
+
+The recommended setting is the most precise one:
+
+```
+report_meta time:iso:usec:tz
+```
+
+or, on the command line, `-M time:iso:usec:tz`. A sub-second stamp also lets the
+integration separate two transmissions from the same device inside one second.
+
 ## Reconfigure vs Configure
 
 Use **Reconfigure** to point an existing hub at the same server's new address:
