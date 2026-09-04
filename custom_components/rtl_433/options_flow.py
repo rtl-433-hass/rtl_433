@@ -5,12 +5,17 @@ step, a *device* step, a *mappings* step, and a *replace* step:
 
 - **add_devices** renders the coordinator's in-memory pending list -- every
   device heard since the last restart that the user has neither added nor
-  ignored -- and on submit adopts the selected keys through
-  ``coordinator.adopt_device`` and ignores the ones the user never wants offered
-  again. It leads the menu because it is the only route by which an RF device
-  reaches the Home Assistant device registry.
+  ignored -- and on submit adopts the selected keys and ignores the ones the user
+  never wants offered again. It leads the menu because it is the route by which
+  an RF device reaches the Home Assistant device registry.
 - **ignored_devices** un-ignores keys from ``entry.data["ignored_devices"]`` so
   the devices are offered again on their next transmission.
+
+Neither approval step implements adopting or ignoring itself: both call
+:mod:`.adoption`, the service they share with the discovery panel's WebSocket
+API, so a device added from a form and one added from the panel are the same
+device. What lives here is the *presentation* -- what the picker labels look
+like, when a step aborts, and how the dialog closes.
 - **hub** persists the default availability timeout and the manage-settings
   toggle to ``entry.options``.
 - **device** picks a known device from the hub's ``entry.data["devices"]`` map,
@@ -56,6 +61,7 @@ from homeassistant.helpers.selector import (
 )
 from homeassistant.util import dt as dt_util
 
+from .adoption import async_adopt_devices, async_ignore_devices, async_unignore_devices
 from .calibration import (
     COMMODITY_UNITS,
     commodity_from_fields,
@@ -85,7 +91,6 @@ from .const import (
     DOMAIN,
 )
 from .device_replace import DeviceReplaceError, async_replace_device
-from .entity import async_upsert_device
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -269,21 +274,18 @@ class Rtl433OptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Adopt the selected devices, ignore the selected devices, and finish.
 
-        Adoption goes through the coordinator so the device is built by the same
-        ``new_device_callback`` seam a live first sighting used -- one
-        registration path, not two -- and is then written into
-        ``entry.data[CONF_DEVICES]`` with :func:`async_upsert_device`, the same
-        idempotent union-write the entity platforms use, so an adopted device's
-        record has exactly the shape every other write path produces and the
-        device is rebuilt after a restart. A key that is no longer pending yields
-        ``None`` (it stopped being a candidate between the render and the submit,
-        or a second submit repeated the selection) and is skipped rather than
-        storing a record for a device the coordinator knows nothing about.
+        Both halves are delegated to :mod:`.adoption`, the single implementation
+        this step shares with the discovery panel's WebSocket API, so adopting
+        from a form and adopting from the panel cannot drift apart. What stays
+        here is the flow mechanics: the order (adopt first, then ignore, matching
+        the form's own reading order) and how the dialog closes.
 
-        The ignore list is persisted in a single write because it is a single
-        value. The coordinator's copy is updated key by key first, which is what
-        makes the very next transmission drop; ``entry.data`` is what makes that
-        survive a restart.
+        A key that is no longer pending -- it stopped being a candidate between
+        the render and the submit, or a second submit repeated the selection --
+        comes back as ``skipped``. The form ignores that: it has already closed by
+        the time anyone could be told, and the list it re-renders next time is
+        rebuilt from live state anyway. The WebSocket caller, with a user watching
+        the row they clicked, is the one that needs the answer.
 
         ``entry.options`` is handed back unchanged: as in the mappings step, this
         step writes ``entry.data`` and only needs the dialog to close without
@@ -291,27 +293,8 @@ class Rtl433OptionsFlow(OptionsFlow):
         """
         entry = self.config_entry
 
-        for device_key in add:
-            record = coordinator.adopt_device(device_key)
-            if record is None:
-                continue
-            await async_upsert_device(
-                self.hass,
-                entry,
-                device_key,
-                model=record.model,
-                fields=set(record.event.fields),
-            )
-
-        if ignore:
-            ignored = list(entry.data.get(CONF_IGNORED_DEVICES, []))
-            for device_key in ignore:
-                coordinator.ignore_device(device_key)
-                if device_key not in ignored:
-                    ignored.append(device_key)
-            self.hass.config_entries.async_update_entry(
-                entry, data={**entry.data, CONF_IGNORED_DEVICES: ignored}
-            )
+        await async_adopt_devices(self.hass, entry, coordinator, add)
+        await async_ignore_devices(self.hass, entry, coordinator, ignore)
 
         return self.async_create_entry(title="", data=dict(entry.options))
 
@@ -320,16 +303,16 @@ class Rtl433OptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Un-ignore devices so they are offered for adding again.
 
-        Un-ignoring is not retroactive: the pending list is in-memory and an
-        ignored device was never recorded while it was ignored, so it reappears
-        under "Add discovered devices" on its next transmission rather than
-        immediately. For a sensor that reports every few minutes that is a short
-        wait; for a door sensor it takes a door.
+        Un-ignoring is not retroactive -- the reappearance waits for the device's
+        next transmission, for the reasons :func:`.adoption.async_unignore_devices`
+        explains -- so the step's own job is only to render the stored list and
+        hand the selection to that service.
 
-        ``entry.data`` is the source of truth here (the coordinator's ``ignored``
-        set mirrors it), but the step still requires a running coordinator:
-        discarding the key from that mirrored set is what un-ignores the device
-        on its next transmission instead of only after a reload.
+        ``entry.data`` is the source of truth for what is ignored, but the step
+        still requires a running coordinator: discarding the key from the
+        coordinator's mirrored set is what un-ignores the device on its next
+        transmission instead of only after a reload, and the service needs the
+        coordinator to do it.
         """
         coordinator = self._coordinator()
         if coordinator is None:
@@ -341,17 +324,11 @@ class Rtl433OptionsFlow(OptionsFlow):
             return self.async_abort(reason="no_ignored_devices")
 
         if user_input is not None:
-            selected = set(user_input.get(CONF_UNIGNORE_DEVICES, []))
-            for device_key in selected:
-                coordinator.ignored.discard(device_key)
-            self.hass.config_entries.async_update_entry(
+            await async_unignore_devices(
+                self.hass,
                 entry,
-                data={
-                    **entry.data,
-                    CONF_IGNORED_DEVICES: [
-                        key for key in ignored if key not in selected
-                    ],
-                },
+                coordinator,
+                set(user_input.get(CONF_UNIGNORE_DEVICES, [])),
             )
             return self.async_create_entry(title="", data=dict(entry.options))
 

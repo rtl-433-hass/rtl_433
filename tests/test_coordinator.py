@@ -29,7 +29,7 @@ from pyrtl_433.normalizer import NormalizedEvent
 from pyrtl_433.replay import DISCOVERY_BACKLOG_GRACE
 import pytest
 
-from custom_components.rtl_433.const import signal_device_update
+from custom_components.rtl_433.const import signal_device_update, signal_pending_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator._events import _MAX_PENDING_CANDIDATES
 from homeassistant.util import dt as dt_util
@@ -38,6 +38,18 @@ DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
 _TRACE_LOGGER = "custom_components.rtl_433"
 # The device key every ``_event()`` carries, and the one the fixture adopts.
 _KEY = "Acurite-606TX-42"
+
+
+def _dispatched(dispatch) -> list[str]:
+    """Return the signal names one patched ``async_dispatcher_send`` recorded.
+
+    Several different dispatcher signals go through the one function these tests
+    patch, and a device-update -- the fan-out that reaches a device's entities --
+    is only one of them. Asserting on names rather than call counts lets a test
+    say "no entity fan-out happened" exactly, instead of approximating it with
+    "nothing happened at all".
+    """
+    return [call.args[1] for call in dispatch.call_args_list]
 
 
 def _run(hass, coro):
@@ -306,12 +318,15 @@ def test_forget_device_evicts_runtime_state(hass, coordinator):
     _assert_nothing_tracks(coordinator, key)
 
     # Un-adopted, so the next transmission makes it a pending candidate again
-    # rather than silently re-creating the device the user deleted.
+    # rather than silently re-creating the device the user deleted. It fires one
+    # pending-update -- the device is a fresh candidate and the discovery panel
+    # has to hear about it -- and no device-update, which is the point: the
+    # entities the user deleted must not be fanned out to again.
     with patch(DISPATCH) as dispatch:
         coordinator._on_client_event(_event())
     assert key not in coordinator.devices
     assert coordinator.pending[key].count == 1
-    dispatch.assert_not_called()
+    assert _dispatched(dispatch) == [signal_pending_update(coordinator.entry.entry_id)]
 
     # forget on an unknown key is a safe no-op.
     coordinator.forget_device("nonexistent-key")

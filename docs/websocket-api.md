@@ -4,6 +4,10 @@ This document describes the WebSocket control/streaming API exposed by the
 rtl_433 HTTP server. It is derived from the implementation in `src/http_server.c`
 (`ev_handler`, `json_parse`, `rpc_exec`, `rpc_response_ws`).
 
+A second, unrelated API is documented at the end:
+[Home Assistant discovery commands](#home-assistant-discovery-commands), the
+commands this integration adds to *Home Assistant's* own WebSocket API.
+
 The WebSocket API shares its command dispatcher (`rpc_exec`) with the `/cmd` and
 `/jsonrpc` HTTP endpoints, so the command set is identical across all three; only
 the framing differs.
@@ -278,3 +282,202 @@ the decoded data stream and change live SDR settings. Traffic is plain HTTP.
 This is intentional: upstream considers rtl_433 safe to use but not secure and
 recommends it not be exposed to the internet. Bind to `127.0.0.1` and/or place a
 reverse proxy with TLS and authentication in front if remote access is required.
+
+## Home Assistant discovery commands
+
+Everything above belongs to the rtl_433 server. This section is a different API:
+the commands this integration registers on **Home Assistant's own** WebSocket API
+at `ws://<home-assistant>:8123/api/websocket`. They back the discovery panel, and
+they are equally usable from a script or from the browser's developer console —
+the panel adds no logic of its own on top of them, so anything it can do, these
+can do.
+
+They are the programmatic form of [Device Discovery](device-discovery.md): see
+what the receiver has heard, then add, ignore or un-ignore it.
+
+### Authentication
+
+Connect and authenticate the way you would for any Home Assistant WebSocket
+client (a long-lived access token). **Every command below requires an
+administrator**, so a token issued for a non-admin user is refused:
+
+```json
+{"id": 5, "type": "result", "success": false,
+ "error": {"code": "unauthorized", "message": "Unauthorized"}}
+```
+
+### Command summary
+
+| `type` | Parameters | Returns |
+| --- | --- | --- |
+| `rtl_433/hubs` | — | Every configured hub, loaded or not. |
+| `rtl_433/devices/pending` | `entry_id` | One hub's discovered devices and its ignore list. |
+| `rtl_433/devices/add` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
+| `rtl_433/devices/ignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
+| `rtl_433/devices/unignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
+| `rtl_433/devices/subscribe` | `entry_id` | A subscription pushing the `pending` payload on change. |
+
+`entry_id` is a hub's config-entry id, from `rtl_433/hubs`. `device_keys` is a
+list, so one message can add or ignore several devices.
+
+Errors are the usual `{"success": false, "error": {...}}` result:
+
+| `error.code` | Meaning |
+| --- | --- |
+| `unauthorized` | The connection's user is not an administrator. |
+| `not_found` | No rtl_433 hub has that `entry_id`. An entry belonging to another integration reads the same way — these commands never reach into one. |
+| `not_loaded` | The hub exists but is not set up — reloading, or its server is unreachable. The discovered list lives in memory, so there is nothing to answer with until it loads. |
+
+### `rtl_433/hubs`
+
+Lists the hubs, so a caller can pick one. Hubs that failed to load are listed
+too, flagged rather than hidden.
+
+```json
+{"id": 1, "type": "rtl_433/hubs"}
+```
+
+```json
+{
+  "id": 1,
+  "type": "result",
+  "success": true,
+  "result": {
+    "hubs": [
+      {
+        "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
+        "title": "rtl_433 (wsbridge)",
+        "loaded": true
+      }
+    ]
+  }
+}
+```
+
+### `rtl_433/devices/pending`
+
+Returns one hub's discovered devices, most recently heard first, together with
+the keys it is ignoring.
+
+```json
+{"id": 2, "type": "rtl_433/devices/pending",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P"}
+```
+
+The `result`, with four of its six devices left out:
+
+```json
+{
+  "pending": [
+    {
+      "key": "Acurite-Tower-12053-chC",
+      "model": "Acurite-Tower",
+      "count": 915,
+      "signal": 39.134,
+      "first_seen": "2026-09-01T04:01:51.881359+00:00",
+      "last_seen": "2026-09-01T04:07:02.042143+00:00",
+      "fields": {
+        "battery_ok": 1,
+        "temperature_C": 26.7,
+        "humidity": 74,
+        "freq": 434.003,
+        "rssi": 0.618,
+        "snr": 39.134,
+        "noise": -39.134
+      }
+    },
+    {
+      "key": "LeakDetector-9-21",
+      "model": "LeakDetector-9",
+      "count": 39,
+      "signal": null,
+      "first_seen": "2026-09-01T04:01:56.472199+00:00",
+      "last_seen": "2026-09-01T04:07:00.516721+00:00",
+      "fields": {"detect_wet": 1, "battery_ok": 1}
+    }
+  ],
+  "ignored": []
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `key` | The device key: the decoded model plus the id, channel and subtype it reported. This is the id every command below takes. |
+| `model` | The model rtl_433 decoded. |
+| `count` | Sightings since Home Assistant started. The list is memory-only, so this counts from the last restart or hub reload. |
+| `signal` | The most recent message's SNR, or its RSSI when no SNR was reported, in dB. `null` when the server reports no levels (it needs `-M level`). |
+| `first_seen`, `last_seen` | ISO 8601 timestamps. |
+| `fields` | The decoded fields of the most recent message, verbatim. |
+
+`ignored` carries one `{"key", "model"}` per ignored device. The model is an
+empty string for a device that was ignored while still pending, which is the
+usual case — nothing is stored about a device that was never added.
+
+### `rtl_433/devices/add`, `.../ignore`, `.../unignore`
+
+The three actions. All take the same parameters and return the same shape, and
+all do exactly what the equivalent options-flow step does — there is one
+implementation behind both.
+
+```json
+{"id": 3, "type": "rtl_433/devices/add",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
+ "device_keys": ["Acurite-Tower-12053-chC", "LeakDetector-9-21"]}
+```
+
+```json
+{"applied": ["Acurite-Tower-12053-chC"], "skipped": ["LeakDetector-9-21"]}
+```
+
+`skipped` is not an error. It means the key was not in a state the action
+applies to, and each command means something slightly different by that:
+
+| Command | `applied` | `skipped` |
+| --- | --- | --- |
+| `add` | The device was created, with its entities. | The key was no longer discovered — usually already added, or ignored. |
+| `ignore` | The key was added to the ignore list and dropped from the discovered list. | It was already ignored. |
+| `unignore` | The key was taken off the ignore list. | It was not on it. |
+
+Un-ignoring is not retroactive: `applied` means the key is no longer ignored,
+not that it is back on the discovered list. The device returns there on its next
+transmission.
+
+### `rtl_433/devices/subscribe`
+
+Subscribes to one hub's discovered devices. The event payload is exactly what
+`rtl_433/devices/pending` returns.
+
+```json
+{"id": 4, "type": "rtl_433/devices/subscribe",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P"}
+```
+
+The success result comes first, then the current payload immediately as the first
+event — so a client never has to call `pending` as well — and then a new payload
+whenever it changes:
+
+```json
+{"id": 4, "type": "result", "success": true, "result": null}
+{"id": 4, "type": "event", "event": {"pending": [...], "ignored": [...]}}
+```
+
+!!! warning "One message per change, not one per transmission"
+    A device that is already on the list transmitting again does **not** push a
+    message. Those repeat sightings only age a row's `count` and `last_seen`, so
+    they are coalesced: the payload is re-checked on a five-second timer and sent
+    only when it actually differs from the last one sent. A receiver in a busy
+    area decodes constantly, and a push per frame would flood every open
+    connection.
+
+    Membership changes — a device heard for the first time, or added, ignored or
+    un-ignored — are pushed immediately.
+
+    So a client must not count messages to count transmissions, and must not
+    assume the counts it holds are current to the second. Read `count` and
+    `last_seen` from the payload.
+
+Unsubscribe the standard way, naming the subscription's id:
+
+```json
+{"id": 9, "type": "unsubscribe_events", "subscription": 4}
+```

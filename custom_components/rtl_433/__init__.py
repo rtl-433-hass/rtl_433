@@ -24,15 +24,28 @@ via :func:`async_remove_config_entry_device`, which returns it to the pending
 list; deleting the hub entry removes all nested devices and entities
 automatically.
 
+Setting up the first hub also registers the discovery WebSocket commands
+(:mod:`.websocket_api`), which back the approval panel and are equally usable
+from a script, and the **discovery panel** itself — the shipped
+``frontend/rtl_433-panel.js`` served as a static path and registered with
+``panel_custom``. Both are per Home Assistant *run*, not per entry, so both are
+guarded to happen once rather than once per hub.
+
 The library loading lives in :mod:`.library`, the hub-setting resolvers in
-:mod:`.hub_settings`, and the config-entry migration / one-time legacy cleanups
-in :mod:`.migration`; this module keeps only the steady-state lifecycle.
+:mod:`.hub_settings`, the shared adopt / ignore / un-ignore service in
+:mod:`.adoption`, and the config-entry migration / one-time legacy cleanups in
+:mod:`.migration`; this module keeps only the steady-state lifecycle.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pyrtl_433.library import event_driven_field_keys
 
+from homeassistant.components import panel_custom
+from homeassistant.components.frontend import async_panel_exists
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -73,6 +86,76 @@ from .migration import (
     _migrate_motion_event_to_binary_sensor,
     async_migrate_entry,
 )
+from .websocket_api import async_register_commands
+
+# Where the shipped ``frontend/`` directory is served from. Its own path rather
+# than something under ``/api`` because it is a plain static directory, and a
+# distinct one rather than the domain so the served assets can never be confused
+# with the panel's own front-end route (``/rtl_433``, from ``frontend_url_path``
+# below).
+PANEL_URL_BASE = "/rtl_433_panel"
+
+# The custom element the module defines, and the module that defines it. Both
+# have to agree with ``frontend/rtl_433-panel.js`` exactly: Home Assistant loads
+# the module and then instantiates this tag name, so a mismatch is a blank page
+# with nothing in the log.
+PANEL_ELEMENT_NAME = "rtl-433-panel"
+PANEL_MODULE_NAME = "rtl_433-panel.js"
+
+
+async def _async_register_panel(hass: HomeAssistant) -> None:
+    """Serve and register the discovery panel, once per Home Assistant run.
+
+    Guarded on the panel already existing because registration is per-run while
+    this is called from per-entry setup: a second receiver must not try to
+    register a second panel, and ``async_register_built_in_panel`` raises rather
+    than tolerating the duplicate.
+
+    ``config_panel_domain`` is deliberately **not** passed, though it would put
+    the panel behind this integration's entry in Settings → Devices & services.
+    It does not add a route, it *replaces* one: the entry's Configure control
+    becomes a link to the panel, and the options flow behind it -- receiver
+    settings, device settings, device mappings, calibration, replace-device --
+    loses its only entry point. ``knx`` is the one core integration that ships
+    both a panel and an options flow, and it omits the argument for the same
+    reason; ``dynalite`` and ``insteon`` pass it and have no options flow to
+    lose. The panel is reached from the sidebar instead.
+
+    Two arguments are the whole reason this works the way it does:
+
+    - ``embed_iframe=False`` is what gets ``hass`` handed to the element as a
+      property. An iframe would isolate the panel from the frontend's connection
+      *and* its theme, and then the panel would need its own authentication and
+      its own colours. Unlike ``knx`` and ``dynalite``, which embed large
+      pre-built SPAs with their own routing, this is one table and belongs in
+      the page.
+    - ``cache_headers=False`` because the file ships *inside* the integration
+      and changes on upgrade. There is no content hash in its URL to bust a
+      cache with, and a browser serving yesterday's panel against today's
+      WebSocket API is a miserable bug to be handed.
+    """
+    if async_panel_exists(hass, DOMAIN):
+        return
+
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(
+                PANEL_URL_BASE,
+                str(Path(__file__).parent / "frontend"),
+                cache_headers=False,
+            )
+        ]
+    )
+    await panel_custom.async_register_panel(
+        hass=hass,
+        frontend_url_path=DOMAIN,
+        webcomponent_name=PANEL_ELEMENT_NAME,
+        module_url=f"{PANEL_URL_BASE}/{PANEL_MODULE_NAME}",
+        embed_iframe=False,
+        require_admin=True,
+        sidebar_title="rtl_433",
+        sidebar_icon="mdi:radio-tower",
+    )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -83,6 +166,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     forwards the entity platforms once on the hub entry.
     """
     hass.data.setdefault(DOMAIN, {})
+    # Command names are global and registration is per Home Assistant run, not
+    # per entry -- but this integration is entry-only (no ``async_setup``), so the
+    # call is made from every hub's setup and made idempotent inside. A user with
+    # two receivers must not lose the second entry to a duplicate registration.
+    async_register_commands(hass)
+    # Same story for the panel: per-run, called from per-entry setup, idempotent
+    # inside. It is awaited before anything else because a failure here is a
+    # failure to set the hub up at all, and that should be loud rather than a
+    # working hub with a panel nobody can reach.
+    await _async_register_panel(hass)
 
     shipped_registry, shipped_skip_keys = await _async_load_library(hass)
     entry_registry, entry_skip_keys = _merge_entry_library(

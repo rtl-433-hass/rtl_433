@@ -17,6 +17,11 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     the HA-side policy (event fan-out, managed-SDR desired state, the silence
     watchdog and the hub-connection availability gate) the library deliberately
     leaves out.
+  - `frontend/rtl_433-panel.js` — the shipped discovery panel: one hand-written
+    vanilla custom element, **no build step** (see
+    [Approval surfaces](#approval-surfaces-adoption-service-websocket-api-panel)).
+  - `adoption.py` (the single adopt / ignore / un-ignore implementation) and
+    `websocket_api.py` (the six admin-gated discovery commands over it).
   - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`,
     `diagnostics.py`, `repairs.py`, `sensor.py`, `binary_sensor.py`,
     `event.py`, `translations/en.json`. There is no local `mapping/` package or
@@ -212,11 +217,13 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   (`options_flow.py`): a menu led by the two approval steps — `add_devices`
   (renders `coordinator.pending` newest-first, one row per candidate labelled
   model, key, sighting count, signal level and relative last-seen, with two
-  independent multi-selects: *Add* → `adopt_device` + `async_upsert_device`,
-  *Ignore* → `entry.data["ignored_devices"]`; aborts `no_pending_devices` on an
-  empty list) and `ignored_devices` (un-ignores selected keys; not retroactive —
-  the device returns on its next transmission). The ignore list is applied
-  **live** through the update listener, never a reload. The user-facing verb is
+  independent multi-selects: *Add* and *Ignore*; aborts `no_pending_devices` on
+  an empty list) and `ignored_devices` (un-ignores selected keys; not
+  retroactive — the device returns on its next transmission). Both steps are
+  **presentation over `adoption.py`** — they own no adopt/ignore logic of their
+  own (see [Approval surfaces](#approval-surfaces-adoption-service-websocket-api-panel)),
+  and the panel is the other, richer view of the same list. The ignore list is
+  applied **live** through the update listener, never a reload. The user-facing verb is
   **Ignore/Ignored**, matching HA's ignored-discovery vocabulary; "reject" must
   not appear. The menu then carries a *Hub settings* step (default timeout +
   managed-settings, written to `entry.options`) and a *Device settings* pair — a
@@ -297,6 +304,94 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   authoritatively overriding the adopted/persisted center frequency (gated on a
   persisted `initial_freq_seeded` flag, not on the desired store being empty), and
   never re-applied after the user later changes the frequency via the control.
+
+## Approval surfaces (adoption service, WebSocket API, panel)
+
+Adopting, ignoring and un-ignoring a discovered device is reachable from
+**three** surfaces backed by **one** implementation. Add a caller, never a
+second implementation.
+
+- **`adoption.py` is that implementation.** `async_adopt_devices`,
+  `async_ignore_devices` and `async_unignore_devices` each take
+  `(hass, entry, coordinator, device_keys)` and return an `AdoptionResult`
+  (`applied` / `skipped`). A key that is no longer pending is **reported** as
+  skipped rather than silently dropped, because a WebSocket caller has to be
+  able to explain the click that did nothing. Adopt promotes the pending record
+  via `coordinator.adopt_device` + `async_upsert_device`; ignore writes
+  `entry.data["ignored_devices"]`; un-ignore removes the key and is **not
+  retroactive** (the device returns on its next transmission). Every membership
+  change dispatches `signal_pending_update(entry_id)` (`const.py`).
+- **`options_flow.py` and `websocket_api.py` are presentation.** Both call the
+  three functions above. A behavioural difference between the form and the panel
+  is therefore a duplicated implementation, not a missing feature.
+- **`websocket_api.py`** registers six commands, all
+  `@websocket_api.require_admin`: `rtl_433/hubs`, `rtl_433/devices/pending`,
+  `.../add`, `.../ignore`, `.../unignore`, `.../subscribe`. Registration is per
+  Home Assistant *run*, not per entry — the integration has no `async_setup`, so
+  `async_register_commands` is called from every `async_setup_entry` and guarded
+  by the `DATA_WS_REGISTERED` sentinel on `hass.data[DOMAIN]`; registering a
+  command name twice raises, and a second hub must not lose to that.
+  `_async_get_coordinator` answers an unknown `entry_id` with `ERR_NOT_FOUND`
+  and one whose entry exists but is not set up with `not_loaded`, so a panel
+  left open across a reload reports a condition instead of raising.
+- **The subscription is deliberately two-speed; keep it that way.** A
+  *membership* change (the dispatcher signal) pushes immediately. A *repeat
+  sighting*, which only ages a row's count and last-seen, is picked up by the
+  `_REFRESH_INTERVAL` (5s) timer, which re-renders and sends **only when the
+  payload differs from the last one sent**. N frames for a known candidate cost
+  at most one message per interval, and an idle hub costs nothing. Do not push
+  per frame (a busy urban receiver decodes constantly), and do not move the
+  coalescing into the coordinator — it stays a state holder that does not know a
+  UI exists.
+- **The panel is `frontend/rtl_433-panel.js`: one vanilla custom element, no
+  imports, and NO BUILD STEP.** The file HACS ships is the file the browser
+  runs. Do not add npm, a bundler, a lockfile, or a second release pipeline, and
+  do not import `ha-*` components or any frontend-internal module — those are
+  not a public API and a panel that depends on them breaks silently on upgrade.
+  The sanctioned surface is `hass.connection` for messaging plus Home Assistant's
+  **CSS custom properties** for colour, which is what makes the panel follow the
+  user's theme (dark mode included) without knowing anything about themes. If it
+  ever outgrows one hand-written file, that is a decision to take deliberately.
+- **Panel registration is once per run, from per-entry setup.**
+  `_async_register_panel` (`__init__.py`) returns early on
+  `async_panel_exists(hass, DOMAIN)`, then registers the static path
+  `/rtl_433_panel` → `custom_components/rtl_433/frontend/` with
+  `cache_headers=False` (the file changes on upgrade and has no hashed URL) and
+  calls `panel_custom.async_register_panel` with `frontend_url_path=DOMAIN`
+  (route `/rtl_433`), a sidebar entry, `require_admin=True` and
+  `embed_iframe=False` — the last is what gets `hass` set as a property on the
+  element and lets it inherit the frontend's theme. `webcomponent_name` and
+  `module_url` must keep matching `customElements.define("rtl-433-panel")` and
+  the shipped filename exactly; a mismatch is a silent blank page.
+  `manifest.json` lists `http`, `panel_custom` and `websocket_api` in
+  `dependencies` for this.
+- **Never pass `config_panel_domain` while this integration has an options
+  flow.** It does not add a route to the panel, it *replaces* one. Verified in a
+  real browser against Home Assistant 2026.5.4: with it set, the hub row's
+  Configure control on Settings → Devices & services → rtl_433 renders as
+  `<a href="/rtl_433?config_entry=…">` and nothing else opens the options flow —
+  the entry's overflow menu offers only Reload / Rename / Copy entry ID /
+  Download diagnostics / Reconfigure / System options / Disable / Delete, and the
+  hub device page offers no route either. Every options-flow step (Hub settings,
+  Device settings, Device mappings, calibration, Replace device, Ignored devices)
+  loses its only entry point while still existing and still passing its tests,
+  which is exactly the kind of break no Python test catches. `knx` is the one
+  core integration shipping both a panel and an options flow and it omits the
+  argument for this reason; `dynalite` and `insteon` pass it and have no options
+  flow to lose. The panel is reached from the sidebar instead, and
+  `test_the_panel_registers_once_and_serves_its_module` asserts
+  `config_panel_domain is None` so this cannot come back by accident.
+- The frontend passes the entry it was opened for as `?config_entry=<entry_id>`.
+  The panel ignores it and opens on the first loaded hub; with two receivers,
+  Configure on either lands on the same one.
+- **Author CSS beats the user agent's `[hidden]` rule.** Any selector in the
+  panel's stylesheet that sets `display` needs its own `[hidden]` rule, or the
+  `hidden` property does nothing — this is what kept the single-hub receiver
+  picker on screen until it was fixed. There is no JS test harness in this
+  repository, by choice: the panel is covered by the Python registration test
+  and by the container harness, whose `STAGE=panel` capture
+  (`17-discovery-panel.png`) is also the only check that a real browser loads
+  the module, hands it `hass`, and updates the table live.
 
 ## Per-device "Last seen" sensor (synthetic, non-field-driven)
 

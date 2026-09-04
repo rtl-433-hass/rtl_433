@@ -51,7 +51,11 @@
       "description": "Group developer tooling updates into a single PR"
     },
     {
-      "matchPackageNames": ["pytest-homeassistant-custom-component", "mutmut"],
+      "matchPackageNames": [
+        "pytest-homeassistant-custom-component",
+        "home-assistant-frontend",
+        "mutmut"
+      ],
       "groupName": "test dependencies",
       "description": "The test pins live in both requirements_test.txt (CI, pip users) and the pyproject dependency-groups dev group (so a bare `uv run pytest` bootstraps itself). Sharing one group keeps both in a single PR so they cannot drift apart"
     },

@@ -25,6 +25,15 @@ pytest-homeassistant-custom-component==0.13.357
 # rtl_433 protocol layer under test.
 pyrtl_433==0.4.0
 
+# The Home Assistant frontend bundle. Not used by any test directly, but the
+# integration declares ``panel_custom`` (and through it ``frontend``) as a
+# manifest dependency, and Home Assistant refuses to set up a component whose
+# dependencies fail -- ``frontend`` fails to import ``hass_frontend`` without
+# this package, which would take every hub-setup test down with it.
+# pytest-homeassistant-custom-component does not pull it in, so it is pinned here
+# to the version the installed Home Assistant's frontend manifest requires.
+home-assistant-frontend==20260729.7
+
 # Mutation testing. mutmut 3.x copies the package into a mutants/ working tree
 # and forks once per mutant, running the pytest suite with coverage-based test
 # selection. Configured under [tool.mutmut] in pyproject.toml; the CI mutation

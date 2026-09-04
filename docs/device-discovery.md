@@ -13,6 +13,48 @@ trigger them once to make them show up.
 
 ## Adding Devices
 
+Pick **rtl_433** in the sidebar to open the discovery panel, which lists every
+device the receiver has heard and you have not added. The panel is only
+available to administrators; if you do not see it in the sidebar, use the
+options flow below instead.
+
+![The rtl_433 discovery panel: a Pending table of six devices, each row giving the model, device key, sighting count, signal level, how long ago it was last heard and its latest decoded values, with Add and Ignore buttons at the end of the row](images/17-discovery-panel.png)
+
+The most recently heard device is at the top. Click a column heading to sort by
+model, device key, sightings, signal or last seen; click it again to reverse the
+order.
+
+| Column | What it tells you |
+| --- | --- |
+| **Model** | The model rtl_433 decoded. |
+| **Device key** | The id rtl_433 uses to tell one device of that model from another, with its channel and subtype when it reports them. |
+| **Sightings** | How many times the device has transmitted since Home Assistant started. A real sensor keeps checking in; a bad decode is usually heard once. |
+| **Signal** | The signal-to-noise ratio of the most recent message, or its RSSI when no SNR was reported. Only shown when the server reports levels; your own sensors are normally the strongest. |
+| **Last seen** | How long ago the device last transmitted. Hover over it for the exact first and last times. |
+| **Latest values** | The readings from its most recent message. This is usually the quickest way to tell two identical sensors apart. |
+
+**Add** creates that device and its entities immediately. It starts recording
+history from that point and leaves the list:
+
+![An Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics](images/02-device-page.png)
+
+**Ignore** drops the device for good — see [Ignoring
+Devices](#ignoring-devices).
+
+The page is live. A device heard while it is open appears on its own, sighting
+counts climb as devices transmit, and nothing needs a reload. So trigger a
+doorbell or open a door sensor and watch it arrive.
+
+The page is for administrators only. Home Assistant hides it from other users
+and refuses its commands. If you are not an administrator, or the page does not
+load, use the options flow below instead: it adds exactly the same devices.
+
+Everything the page does is also a Home Assistant WebSocket command, so the same
+list and the same actions are available to a script — see [Home Assistant
+discovery commands](websocket-api.md#home-assistant-discovery-commands).
+
+### Adding Devices from the Options Flow
+
 Open **Settings → Devices & Services → rtl_433 → Configure**. The menu starts
 with the two discovery steps:
 
@@ -23,35 +65,30 @@ added yet:
 
 ![The Add discovered devices step, listing the heard devices with their model, id, sighting count, signal level, and last-seen time, above the two selection lists for adding and ignoring](images/15-add-devices.png)
 
-The most recently heard device is at the top. Each row describes one device:
-
-| Part of the row | What it tells you |
-| --- | --- |
-| **Model and id** | The model rtl_433 decoded, and the id it uses to tell one device of that model from another. |
-| **seen *n*x** | How many times the device has transmitted since Home Assistant started. A real sensor keeps checking in; a bad decode is usually heard once. |
-| **Signal level** | The signal-to-noise ratio of the most recent message, or its RSSI when no SNR was reported. Only shown when the server reports levels; your own sensors are normally the strongest. |
-| **Last seen** | How long ago the device last transmitted. |
+Each row carries the same details as a row of the panel. The difference is that
+a form is a snapshot: it is built when you open the step, so a device heard
+afterwards only shows up when you close and reopen it.
 
 Tick every device you want under **Add these devices** and submit. They are
 created immediately, with their entities, and start recording history from that
 point. Adding several devices is one submit.
 
-![An Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics](images/02-device-page.png)
-
 Anything you leave unticked stays on the list and is offered again next time.
 
 ## Ignoring Devices
 
-Devices you never want to see again go under **Ignore these devices** on the
-same form. An ignored device is dropped from the list, is never offered again,
-and stays ignored across restarts. It is the way to make a neighbour's sensor go
-away for good.
+Devices you never want to see again are ignored. Click **Ignore** on the row in
+the panel, or tick them under **Ignore these devices** in the options flow. An
+ignored device is dropped from the list, is never offered again, and stays
+ignored across restarts. It is the way to make a neighbour's sensor go away for
+good.
 
 Ignoring is not deleting: an ignored device is simply not offered, and its
 messages are dropped as they arrive.
 
-To undo it, open **Configure → Ignored devices**, tick the devices you want back,
-and submit:
+To undo it, click **Show ignored devices** under the table in the panel and then
+**Un-ignore**. From the options flow, open **Configure → Ignored devices**, tick
+the devices you want back, and submit:
 
 ![The Ignored devices step, listing an ignored device with a checkbox to stop ignoring it](images/16-ignored-devices.png)
 

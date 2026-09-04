@@ -38,6 +38,7 @@ from freezegun import freeze_time
 from pyrtl_433.normalizer import NormalizedEvent
 import pytest
 
+from custom_components.rtl_433.const import signal_pending_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.util import dt as dt_util
 
@@ -47,6 +48,24 @@ _MODEL = "Acurite-606TX"
 # The connect-edge anchor every test pins, so "before the connection" (backlog)
 # and "after it" (live) are unambiguous rather than wall-clock dependent.
 _CONNECTED_AT = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
+
+
+def _dispatched(dispatch) -> list[str]:
+    """Return the signal names one patched ``async_dispatcher_send`` recorded.
+
+    The coordinator sends several *different* dispatcher signals through the one
+    function these tests patch, and this module cares which: a device-update
+    (:func:`~custom_components.rtl_433.const.signal_device_update`) is the fan-out
+    that reaches a device's entities and must never happen for a device the user
+    has not adopted, while a pending-update
+    (:func:`~custom_components.rtl_433.const.signal_pending_update`) carries no
+    device payload at all -- it only tells the discovery panel that the candidate
+    list changed. Asserting on the names states that distinction; a bare
+    ``assert_not_called`` could only say "nothing at all", which stopped being
+    true once the panel needed telling and was always a coarser claim than the
+    thing these tests exist to protect.
+    """
+    return [call.args[1] for call in dispatch.call_args_list]
 
 
 @pytest.fixture
@@ -131,9 +150,12 @@ async def test_frame_routing_matrix(
     * ``adopted`` — the pre-existing path, unchanged: runtime state, the
       registration callback, and dispatch to the device's entities.
 
-    ``dropped`` and ``pending`` both assert nothing was dispatched and no
-    registration was offered, since either would put a device in front of the
-    user that they never asked for.
+    Neither ``dropped`` nor ``pending`` may offer the device for registration or
+    dispatch a *device-update*, since either would put a device in front of the
+    user that they never asked for. ``pending`` does dispatch one thing -- a
+    pending-update, so the discovery panel learns its candidate list grew -- and
+    the assertion names the signals rather than counting them, so "no entity
+    fan-out" is stated directly instead of being inferred from silence.
     """
     coordinator = make_coordinator(
         adopted={_KEY} if adopted else None,
@@ -162,7 +184,19 @@ async def test_frame_routing_matrix(
     assert _KEY not in coordinator.devices
     assert _KEY not in coordinator.adopted
     assert registered == []
-    dispatch.assert_not_called()
+    # Exactly which signals each outcome may send, by name. ``pending`` fires one
+    # pending-update and nothing else: a candidate appearing is a membership
+    # change the discovery panel subscribes to, and it carries no device payload
+    # -- it says "the list changed", not "here is a device". ``dropped`` changed
+    # no state at all, so it says nothing. Neither may send a device-update,
+    # which is the fan-out that reaches entities and would put a device in front
+    # of the user that they never asked for. That is the claim this test has
+    # always been making; naming the signals is what finally states it exactly.
+    assert _dispatched(dispatch) == (
+        [signal_pending_update(coordinator.entry.entry_id)]
+        if expect == "pending"
+        else []
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -178,6 +212,12 @@ async def test_pending_frame_touches_no_adopted_runtime_state(hass, make_coordin
     watchdog would flip a device the user never added to unavailable and dispatch
     a repaint for entities that do not exist — the regression this asserts
     against. The watchdog is actually run here rather than reasoned about.
+
+    The frame does dispatch one signal, and should: a pending-update, which tells
+    the discovery panel that the candidate list changed. It names no device and
+    reaches no entity, so it is not the leak this test guards — the assertion
+    below pins the dispatched signal *by name* to exactly that one, which rules a
+    device-update out far more precisely than "nothing was dispatched" ever did.
     """
     coordinator = make_coordinator()
     start = dt_util.utcnow()
@@ -199,7 +239,11 @@ async def test_pending_frame_touches_no_adopted_runtime_state(hass, make_coordin
     assert coordinator.seen_fields == set()
     # Not offered for registration either, so nothing downstream can build it.
     assert _KEY not in coordinator._discovered
-    dispatch.assert_not_called()
+    # The one signal a new candidate is allowed to send, and the one it must:
+    # a pending-update, which tells the discovery panel its list changed without
+    # naming a device to build. No device-update, because there are no entities
+    # to fan out to -- that is the regression this whole test guards.
+    assert _dispatched(dispatch) == [signal_pending_update(coordinator.entry.entry_id)]
 
     # Long past any timeout: the watchdog has nothing to say about a device that
     # was only ever heard.
