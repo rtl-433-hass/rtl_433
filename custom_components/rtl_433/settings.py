@@ -12,10 +12,11 @@ instead, and which of ``entry.data`` / ``entry.options`` it goes in. None of
 those is obvious from the code that calls these builders, so they are written
 down here:
 
-- A hub timeout equal to :data:`~.const.DEFAULT_AVAILABILITY_TIMEOUT` is dropped
-  rather than stored, because storing it as an explicit hub-wide timeout would
-  mask the per-device-class defaults and expire event-driven devices -- a
-  doorbell that has not rung in ten minutes is not unavailable.
+- A hub timeout of ``None`` means "use the per-device-type defaults" and is
+  dropped rather than stored; every ``int`` is a deliberate choice and is stored
+  as given. Storing a value where the user meant "defaults" would mask the
+  per-device-class defaults and expire event-driven devices -- a doorbell that
+  has not rung in ten minutes is not unavailable.
 - A device's timeout override, calibration and clear-delay each *clear* on a
   blank submission rather than persisting a zero or a default.
 - The clear-delay lives in ``entry.options`` while the other two live in
@@ -45,14 +46,13 @@ from .const import (
     CONF_MODEL,
     CONF_USER_MAPPINGS,
     DATA_ENTRY_LIBRARY,
-    DEFAULT_AVAILABILITY_TIMEOUT,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
     DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
-from .hub_settings import _hub_availability_timeout, _hub_manage_settings
+from .hub_settings import _explicit_hub_timeout, _hub_manage_settings
 
 if TYPE_CHECKING:
     from pyrtl_433.library import Registry
@@ -72,35 +72,45 @@ def hub_defaults(entry: ConfigEntry) -> dict[str, Any]:
     """Return the hub-level form's current values.
 
     These come straight from the resolvers :mod:`.hub_settings` uses at runtime,
-    rather than from a second copy of the options-then-data-then-default rule.
-    The form therefore opens showing what the hub is actually doing -- including
-    the int/bool coercion, so a value stored as a string still displays as a
-    number.
+    rather than from a second copy of the options-then-data-then-default rule --
+    including the int/bool coercion, so a value stored as a string still reaches
+    a form as a number.
+
+    The timeout reported is the *explicit* one, so ``None`` when the hub has none
+    and the per-device-type defaults apply. A form that was handed the resolved
+    value instead could not tell "unset" from a hub timeout that happens to equal
+    :data:`~.const.DEFAULT_AVAILABILITY_TIMEOUT`, and the two behave differently:
+    the first leaves a doorbell never expiring, the second expires it after ten
+    minutes. A form wanting a number to pre-fill applies that default itself.
     """
     return {
-        CONF_AVAILABILITY_TIMEOUT: _hub_availability_timeout(entry),
+        CONF_AVAILABILITY_TIMEOUT: _explicit_hub_timeout(entry),
         CONF_MANAGE_SETTINGS: _hub_manage_settings(entry),
     }
 
 
 def build_hub_options(
-    entry: ConfigEntry, availability_timeout: int, manage_settings: bool
+    entry: ConfigEntry, availability_timeout: int | None, manage_settings: bool
 ) -> dict[str, Any]:
     """Return the options a hub-settings submission should persist.
 
-    A submitted timeout equal to the plain default means "use the
-    per-device-type defaults", so the key is dropped instead of stored; any
-    deliberately chosen value -- ``0`` (never expire) included -- is kept. This
-    mirrors the one-time migration that strips the same sentinel from older
-    entries, and is what stops an entry from re-acquiring it every time somebody
-    opens the form and saves without touching anything.
+    ``None`` means "use the per-device-type defaults", so the key is dropped
+    instead of stored; every ``int`` is a value the user chose -- ``0`` (never
+    expire) and :data:`~.const.DEFAULT_AVAILABILITY_TIMEOUT` alike -- and is
+    stored as given.
+
+    Intent, not the value, is what decides: a caller whose form cannot express
+    "unset" collapses its own sentinel to ``None`` before calling (the options
+    flow does, since a ``vol.Required`` number field echoes its default back on
+    every save). Deciding it here instead is what made a hub-wide 600 seconds
+    unstorable -- the one value a ten-minute default makes it natural to type.
 
     Everything else already in ``entry.options`` carries over: the hub form owns
     two keys, and the per-device sub-map lives alongside them.
     """
     options = dict(entry.options)
     options[CONF_MANAGE_SETTINGS] = manage_settings
-    if availability_timeout == DEFAULT_AVAILABILITY_TIMEOUT:
+    if availability_timeout is None:
         options.pop(CONF_AVAILABILITY_TIMEOUT, None)
     else:
         options[CONF_AVAILABILITY_TIMEOUT] = availability_timeout

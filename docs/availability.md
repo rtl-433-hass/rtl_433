@@ -79,12 +79,19 @@ INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
 The effective availability timeout is resolved in this order:
 
 1. Per-device override from **Device settings**.
-2. Hub default from **Hub settings**, if set.
+2. Hub default from **Receiver settings**, if set.
 3. Device-class default.
 4. 600 second fallback.
 
 Set a timeout to `0` to make a device never expire. This is already the automatic
 default for event-driven devices.
+
+**Receiver settings** asks which of the three you want outright — *Per-device-type
+defaults*, *Never expire*, or *a fixed timeout* — so leaving the receiver on the
+class defaults is a choice you make rather than a number you have to leave alone.
+A fixed timeout of 600 seconds is a hub default like any other, and stops at step
+2; it is not the same as the step-4 fallback, which only applies to devices no
+earlier step has claimed.
 
 ## Restart Behavior
 

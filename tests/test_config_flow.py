@@ -538,6 +538,50 @@ async def test_hub_options_step_persists_timeout(hass, hub_entry_builder):
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == 120
 
 
+async def test_hub_options_step_prefills_the_timeout_it_will_read_back(
+    hass, hub_entry_builder
+):
+    """The field opens on the stored timeout, or on the value that means "unset".
+
+    This form has no way to say "no hub timeout": the field is ``vol.Required``
+    and must open on *a* number. So an entry with nothing stored opens on the
+    same ``DEFAULT_AVAILABILITY_TIMEOUT`` the submit path reads back as "use the
+    per-device-type defaults" — the round trip a user who only came to flip the
+    other toggle takes, and it has to leave the entry as it found it. An entry
+    that does have a timeout opens on that instead, whatever it is.
+    """
+
+    async def timeout_field_default(entry):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "hub"}
+        )
+        keys = [
+            key
+            for key in result["data_schema"].schema
+            if key == CONF_AVAILABILITY_TIMEOUT
+        ]
+        assert keys, "the hub step has no availability-timeout field"
+        return keys[0].default()
+
+    unset = hub_entry_builder()
+    unset.add_to_hass(hass)
+    assert await timeout_field_default(unset) == DEFAULT_AVAILABILITY_TIMEOUT
+
+    # A stored timeout that is *not* the plain default, so the assertion cannot
+    # pass on the fallback by accident.
+    stored = hub_entry_builder(availability_timeout=45)
+    stored.add_to_hass(hass)
+    assert await timeout_field_default(stored) == 45
+
+    # And zero, which is a real stored choice that reads as falsy: a fallback
+    # written with `or` rather than an `is None` test turns "never expire" back
+    # into ten minutes here.
+    never = hub_entry_builder(availability_timeout=0)
+    never.add_to_hass(hass)
+    assert await timeout_field_default(never) == 0
+
+
 async def test_hub_options_step_drops_default_timeout(hass, hub_entry_builder):
     """Submitting the plain-default timeout does not persist it as an explicit hub
     default.
