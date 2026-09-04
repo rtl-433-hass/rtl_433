@@ -375,15 +375,9 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
     def time_precision(self) -> TimePrecision | None:
         """Resolution of the server's event ``time`` stamps, as seen on the wire.
 
-        ``None`` until the first event frame is classified. The value is a
-        property of the server's ``report_meta time:...`` setting rather than of
-        any one device, which is why it is hub state: the client re-reads it per
-        frame and fires ``on_hub_update`` when it changes, so
-        :meth:`_emit_hub_update` carries the change out to anything watching.
-
-        Read by the diagnostics dump and by the repairs tracker, which advises on
-        :attr:`~pyrtl_433.TimePrecision.UNUSABLE` — the value at which the
-        library's replay suppression is disabled entirely.
+        ``None`` until the first event frame is classified. Hub state rather than
+        per-device: it follows the server's ``report_meta time:...`` setting, and
+        the client fires ``on_hub_update`` when it changes.
         """
         return self._client.time_precision
 

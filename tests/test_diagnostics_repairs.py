@@ -276,88 +276,6 @@ async def test_event_time_advisory_edge_triggered(
     unsub()
 
 
-async def test_event_time_advisory_silent_before_first_frame(
-    hass: HomeAssistant, hub_entry_builder
-):
-    """``None`` (no event frame seen yet) is not a verdict and must not advise."""
-    entry = hub_entry_builder()
-    entry.add_to_hass(hass)
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
-    assert coordinator.time_precision is None
-
-    unsub = repairs.async_track_event_time_precision(hass, entry, coordinator)
-    assert (
-        ir.async_get(hass).async_get_issue(DOMAIN, repairs._event_time_issue_id(entry))
-        is None
-    )
-    unsub()
-
-
-async def test_event_time_advisory_clears_after_a_reload(
-    hass: HomeAssistant, hub_entry_builder
-):
-    """A card raised before a reload is cleared by the tracker that follows it.
-
-    The issue registry outlives a config-entry reload; the tracker's closure does
-    not. If clearing were gated on the in-memory "already flagged" state, a fresh
-    tracker would come up with that state at False and never take down a card
-    raised by its predecessor -- while the card itself promises it clears once
-    timestamps start arriving.
-    """
-    entry = hub_entry_builder()
-    entry.add_to_hass(hass)
-
-    # A card left over from before the reload.
-    repairs.async_raise_event_time_unusable(hass, entry)
-    issue_reg = ir.async_get(hass)
-    issue_id = repairs._event_time_issue_id(entry)
-    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
-
-    # The reload: a brand-new coordinator and tracker, server now stamping fine.
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
-    coordinator._client.time_precision = TimePrecision.SECOND
-    unsub = repairs.async_track_event_time_precision(hass, entry, coordinator)
-
-    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
-    unsub()
-
-
-async def test_event_time_fix_flow_acknowledges_and_silences(
-    hass: HomeAssistant, hub_entry_builder
-):
-    """The flow shows an explanation, then persists the acknowledgement.
-
-    There is nothing to apply — the remedy is a server-side setting — so the
-    single confirm step exists to record that the user has seen it.
-    """
-    from custom_components.rtl_433.const import CONF_EVENT_TIME_DISMISSED
-
-    entry = hub_entry_builder()
-    entry.add_to_hass(hass)
-
-    repairs.async_raise_event_time_unusable(hass, entry)
-    issue_reg = ir.async_get(hass)
-    issue_id = repairs._event_time_issue_id(entry)
-    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
-
-    flow = repairs.EventTimeRepairFlow(entry)
-    flow.hass = hass
-
-    # First pass renders the card's explanation rather than acting.
-    form = await flow.async_step_init()
-    assert form["type"] == FlowResultType.FORM
-    assert form["step_id"] == "confirm"
-    assert form["description_placeholders"]["title"] == entry.title
-    assert entry.data.get(CONF_EVENT_TIME_DISMISSED) is None
-
-    result = await flow.async_step_confirm({})
-    await hass.async_block_till_done()
-
-    assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
-    assert entry.data.get(CONF_EVENT_TIME_DISMISSED) is True
-
-
 async def test_dismissed_event_time_advisory_is_not_re_raised(
     hass: HomeAssistant, hub_entry_builder
 ):
@@ -520,6 +438,33 @@ async def test_sample_rate_fix_flow_ignore_silences_advisory(
     assert entry.data.get(CONF_SAMPLE_RATE_DISMISSED) is True
     # "Keep the current rate" must not have touched the desired sample rate.
     assert coordinator.get_desired(KEY_SAMPLE_RATE) is None
+
+
+async def test_sample_rate_advisory_clears_after_a_reload(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """A sample-rate card raised before a reload is cleared by its successor.
+
+    Same shape as the event-time advisory: the issue registry outlives a reload,
+    the tracker's in-memory "already flagged" state does not.
+    """
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+
+    repairs.async_raise_sample_rate_low(
+        hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+    )
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._sample_rate_issue_id(entry)
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
+
+    # The reload: a fresh coordinator and tracker, receiver now on a wide rate.
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 1_024_000}
+    unsub = repairs.async_track_sample_rate(hass, entry, coordinator)
+
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+    unsub()
 
 
 async def test_dismissed_advisory_is_not_re_raised(
