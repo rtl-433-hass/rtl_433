@@ -109,6 +109,15 @@ async def async_get_config_entry_diagnostics(
         if (since := coordinator.disconnected_since) is not None
         else None
     )
+    # Resolution of the server's event ``time`` stamps. "unusable" means the
+    # library's reconnect-replay suppression is switched off, which is the first
+    # thing to check behind a report of duplicate events or devices that come
+    # back to life on reconnect. ``None`` until the first event frame lands.
+    diagnostics["event_time_precision"] = (
+        precision.value
+        if (precision := coordinator.time_precision) is not None
+        else None
+    )
     diagnostics["discovery_enabled"] = coordinator.discovery_enabled
     diagnostics["availability_timeout"] = coordinator.availability_timeout
 

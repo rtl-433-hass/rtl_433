@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from pyrtl_433 import TimePrecision
 from pyrtl_433.library import FieldDescriptor, Registry, load_library
 
 from custom_components.rtl_433.const import (
@@ -63,6 +64,8 @@ class _FakeCoordinator:
         self.device_fields: dict = {}
         self.last_seen: dict = {}
         self.available: dict = {}
+        # Hub state as of the last event frame; ``None`` before the first one.
+        self.time_precision = TimePrecision.SECOND
 
     @property
     def ws_url(self) -> str:

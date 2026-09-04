@@ -236,6 +236,17 @@
           }
         }
       }
+    },
+    "event_time_unusable": {
+      "title": "rtl_433 event timestamps are unusable: {title}",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Event timestamps cannot be read",
+            "description": "Events from {title} carry no timestamp this integration can read, so it cannot tell a freshly received transmission from one the server is re-sending.\n\nrtl_433 re-broadcasts a short buffer of recent events every time Home Assistant reconnects. Without usable timestamps those are treated as new traffic: devices that have actually gone silent are marked available again, and their event entities and device triggers fire a second time — which can re-run automations.\n\nTo fix it, add `report_meta time:iso:usec:tz` to the rtl_433 configuration (or start it with `-M time:iso:usec:tz`) and restart the server. This card clears itself once timestamps start arriving.\n\nSubmit to acknowledge this and stop the warning for this hub — choose this if you deliberately run without timestamps."
+          }
+        }
+      }
     }
   }
 }

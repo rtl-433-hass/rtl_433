@@ -61,7 +61,7 @@ import dataclasses
 from datetime import datetime
 from typing import Any
 
-from pyrtl_433 import CannotConnect as CannotConnect, Rtl433Client
+from pyrtl_433 import CannotConnect as CannotConnect, Rtl433Client, TimePrecision
 from pyrtl_433.normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent
 
 from homeassistant.config_entries import ConfigEntry
@@ -377,6 +377,16 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
     def stats(self) -> dict[str, Any]:
         """Latest server-stats payload (client-sourced over HTTP ``/cmd``)."""
         return self._client.stats
+
+    @property
+    def time_precision(self) -> TimePrecision | None:
+        """Resolution of the server's event ``time`` stamps, as seen on the wire.
+
+        ``None`` until the first event frame is classified. Hub state rather than
+        per-device: it follows the server's ``report_meta time:...`` setting, and
+        the client fires ``on_hub_update`` when it changes.
+        """
+        return self._client.time_precision
 
     @property
     def dev_info(self) -> dict[str, Any]:

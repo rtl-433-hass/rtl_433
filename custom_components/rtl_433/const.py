@@ -76,6 +76,11 @@ DEFAULT_INITIAL_FREQUENCY: Final = 433.92
 # Absent / falsey means "not dismissed" — many users deliberately want the lower
 # rate, so this lets them silence the advisory for good.
 CONF_SAMPLE_RATE_DISMISSED: Final = "sample_rate_advisory_dismissed"
+# Per-hub flag set when the user acknowledges the unusable-event-time advisory.
+# Persisted for the same reason as the flag above: the remedy is a server-side
+# rtl_433 setting we cannot apply for them, so a user who deliberately runs
+# without parseable timestamps would otherwise be re-warned on every restart.
+CONF_EVENT_TIME_DISMISSED: Final = "event_time_advisory_dismissed"
 
 # --- Per-device config-entry keys ------------------------------------------
 # entry id of the parent hub entry; enables cascade removal when a hub is
