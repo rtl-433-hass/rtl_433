@@ -73,11 +73,17 @@ string in every mode, and these forms are understood:
 | rtl_433 setting | Example `time` | |
 | --- | --- | --- |
 | default | `2026-05-25 10:00:00` | Local wall clock, whole seconds. |
-| `time:iso` | `2026-05-25T10:00:00Z` | ISO-8601, with an offset or `Z`. |
-| `time:unix` | `1779706800` | Epoch seconds. |
+| `time:iso` | `2026-05-25T10:00:00` | ISO-8601. Local, unless you add `tz` or `utc`. |
+| `time:unix` | `1779703200` | Epoch seconds, always UTC. |
 | `time:off` | *(no field)* | **Timestamps off — see below.** |
 
-Adding `usec` to any of them (`time:iso:usec`) adds a fractional part.
+Adding `usec` to any of them (`time:iso:usec`) adds a fractional part, and `tz`
+(or `utc`) makes the zone explicit. Be explicit if you can: a bare local stamp is
+read in Home Assistant's own time zone, so a server in a different zone puts
+every event hours away from where it belongs. When that lands in the past, each
+frame looks like an event from an old disconnection: values still seed, but
+devices stop refreshing their last-seen and go unavailable, and event entities
+and device triggers stop firing.
 
 Epoch stamps are worth calling out: `time:unix` was unreadable before the
 integration picked up pyrtl_433 0.4.0, and an unreadable stamp is treated the
