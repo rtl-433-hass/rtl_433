@@ -2,11 +2,11 @@
 
 Two surfaces put the same three questions to the user — the hub's options flow
 (``options_flow.py``, universally available) and the discovery panel's WebSocket
-API (``websocket_api.py``, admin-only and dependent on a JS module loading). Two
-surfaces must not mean two implementations: adopting from the panel has to
-produce byte-for-byte the device that adopting from the options form produces,
-or a user who moves between them gets two different integrations. So the *doing*
-lives here and both surfaces are thin presentation over it.
+API (``websocket_api.py``, admin-only and dependent on a JS module loading).
+Both must create exactly the same device: if the panel and the options form
+adopted a device differently, someone who used both would end up with an
+inconsistent set of devices. So the actual work lives here, and both surfaces
+are thin presentation over it.
 
 Every function takes ``(hass, entry, coordinator, device_keys)`` and returns an
 :class:`AdoptionResult` naming what actually happened. The options flow could
@@ -16,11 +16,11 @@ is watching a row they just clicked, and "nothing happened" has to be
 distinguishable from "done". Reporting skips rather than silently discarding
 them is what lets the panel say which of the two it was.
 
-The split of responsibility these functions preserve is the one the coordinator
-already draws: the coordinator's in-memory sets (``adopted`` / ``ignored`` /
-``pending``) are what makes a change take effect on a device's *very next
-transmission*, and ``entry.data`` is what makes it survive a restart. Both are
-written here, in that order, for exactly that reason.
+These functions keep the same split the coordinator already uses. Its in-memory
+sets (``adopted`` / ``ignored`` / ``pending``) are what makes a change take
+effect on a device's *very next transmission*; ``entry.data`` is what makes it
+survive a restart. Both are written here, in that order, for exactly that
+reason.
 """
 
 from __future__ import annotations

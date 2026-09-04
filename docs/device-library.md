@@ -118,7 +118,7 @@ models:
 Mapping overrides are **global or model-scoped only** — they apply to every device
 of a model, not a single physical unit. To change settings for one specific unit
 (its availability timeout, meter calibration, or motion clear delay), use the
-*Device settings* dialog instead.
+*Device settings* page instead.
 
 ## Mapping entry schema (summary)
 
@@ -340,7 +340,7 @@ global descriptor for that same field.
 ### Precedence (specificity-first)
 
 Combined with [UI mappings](#adding-device-mappings) and the per-device meter
-calibration (the *Device settings* dialog), the full precedence for a
+calibration (the *Device settings* page), the full precedence for a
 single field on a single device is, **highest to lowest**:
 
 1. **Per-device calibration** (commodity + base unit + scale, set in the options
@@ -361,7 +361,7 @@ before the global tier.)
 > carry a guessed `models:` consumption mapping for any real model — a wrong
 > scale would silently corrupt real Energy data. The example below is purely
 > illustrative; for a real meter use the per-device calibration step in the
-> *Device settings* dialog (see [Utility-meter calibration](calibration.md)) until a model's unit/scale is authoritatively
+> *Device settings* page (see [Utility-meter calibration](calibration.md)) until a model's unit/scale is authoritatively
 > known.
 
 ## Contributing device mappings

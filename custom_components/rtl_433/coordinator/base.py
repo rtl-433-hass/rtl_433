@@ -724,16 +724,44 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
     @callback
     def pending_candidates(self) -> list[PendingDevice]:
-        """Return the pending candidates, most recently heard first.
+        """Return the pending candidates, most recently *discovered* first.
 
         The order a user is offered candidates in is one decision, so it is made
         here rather than separately by each surface: the options form's picker
         and the WebSocket payload both render this list, and a long list worked
-        from the top has to put the same device first in both. Most-recently-heard
-        leads because the device the user just triggered to make it transmit is
-        the one they came here for.
+        from the top has to put the same device first in both.
+
+        Ordering by ``first_seen`` rather than ``last_seen`` puts the device the
+        user just triggered at the top -- it has only just been discovered -- and,
+        unlike ``last_seen``, it does not move afterwards. The panel draws a card
+        per candidate and refreshes them every few seconds, so a most-recently-
+        *heard* order would have cards swapping places under the cursor as
+        devices transmitted. The key breaks a tie, so two devices first heard in
+        the same instant keep a stable order too.
         """
-        return sorted(self.pending.values(), key=lambda r: r.last_seen, reverse=True)
+        return sorted(
+            self.pending.values(),
+            key=lambda r: (r.first_seen, r.key),
+            reverse=True,
+        )
+
+    @callback
+    def clear_pending(self) -> int:
+        """Forget every pending candidate, and return how many there were.
+
+        A candidate is only ever a working set: the pending map is memory-only
+        and rebuilt from live traffic, so clearing it discards nothing the user
+        decided. Adopting and ignoring are the decisions, and they have their own
+        methods.
+
+        Lives here with the other verbs that write ``pending`` so the map has one
+        owner. Clearing does announce -- an emptied list is a membership change
+        every open panel needs at once.
+        """
+        cleared = len(self.pending)
+        self.pending.clear()
+        self.emit_pending_update()
+        return cleared
 
     def _dispatch(
         self,

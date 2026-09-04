@@ -36,7 +36,7 @@
  * and `rtl_433/devices/replace` re-points an existing device onto a candidate.
  * None of the adopt/ignore/replace *logic* is reimplemented here; every button
  * is one command call, so this panel cannot drift from what the integration
- * does. The same holds for the three settings dialogs: `rtl_433/settings/get`
+ * does. The same holds for the three settings pages: `rtl_433/settings/get`
  * answers with everything they render -- including which units are valid for
  * which commodity -- and `.../hub`, `.../device` and `.../mappings` store it.
  * A form here knows how to lay a control out and nothing about what a value
@@ -78,6 +78,118 @@ const RELOAD_RETRY_LIMIT = 10;
 
 /** The integration domain, as it appears in a device registry identifier. */
 const DOMAIN = "rtl_433";
+
+/**
+ * The panel's views, keyed by the path segment that addresses each one.
+ *
+ * Real paths rather than in-page state, because these are pages: the browser's
+ * back button, a bookmark and a reload all have to land where the user left
+ * off, which is what Home Assistant's own Zigbee and Z-Wave subpages do. The
+ * empty key is the overview.
+ */
+const VIEWS = {
+  "": { view: "overview", title: "rtl_433" },
+  discovered: { view: "discovered", title: "Discovered devices" },
+  options: { view: "settings", title: "Receiver settings", form: "hub" },
+  "device-settings": {
+    view: "settings",
+    title: "Device settings",
+    form: "device",
+  },
+  mappings: { view: "settings", title: "Device mappings", form: "mappings" },
+};
+
+/**
+ * The view definition for one path segment, falling back to the overview.
+ *
+ * `hasOwnProperty` rather than a plain lookup: `VIEWS` is an object literal, so
+ * `/rtl_433/toString` (or `constructor`, or `valueOf`) would otherwise find
+ * something on `Object.prototype` -- truthy, but with no `view` on it, which
+ * hides every view and puts the word "undefined" in the toolbar. Any ordinary
+ * unknown segment already fell back to the overview correctly; those few names
+ * were the exception.
+ */
+export function viewFor(segment) {
+  return Object.prototype.hasOwnProperty.call(VIEWS, segment)
+    ? VIEWS[segment]
+    : VIEWS[""];
+}
+
+/**
+ * Whether the back arrow still owes the browser an unwind, after a route change.
+ *
+ * Moving from the overview into a subview always leaves the overview one entry
+ * behind us -- whoever drove it: a row click, the frontend router, or the
+ * browser's Forward button after a Back. Landing back on the overview means
+ * there is nothing left to unwind.
+ *
+ * `seen` is false for the very first path the panel is handed, which is an
+ * arrival rather than a move: a bookmarked or typed subview URL has no overview
+ * behind it, and going back from one would leave the panel entirely.
+ */
+export function pushedAfter(previous, next, pushed, seen) {
+  if (!seen) {
+    return pushed;
+  }
+  if (next && !previous) {
+    return true;
+  }
+  if (!next) {
+    return false;
+  }
+  return pushed;
+}
+
+/** mdiDevices, mdiShape: the overview's row icons. */
+const ICON_DEVICES =
+  "M3 6h18V4H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4v-2H3V6m10 6H9v1.78c-.61.55-1 1.33-1 2.22s.39 1.67 1 2.22V20h4v-1.78c.61-.55 1-1.33 1-2.22s-.39-1.67-1-2.22V12m-2 5.5a1.5 1.5 0 0 1 0-3 1.5 1.5 0 0 1 0 3M22 8h-6a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1m-1 10h-4v-8h4v8Z";
+const ICON_ENTITIES =
+  "m12 2 5.5 9h-11L12 2M17.5 13a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9M3 13.5h8v8H3v-8Z";
+/** mdiCog, mdiTune, mdiCodeBraces: the settings rows. */
+const ICON_RECEIVER =
+  "M12 15.5A3.5 3.5 0 0 1 8.5 12A3.5 3.5 0 0 1 12 8.5a3.5 3.5 0 0 1 3.5 3.5a3.5 3.5 0 0 1-3.5 3.5m7.43-2.53c.04-.32.07-.64.07-.97c0-.33-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.31-.61-.22l-2.49 1c-.52-.39-1.06-.73-1.69-.98l-.37-2.65A.506.506 0 0 0 14 2h-4c-.25 0-.46.18-.5.42l-.37 2.65c-.63.25-1.17.59-1.69.98l-2.49-1c-.22-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64L4.57 11c-.04.34-.07.67-.07 1c0 .33.03.65.07.97l-2.11 1.66c-.19.15-.25.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.06.74 1.69.99l.37 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.37-2.65c.63-.26 1.17-.59 1.69-.99l2.49 1.01c.22.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.66Z";
+const ICON_DEVICE_SETTINGS =
+  "M3 17v2h6v-2H3M3 5v2h10V5H3m10 16v-2h8v-2h-8v-2h-2v6h2M7 9v2H3v2h4v2h2V9H7m14 4v-2H11v2h10m-6-4h2V7h4V5h-4V3h-2v6Z";
+const ICON_MAPPINGS =
+  "M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-1-1.73V13a2 2 0 0 0 1-1.73V5h2V3H8m8 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 1-1.73V13a2 2 0 0 1-1-1.73V5h-2V3h2Z";
+
+/** mdiPlus, for the floating action button. */
+const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
+
+/** mdiCheckCircle / mdiAlertCircle: the status card's two states. */
+const ICON_ONLINE =
+  "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9Z";
+const ICON_OFFLINE =
+  "M13 13h-2V7h2m0 10h-2v-2h2M12 2A10 10 0 0 0 2 12a10 10 0 0 0 10 10 10 10 0 0 0 10-10A10 10 0 0 0 12 2Z";
+
+/**
+ * What the back control should do from where the panel currently is.
+ *
+ * Pure, and exported, so the rule can be tested without a browser: it is the
+ * part that was wrong, and it is wrong in a way no screenshot shows -- the
+ * page looks right and the history underneath it is not.
+ *
+ * Entering a subview pushes an entry, so going back up has to *unwind* that
+ * push rather than push again. Pushing again is what broke it: the overview
+ * ended up stacked on top of the subview it came from, so the overview's own
+ * back control walked straight back into that subview, and there was no way
+ * out of the panel.
+ *
+ * Arriving at a subview directly -- a bookmark, a reload, a shared link -- has
+ * no push to unwind, so going up replaces instead. Either way exactly one entry
+ * represents "the panel", and back from the overview leaves it.
+ *
+ * @param {string} segment      the path segment showing, "" for the overview
+ * @param {boolean} pushed      whether this panel pushed to reach `segment`
+ * @param {number} historyLength `window.history.length`
+ * @returns {"unwind"|"replace-up"|"leave"|"exit"}
+ */
+export function backAction(segment, pushed, historyLength) {
+  if (segment) {
+    return pushed ? "unwind" : "replace-up";
+  }
+  return historyLength > 1 ? "leave" : "exit";
+}
 
 /** mdiArrowLeft, for the toolbar's back control and its native fallback. */
 const BACK_ARROW_PATH = "M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2z";
@@ -208,10 +320,8 @@ function haRadio(name, value, labelNode) {
     // `ha-formfield` slots its control; the two-line text goes in the label
     // slot so the whole row stays one click target.
     labelNode.slot = "label";
-    field.append(radio, labelNode);
-  } else {
-    field.append(radio, labelNode);
   }
+  field.append(radio, labelNode);
   return { field, radio };
 }
 
@@ -250,6 +360,26 @@ class Rtl433Panel extends HTMLElement {
 
     this._hubs = [];
     this._entryId = null;
+    // Whether this panel pushed a history entry to reach the view it is on,
+    // and therefore owes an unwind when it goes back up.
+    this._pushed = false;
+    // No route has been assigned yet, so the first one is an arrival
+    // rather than a move (see `_readPath`).
+    this._routeSeen = false;
+    // The brands access token, fetched once for the status card's logo.
+    this._brandToken = null;
+    // The path segment this panel is showing, from `route`. Empty is the
+    // overview.
+    this._segment = "";
+    // The receiver a settings path names, when it names one.
+    this._segmentEntry = null;
+    // Which receiver the cached settings payload belongs to, so a page for a
+    // different one refetches rather than showing the wrong hub's values.
+    this._settingsFor = null;
+    // The form + receiver whose payload has been asked for, so a repaint does
+    // not ask again (see `_openSettings`).
+    this._settingsAttempt = null;
+    this._narrow = false;
     // `null` until the first payload lands, which distinguishes "still loading"
     // from "loaded, and there is genuinely nothing here" -- different things to
     // tell someone staring at an empty page.
@@ -291,12 +421,10 @@ class Rtl433Panel extends HTMLElement {
     // Devices adopted from this panel, in this session:
     // `key -> {row, deviceId}`.
     //
-    // An adopted device leaves the pending list immediately, so without this
-    // its card would simply vanish at the moment of the click -- the one moment
-    // the user is looking straight at it, and with the device page it just
-    // created still one unexplained navigation away. Keeping the snapshot lets
-    // the card stay exactly where it was and turn green, which is also what
-    // makes "you added these five" readable at a glance.
+    // Adopting removes a device from the pending list straight away, so
+    // without this snapshot its card would disappear the instant the user
+    // clicked Add. Keeping it lets the card stay where it is and turn green,
+    // so the user can see everything they just added.
     this._added = new Map();
 
     // `key -> area_id` for adds whose area has not been applied yet.
@@ -347,6 +475,140 @@ class Rtl433Panel extends HTMLElement {
     return this._hass;
   }
 
+  /**
+   * Take the path Home Assistant is showing.
+   *
+   * `ha-panel-custom` assigns `route` as `{prefix, path}` on every navigation
+   * inside the panel, so this is where a subview URL -- typed, bookmarked,
+   * reloaded or arrived at with the browser's back button -- becomes the view
+   * on screen. It arrives before `hass` sometimes and after it others, so it
+   * only records the segment; `_render` is what draws it.
+   */
+  set route(route) {
+    this._readPath(((route && route.path) || "").replace(/^\//, ""));
+    if (this._el) {
+      this._render();
+    }
+  }
+
+  get route() {
+    return { prefix: `/${DOMAIN}`, path: `/${this._path()}` };
+  }
+
+  /**
+   * Split a panel path into the view and, for the settings pages, its receiver.
+   *
+   * A settings page names the receiver it configures -- `options/<entry_id>` --
+   * because with more than one receiver the page is otherwise ambiguous: a
+   * reload or a bookmark would land on whichever hub happened to resolve first
+   * and quietly configure the wrong radio. The id is optional, so links written
+   * before this still work and fall back to the selected receiver.
+   */
+  _readPath(path) {
+    const [segment, entry] = path.split("/");
+    const next = segment || "";
+    // Whether the back arrow should unwind a history entry or replace one is a
+    // fact about how we got here, so it is decided on every route change rather
+    // than only in the few places that navigate -- the browser's Forward button
+    // is a route change this panel never sees as a navigation. See
+    // `pushedAfter`.
+    this._pushed = pushedAfter(
+      this._segment,
+      next,
+      this._pushed,
+      this._routeSeen
+    );
+    this._routeSeen = true;
+    this._segment = next;
+    this._segmentEntry = entry || null;
+  }
+
+  /** The current path, as `route` reports it back. */
+  _path() {
+    return this._segmentEntry
+      ? `${this._segment}/${this._segmentEntry}`
+      : this._segment || "";
+  }
+
+  /**
+   * The receiver a settings page is for.
+   *
+   * The URL wins when it names one that exists; a stale id -- an entry removed
+   * since the link was made -- falls back rather than showing a page that can
+   * only fail on save.
+   */
+  _settingsEntryId() {
+    if (
+      this._segmentEntry &&
+      this._hubs.some((hub) => hub.entry_id === this._segmentEntry)
+    ) {
+      return this._segmentEntry;
+    }
+    return this._entryId;
+  }
+
+  /** Narrow is handed down for the elements that lay themselves out by it. */
+  set narrow(narrow) {
+    this._narrow = Boolean(narrow);
+  }
+
+  get narrow() {
+    return this._narrow;
+  }
+
+  /**
+   * Move to another view by changing the URL.
+   *
+   * `pushState` plus a `location-changed` event is Home Assistant's own
+   * navigation contract: the frontend router listens for it and re-assigns
+   * `route`. The view is also set directly rather than waiting for that round
+   * trip, so a frontend that stops re-assigning `route` still navigates -- the
+   * URL and the view are kept in step by whichever of the two arrives.
+   */
+  _navigate(segment, { replace = false, entry = null } = {}) {
+    const tail = entry ? `${segment}/${entry}` : segment;
+    const path = segment ? `/${DOMAIN}/${tail}` : `/${DOMAIN}`;
+    if (window.location.pathname !== path) {
+      if (replace) {
+        window.history.replaceState(null, "", path);
+      } else {
+        window.history.pushState(null, "", path);
+        // Only a move *into* a subview is an entry this panel has to unwind
+        // later; the rows that do it all live on the overview.
+        if (segment) {
+          this._pushed = true;
+        }
+      }
+      window.dispatchEvent(
+        new CustomEvent("location-changed", { detail: { replace } })
+      );
+    }
+    this._segment = segment;
+    this._segmentEntry = entry;
+    this._render();
+  }
+
+  /**
+   * Leave a subview for the overview, without stacking an entry on top of it.
+   *
+   * Used by the back arrow and by a form's Cancel and Save alike: all three
+   * mean the same thing, and all three were pushing.
+   */
+  _goUp() {
+    if (this._pushed) {
+      this._pushed = false;
+      // `popstate` re-reads the URL and renders, so this needs no follow-up.
+      window.history.back();
+      return;
+    }
+    this._navigate("", { replace: true });
+  }
+
+  /** The view definition for the current path, falling back to the overview. */
+  _viewFor() {
+    return viewFor(this._segment);
+  }
+
   connectedCallback() {
     // `hass` may have been set before the element was in the document, in which
     // case `_start` deferred; and an element that is detached and re-attached
@@ -356,6 +618,22 @@ class Rtl433Panel extends HTMLElement {
       this._subscribe();
     }
     this._startClock();
+    // The frontend router re-assigns `route` for navigations it makes, but a
+    // browser back button between two of this panel's own paths does not
+    // always reach it. Reading the URL back on `popstate` keeps the view and
+    // the address bar in step either way.
+    this._onPopState = () => {
+      const prefix = `/${DOMAIN}`;
+      if (window.location.pathname.startsWith(prefix)) {
+        this._readPath(
+          window.location.pathname.slice(prefix.length).replace(/^\//, "")
+        );
+        if (this._el) {
+          this._render();
+        }
+      }
+    };
+    window.addEventListener("popstate", this._onPopState);
   }
 
   /**
@@ -369,6 +647,10 @@ class Rtl433Panel extends HTMLElement {
   disconnectedCallback() {
     this._teardownSubscription();
     this._stopClock();
+    if (this._onPopState) {
+      window.removeEventListener("popstate", this._onPopState);
+      this._onPopState = null;
+    }
   }
 
   /** Begin once, as soon as there is both a `hass` and a document to render into. */
@@ -382,6 +664,7 @@ class Rtl433Panel extends HTMLElement {
     this._render();
     this._startClock();
     this._loadHubs();
+    this._loadBrandLogo();
   }
 
   _startClock() {
@@ -431,7 +714,7 @@ class Rtl433Panel extends HTMLElement {
     // healthy one is the one worth opening on.
     const initial = this._hubs.find((hub) => hub.loaded) || this._hubs[0];
     this._entryId = initial.entry_id;
-    this._renderHubPicker();
+    this._renderSettingsCards(this._el.root);
     this._subscribe();
   }
 
@@ -505,10 +788,10 @@ class Rtl433Panel extends HTMLElement {
       if (this._entryId !== entryId) {
         return;
       }
-      // A hub that is reloading is a wait, not a failure -- and it is the
-      // *expected* answer for a second or so after saving a setting that
-      // requires a reload. Reporting it would show an error banner at the one
-      // moment the user has just succeeded at something.
+      // A `not_loaded` error means the hub is reloading, so retry rather than
+      // report it. It is the expected answer for a second or so after saving a
+      // setting that requires a reload -- exactly when an error banner would be
+      // most confusing, since the save actually worked.
       if (error && error.code === "not_loaded" && this._retries < RELOAD_RETRY_LIMIT) {
         this._retries += 1;
         this._status = "Waiting for the receiver to reload…";
@@ -729,33 +1012,38 @@ class Rtl433Panel extends HTMLElement {
    * the feature.
    */
   _buildReplaceDialog(slot) {
-    const dialog = haControl("ha-dialog", () => {
-      const native = document.createElement("dialog");
-      native.innerHTML = `
-        <form method="dialog" class="replace-form">
-          <h2 class="replace-title">Replace a device</h2>
-          <p class="replace-intro"></p>
-          <div class="replace-list" role="radiogroup" aria-label="Device to replace"></div>
-          <div class="replace-actions"></div>
-        </form>`;
-      return native;
-    });
+    const dialog = haControl("ha-dialog", () =>
+      document.createElement("dialog")
+    );
     dialog.className = "replace-dialog";
+
+    // The same three children either way, so `_buildDom` finds them by
+    // `querySelector` without caring which element it got.
+    const intro = document.createElement("p");
+    intro.className = "replace-intro";
+    const list = document.createElement("div");
+    list.className = "replace-list";
+    list.setAttribute("role", "radiogroup");
+    list.setAttribute("aria-label", "Device to replace");
+    const actions = document.createElement("div");
+    actions.className = "replace-actions";
 
     if (dialog.localName === "ha-dialog") {
       dialog.hass = this._hass;
-      // The heading is the element's own, so the fallback's <h2> is not needed.
+      // The heading is the element's own, so no <h2> of ours.
       dialog.headerTitle = "Replace a device";
-      const intro = document.createElement("p");
-      intro.className = "replace-intro";
-      const list = document.createElement("div");
-      list.className = "replace-list";
-      list.setAttribute("role", "radiogroup");
-      list.setAttribute("aria-label", "Device to replace");
-      const actions = document.createElement("div");
-      actions.className = "replace-actions";
       actions.slot = "footer";
       dialog.append(intro, list, actions);
+    } else {
+      // `method="dialog"` is what makes Esc and the buttons close a native one.
+      const form = document.createElement("form");
+      form.method = "dialog";
+      form.className = "replace-form";
+      const heading = document.createElement("h2");
+      heading.className = "replace-title";
+      heading.textContent = "Replace a device";
+      form.append(heading, intro, list, actions);
+      dialog.append(form);
     }
 
     slot.append(dialog);
@@ -810,16 +1098,324 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * The three settings entries, preferring Home Assistant's own buttons.
+   * One navigation row, preferring `ha-md-list-item`.
+   *
+   * This is the row core uses for a link into a subpage -- an icon, a headline,
+   * an optional supporting line and a chevron -- and it is what makes these
+   * read as pages to open rather than buttons to press. The class is kept on
+   * whichever element comes back so the rest of this file (and the screenshot
+   * harness) can still find and click it.
    */
-  _buildPageActions(row) {
-    const made = {
-      openHub: haButton("Receiver settings", "ghost open-hub-settings"),
-      openDevice: haButton("Device settings", "ghost open-device-settings"),
-      openMappings: haButton("Device mappings", "ghost open-mappings"),
-    };
-    row.append(made.openHub, made.openDevice, made.openMappings);
+  _navRow({ className, icon, headline, supporting, onClick }) {
+    const item = haControl("ha-md-list-item", () => {
+      const native = document.createElement("button");
+      native.type = "button";
+      return native;
+    });
+    item.className = className;
+    if (item.localName === "ha-md-list-item") {
+      item.type = "button";
+    }
+
+    if (icon) {
+      const glyph = haControl("ha-svg-icon", () =>
+        document.createElement("span")
+      );
+      glyph.slot = "start";
+      glyph.className = "row-icon";
+      if (glyph.localName === "ha-svg-icon") {
+        glyph.path = icon;
+      }
+      item.append(glyph);
+    }
+
+    const head = document.createElement("span");
+    head.slot = "headline";
+    head.className = "row-headline";
+    head.textContent = headline;
+    item.append(head);
+
+    if (supporting !== undefined) {
+      const sub = document.createElement("span");
+      sub.slot = "supporting-text";
+      sub.className = "row-supporting";
+      sub.textContent = supporting;
+      item.append(sub);
+    }
+
+    // The chevron is decoration: it says "this opens something" and the row
+    // itself is the control, so it is never the click target.
+    const chevron = haControl("ha-icon-next", () =>
+      document.createElement("span")
+    );
+    chevron.slot = "end";
+    chevron.className = "row-chevron";
+    item.append(chevron);
+
+    item.addEventListener("click", onClick);
+    return item;
+  }
+
+  /**
+   * The floating action button that opens the discovery page.
+   *
+   * Zigbee and Z-Wave both put the one thing you came to do in a floating
+   * button rather than a row, and adopting a device is that thing here.
+   *
+   * `ha-fab` is not registered in this frontend -- checked, not assumed -- so
+   * this is built from `ha-button`, which is, using the pill shape and accent
+   * weighting core gives the same control. The positioning is this file's,
+   * because a floating button has to be placed by whatever owns the scroll
+   * area, and here that is the panel.
+   */
+  _buildFab(slot) {
+    const fab = haControl("ha-fab", () =>
+      haButton("Add or replace device", "fab-button", "accent")
+    );
+    fab.classList.add("panel-fab");
+    if (fab.localName === "ha-fab") {
+      fab.label = "Add or replace device";
+      fab.extended = true;
+    } else if (fab.localName === "ha-button") {
+      fab.size = "large";
+      fab.pill = true;
+      const plus = haControl("ha-svg-icon", () =>
+        document.createElement("span")
+      );
+      plus.slot = "start";
+      if (plus.localName === "ha-svg-icon") {
+        plus.path = ICON_PLUS;
+      }
+      fab.prepend(plus);
+    }
+    fab.addEventListener("click", () => this._navigate("discovered"));
+    slot.append(fab);
+    return fab;
+  }
+
+  /** A card with a heading and a list of rows inside it. */
+  _buildCard(slot, className, rows, heading) {
+    const card = haControl("ha-card", () => document.createElement("div"));
+    card.className = className;
+    if (heading) {
+      if (card.localName === "ha-card") {
+        card.header = heading;
+      } else {
+        const title = document.createElement("h2");
+        title.className = "card-heading";
+        title.textContent = heading;
+        card.append(title);
+      }
+    }
+    const list = haControl("ha-md-list", () => document.createElement("div"));
+    list.className = "card-list";
+    for (const row of rows) {
+      list.append(row);
+    }
+    card.append(list);
+    slot.append(card);
+    return card;
+  }
+
+  /**
+   * The receiver's status, as core's integration pages lead with it.
+   *
+   * The connection state is the one fact worth the top of the page: everything
+   * below it is meaningless while the receiver is unreachable, and "is it
+   * connected?" is the first question anyone opens this page with.
+   */
+  _buildStatusCard(slot) {
+    const card = haControl("ha-card", () => document.createElement("div"));
+    card.className = "status-card";
+    const row = document.createElement("div");
+    row.className = "status-row";
+    const badge = document.createElement("div");
+    badge.className = "status-badge";
+    const glyph = haControl("ha-svg-icon", () =>
+      document.createElement("span")
+    );
+    glyph.className = "status-icon";
+    badge.append(glyph);
+    const text = document.createElement("div");
+    text.className = "status-text";
+    const headline = document.createElement("div");
+    headline.className = "status-headline";
+    const supporting = document.createElement("div");
+    supporting.className = "status-supporting";
+    text.append(headline, supporting);
+
+    // The brand mark sits opposite the state, which is where Zigbee and Z-Wave
+    // put theirs. Hidden until it actually loads: an integration whose brand
+    // images are missing should show a card with no logo, never a broken-image
+    // glyph, and the request needs a token that may not arrive.
+    const logo = document.createElement("img");
+    logo.className = "status-logo";
+    logo.alt = "";
+    logo.hidden = true;
+    logo.addEventListener("error", () => {
+      logo.hidden = true;
+    });
+    logo.addEventListener("load", () => {
+      logo.hidden = false;
+    });
+
+    row.append(badge, text, logo);
+    card.append(row);
+    slot.append(card);
+    return { card, glyph, badge, headline, supporting, logo };
+  }
+
+  /**
+   * Point the status card's logo at this integration's own brand image.
+   *
+   * `/api/brands/integration/<domain>/<image>` serves a *custom* integration's
+   * in-repo `brand/` directory before it falls back to the brands CDN, which is
+   * what makes this work for an integration that is not in core's brands
+   * repository -- the files in `custom_components/rtl_433/brand/` are the ones
+   * that come back.
+   *
+   * The view is not behind the frontend's normal bearer auth, because an `<img>`
+   * cannot carry a header; it takes a short-lived token instead, which is what
+   * `brands/access_token` hands out and what Home Assistant's own frontend uses
+   * for the same images. The token rotates, so a card left open long enough
+   * will eventually 403 -- and then the logo hides itself rather than breaking
+   * the card, which is the same posture as every other borrowed thing here.
+   */
+  async _loadBrandLogo() {
+    const logo = this._el.status0 && this._el.status0.logo;
+    if (!logo || this._brandToken) {
+      return;
+    }
+    let token;
+    try {
+      token = (await this._call({ type: "brands/access_token" })).token;
+    } catch (error) {
+      // A frontend without the brands component, or an older core: the card is
+      // complete without a logo, so this is not worth a banner.
+      return;
+    }
+    this._brandToken = token;
+    logo.src = `/api/brands/integration/${DOMAIN}/icon.png?token=${encodeURIComponent(
+      token
+    )}`;
+  }
+
+  /**
+   * The overview's two lists: what this receiver has, and what can be changed.
+   *
+   * Devices and entities link out to the registry pages filtered to this
+   * integration, which is where Home Assistant already lists them -- there is
+   * nothing this panel could add by drawing that list again. There is no
+   * groups row because rtl_433 has no grouping, and no map because a receiver
+   * has no topology to draw.
+   */
+  _buildOverview(root) {
+    const made = {};
+    made.status0 = this._buildStatusCard(root.querySelector(".status-slot"));
+    made.rowDevices = this._navRow({
+      className: "nav-devices",
+      icon: ICON_DEVICES,
+      headline: "Devices",
+      supporting: "",
+      onClick: () => this._openConfigPage("devices"),
+    });
+    made.rowEntities = this._navRow({
+      className: "nav-entities",
+      icon: ICON_ENTITIES,
+      headline: "Entities",
+      supporting: "",
+      onClick: () => this._openConfigPage("entities"),
+    });
+    this._buildCard(
+      root.querySelector(".network-slot"),
+      "network-card",
+      [made.rowDevices, made.rowEntities],
+      "My network"
+    );
+    made.fab = this._buildFab(root.querySelector(".fab-slot"));
+
     return made;
+  }
+
+  /**
+   * One settings card per receiver, rebuilt when the hub list changes.
+   *
+   * Built here rather than in the skeleton because the receivers are not known
+   * until `rtl_433/hubs` answers. With one receiver the card is unheaded and
+   * reads exactly as before; with several, each is headed by its own hub title,
+   * which is what says *which* radio a row configures -- so the pages
+   * themselves do not have to repeat it.
+   */
+  _renderSettingsCards(root) {
+    const key = this._hubs.map((hub) => `${hub.entry_id}:${hub.title}`).join("|");
+    if (key === this._settingsCardsKey) {
+      return;
+    }
+    this._settingsCardsKey = key;
+    const slot = root.querySelector(".page-actions");
+    slot.textContent = "";
+    const several = this._hubs.length > 1;
+    for (const hub of this._hubs) {
+      const rows = [
+        {
+          className: "open-hub-settings",
+          icon: ICON_RECEIVER,
+          headline: "Receiver settings",
+          supporting:
+            "Availability timeout and whether Home Assistant manages the receiver",
+          segment: "options",
+        },
+        {
+          className: "open-device-settings",
+          icon: ICON_DEVICE_SETTINGS,
+          headline: "Device settings",
+          supporting:
+            "Per-device timeout overrides and utility-meter calibration",
+          segment: "device-settings",
+        },
+        {
+          className: "open-mappings",
+          icon: ICON_MAPPINGS,
+          headline: "Device mappings",
+          supporting: "YAML overrides for how fields become entities",
+          segment: "mappings",
+        },
+      ].map((row) =>
+        this._navRow({
+          className: row.className,
+          icon: row.icon,
+          headline: row.headline,
+          supporting: row.supporting,
+          // The receiver goes in the URL even with one of them, so a link is
+          // unambiguous the moment a second is added.
+          onClick: () =>
+            this._navigate(row.segment, { entry: hub.entry_id }),
+        })
+      );
+      this._buildCard(
+        slot,
+        "settings-card",
+        rows,
+        several ? hub.title : null
+      );
+    }
+  }
+
+  /**
+   * Open one of Home Assistant's own registry pages, scoped to this hub.
+   *
+   * The config-entry filter is the same one the integration page's own
+   * "N devices" link uses, so this lands on exactly that list.
+   */
+  _openConfigPage(which) {
+    if (!this._entryId) {
+      return;
+    }
+    const path = `/config/${which}/dashboard?historyBack=1&config_entry=${this._entryId}`;
+    window.history.pushState(null, "", path);
+    window.dispatchEvent(
+      new CustomEvent("location-changed", { detail: { replace: false } })
+    );
   }
 
   /**
@@ -844,19 +1440,6 @@ class Rtl433Panel extends HTMLElement {
    * skeleton's `<span>Receiver</span>` caption is dropped rather than stacked
    * on top of a second one.
    */
-  _buildHubSelect(picker) {
-    const select = haControl("ha-select", () =>
-      document.createElement("select")
-    );
-    select.className = "hub-select";
-    if (select.localName === "ha-select") {
-      select.label = "Receiver";
-      picker.textContent = "";
-    }
-    picker.append(select);
-    return select;
-  }
-
   /**
    * Build the shadow tree once.
    *
@@ -875,12 +1458,12 @@ class Rtl433Panel extends HTMLElement {
     this.shadowRoot.append(style, root);
 
     this._el = {
-      hubPicker: root.querySelector(".hub-picker"),
-      hubSelect: this._buildHubSelect(root.querySelector(".hub-picker")),
       banner: this._buildBanner(root.querySelector(".banner-slot")),
       status: root.querySelector(".status"),
       grid: root.querySelector(".grid"),
-      empty: root.querySelector(".pending-empty"),
+      searching: root.querySelector(".searching"),
+      searchingHint: root.querySelector(".searching-hint"),
+      searchingSpinner: root.querySelector(".searching-spinner"),
       back: this._buildBack(root.querySelector(".back-slot")),
       ignoredGrid: root.querySelector(".ignored-grid"),
       dialog: this._buildReplaceDialog(root.querySelector(".replace-slot")),
@@ -889,18 +1472,27 @@ class Rtl433Panel extends HTMLElement {
       dialogActions: root.querySelector(".replace-actions"),
       dialogCancel: null,
       dialogConfirm: null,
-      openHub: null,
-      openDevice: null,
-      openMappings: null,
-      settings: root.querySelector(".settings-dialog"),
-      settingsTitle: root.querySelector(".settings-title"),
+      title: root.querySelector(".toolbar-title"),
+      viewOverview: root.querySelector(".view-overview"),
+      viewDiscovered: root.querySelector(".view-discovered"),
+      viewSettings: root.querySelector(".view-settings"),
       settingsIntro: root.querySelector(".settings-intro"),
       settingsProblem: root.querySelector(".settings-problem"),
       settingsBody: root.querySelector(".settings-body"),
       settingsCancel: null,
       settingsSave: null,
     };
-    Object.assign(this._el, this._buildPageActions(root.querySelector(".page-actions")));
+    Object.assign(this._el, this._buildOverview(root));
+    this._el.root = root;
+    this._el.searchingSpinner.append(
+      haControl("ha-spinner", () => {
+        // No spinner element: the heading already says what is happening, so
+        // the fallback is nothing rather than a hand-rolled animation.
+        const nothing = document.createElement("span");
+        nothing.hidden = true;
+        return nothing;
+      })
+    );
     // Cancel is `plain` and Save `accent`: core's weighting for a dialog's
     // dismiss-versus-commit pair.
     this._el.settingsCancel = haButton(
@@ -945,22 +1537,6 @@ class Rtl433Panel extends HTMLElement {
     this._el.dialogConfirm.disabled = true;
     this._el.dialogActions.append(this._el.dialogCancel, this._el.dialogConfirm);
 
-    // Which event a select fires on a pick is exactly the sort of detail that
-    // has changed upstream before, so every plausible one is listened for and
-    // the handler is made idempotent instead: it returns unless the value it
-    // reads is genuinely new, which also covers a popup closed without a pick.
-    const onPick = () => {
-      const picked = this._el.hubSelect.value;
-      if (!picked || picked === this._entryId) {
-        return;
-      }
-      this._entryId = picked;
-      this._subscribe();
-    };
-    for (const name of ["change", "input", "selected", "closed"]) {
-      this._el.hubSelect.addEventListener(name, onPick);
-    }
-
     this._el.ignoredToggle.addEventListener("click", () => {
       this._showIgnored = !this._showIgnored;
       this._render();
@@ -987,50 +1563,10 @@ class Rtl433Panel extends HTMLElement {
       this._el.dialog.addEventListener(name, onClosed);
     }
 
-    this._el.openHub.addEventListener("click", () => this._openSettings("hub"));
-    this._el.openDevice.addEventListener("click", () =>
-      this._openSettings("device")
-    );
-    this._el.openMappings.addEventListener("click", () =>
-      this._openSettings("mappings")
-    );
     this._el.settingsCancel.addEventListener("click", () => {
-      this._el.settings.close();
+      this._goUp();
     });
     this._el.settingsSave.addEventListener("click", () => this._saveSettings());
-    this._el.settings.addEventListener("close", () => {
-      this._settingsForm = null;
-      this._settingsData = null;
-      // Dropped so the next open builds a fresh form: the schema it needs
-      // depends on the payload, which is re-fetched after every save.
-      this._el.settingsFormEl = null;
-    });
-  }
-
-  _renderHubPicker() {
-    // A single receiver is the common case, and a picker with one option is
-    // just a control that does nothing.
-    this._el.hubPicker.hidden = this._hubs.length < 2;
-    const options = this._hubs.map((hub) => ({
-      value: hub.entry_id,
-      label: hub.loaded ? hub.title : `${hub.title} (not loaded)`,
-    }));
-    const select = this._el.hubSelect;
-    if (select.localName === "ha-select") {
-      // `ha-select` is driven by its `options` property; the list-item children
-      // its predecessor took are no longer read.
-      select.options = options;
-      select.value = this._entryId;
-      return;
-    }
-    select.textContent = "";
-    for (const { value, label } of options) {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = label;
-      option.selected = value === this._entryId;
-      select.append(option);
-    }
   }
 
   _render() {
@@ -1038,6 +1574,29 @@ class Rtl433Panel extends HTMLElement {
       return;
     }
     const now = Date.now();
+    const view = this._viewFor();
+
+    // One view is on screen at a time, and the toolbar names it -- which is
+    // what makes the back arrow read as "up a level" rather than "leave".
+    this._el.viewOverview.hidden = view.view !== "overview";
+    this._el.viewDiscovered.hidden = view.view !== "discovered";
+    this._el.viewSettings.hidden = view.view !== "settings";
+    this._el.title.textContent = view.title;
+
+    if (view.form) {
+      // Fetching the payload is asynchronous, so this is fired and forgotten:
+      // it re-renders on its own when the form is built.
+      this._openSettings(view.form);
+    } else if (this._settingsForm || this._settingsAttempt) {
+      this._settingsAttempt = null;
+      this._settingsForm = null;
+      this._settingsData = null;
+      // Dropped so the next visit builds a fresh form: the schema it needs
+      // depends on the payload, which is re-fetched after every save.
+      this._el.settingsFormEl = null;
+      this._el.settingsBody.textContent = "";
+      this._el.settingsProblem.hidden = true;
+    }
 
     if (this._banner) {
       this._el.banner.textContent = this._banner.text;
@@ -1056,17 +1615,43 @@ class Rtl433Panel extends HTMLElement {
     this._el.status.textContent = this._status;
     this._el.status.hidden = !this._status;
 
+    const loaded = this._data !== null;
+
+    // Only the view on screen is drawn. The subscription stays open on all
+    // three, and pushes arrive every few seconds, so without this the panel
+    // would keep rebuilding a card per candidate -- timestamps, readings and
+    // all -- into DOM nobody can see, for as long as the user sat on the
+    // overview or a settings page. Entering a view re-renders, so what is
+    // skipped here is drawn on arrival.
+    if (view.view === "discovered") {
+      this._renderDiscovered(now, loaded);
+    } else if (view.view === "overview") {
+      this._renderOverview();
+    }
+  }
+
+  /**
+   * Draw the discovered-devices view: the cards, and the controls around them.
+   *
+   * Split out of `_render` so it can be skipped while the view is hidden.
+   */
+  _renderDiscovered(now, loaded) {
     // The frontend swaps this object only when the area registry changes, so
     // an identity compare answers "did areas move?" without touching its
-    // contents on every push, banner change and clock tick.
+    // contents on every push, banner change and clock tick. It is only updated
+    // when the cards are actually redrawn, so a change that lands while this
+    // view is hidden is still noticed on the way back in.
     const areas = this._hass ? this._hass.areas : null;
     const areasChanged = areas !== this._lastAreas;
     this._lastAreas = areas;
 
     const cards = this._cards();
-    const loaded = this._data !== null;
     this._el.grid.hidden = !loaded || cards.length === 0;
-    this._el.empty.hidden = !loaded || cards.length > 0;
+    // The "Searching for rtl_433 devices…" block stays on screen even after
+    // devices appear, because the receiver really is still listening. Only the
+    // hint under it is hidden once there are cards, where it would be
+    // describing something the user can already see.
+    this._el.searchingHint.hidden = cards.length > 0;
 
     this._reconcile(
       this._el.grid,
@@ -1077,14 +1662,6 @@ class Rtl433Panel extends HTMLElement {
     );
 
     this._el.clear.hidden = !loaded || cards.length === 0;
-    // Every settings command names a hub, so the row waits for one to resolve.
-    for (const button of [
-      this._el.openHub,
-      this._el.openDevice,
-      this._el.openMappings,
-    ]) {
-      button.disabled = !this._entryId;
-    }
 
     const ignored = this._data && this._data.ignored ? this._data.ignored : [];
     this._el.ignoredToggle.hidden = !loaded || ignored.length === 0;
@@ -1230,10 +1807,11 @@ class Rtl433Panel extends HTMLElement {
     const row = card.row;
     element.card = card;
 
-    // The model and key are the card's identity, promoted into the coloured
-    // heading: without an interview step there is nothing else to lead with,
-    // and between them they are what a user matches against the box in their
-    // hand.
+    // Put the model and device key in the coloured heading. rtl_433 devices
+    // are never interrogated the way a Zigbee or Z-Wave device is when it
+    // joins, so these two strings are everything we know about a candidate --
+    // and they are what the user compares against the label on the sensor
+    // itself.
     this._text(parts.model, row.model || "Unknown model");
     this._text(parts.key, row.key);
     element.classList.toggle("added", card.added);
@@ -1273,9 +1851,10 @@ class Rtl433Panel extends HTMLElement {
         added.deviceId = device.id;
       }
     }
-    // Once the device exists it owns its own area, and the card's picker would
-    // be a second control claiming to set the same thing while actually only
-    // recording an intent that has already been carried out.
+    // Hide the area picker once the device has been added. From then on the
+    // device registry holds the device's area, so leaving the picker would give
+    // the user a second control that looks like it sets the area but only
+    // records a choice that has already been applied.
     parts.area.hidden = card.added;
     if (parts.areaControl) {
       parts.areaControl.disabled = card.added;
@@ -1354,21 +1933,6 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * Build one card's area control, preferring Home Assistant's own picker.
-   *
-   * `ha-area-picker` is the control the device page itself uses to set an area,
-   * so borrowing it is what makes this field look and behave like the one the
-   * user will meet a minute later -- with the same search, the same "add a new
-   * area", and the same 56px outlined field. It is used by tag name and never
-   * imported: nothing here reaches into a frontend module path, and the element
-   * is only touched if the frontend has already registered it.
-   *
-   * When it has not, the card falls back to a native `<select>` populated from
-   * `hass.areas`. That is plainer, but it is a working control rather than an
-   * empty box, and this file's whole posture is that frontend internals may move
-   * and the page should degrade rather than break.
-   */
-  /**
    * Build one card's area field.
    *
    * `ha-area-picker` is the control Home Assistant's own device page uses to
@@ -1418,6 +1982,116 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
+   * Fill the overview: the connection state, and what is behind each row.
+   *
+   * The counts come from the registries rather than from the panel's own
+   * payload, because they are counts of what Home Assistant *has* -- which is
+   * exactly what the rows link to. A count the page could not work out is left
+   * off rather than guessed at, so a row never claims "0 devices" while the
+   * subscription is still connecting.
+   */
+  _renderOverview() {
+    // These open Home Assistant's own pages filtered to a hub, and the FAB
+    // needs one too, so all three wait for a receiver to resolve. The settings
+    // rows do not: they are built per receiver, from a list that only exists
+    // once `rtl_433/hubs` has answered.
+    for (const row of [
+      this._el.rowDevices,
+      this._el.rowEntities,
+      this._el.fab,
+    ]) {
+      row.disabled = !this._entryId;
+    }
+
+    // One walk of the device registry, shared by the status card and both rows.
+    // `_render` reaches here on every push from the receiver and on the clock
+    // tick, and the registry is the user's whole instance -- thousands of
+    // entries on a big one -- so walking it once per count added up.
+    const deviceIds = this._entryDeviceIds();
+    const devices = deviceIds === null ? null : deviceIds.length;
+    const status = this._el.status0;
+    // The receiver's own connection, as the payload reports it -- not
+    // "is my subscription working?", which stays true through an outage.
+    const connected = Boolean(this._data && this._data.connected);
+    status.glyph.className = "status-icon";
+    if (status.glyph.localName === "ha-svg-icon") {
+      status.glyph.path = connected ? ICON_ONLINE : ICON_OFFLINE;
+    }
+    status.badge.classList.toggle("offline", !connected);
+    status.headline.textContent = connected
+      ? "Online"
+      : this._data === null
+        ? "Connecting…"
+        : "Problem";
+    status.supporting.textContent =
+      devices === null ? "" : `${devices} ${devices === 1 ? "device" : "devices"}`;
+
+    this._setRowCount(this._el.rowDevices, devices, "device", "devices");
+    this._setRowCount(
+      this._el.rowEntities,
+      this._entryEntityCount(deviceIds),
+      "entity",
+      "entities"
+    );
+  }
+
+  /** Put "N things" on a row's supporting line, or nothing when unknown. */
+  _setRowCount(row, count, one, many) {
+    const line = row.querySelector(".row-supporting");
+    if (!line) {
+      return;
+    }
+    line.textContent =
+      count === null ? "" : `${count} ${count === 1 ? one : many}`;
+    line.hidden = count === null;
+  }
+
+  /**
+   * The device ids this hub owns, from the device registry.
+   *
+   * `hass.devices` is keyed by device id and each entry lists the config
+   * entries it belongs to, so this is a filter rather than a lookup. The
+   * receiver's own device is *included*, because the row this count sits on
+   * opens Home Assistant's device list filtered to this entry -- and that list
+   * includes it. A count that disagreed with what clicking it shows would read
+   * as a bug in the count.
+   */
+  _entryDeviceIds() {
+    const devices = this._hass && this._hass.devices;
+    if (!devices || !this._entryId) {
+      return null;
+    }
+    return Object.values(devices)
+      .filter(
+        (device) =>
+          device.config_entries &&
+          device.config_entries.includes(this._entryId)
+      )
+      .map((device) => device.id);
+  }
+
+
+  /**
+   * How many entities this hub owns, counted through its devices.
+   *
+   * Deliberately not `entity.config_entry_id`: the registry the frontend hands
+   * a panel is the *display* registry, and it carries `device_id`, `platform`
+   * and `entity_category` but no config entry at all -- so filtering on one
+   * silently counted zero. Every entity this integration creates is attached
+   * to one of its devices, so the device set is the reliable way in.
+   */
+  _entryEntityCount(deviceIds) {
+    const entities = this._hass && this._hass.entities;
+    if (!entities || deviceIds === null) {
+      return null;
+    }
+    const owned = new Set(deviceIds);
+    return Object.values(entities).filter((entity) =>
+      owned.has(entity.device_id)
+    ).length;
+  }
+
+  /**
    * Leave the panel the way the user arrived at it.
    *
    * The panel is the rtl_433 entry's configuration page, so it is always
@@ -1427,13 +2101,24 @@ class Rtl433Panel extends HTMLElement {
    * only way out.
    */
   _goBack() {
-    if (window.history.length > 1) {
-      window.history.back();
-      return;
+    // Inside the panel, back means up a level: a subview returns to the
+    // overview rather than out of the integration entirely, which is what the
+    // arrow means on core's own subpages.
+    switch (backAction(this._segment, this._pushed, window.history.length)) {
+      case "unwind":
+      case "replace-up":
+        // Both of these are "go up a level", which is exactly `_goUp` -- and
+        // `backAction` has already chosen between its two halves.
+        this._goUp();
+        return;
+      case "leave":
+        window.history.back();
+        return;
+      default:
+        // Opened directly by URL with nothing behind it. The integration's own
+        // page is where this panel belongs under.
+        window.location.assign("/config/integrations/integration/rtl_433");
     }
-    // Opened directly by URL, so there is nothing to go back to. The
-    // integration's own page is where this panel belongs under.
-    window.location.assign("/config/integrations/integration/rtl_433");
   }
 
   /**
@@ -1476,42 +2161,66 @@ class Rtl433Panel extends HTMLElement {
    * Open one of the three settings forms.
    *
    * The payload behind all three is fetched once and reused, because the three
-   * dialogs are one screenful and the alternative is a round trip per open. It
-   * is re-fetched after every save so the next open shows what was stored
-   * rather than what was typed -- the two differ exactly where the backend
-   * cleared something, which is the case the user most needs to see.
+   * pages are one screenful between them and the alternative is a round trip
+   * per visit. It is re-fetched after every save so the next visit shows what
+   * was stored rather than what was typed -- the two differ exactly where the
+   * backend cleared something, which is the case the user most needs to see.
    */
   async _openSettings(kind) {
-    if (!this._entryId) {
+    const entryId = this._settingsEntryId();
+    if (!entryId) {
       return;
     }
+    // Claim this attempt *before* fetching, and leave it claimed even if the
+    // fetch fails. `_render` calls this on every repaint -- every push from the
+    // receiver, plus the clock tick -- and without those two rules:
+    //
+    //  - claiming only after the form was built let a slow fetch start again on
+    //    top of itself; when the second reply landed it rebuilt the form and
+    //    discarded whatever the user had typed;
+    //  - releasing the claim on failure retried the fetch on every repaint, so
+    //    the error message flickered while the user was reading it.
+    //
+    // Leaving the settings view releases the claim, so going back and reopening
+    // the form is how a user retries.
+    const attempt = `${kind}:${entryId}`;
+    if (this._settingsAttempt === attempt) {
+      return;
+    }
+    this._settingsAttempt = attempt;
     this._el.settingsProblem.hidden = true;
+    // A cached payload belongs to the receiver it was fetched for; opening a
+    // different one has to refetch or the form would show another hub's values
+    // and save them over this one's.
+    if (this._settingsFor !== entryId) {
+      this._settings = null;
+    }
     if (!this._settings) {
+      // The form cannot be drawn until the payload lands, and the view is
+      // already on screen by now -- so the body says so rather than sitting
+      // blank, and Save is withheld until there is something to save.
+      this._el.settingsBody.textContent = "Loading…";
       this._el.settingsSave.disabled = true;
       try {
         this._settings = await this._call({
           type: "rtl_433/settings/get",
-          entry_id: this._entryId,
+          entry_id: entryId,
         });
+        this._settingsFor = entryId;
       } catch (error) {
-        this._setBanner(describeError(error), "error");
+        this._el.settingsBody.textContent = "";
+        this._el.settingsProblem.textContent = describeError(error);
+        this._el.settingsProblem.hidden = false;
         return;
       } finally {
         this._el.settingsSave.disabled = false;
       }
+      // Navigated away while the payload was in flight.
+      if (this._viewFor().form !== kind) {
+        return;
+      }
     }
-    this._settingsForm = kind;
     this._buildSettingsForm(kind);
-    this._el.settings.showModal();
-    // A native <dialog> moves focus to its first focusable descendant *on
-    // open*, which for the mappings form is the documentation link in the
-    // intro -- so this has to run after showModal, not as an autofocus before
-    // it. The editor is the only control that needs claiming: every other form
-    // starts with a real field, which is what the dialog would pick anyway.
-    const editor = this._el.settingsBody.querySelector(".mappings-editor");
-    if (editor && editor.focus) {
-      editor.focus();
-    }
   }
 
   /**
@@ -1522,10 +2231,9 @@ class Rtl433Panel extends HTMLElement {
    * keeps the markup and the read-back next to each other -- the two things
    * that drift when a field is added.
    */
-  _field(parent, { label, control, hint, hidden }) {
+  _field(parent, { label, control, hint }) {
     const wrapper = document.createElement("div");
     wrapper.className = control.type === "checkbox" ? "field checkbox" : "field";
-    wrapper.hidden = Boolean(hidden);
     const id = `field-${Math.random().toString(36).slice(2)}`;
     control.id = id;
     const labelEl = document.createElement("label");
@@ -1544,7 +2252,6 @@ class Rtl433Panel extends HTMLElement {
       wrapper.append(hintEl);
     }
     parent.append(wrapper);
-    control.fieldEl = wrapper;
     return control;
   }
 
@@ -1770,11 +2477,9 @@ class Rtl433Panel extends HTMLElement {
     this._settingsForm = kind;
 
     if (kind === "hub") {
-      this._el.settingsTitle.textContent = "Receiver settings";
       this._el.settingsIntro.textContent =
         "Settings for this receiver as a whole. Individual devices can override the timeout.";
     } else if (kind === "device") {
-      this._el.settingsTitle.textContent = "Device settings";
       if (!this._settings.devices.length) {
         this._el.settingsIntro.textContent =
           "No devices have been added yet. Add one from this page first, and its settings will appear here.";
@@ -1785,7 +2490,6 @@ class Rtl433Panel extends HTMLElement {
       this._el.settingsIntro.textContent =
         "Overrides for one device. Blank means “use the receiver's setting”.";
     } else {
-      this._el.settingsTitle.textContent = "Device mappings";
       // The one intro that needs a link, so it is built rather than assigned.
       this._el.settingsIntro.textContent =
         "YAML overrides for how this receiver's fields become entities. Clearing the editor removes them all. ";
@@ -1965,10 +2669,11 @@ class Rtl433Panel extends HTMLElement {
   /**
    * Save the open form.
    *
-   * A rejected save keeps the dialog open and reports the reason inside it: the
-   * page's banner is behind the backdrop, and a dialog that closes on a refusal
-   * throws away what the user typed. On success the payload is dropped so the
-   * next open re-reads it, and the subscription is re-established -- a hub
+   * A rejected save stays on the form and reports the reason next to it: the
+   * overview's banner is not where the user is standing, and navigating away on
+   * a refusal would throw away what they typed. On success the payload is
+   * dropped so the next visit re-reads it, the panel returns to the overview,
+   * and the subscription is re-established -- a hub
    * reloads when its calibration, mappings or manage-settings toggle changes,
    * and the old subscription would then be pushing a replaced coordinator's
    * state.
@@ -1987,22 +2692,21 @@ class Rtl433Panel extends HTMLElement {
     if (kind === "hub") {
       message = {
         type: "rtl_433/settings/hub",
-        entry_id: this._entryId,
+        entry_id: this._settingsEntryId(),
         availability_timeout:
           number("availability_timeout") ??
           this._settings.defaults.availability_timeout,
         manage_settings: Boolean(data.manage_settings),
       };
     } else if (kind === "device") {
-      // The unit and scale fields only exist for a calibrated commodity, so
-      // their absence from the schema is what says "send nothing" -- the same
-      // fact the hidden fields used to carry.
-      const calibrated = this._settingsSchema("device").some(
-        (field) => field.name === "unit"
-      );
+      // A commodity with no convertible units is not a calibrated one, so it
+      // sends no unit and no scale. This is the same test the schema builder
+      // uses to decide whether to show those two fields at all.
+      const calibrated = (this._settings.commodity_units[data.commodity] || [])
+        .length > 0;
       message = {
         type: "rtl_433/settings/device",
-        entry_id: this._entryId,
+        entry_id: this._settingsEntryId(),
         device_key: data.device_key,
         timeout_override: number("timeout_override"),
         motion_clear_delay: number("motion_clear_delay"),
@@ -2013,7 +2717,7 @@ class Rtl433Panel extends HTMLElement {
     } else {
       message = {
         type: "rtl_433/settings/mappings",
-        entry_id: this._entryId,
+        entry_id: this._settingsEntryId(),
         yaml: data.mappings || "",
       };
     }
@@ -2031,7 +2735,7 @@ class Rtl433Panel extends HTMLElement {
     }
 
     this._settings = null;
-    this._el.settings.close();
+    this._goUp();
     // Re-subscribe *before* the banner, not after. A hub reloads when its
     // calibration, mappings or manage-settings toggle changes, and the old
     // subscription would go on pushing a replaced coordinator's state -- but
@@ -2212,49 +2916,43 @@ const SKELETON = `
     <div class="toolbar-title">rtl_433</div>
   </div>
 
-  <div class="header">
-    <div>
-      <h1>Discovered devices</h1>
-      <div class="subtitle">
-        Devices this receiver has heard that are not in Home Assistant yet.
-        Adding one creates its device and entities; ignoring one hides it until
-        you un-ignore it. An un-ignored device comes back on its next
-        transmission.
-      </div>
-    </div>
-    <label class="hub-picker" hidden>
-      <span>Receiver</span>
-    </label>
-  </div>
-
-  <div class="page-actions"></div>
-
   <div class="banner-slot"></div>
+
   <div class="status" hidden></div>
 
-  <div class="grid" hidden></div>
-
-  <div class="empty pending-empty" hidden>
-    Nothing pending. Everything this receiver has heard is either added or
-    ignored &mdash; trigger a new device so it transmits and it will appear here
-    on its own.
+  <div class="view view-overview">
+    <div class="status-slot"></div>
+    <div class="network-slot"></div>
+    <div class="page-actions"></div>
+    <div class="fab-slot"></div>
   </div>
 
-  <div class="list-actions"></div>
+  <div class="view view-discovered" hidden>
+    <div class="searching">
+      <div class="searching-spinner"></div>
+      <h2 class="searching-title">Searching for rtl_433 devices&hellip;</h2>
+      <div class="searching-hint">
+        Devices will show up here once discovered.
+      </div>
+    </div>
 
-  <div class="grid ignored-grid" hidden></div>
+    <div class="grid" hidden></div>
 
-  <div class="replace-slot"></div>
+    <div class="list-actions"></div>
 
-  <dialog class="settings-dialog panel-dialog">
-    <form method="dialog" class="panel-dialog-form">
-      <h2 class="settings-title panel-dialog-title"></h2>
-      <p class="settings-intro panel-dialog-intro"></p>
+    <div class="grid ignored-grid" hidden></div>
+  </div>
+
+  <div class="view view-settings" hidden>
+    <p class="settings-intro"></p>
+    <div class="settings-card-slot">
       <div class="settings-problem" hidden></div>
       <div class="settings-body"></div>
-      <div class="panel-dialog-actions settings-actions"></div>
-    </form>
-  </dialog>
+      <div class="settings-actions"></div>
+    </div>
+  </div>
+
+  <div class="replace-slot"></div>
 `;
 
 /*
@@ -2265,7 +2963,7 @@ const SKELETON = `
  * Nothing here is hard-coded to a palette, so dark themes follow automatically.
  *
  * The two heading colours carry the card's whole state. Blue is a candidate the
- * receiver has heard and Home Assistant has not adopted; green is one adopted
+ * receiver has decoded and Home Assistant has not adopted; green is one adopted
  * from this page a moment ago. They are `--info-color` and `--success-color`
  * rather than literals so a theme restyles them along with everything else.
  */
@@ -2329,46 +3027,13 @@ const STYLES = `
     gap: 8px;
     margin-bottom: 16px;
   }
-  .header {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 16px;
-  }
-  h1 { margin: 0 0 4px; font-size: 22px; font-weight: 400; }
-  .subtitle { color: var(--secondary-text-color, #727272); max-width: 68ch; }
-  .hub-picker {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 12px;
-    color: var(--secondary-text-color, #727272);
-  }
+
   /*
    * An author display rule beats the user agent's "[hidden] { display: none }",
    * so every element this file gives a display to needs its own hidden rule or
-   * the hidden property silently does nothing. The picker, the grids and the
+   * the hidden property silently does nothing. The views, the grids and the
    * card's own flex children all need one.
    */
-  .hub-picker[hidden] { display: none; }
-  /*
-   * Only the native fallback is styled here. ha-select arrives with Home
-   * Assistant's own field -- floating label, 56px height, theme colours -- and
-   * restyling it from outside would be this panel disagreeing with the rest of
-   * Settings about what a field looks like.
-   */
-  select.hub-select {
-    font: inherit;
-    font-size: 14px;
-    padding: 6px 8px;
-    color: var(--primary-text-color, #212121);
-    background: var(--card-background-color, #ffffff);
-    border: 1px solid var(--divider-color, #e0e0e0);
-    border-radius: 4px;
-  }
-  ha-select.hub-select { min-width: 240px; }
   ha-alert.banner { display: block; margin-bottom: 16px; }
   ha-alert.banner[hidden] { display: none; }
   div.banner {
@@ -2380,17 +3045,15 @@ const STYLES = `
     color: var(--primary-text-color, #212121);
   }
   div.banner.notice { border-left-color: var(--warning-color, #ffa600); }
-  .status, .empty {
+  .status {
     padding: 24px;
     text-align: center;
     color: var(--secondary-text-color, #727272);
   }
-  .empty { max-width: 62ch; margin: 0 auto; }
 
   /*
    * auto-fill rather than auto-fit: with a single candidate, auto-fit would
-   * stretch its card the full width of a desktop window, which reads as a
-   * layout bug rather than as one device.
+   * stretch its card across the whole window, which just looks broken.
    */
   .grid {
     display: grid;
@@ -2518,7 +3181,7 @@ const STYLES = `
   button:disabled { opacity: 0.5; cursor: default; }
   button[hidden] { display: none; }
   ha-button[hidden] { display: none; }
-  .list-actions { display: flex; gap: 8px; flex-wrap: wrap; }  button.primary {
+  button.primary {
     background: var(--primary-color, #03a9f4);
     color: var(--text-primary-color, #ffffff);
   }
@@ -2533,17 +3196,20 @@ const STYLES = `
   }
 
   /*
-   * Both dialogs. Native <dialog>s, so the backdrop, the stacking and the focus
-   * trap are the platform's; only the surface needs dressing, in the same
-   * tokens as the cards.
+   * The replace dialog, in its two forms.
+   *
+   * When ha-dialog is available it brings its own surface, corner radius, scrim
+   * and full-screen phone layout, and none of that is restyled here: rules of
+   * ours on top would leave it looking half like Home Assistant's dialogs and
+   * half like ours. It needs only the spacing below the header that core's own
+   * dialog bodies have.
+   *
+   * The plain <dialog> fallback gets the surface instead, because nothing else
+   * gives it one. The backdrop, stacking and focus trap are the browser's; only
+   * the surface needs dressing, in the same theme tokens as the cards.
    */
-  /*
-   * Only the native dialog is styled here. The replace dialog is ha-dialog now
-   * and arrives with its own surface, radius, scrim and phone treatment;
-   * painting over those from out here is how a borrowed dialog ends up looking
-   * like neither one thing nor the other.
-   */
-  dialog.panel-dialog {
+  ha-dialog.replace-dialog .replace-list { margin-top: 8px; }
+  dialog.replace-dialog {
     padding: 0;
     border: none;
     border-radius: var(--ha-card-border-radius, 12px);
@@ -2552,21 +3218,19 @@ const STYLES = `
     max-width: 480px;
     width: calc(100vw - 32px);
   }
-  dialog.panel-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
-  /* The borrowed dialog only needs its body to breathe like core's do. */
-  ha-dialog.replace-dialog .replace-list { margin-top: 8px; }
-  .panel-dialog-form {
+  dialog.replace-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+  dialog.replace-dialog .replace-form {
     margin: 0;
     padding: 20px;
     font-family: var(--ha-font-family-body, Roboto, system-ui, sans-serif);
     font-size: 14px;
   }
-  .panel-dialog-title { margin: 0 0 8px; font-size: 20px; font-weight: 400; }
-  .panel-dialog-intro {
+  .replace-title { margin: 0 0 8px; font-size: 20px; font-weight: 400; }
+  .replace-intro {
     margin: 0 0 16px;
     color: var(--secondary-text-color, #727272);
   }
-  .panel-dialog-intro a { color: var(--primary-color, #03a9f4); }
+  .replace-intro a { color: var(--primary-color, #03a9f4); }
   .replace-list {
     max-height: 45vh;
     overflow-y: auto;
@@ -2592,7 +3256,7 @@ const STYLES = `
     color: var(--secondary-text-color, #727272);
     overflow-wrap: anywhere;
   }
-  .panel-dialog-actions {
+  .replace-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
@@ -2605,21 +3269,217 @@ const STYLES = `
    * because a receiver in a busy neighbourhood puts dozens of cards between the
    * two and a setting nobody can find is a setting nobody has.
    */
-  .page-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 16px;
+
+  /*
+   * The overview and the settings pages are a reading column, not a grid, so
+   * they are held to a width a form is comfortable at rather than stretched
+   * across a desktop. The discovered view is deliberately left full width --
+   * it is a card grid, and it wants the room.
+   */
+  .view-overview, .view-settings { max-width: 800px; margin: 0 auto; }
+  /*
+   * One spacing rule for the whole column, rather than a margin on each thing
+   * that happens to sit in it. Every card on the overview is then spaced the
+   * same, including the second and third receiver's settings cards -- which had
+   * no margin of their own and sat flush against each other.
+   *
+   * A margin between siblings rather than a flex gap, deliberately: the views
+   * are handed their display by ".view" / ".view[hidden]" further down, and a
+   * "display: flex" up here loses to them on source order and silently does
+   * nothing -- which is exactly how this page ended up with no spacing at all.
+   * A margin needs no display of its own, so it cannot be overruled that way.
+   *
+   * 16px is what Home Assistant's own integration pages put between cards, so
+   * this page keeps step with the Zigbee and Z-Wave ones either side of it.
+   */
+  .view-overview > * + *,
+  .page-actions > * + * {
+    margin-top: 16px;
+  }
+  /*
+   * The FAB is fixed to the viewport, so its wrapper only ever sat in the flow
+   * to collect a trailing margin. Setting it to display:contents generates no
+   * box for it at all, leaving the fixed button exactly where it was.
+   */
+  .fab-slot { display: contents; }
+  .settings-card-slot {
+    padding: 16px;
+    border-radius: var(--ha-card-border-radius, 12px);
+    background: var(--card-background-color, #ffffff);
+    border: 1px solid var(--divider-color, #e0e0e0);
+  }
+  .settings-intro {
+    margin: 0 0 16px;
+    max-width: 68ch;
+    color: var(--secondary-text-color, #727272);
   }
 
   /*
-   * Form controls, sized and coloured like Home Assistant's own so the dialogs
-   * read as part of the frontend rather than as a page that happens to be
-   * inside it. Deliberately native input/select/textarea elements and not the
-   * frontend's own ha-* ones: this file imports nothing, and a control that is
-   * merely styled like core's cannot break when core's internals move. (No
-   * backticks in here -- this comment is inside a template literal, and one
-   * would end it.)
+   * One view on screen at a time. An author display rule beats the user
+   * agent's [hidden] rule, so each of these needs its own hidden rule or the
+   * hidden property silently does nothing.
+   */
+  .view { display: block; }
+  .view[hidden] { display: none; }
+
+  /*
+   * The overview, shaped like the integration pages core ships for Zigbee and
+   * Z-Wave: a status card, then cards of rows that open somewhere. Spacing is
+   * the only thing set on the cards themselves -- ha-card brings its own
+   * surface, radius and elevation, and overriding those would make this panel
+   * disagree with every other card in Settings.
+   */
+  .status-slot, .network-slot { display: block; }
+  .status-card, .network-card, .settings-card { display: block; }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px;
+  }
+  .status-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--success-color, #43a047) 18%, transparent);
+    color: var(--success-color, #43a047);
+  }
+  /*
+   * A receiver that is not connected is the one thing on this page worth
+   * colouring, so the badge carries the state rather than a line of text
+   * needing to be read.
+   */
+  .status-badge.offline {
+    background: color-mix(in srgb, var(--error-color, #db4437) 18%, transparent);
+    color: var(--error-color, #db4437);
+  }
+  .status-icon { width: 24px; height: 24px; }
+  /*
+   * Pushed to the far end by the text block taking the slack, so the mark keeps
+   * its corner whatever the state line says. Sized in ch-independent pixels
+   * because it is a fixed-aspect image, not text.
+   */
+  .status-text { flex: 1 1 auto; min-width: 0; }
+  .status-logo {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+  }
+  .status-logo[hidden] { display: none; }
+  .status-headline { font-size: 20px; font-weight: 400; }
+  .status-supporting {
+    font-size: 14px;
+    color: var(--secondary-text-color, #727272);
+  }
+
+  .card-list { display: block; }
+  .card-heading {
+    margin: 0;
+    padding: 16px 16px 0;
+    font-size: 20px;
+    font-weight: 400;
+  }
+  .row-icon { color: var(--secondary-text-color, #727272); }
+  .row-supporting[hidden] { display: none; }
+  /*
+   * The fallback row, for a frontend with no ha-md-list-item: a button laid out
+   * like the list row it stands in for, so the overview still reads as a list
+   * of things to open.
+   */
+  button.nav-devices,
+  button.nav-entities,
+  button.open-hub-settings,
+  button.open-device-settings,
+  button.open-mappings {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    padding: 16px;
+    border: none;
+    border-radius: 0;
+    background: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  button.nav-devices .row-headline,
+  button.nav-entities .row-headline,
+  button.open-hub-settings .row-headline,
+  button.open-device-settings .row-headline,
+  button.open-mappings .row-headline { font-size: 16px; }
+
+  /*
+   * The search state, shaped like the one core shows while a radio is looking
+   * for devices: a spinner, what it is doing, and where the results will land.
+   * It stays on screen once cards appear, because the receiver does not stop
+   * listening -- only the closing hint drops away, where it would be describing
+   * something already visible.
+   */
+  .searching {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px 16px 32px;
+    text-align: center;
+  }
+  .searching-spinner { display: flex; min-height: 28px; }
+  .searching-title { margin: 0; font-size: 20px; font-weight: 400; }
+  .searching-hint {
+    max-width: 48ch;
+    color: var(--secondary-text-color, #727272);
+  }
+  .searching-hint[hidden] { display: none; }
+
+  /*
+   * The floating action button. Fixed to the viewport rather than the page so
+   * it stays reachable while the overview scrolls, and inset far enough to
+   * clear a phone's home indicator.
+   */
+  .panel-fab {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 1;
+  }
+  ha-button.panel-fab { --ha-button-height: 56px; }
+  button.fab-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 56px;
+    padding: 0 20px;
+    border: none;
+    border-radius: 28px;
+    background: var(--primary-color, #03a9f4);
+    color: var(--text-primary-color, #ffffff);
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  /* The settings subview's own action row, at the end of the page. */
+  .settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  /*
+   * The native fallback's form controls, for a frontend with no ha-form. Sized
+   * and coloured like Home Assistant's own so a page that has to fall back to
+   * them still reads as part of the frontend. Every rule here is scoped to the
+   * element it styles, so none of it reaches the borrowed controls: those
+   * arrive already themed, and restyling them from outside is how a panel ends
+   * up disagreeing with the rest of Settings. (No backticks in here -- this
+   * comment is inside a template literal, and one would end it.)
    */
   .field { margin-bottom: 16px; }
   .field > label {
@@ -2676,18 +3536,14 @@ const STYLES = `
     font-size: 14px;
   }
   .field.checkbox .hint { flex: 1 0 100%; margin-top: 0; }
-  .field[hidden] { display: none; }
 
   /*
-   * The borrowed form. ha-form lays out and labels its own rows, so all that
-   * is set here is the gap between them -- anything more would be this panel
-   * second-guessing the spacing core uses for the same fields.
+   * The borrowed form is left to lay itself out. ha-form puts every row inside
+   * a single wrapper of its own, so a flex gap here would apply to that one
+   * child and space nothing -- and the row rhythm it already has is core's,
+   * for the same fields, which is the whole reason for going through it.
    */
-  ha-form.settings-form {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
+  ha-form.settings-form { display: block; }
   /*
    * The YAML editor needs a height: ha-code-editor sizes to its content, and
    * an empty mappings file would otherwise open as a one-line box that grows
@@ -2703,11 +3559,16 @@ const STYLES = `
   /* The label above a borrowed control is the panel's, so it keeps its own. */
   .field > ha-code-editor { margin-top: 4px; }
 
-  .settings-body { max-height: 55vh; overflow-y: auto; }
   /*
-   * A rejected save reports what was wrong *inside* the dialog. The page's own
-   * banner is behind the backdrop, so putting it there would hide the reason
-   * the dialog is still open.
+   * No height cap: this is a page now, so the page scrolls. Capping it was for
+   * a dialog, where the form had to fit inside a box that could not grow.
+   */
+  .settings-body { display: block; }
+  /*
+   * A rejected save reports what was wrong next to the form that was refused,
+   * not in the page banner: the banner is at the top of the overview, which is
+   * not where the user is standing, and a form that lost its reason would look
+   * like it simply did nothing.
    */
   .settings-problem {
     margin-bottom: 16px;
@@ -2718,11 +3579,26 @@ const STYLES = `
     white-space: pre-wrap;
   }
   .settings-problem[hidden] { display: none; }
+  /*
+   * The page padding and a card's own padding stack. That is comfortable on a
+   * desktop and wasteful on a phone, where it cost the form 66px of a 412px
+   * screen, so the outer one gives way and the card keeps its own.
+   */
+  @media (max-width: 600px) {
+    :host { padding: 8px; }
+    .settings-card-slot { padding: 12px; }
+  }
+
 `;
 
-// Guarded because a panel module can be evaluated more than once in a
-// long-lived frontend session, and `customElements.define` throws on a name
-// that is already taken.
-if (!customElements.get("rtl-433-panel")) {
+// Two guards, for two different situations. `customElements.define` throws on
+// a name that is already taken, and a panel module can be evaluated more than
+// once in a long-lived frontend session. And there is no registry at all
+// outside a browser, where this module is imported to test the pure helpers
+// above.
+if (
+  typeof customElements !== "undefined" &&
+  !customElements.get("rtl-433-panel")
+) {
   customElements.define("rtl-433-panel", Rtl433Panel);
 }

@@ -531,9 +531,9 @@ Unsubscribe the standard way, naming the subscription's id:
 
 ## Home Assistant settings commands
 
-The same three forms the panel's dialogs render. They are ordinary commands, so
-anything the dialogs do is scriptable — including the parts that are awkward by
-hand, like setting the same calibration on a dozen meters.
+The same three forms the panel's settings pages render. They are ordinary
+commands, so anything those pages do is scriptable — including the parts that
+are awkward by hand, like setting the same calibration on a dozen meters.
 
 ### `rtl_433/settings/get`
 

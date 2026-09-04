@@ -25,23 +25,25 @@ rather than an exception. A panel left open across a hub reload will send
 commands for an entry that is momentarily not loaded, and that is a normal
 condition to report, not a crash to log.
 
-**The subscription must not become a firehose.** A receiver in a dense
-neighbourhood decodes constantly, and the naive wiring -- push the list on every
-frame -- would send a full payload down every open socket so one row's count
-could tick up by one. So the pushes come from two places with two different
-urgencies. A *membership* change (:data:`~.const.SIGNAL_PENDING_UPDATE`: a
-candidate appeared, or one was adopted, ignored, or un-ignored) is the answer to
-"is there something new for me?" and pushes immediately. A *repeat sighting*
-only ages the count and last-seen columns of a row already on screen, so it is
-picked up by a slow :data:`_REFRESH_INTERVAL` timer that re-renders the payload
-and sends it only when it actually differs from the last one sent. N frames for a
-known candidate therefore cost at most one message per interval, and zero when
-nothing on screen would change.
+**Pushes to an open subscription are rate-limited**, and come in two kinds.
 
-That coalescing lives here rather than in the coordinator on purpose: the
-coordinator stays a pure state holder that does not know a panel exists, and the
-policy about how often a UI may be told is owned by the layer that talks to the
-UI.
+A *membership* change (:data:`~.const.SIGNAL_PENDING_UPDATE`: a candidate
+appeared, or one was adopted, ignored, or un-ignored) is pushed immediately,
+because it answers "is there something new for me?".
+
+A *repeat sighting* only ages the count and last-seen columns of a row already
+on screen, so it is not pushed directly. A slow :data:`_REFRESH_INTERVAL` timer
+re-renders the payload and sends it only when it differs from the last one sent.
+N frames for a known candidate therefore cost at most one message per interval,
+and none at all when nothing on screen would change.
+
+Without this, a receiver in a busy neighbourhood -- which decodes almost
+continuously -- would send a full payload down every open socket just to tick
+one row's count up by one.
+
+The rate limiting lives here rather than in the coordinator on purpose: the
+coordinator stays a state holder that does not know a panel exists, and how
+often a UI may be told is a decision for the layer that talks to the UI.
 """
 
 from __future__ import annotations
@@ -90,7 +92,6 @@ from .const import (
     CONF_MODEL,
     CONF_USER_MAPPINGS,
     DATA_ENTITY_META,
-    DATA_ENTRY_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MOTION_CLEAR_DELAY,
     DEVICE_MOTION_CLEAR_DELAY,
@@ -100,6 +101,7 @@ from .const import (
 )
 from .coordinator import Rtl433Coordinator
 from .device_replace import DeviceReplaceError, async_replace_device
+from .entity import resolve_event_type
 from .hub_settings import _hub_ignored_devices
 from .settings import (
     MAPPINGS_DOCS_URL,
@@ -108,6 +110,7 @@ from .settings import (
     build_hub_options,
     build_mappings_data,
     device_defaults,
+    entry_registry,
     hub_defaults,
 )
 
@@ -121,8 +124,8 @@ _LOGGER = logging.getLogger(__name__)
 _REFRESH_INTERVAL: Final = timedelta(seconds=5)
 
 # Error code for a hub whose entry exists but is not set up. Distinct from
-# ``ERR_NOT_FOUND`` (no such entry) because the two need different answers: a
-# not-loaded hub is a hub to retry against or repair, not a typo.
+# ``ERR_NOT_FOUND`` (no such entry) so the caller can tell a hub that is
+# temporarily unavailable from an entry id that does not exist.
 ERR_NOT_LOADED: Final = "not_loaded"
 # A replace the user asked for that the helper refused: an unknown survivor, or
 # the same key on both sides. Its own code rather than ``not_loaded`` so a script
@@ -381,8 +384,9 @@ def _reading_state(
     digits where today it disagrees about the unit.
     """
     if descriptor.platform == "event":
-        event_map = descriptor.event_map
-        event_type = event_map.get(str(raw), str(raw)) if event_map else str(raw)
+        # The same resolver the entity uses, so the preview names a doorbell
+        # press exactly what the automation will see.
+        event_type = resolve_event_type(descriptor, raw)
         return event_type, event_type
 
     value = apply_transform(descriptor, raw)
@@ -404,22 +408,6 @@ def _reading_state(
     if not unit:
         return value, shown
     return value, f"{shown}{unit}" if unit == "%" else f"{shown} {unit}"
-
-
-@callback
-def _entry_registry(hass: HomeAssistant, entry: ConfigEntry) -> Registry | None:
-    """This hub's merged library (shipped + its own overrides), or ``None``.
-
-    The same cache the entity platforms read, so a reading previewed here is
-    resolved through exactly the descriptor that would create the entity. Absent
-    only if the library failed to load, in which case the preview degrades to
-    "no readings" rather than to a guess.
-    """
-    return (
-        hass.data.get(DOMAIN, {})
-        .get(DATA_ENTRY_LIBRARY, {})
-        .get(entry.entry_id, (None, None))[0]
-    )
 
 
 @callback
@@ -497,9 +485,19 @@ def _pending_payload(
     transmitting after a restart. Only a key that has neither goes out unnamed.
     """
     stored: dict[str, Any] = entry.data.get(CONF_DEVICES, {})
-    registry = _entry_registry(hass, entry)
+    # The same cache the entity platforms read, so a reading previewed
+    # here resolves through exactly the descriptor that would create the
+    # entity. `None` only if the library failed to load, in which case
+    # the preview shows "no readings" rather than a guess.
+    registry = entry_registry(hass, entry)
     meta: _EntityMeta = hass.data.get(DOMAIN, {}).get(DATA_ENTITY_META, _EMPTY_META)
     return {
+        # Whether the hub's socket to the rtl_433 server is up -- the same fact
+        # the hub's Connectivity binary sensor reports. The panel cannot work
+        # this out for itself: its own subscription stays healthy while the
+        # receiver's connection is down, so a page that inferred it from "am I
+        # receiving payloads?" would say Online through an outage.
+        "connected": coordinator.connected,
         "pending": [
             {
                 "key": record.key,
@@ -521,9 +519,9 @@ def _pending_payload(
             for device_key in sorted(_hub_ignored_devices(entry))
         ],
         # The devices this hub already has, offered as the thing a candidate can
-        # replace. Sent with the candidates rather than fetched when the dialog
-        # opens so the list cannot be stale against the card beside it: both
-        # halves of "which of these is the same hardware?" come from one payload.
+        # replace. Sent with the candidates rather than fetched when the
+        # dialog opens, so the candidate and the devices it could replace always
+        # come from the same snapshot and cannot disagree.
         "devices": [
             {"key": device_key, "model": record.get(CONF_MODEL, "")}
             for device_key, record in sorted(stored.items())
@@ -682,30 +680,24 @@ def ws_clear_devices(
 ) -> None:
     """Forget every candidate heard so far, so the list can refill from scratch.
 
-    A receiver left running in a dense neighbourhood accumulates hundreds of
-    candidates, and the one the user came to add is somewhere in them. Clearing
-    turns the list back into a live question -- trigger the doorbell, and it is
-    the only thing on the screen.
+    A receiver in a busy neighbourhood can accumulate hundreds of candidates,
+    burying the one device the user actually wants. After clearing, only devices
+    that transmit from now on are listed -- so the user can press their doorbell
+    and see it alone on the screen.
 
-    Nothing is persisted and nothing is ignored: the pending list has always
-    been memory-only and rebuilt from live traffic, so this discards a working
-    set rather than making a decision. Every device cleared comes back on its
-    next transmission, which is precisely what makes it safe to offer as a
-    one-click button with no confirmation to read.
+    Nothing is deleted or ignored. The pending list has always been held in
+    memory only and rebuilt from live traffic, so every cleared device reappears
+    on its next transmission. That is why this can be a one-click button with no
+    confirmation dialog.
 
-    A device the user *has* ignored stays ignored -- that list is persisted and
-    is a decision, and this is not the control for undoing it.
+    Devices the user has explicitly ignored stay ignored. That list is stored on
+    disk and records a choice they made; un-ignore is how it is undone.
     """
     resolved = _async_get_coordinator(hass, connection, msg)
     if resolved is None:
         return
-    entry, coordinator = resolved
-    cleared = len(coordinator.pending)
-    coordinator.pending.clear()
-    # A membership change, so every open panel is told at once -- including the
-    # other admin's, who is looking at a list that just emptied.
-    coordinator.emit_pending_update()
-    connection.send_result(msg["id"], {"cleared": cleared})
+    _entry, coordinator = resolved
+    connection.send_result(msg["id"], {"cleared": coordinator.clear_pending()})
 
 
 @websocket_api.websocket_command(
@@ -883,8 +875,8 @@ def ws_subscribe_devices(
 # mapping overrides -- the three forms that used to be reachable only through   #
 # the options flow, and are now the panel's dialogs as well. Every rule about   #
 # what a submitted value *means* lives in ``settings.py``; these commands are   #
-# transport, and deliberately thin enough that reading them tells you nothing   #
-# the options flow does not also do.                                           #
+# transport only. They apply no rules of their own, so they cannot disagree   #
+# with the options flow about what a saved value means.                        #
 # --------------------------------------------------------------------------- #
 
 
@@ -953,10 +945,7 @@ def ws_get_settings(
     connection.send_result(
         msg["id"],
         {
-            "hub": {
-                CONF_AVAILABILITY_TIMEOUT: hub[CONF_AVAILABILITY_TIMEOUT],
-                CONF_MANAGE_SETTINGS: hub[CONF_MANAGE_SETTINGS],
-            },
+            "hub": hub,
             "defaults": {
                 CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
                 DEVICE_MOTION_CLEAR_DELAY: DEFAULT_MOTION_CLEAR_DELAY,

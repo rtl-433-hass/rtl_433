@@ -235,8 +235,8 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
 - **The rules behind those forms live in `settings.py`, not in the flow.** Which
   submitted value means "clear this", which means "use the default and store
   nothing", and which of `entry.data` / `entry.options` each lands in are shared
-  with the panel's dialogs (`rtl_433/settings/*`), which render the same three
-  forms. `settings.py` returns plain dicts and writes nothing, because the two
+  with the panel's settings pages (`rtl_433/settings/*`), which render the same
+  three forms. `settings.py` returns plain dicts and writes nothing, because the two
   callers must persist differently: `async_create_entry` *is* the options write
   for a flow, and adding an `async_update_entry` beside it would fire the update
   listener twice and reload the hub twice for one save, while the WebSocket path
@@ -245,7 +245,11 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   `entry.data`** (`settings.device_clear_delay`). The migration from per-device
   child entries writes it to `data`; every settings form writes it to `options`.
   The resolver used to read only `data`, so a clear-delay set by hand persisted,
-  displayed, and did nothing — do not narrow it back to one location.
+  displayed, and did nothing — do not narrow it back to one location. Saving a
+  device drops the `data` copy (`settings.build_device_data`), so options becomes
+  the only copy from the first save onwards; without that, a migrated hub could
+  never clear the delay, because blanking the field emptied options and the read
+  fell straight back to the leftover.
 - **Utility-meter calibration** (`calibration.py`, options `device_settings` →
   `calibration` step) writes a `DEVICE_CALIBRATION` sub-record (`{commodity,
   unit, scale}`) into `entry.data[CONF_DEVICES][device_key]` next to
@@ -393,7 +397,8 @@ second implementation.
 
   It is set deliberately, and the panel now renders all six displaced steps: Add
   and Ignore on the cards, Replace on a card, Ignored devices behind the toggle,
-  and Receiver settings / Device settings / Device mappings as dialogs. **The
+  and Receiver settings / Device settings / Device mappings as subviews, each on
+  its own deep-linkable path. **The
   invariant to keep is that list, not the flag**: an options step with no panel
   equivalent is unreachable while still existing and still passing its tests,
   which is exactly the kind of break no Python test catches. `knx` ships both a
@@ -1064,7 +1069,7 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
    [add-a-mapping workflow](docs/device-library.md#add-a-mapping-workflow).
 
 For an installation-local change that should **not** be committed, use the
-hub's *Device mappings* dialog instead of editing the shipped library (see
+hub's *Device mappings* page instead of editing the shipped library (see
 [Adding device mappings](docs/device-library.md#adding-device-mappings)).
 
 ## Running the unit tests

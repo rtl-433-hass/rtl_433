@@ -2,11 +2,15 @@
 
 The hub's availability timeout and manage-settings toggle, a device's timeout
 override / calibration / motion clear-delay, and the hub's device-library
-mapping overrides are each edited from two places now -- the discovery panel's
-dialogs (over :mod:`.websocket_api`) and the options flow (:mod:`.options_flow`)
--- and the two must not drift. What drifts is never the form: it is the
-*sentinel* rules sitting behind it, every one of which exists for a reason that
-is invisible at the call site.
+mapping overrides are each edited from two places now -- the panel's settings
+pages (over :mod:`.websocket_api`) and the options flow (:mod:`.options_flow`)
+-- and the two must not drift.
+
+Keeping the forms themselves in step is easy. What drifts is the set of rules
+about what a submitted value *means*: when a value is stored, when it is dropped
+instead, and which of ``entry.data`` / ``entry.options`` it goes in. None of
+those is obvious from the code that calls these builders, so they are written
+down here:
 
 - A hub timeout equal to :data:`~.const.DEFAULT_AVAILABILITY_TIMEOUT` is dropped
   rather than stored, because storing it as an explicit hub-wide timeout would
@@ -42,13 +46,13 @@ from .const import (
     CONF_USER_MAPPINGS,
     DATA_ENTRY_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
-    DEFAULT_MANAGE_SETTINGS,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
     DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
+from .hub_settings import _hub_availability_timeout, _hub_manage_settings
 
 if TYPE_CHECKING:
     from pyrtl_433.library import Registry
@@ -67,19 +71,15 @@ MAPPINGS_DOCS_URL = (
 def hub_defaults(entry: ConfigEntry) -> dict[str, Any]:
     """Return the hub-level form's current values.
 
-    Options override data, then the shipped default -- the same precedence
-    :mod:`.hub_settings` resolves at runtime, applied here so the form opens
-    showing what the hub is actually doing rather than what was last typed.
+    These come straight from the resolvers :mod:`.hub_settings` uses at runtime,
+    rather than from a second copy of the options-then-data-then-default rule.
+    The form therefore opens showing what the hub is actually doing -- including
+    the int/bool coercion, so a value stored as a string still displays as a
+    number.
     """
     return {
-        CONF_AVAILABILITY_TIMEOUT: entry.options.get(
-            CONF_AVAILABILITY_TIMEOUT,
-            entry.data.get(CONF_AVAILABILITY_TIMEOUT, DEFAULT_AVAILABILITY_TIMEOUT),
-        ),
-        CONF_MANAGE_SETTINGS: entry.options.get(
-            CONF_MANAGE_SETTINGS,
-            entry.data.get(CONF_MANAGE_SETTINGS, DEFAULT_MANAGE_SETTINGS),
-        ),
+        CONF_AVAILABILITY_TIMEOUT: _hub_availability_timeout(entry),
+        CONF_MANAGE_SETTINGS: _hub_manage_settings(entry),
     }
 
 
@@ -111,8 +111,9 @@ def entry_registry(hass: HomeAssistant, entry: ConfigEntry) -> Registry | None:
     """Return this hub's merged device-library registry, cached at setup.
 
     ``None`` while the hub is still loading, which callers read as "cannot tell
-    yet" rather than as "no": the only thing that consults it is the motion test
-    below, whose knob then simply does not appear.
+    yet" rather than as "no": the motion test below is one such caller, and its
+    knob then simply does not appear. The WebSocket reading preview is the
+    other.
     """
     return (
         hass.data.get(DOMAIN, {})

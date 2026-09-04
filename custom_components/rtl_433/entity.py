@@ -421,6 +421,23 @@ async def async_setup_hub_controls(
 # --------------------------------------------------------------------------- #
 # Devices-map helper.                                                          #
 # --------------------------------------------------------------------------- #
+def resolve_event_type(descriptor: FieldDescriptor, raw: Any) -> str:
+    """Return the event type one raw field value should fire as.
+
+    A descriptor may declare an ``event_map`` naming each value it expects --
+    a doorbell's ``0`` / ``1`` becoming ``ring`` / ``secret_knock``. A value the
+    map does not name, and a descriptor with no map at all (the plain button
+    case), fall back to the value as a string, unchanged.
+
+    Shared with the panel's reading preview
+    (:func:`~.websocket_api._reading_state`), which has to show the same word the
+    entity will fire, or the preview would name a doorbell press one thing and
+    the automation another.
+    """
+    event_map = descriptor.event_map
+    return event_map.get(str(raw), str(raw)) if event_map else str(raw)
+
+
 async def async_upsert_device(
     hass: HomeAssistant,
     entry: ConfigEntry,

@@ -90,11 +90,9 @@ from .settings import (
     build_device_options,
     build_hub_options,
     build_mappings_data,
-    device_clear_delay,
     device_defaults,
     device_label,
     hub_defaults,
-    is_motion_bearing,
 )
 
 if TYPE_CHECKING:
@@ -597,9 +595,11 @@ class Rtl433OptionsFlow(OptionsFlow):
         ]
         # Pre-fill the commodity from this device's existing calibration when it
         # has one, else from its decoded MeterType / ert_type hint.
-        commodity_default = device_defaults(self.hass, self.config_entry, device_key)[
-            CALIBRATION_COMMODITY
-        ]
+        # One call, then read every field off it. The panel's device form is
+        # built from exactly this dict, so answering any of these questions
+        # another way here is a second answer to a question it already answered.
+        defaults = device_defaults(self.hass, self.config_entry, device_key)
+        commodity_default = defaults[CALIBRATION_COMMODITY]
         # ``suggested_value`` (not ``default``) so an emptied field still submits
         # as absent and clears the persisted override.
         schema_dict: dict[Any, Any] = {
@@ -620,12 +620,12 @@ class Rtl433OptionsFlow(OptionsFlow):
         # The clear-delay knob is only meaningful for motion-bearing devices
         # (those with a field whose descriptor carries a ``clear_delay``), so it
         # appears iff *this* device is one, pre-filled from its persisted override.
-        if is_motion_bearing(self.hass, self.config_entry, device_key):
+        if defaults["motion"]:
             schema_dict[
                 vol.Optional(
                     DEVICE_MOTION_CLEAR_DELAY,
                     default=(
-                        device_clear_delay(self.config_entry, device_key)
+                        defaults[DEVICE_MOTION_CLEAR_DELAY]
                         or DEFAULT_MOTION_CLEAR_DELAY
                     ),
                 )
@@ -633,7 +633,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="device_settings",
             data_schema=vol.Schema(schema_dict),
-            description_placeholders={"device": self._device_label(device_key, record)},
+            description_placeholders={"device": defaults["label"]},
         )
 
     async def async_step_calibration(

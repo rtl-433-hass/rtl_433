@@ -44,7 +44,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_DEVICES, DEVICE_EVENT_TYPES, LOGGER
-from .entity import Rtl433Entity, async_setup_hub_platform, async_upsert_event_types
+from .entity import (
+    Rtl433Entity,
+    async_setup_hub_platform,
+    async_upsert_event_types,
+    resolve_event_type,
+)
 
 if TYPE_CHECKING:
     from pyrtl_433.library import FieldDescriptor
@@ -193,13 +198,8 @@ class Rtl433Event(Rtl433Entity, EventEntity):
             self.async_write_ha_state()
             return
         if field_key in event.fields:
-            # Resolve the event type: a declared ``event_map`` maps the raw value
-            # to a named type (e.g. doorbell ``0``/``1`` -> ``ring``/
-            # ``secret_knock``); unmapped values and the no-map button path fall
-            # back to the stringified raw value unchanged.
             raw = event.fields[field_key]
-            event_map = self._descriptor.event_map
-            event_type = event_map.get(str(raw), str(raw)) if event_map else str(raw)
+            event_type = resolve_event_type(self._descriptor, raw)
             LOGGER.debug(
                 "rtl_433 fired %s for %s field=%s value=%s",
                 event_type,
