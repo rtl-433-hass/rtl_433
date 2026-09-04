@@ -752,6 +752,150 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#home-assistant-discovery-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Home Assistant discovery commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Home Assistant discovery commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#command-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Command summary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rtl_433hubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rtl_433/hubs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rtl_433devicespending" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rtl_433/devices/pending
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rtl_433devicesadd-ignore-unignore" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rtl_433/devices/add, .../ignore, .../unignore
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rtl_433devicessubscribe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rtl_433/devices/subscribe
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#home-assistant-settings-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Home Assistant settings commands
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Home Assistant settings commands">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rtl_433settingsget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rtl_433/settings/get
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rtl_433settingshub" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rtl_433/settings/hub
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rtl_433settingsdevice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rtl_433/settings/device
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rtl_433settingsmappings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        rtl_433/settings/mappings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -776,6 +920,9 @@
 <p>This document describes the WebSocket control/streaming API exposed by the
 rtl_433 HTTP server. It is derived from the implementation in <code>src/http_server.c</code>
 (<code>ev_handler</code>, <code>json_parse</code>, <code>rpc_exec</code>, <code>rpc_response_ws</code>).</p>
+<p>A second, unrelated API is documented at the end:
+<a href="#home-assistant-discovery-commands">Home Assistant discovery commands</a>, the
+commands this integration adds to <em>Home Assistant's</em> own WebSocket API.</p>
 <p>The WebSocket API shares its command dispatcher (<code>rpc_exec</code>) with the <code>/cmd</code> and
 <code>/jsonrpc</code> HTTP endpoints, so the command set is identical across all three; only
 the framing differs.</p>
@@ -1266,6 +1413,433 @@ the decoded data stream and change live SDR settings. Traffic is plain HTTP.</p>
 <p>This is intentional: upstream considers rtl_433 safe to use but not secure and
 recommends it not be exposed to the internet. Bind to <code>127.0.0.1</code> and/or place a
 reverse proxy with TLS and authentication in front if remote access is required.</p>
+<h2 id="home-assistant-discovery-commands">Home Assistant discovery commands<a class="headerlink" href="#home-assistant-discovery-commands" title="Permanent link">&para;</a></h2>
+<p>Everything above belongs to the rtl_433 server. This section is a different API:
+the commands this integration registers on <strong>Home Assistant's own</strong> WebSocket API
+at <code>ws://&lt;home-assistant&gt;:8123/api/websocket</code>. They back the discovery panel, and
+they are equally usable from a script or from the browser's developer console —
+the panel adds no logic of its own on top of them, so anything it can do, these
+can do.</p>
+<p>They are the programmatic form of <a href="../device-discovery/">Device Discovery</a>: see
+what the receiver has heard, then add, ignore or un-ignore it — and, since the
+panel became the integration's configuration page, read and write the hub's
+settings too.</p>
+<h3 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h3>
+<p>Connect and authenticate the way you would for any Home Assistant WebSocket
+client (a long-lived access token). <strong>Every command below requires an
+administrator</strong>, so a token issued for a non-admin user is refused:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"result"</span><span class="p">,</span><span class="w"> </span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"unauthorized"</span><span class="p">,</span><span class="w"> </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Unauthorized"</span><span class="p">}}</span>
+</code></pre></div>
+<h3 id="command-summary">Command summary<a class="headerlink" href="#command-summary" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th><code>type</code></th>
+<th>Parameters</th>
+<th>Returns</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rtl_433/hubs</code></td>
+<td>—</td>
+<td>Every configured hub, loaded or not.</td>
+</tr>
+<tr>
+<td><code>rtl_433/devices/pending</code></td>
+<td><code>entry_id</code></td>
+<td>One hub's discovered devices and its ignore list.</td>
+</tr>
+<tr>
+<td><code>rtl_433/devices/add</code></td>
+<td><code>entry_id</code>, <code>device_keys</code></td>
+<td><code>applied</code> / <code>skipped</code> keys.</td>
+</tr>
+<tr>
+<td><code>rtl_433/devices/ignore</code></td>
+<td><code>entry_id</code>, <code>device_keys</code></td>
+<td><code>applied</code> / <code>skipped</code> keys.</td>
+</tr>
+<tr>
+<td><code>rtl_433/devices/unignore</code></td>
+<td><code>entry_id</code>, <code>device_keys</code></td>
+<td><code>applied</code> / <code>skipped</code> keys.</td>
+</tr>
+<tr>
+<td><code>rtl_433/devices/subscribe</code></td>
+<td><code>entry_id</code></td>
+<td>A subscription pushing the <code>pending</code> payload on change.</td>
+</tr>
+<tr>
+<td><code>rtl_433/devices/replace</code></td>
+<td><code>entry_id</code>, <code>device_key</code>, <code>replaces</code></td>
+<td>Re-points an existing device onto a candidate.</td>
+</tr>
+<tr>
+<td><code>rtl_433/devices/clear</code></td>
+<td><code>entry_id</code></td>
+<td>Forgets every candidate; <code>cleared</code> counts them.</td>
+</tr>
+<tr>
+<td><code>rtl_433/settings/get</code></td>
+<td><code>entry_id</code></td>
+<td>Everything the three settings forms render.</td>
+</tr>
+<tr>
+<td><code>rtl_433/settings/hub</code></td>
+<td><code>entry_id</code>, <code>availability_timeout</code>, <code>manage_settings</code></td>
+<td>The hub's stored options.</td>
+</tr>
+<tr>
+<td><code>rtl_433/settings/device</code></td>
+<td><code>entry_id</code>, <code>device_key</code>, + overrides</td>
+<td>That device's stored settings.</td>
+</tr>
+<tr>
+<td><code>rtl_433/settings/mappings</code></td>
+<td><code>entry_id</code>, <code>yaml</code></td>
+<td>The stored override document, re-rendered.</td>
+</tr>
+</tbody>
+</table>
+<p><code>entry_id</code> is a hub's config-entry id, from <code>rtl_433/hubs</code>. <code>device_keys</code> is a
+list, so one message can add or ignore several devices.</p>
+<p>Errors are the usual <code>{"success": false, "error": {...}}</code> result:</p>
+<table>
+<thead>
+<tr>
+<th><code>error.code</code></th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>unauthorized</code></td>
+<td>The connection's user is not an administrator.</td>
+</tr>
+<tr>
+<td><code>not_found</code></td>
+<td>No rtl_433 hub has that <code>entry_id</code>. An entry belonging to another integration reads the same way — these commands never reach into one.</td>
+</tr>
+<tr>
+<td><code>not_loaded</code></td>
+<td>The hub exists but is not set up — reloading, or its server is unreachable. The discovered list lives in memory, so there is nothing to answer with until it loads.</td>
+</tr>
+<tr>
+<td><code>replace_failed</code></td>
+<td>The replacement cannot be made: an unknown survivor, or the same key on both sides. Distinct from <code>not_loaded</code> so a script can tell "retry in a moment" from "this request cannot work".</td>
+</tr>
+<tr>
+<td><code>invalid_mappings</code></td>
+<td>The submitted device-mapping document is not YAML, is not a mapping, or breaks the override schema. <code>error.message</code> carries every problem found. Nothing is stored.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rtl_433hubs"><code>rtl_433/hubs</code><a class="headerlink" href="#rtl_433hubs" title="Permanent link">&para;</a></h3>
+<p>Lists the hubs, so a caller can pick one. Hubs that failed to load are listed
+too, flagged rather than hidden.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rtl_433/hubs"</span><span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"result"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"hubs"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">      </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"entry_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01M1DJ2TAV2NPMPB2JA4ZHDR2P"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"title"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rtl_433 (wsbridge)"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"loaded"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">]</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="rtl_433devicespending"><code>rtl_433/devices/pending</code><a class="headerlink" href="#rtl_433devicespending" title="Permanent link">&para;</a></h3>
+<p>Returns one hub's discovered devices, most recently heard first, together with
+the keys it is ignoring.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rtl_433/devices/pending"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"entry_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01M1DJ2TAV2NPMPB2JA4ZHDR2P"</span><span class="p">}</span>
+</code></pre></div>
+<p>The <code>result</code>, with four of its six devices left out:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"pending"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Acurite-Tower-12053-chC"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Acurite-Tower"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">915</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"signal"</span><span class="p">:</span><span class="w"> </span><span class="mf">39.134</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"first_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T04:01:51.881359+00:00"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"last_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T04:07:02.042143+00:00"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"readings"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"humidity"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Humidity"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mf">74.0</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"display"</span><span class="p">:</span><span class="w"> </span><span class="s2">"74.0%"</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"%"</span><span class="p">,</span><span class="w"> </span><span class="nt">"platform"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sensor"</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"entity_category"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"icon"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mdi:water-percent"</span><span class="p">},</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"temperature_C"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Temperature"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mf">26.7</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"display"</span><span class="p">:</span><span class="w"> </span><span class="s2">"26.7 °C"</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"°C"</span><span class="p">,</span><span class="w"> </span><span class="nt">"platform"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sensor"</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"entity_category"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"icon"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mdi:thermometer"</span><span class="p">},</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"battery_ok"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Battery"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"display"</span><span class="p">:</span><span class="w"> </span><span class="s2">"100%"</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"%"</span><span class="p">,</span><span class="w"> </span><span class="nt">"platform"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sensor"</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"entity_category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"diagnostic"</span><span class="p">,</span><span class="w"> </span><span class="nt">"icon"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mdi:battery"</span><span class="p">}</span>
+<span class="w">      </span><span class="p">]</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"LeakDetector-9-21"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"LeakDetector-9"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"count"</span><span class="p">:</span><span class="w"> </span><span class="mi">39</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"signal"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"first_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T04:01:56.472199+00:00"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"last_seen"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-09-01T04:07:00.516721+00:00"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"readings"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"detect_wet"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Water sensor"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"display"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Wet"</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"platform"</span><span class="p">:</span><span class="w"> </span><span class="s2">"binary_sensor"</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"entity_category"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"icon"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mdi:water"</span><span class="p">},</span>
+<span class="w">        </span><span class="p">{</span><span class="nt">"key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"battery_ok"</span><span class="p">,</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Battery"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="mi">100</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"display"</span><span class="p">:</span><span class="w"> </span><span class="s2">"100%"</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"%"</span><span class="p">,</span><span class="w"> </span><span class="nt">"platform"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sensor"</span><span class="p">,</span>
+<span class="w">         </span><span class="nt">"entity_category"</span><span class="p">:</span><span class="w"> </span><span class="s2">"diagnostic"</span><span class="p">,</span><span class="w"> </span><span class="nt">"icon"</span><span class="p">:</span><span class="w"> </span><span class="s2">"mdi:battery"</span><span class="p">}</span>
+<span class="w">      </span><span class="p">]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"ignored"</span><span class="p">:</span><span class="w"> </span><span class="p">[]</span>
+<span class="p">}</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>key</code></td>
+<td>The device key: the decoded model plus the id, channel and subtype it reported. This is the id every command below takes.</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>The model rtl_433 decoded.</td>
+</tr>
+<tr>
+<td><code>count</code></td>
+<td>Sightings since Home Assistant started. The list is memory-only, so this counts from the last restart or hub reload.</td>
+</tr>
+<tr>
+<td><code>signal</code></td>
+<td>The most recent message's SNR, or its RSSI when no SNR was reported, in dB. <code>null</code> when the server reports no levels (it needs <code>-M level</code>).</td>
+</tr>
+<tr>
+<td><code>first_seen</code>, <code>last_seen</code></td>
+<td>ISO 8601 timestamps.</td>
+</tr>
+<tr>
+<td><code>readings</code></td>
+<td>The most recent message, resolved through the device library into the entities adoption would create. Ordered as a device page orders them: readings first, then diagnostics, alphabetical within each.</td>
+</tr>
+</tbody>
+</table>
+<p>Each reading describes the entity that field would become:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>key</code></td>
+<td>The rtl_433 field name, as it arrived in the frame.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>The name Home Assistant will give the entity — the library descriptor's own <code>name</code>, else the translated device-class name from core's <code>entity_component</code> strings.</td>
+</tr>
+<tr>
+<td><code>value</code></td>
+<td>The value the entity will hold: a real <code>true</code>/<code>false</code> for a binary field, the mapped event type for an <code>event</code> field, and the scaled number for a sensor.</td>
+</tr>
+<tr>
+<td><code>display</code></td>
+<td>That value rendered as the entity's <strong>state</strong>, ready to print: <code>"74.0%"</code>, <code>"26.7 °C"</code>, <code>"Wet"</code>, <code>"Open"</code>.</td>
+</tr>
+<tr>
+<td><code>unit</code></td>
+<td>The unit the entity will report, or <code>null</code>.</td>
+</tr>
+<tr>
+<td><code>platform</code></td>
+<td><code>sensor</code>, <code>binary_sensor</code> or <code>event</code>.</td>
+</tr>
+<tr>
+<td><code>entity_category</code></td>
+<td><code>"diagnostic"</code> for the fields Home Assistant files under Diagnostic, else <code>null</code>.</td>
+</tr>
+<tr>
+<td><code>icon</code></td>
+<td>The icon Home Assistant will show, from core's own <code>icons.json</code> for the device class, or <code>null</code> when it describes none.</td>
+</tr>
+</tbody>
+</table>
+<p><code>display</code> is worth using in preference to re-formatting <code>value</code>. It is built
+from the same descriptor, unit and translated vocabulary the entity itself
+uses, so it says <code>"Wet"</code> where a <code>moisture</code> sensor says Wet and <code>"Open"</code> where
+an <code>opening</code> sensor says Open — not <code>true</code>/<code>false</code>, and not On/Off.</p>
+<p>One known gap: Home Assistant converts a few device classes to the configured
+unit system (for this library, wind speed, rainfall and pressure). <code>display</code>
+does not, so on a US-customary installation those three read in metric here and
+in imperial on the device page.</p>
+<p>Two kinds of field are deliberately absent, because neither produces an entity
+the user would see: one the device library does not map at all, and one it maps
+with <code>enabled_by_default: false</code> (the <code>time</code>, <code>freq</code>, <code>rssi</code>, <code>snr</code> and <code>noise</code>
+diagnostics). Read the raw frame from the device's own entities after adoption,
+or from <code>rtl_433/events</code> above, if you need it verbatim.</p>
+<p><code>ignored</code> carries one <code>{"key", "model"}</code> per ignored device. The model is an
+empty string for a device that was ignored while still pending, which is the
+usual case — nothing is stored about a device that was never added.</p>
+<h3 id="rtl_433devicesadd-ignore-unignore"><code>rtl_433/devices/add</code>, <code>.../ignore</code>, <code>.../unignore</code><a class="headerlink" href="#rtl_433devicesadd-ignore-unignore" title="Permanent link">&para;</a></h3>
+<p>The three actions. All take the same parameters and return the same shape, and
+all do exactly what the equivalent options-flow step does — there is one
+implementation behind both.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rtl_433/devices/add"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"entry_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01M1DJ2TAV2NPMPB2JA4ZHDR2P"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"device_keys"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Acurite-Tower-12053-chC"</span><span class="p">,</span><span class="w"> </span><span class="s2">"LeakDetector-9-21"</span><span class="p">]}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"applied"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Acurite-Tower-12053-chC"</span><span class="p">],</span><span class="w"> </span><span class="nt">"skipped"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"LeakDetector-9-21"</span><span class="p">]}</span>
+</code></pre></div>
+<p><code>skipped</code> is not an error. It means the key was not in a state the action
+applies to, and each command means something slightly different by that:</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th><code>applied</code></th>
+<th><code>skipped</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>add</code></td>
+<td>The device was created, with its entities.</td>
+<td>The key was no longer discovered — usually already added, or ignored.</td>
+</tr>
+<tr>
+<td><code>ignore</code></td>
+<td>The key was added to the ignore list and dropped from the discovered list.</td>
+<td>It was already ignored.</td>
+</tr>
+<tr>
+<td><code>unignore</code></td>
+<td>The key was taken off the ignore list.</td>
+<td>It was not on it.</td>
+</tr>
+</tbody>
+</table>
+<p><code>applied</code> means the key is no longer ignored, not that it is back on the
+discovered list. The device returns there on its next transmission.</p>
+<h3 id="rtl_433devicessubscribe"><code>rtl_433/devices/subscribe</code><a class="headerlink" href="#rtl_433devicessubscribe" title="Permanent link">&para;</a></h3>
+<p>Subscribes to one hub's discovered devices. The event payload is exactly what
+<code>rtl_433/devices/pending</code> returns.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rtl_433/devices/subscribe"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"entry_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01M1DJ2TAV2NPMPB2JA4ZHDR2P"</span><span class="p">}</span>
+</code></pre></div>
+<p>The success result comes first, then the current payload immediately as the first
+event — so a client never has to call <code>pending</code> as well — and then a new payload
+whenever it changes:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"result"</span><span class="p">,</span><span class="w"> </span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">}</span>
+<span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"event"</span><span class="p">,</span><span class="w"> </span><span class="nt">"event"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"pending"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">],</span><span class="w"> </span><span class="nt">"ignored"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="err">...</span><span class="p">]}}</span>
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">One message per change, not one per transmission</p>
+<p>A device that is already on the list transmitting again does <strong>not</strong> push a
+message. Those repeat sightings only age a row's <code>count</code> and <code>last_seen</code>, so
+they are coalesced: the payload is re-checked on a five-second timer and sent
+only when it actually differs from the last one sent. A receiver in a busy
+area decodes constantly, and a push per frame would flood every open
+connection.</p>
+<p>Membership changes — a device heard for the first time, or added, ignored or
+un-ignored — are pushed immediately.</p>
+<p>So a client must not count messages to count transmissions, and must not
+assume the counts it holds are current to the second. Read <code>count</code> and
+<code>last_seen</code> from the payload.</p>
+</div>
+<p>Unsubscribe the standard way, naming the subscription's id:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"unsubscribe_events"</span><span class="p">,</span><span class="w"> </span><span class="nt">"subscription"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">}</span>
+</code></pre></div>
+<h2 id="home-assistant-settings-commands">Home Assistant settings commands<a class="headerlink" href="#home-assistant-settings-commands" title="Permanent link">&para;</a></h2>
+<p>The same three forms the panel's settings pages render. They are ordinary
+commands, so anything those pages do is scriptable — including the parts that
+are awkward by hand, like setting the same calibration on a dozen meters.</p>
+<h3 id="rtl_433settingsget"><code>rtl_433/settings/get</code><a class="headerlink" href="#rtl_433settingsget" title="Permanent link">&para;</a></h3>
+<p>Everything the three forms need, in one call — they are one screenful, and the
+alternative is three round trips to fill controls the user may never open.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rtl_433/settings/get"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"entry_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01M1DJ2TAV2NPMPB2JA4ZHDR2P"</span><span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"result"</span><span class="p">,</span><span class="w"> </span><span class="nt">"success"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span><span class="w"> </span><span class="nt">"result"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nt">"hub"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"availability_timeout"</span><span class="p">:</span><span class="w"> </span><span class="mi">600</span><span class="p">,</span><span class="w"> </span><span class="nt">"manage_settings"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"defaults"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"availability_timeout"</span><span class="p">:</span><span class="w"> </span><span class="mi">600</span><span class="p">,</span><span class="w"> </span><span class="nt">"motion_clear_delay"</span><span class="p">:</span><span class="w"> </span><span class="mi">90</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"devices"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"device_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SCM-12345"</span><span class="p">,</span><span class="w"> </span><span class="nt">"label"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SCM (SCM-12345) — gas detected"</span><span class="p">,</span>
+<span class="w">     </span><span class="nt">"model"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SCM"</span><span class="p">,</span><span class="w"> </span><span class="nt">"timeout_override"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="nt">"motion_clear_delay"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<span class="w">     </span><span class="nt">"motion"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="nt">"commodity"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gas"</span><span class="p">,</span><span class="w"> </span><span class="nt">"calibration"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">}</span>
+<span class="w">  </span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"commodities"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"none"</span><span class="p">,</span><span class="w"> </span><span class="s2">"energy"</span><span class="p">,</span><span class="w"> </span><span class="s2">"gas"</span><span class="p">,</span><span class="w"> </span><span class="s2">"water"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"commodity_units"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"gas"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"m³"</span><span class="p">,</span><span class="w"> </span><span class="s2">"ft³"</span><span class="p">,</span><span class="w"> </span><span class="s2">"L"</span><span class="p">,</span><span class="w"> </span><span class="s2">"CCF"</span><span class="p">],</span><span class="w"> </span><span class="nt">"..."</span><span class="p">:</span><span class="w"> </span><span class="p">[]},</span>
+<span class="w">  </span><span class="nt">"mappings"</span><span class="p">:</span><span class="w"> </span><span class="s2">""</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"mappings_docs_url"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://github.com/..."</span>
+<span class="p">}}</span>
+</code></pre></div>
+<p><code>commodity_units</code> travels in the payload rather than being a constant a client
+carries, because which units Home Assistant will convert for a given commodity is
+a fact about the integration's calibration table. A client with its own copy will
+eventually offer a unit the entity build refuses, and nothing fails visibly — the
+sensor just stops being eligible for the Energy dashboard.</p>
+<p><code>commodity</code> is a <em>suggestion</em>, not a stored value: it is the device's existing
+calibration when it has one, and otherwise a guess from the <code>MeterType</code> /
+<code>ert_type</code> fields of its last decoded frame.</p>
+<h3 id="rtl_433settingshub"><code>rtl_433/settings/hub</code><a class="headerlink" href="#rtl_433settingshub" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">11</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rtl_433/settings/hub"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"entry_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01M1DJ2TAV2NPMPB2JA4ZHDR2P"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"availability_timeout"</span><span class="p">:</span><span class="w"> </span><span class="mi">1800</span><span class="p">,</span><span class="w"> </span><span class="nt">"manage_settings"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">}</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">The default timeout is not stored</p>
+<p>Submitting <code>availability_timeout</code> equal to the shipped default (600) <em>removes</em>
+the stored value rather than saving it, so the per-device-class defaults keep
+applying. That matters most for event-driven devices — a doorbell that has not
+rung in ten minutes is not unavailable. Any other value is stored as given,
+including <code>0</code>, which means "never expire".</p>
+</div>
+<h3 id="rtl_433settingsdevice"><code>rtl_433/settings/device</code><a class="headerlink" href="#rtl_433settingsdevice" title="Permanent link">&para;</a></h3>
+<p>Every override is optional and nullable, and the two mean the same thing: clear
+it, falling back to the hub default or the library descriptor.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">12</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rtl_433/settings/device"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"entry_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01M1DJ2TAV2NPMPB2JA4ZHDR2P"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"device_key"</span><span class="p">:</span><span class="w"> </span><span class="s2">"SCM-12345"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"timeout_override"</span><span class="p">:</span><span class="w"> </span><span class="mi">1800</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"commodity"</span><span class="p">:</span><span class="w"> </span><span class="s2">"gas"</span><span class="p">,</span><span class="w"> </span><span class="nt">"unit"</span><span class="p">:</span><span class="w"> </span><span class="s2">"m³"</span><span class="p">,</span><span class="w"> </span><span class="nt">"scale"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.01</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"motion_clear_delay"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">}</span>
+</code></pre></div>
+<p>The reply is that device's row from <code>rtl_433/settings/get</code>, rebuilt from what was
+actually stored. Read the calibration back from it rather than assuming what you
+sent: <code>{commodity, unit, scale}</code> is normalized on the way in, and a commodity of
+<code>none</code>, an unknown one, or a unit that is not convertible for the commodity all
+store <em>no</em> calibration at all.</p>
+<p><code>motion_clear_delay</code> only does anything on a device with a field that auto-clears
+(<code>motion</code> is <code>true</code> in the payload for those); elsewhere it is a control with
+nothing behind it.</p>
+<h3 id="rtl_433settingsmappings"><code>rtl_433/settings/mappings</code><a class="headerlink" href="#rtl_433settingsmappings" title="Permanent link">&para;</a></h3>
+<p>The hub's <a href="../device-library/">device-library overrides</a>, as the YAML text the
+documentation writes them in.</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">13</span><span class="p">,</span><span class="w"> </span><span class="nt">"type"</span><span class="p">:</span><span class="w"> </span><span class="s2">"rtl_433/settings/mappings"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"entry_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"01M1DJ2TAV2NPMPB2JA4ZHDR2P"</span><span class="p">,</span>
+<span class="w"> </span><span class="nt">"yaml"</span><span class="p">:</span><span class="w"> </span><span class="s2">"temperature_C:\n  platform: sensor\n  unit_of_measurement: K\n"</span><span class="p">}</span>
+</code></pre></div>
+<p>An empty or whitespace-only document removes every override — clearing the editor
+is how they are all removed. A document that will not store comes back as
+<code>invalid_mappings</code> with every problem found joined into <code>error.message</code>, and the
+overrides already stored are left exactly as they were.</p>
 
 
 

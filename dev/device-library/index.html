@@ -1039,7 +1039,7 @@ leaving every other model untouched:</p>
 <p>Mapping overrides are <strong>global or model-scoped only</strong> — they apply to every device
 of a model, not a single physical unit. To change settings for one specific unit
 (its availability timeout, meter calibration, or motion clear delay), use the
-options flow's <em>Device settings</em> step instead.</p>
+<em>Device settings</em> page instead.</p>
 <h2 id="mapping-entry-schema-summary">Mapping entry schema (summary)<a class="headerlink" href="#mapping-entry-schema-summary" title="Permanent link">&para;</a></h2>
 <p>The full schema is documented upstream, where the library lives:
 <strong><a href="https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/">pyrtl_433 device-library reference</a></strong>. What follows is only enough to
@@ -1094,7 +1094,7 @@ with no re-detection. Every fresh detection <strong>reschedules</strong> the tim
 off window restarts on each retrigger. The shipped default is <strong>90 s</strong>.</p>
 <p>A stale <code>on</code> is never restored across a restart (there would be no live timer to
 clear it): the sensor comes back off/unknown until the next detection.</p>
-<p><strong>Per-device override.</strong> The delay can be tuned per device in the options flow —
+<p><strong>Per-device override.</strong> The delay can be tuned per device in <em>Device settings</em> —
 <strong>Settings → Devices &amp; Services → rtl_433 → Configure → (device step)</strong> exposes a
 <em>Motion clear delay (seconds)</em> field, shown only for motion-bearing devices.
 Leave it blank to use the 90 s default. The override is resolved at runtime
@@ -1239,7 +1239,7 @@ descriptor <strong>most-specific first</strong>:</p>
 global descriptor for that same field.</p>
 <h3 id="precedence-specificity-first">Precedence (specificity-first)<a class="headerlink" href="#precedence-specificity-first" title="Permanent link">&para;</a></h3>
 <p>Combined with <a href="#adding-device-mappings">UI mappings</a> and the per-device meter
-calibration (the options-flow <em>Device settings</em> step), the full precedence for a
+calibration (the <em>Device settings</em> page), the full precedence for a
 single field on a single device is, <strong>highest to lowest</strong>:</p>
 <ol>
 <li><strong>Per-device calibration</strong> (commodity + base unit + scale, set in the options
@@ -1260,7 +1260,7 @@ unit/scale is not knowable from the signal, the shipped library does <strong>not
 carry a guessed <code>models:</code> consumption mapping for any real model — a wrong
 scale would silently corrupt real Energy data. The example below is purely
 illustrative; for a real meter use the per-device calibration step in the
-options flow (see <a href="../calibration/">Utility-meter calibration</a>) until a model's unit/scale is authoritatively
+<em>Device settings</em> page (see <a href="../calibration/">Utility-meter calibration</a>) until a model's unit/scale is authoritatively
 known.</p>
 </blockquote>
 <h2 id="contributing-device-mappings">Contributing device mappings<a class="headerlink" href="#contributing-device-mappings" title="Permanent link">&para;</a></h2>

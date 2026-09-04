@@ -783,7 +783,7 @@ multi-dongle setups, stability is best when each dongle stays in a fixed USB por
 or has a unique serial.</p>
 <h2 id="manual-configuration">Manual Configuration<a class="headerlink" href="#manual-configuration" title="Permanent link">&para;</a></h2>
 <p>Add a hub from <strong>Settings → Devices &amp; Services → Add Integration → rtl_433</strong>.</p>
-<p><img alt="The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings and discovery toggles, and initial frequency" src="../images/06-config-user.png" /></p>
+<p><img alt="The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings toggle, and initial frequency" src="../images/06-config-user.png" /></p>
 <table>
 <thead>
 <tr>
@@ -817,11 +817,6 @@ or has a unique serial.</p>
 <td><strong>Manage rtl_433 settings from Home Assistant</strong></td>
 <td>on</td>
 <td>Expose SDR controls and let Home Assistant adopt and enforce receiver settings.</td>
-</tr>
-<tr>
-<td><strong>Discover new devices</strong></td>
-<td>on</td>
-<td>Add newly observed devices automatically.</td>
 </tr>
 <tr>
 <td><strong>Initial frequency (MHz)</strong></td>
@@ -900,27 +895,28 @@ integration separate two transmissions from the same device inside one second.</
 <h2 id="reconfigure-vs-configure">Reconfigure vs Configure<a class="headerlink" href="#reconfigure-vs-configure" title="Permanent link">&para;</a></h2>
 <p>Use <strong>Reconfigure</strong> to point an existing hub at the same server's new address:
 host, port, path, or secure mode. Devices and their history are preserved.</p>
-<p>Use <strong>Configure</strong> for hub options:</p>
+<p>Use <strong>Configure</strong> to open the rtl_433 page. It is where devices are added and
+ignored — see <a href="../device-discovery/">Device Discovery</a> — and it carries three
+settings pages:</p>
 <ul>
-<li><strong>Hub settings</strong>: discovery toggle, default availability timeout, and the
-  managed-settings toggle.</li>
-<li><strong>Device settings</strong>: per-device availability timeout, motion clear delay, and
-  utility-meter calibration.</li>
-<li><strong>Device mappings</strong>: per-hub mapping overrides.</li>
+<li><strong>Receiver settings</strong>: default availability timeout and the managed-settings
+  toggle.</li>
+<li><strong>Device settings</strong>: one device's availability timeout, motion clear delay,
+  and utility-meter calibration.</li>
+<li><strong>Device mappings</strong>: this receiver's mapping overrides.</li>
 </ul>
-<p><img alt="Hub options flow menu showing Hub settings, Device settings, and Device mappings" src="../images/03-options-flow.png" /></p>
-<p>The <strong>Hub settings</strong> step configures discovery and the default availability
-timeout for every device on the hub:</p>
-<p><img alt="Hub settings step with the discovery toggle, default availability timeout, and managed-settings toggle" src="../images/07-hub-settings.png" /></p>
-<p>The <strong>Device settings</strong> step targets one device for a timeout override, motion
-clear delay, or utility-meter calibration. You pick the device first, then
-configure it — every field on the second form is pre-filled from the device you
-picked, and fields that do not apply to it (such as the motion clear delay on a
-non-motion device) are hidden:</p>
-<p><img alt="Device picker step, with a utility meter labelled with its detected commodity" src="../images/13-device-picker.png" /></p>
-<p><img alt="Device settings step with the availability timeout override and meter commodity selector" src="../images/08-device-settings.png" /></p>
-<p>Changing discovery or timeout options applies live. Changing the managed-settings
-toggle reloads the hub because the entity set changes.</p>
+<p><strong>Receiver settings</strong> configures the default availability timeout for every
+device on the hub, and whether Home Assistant manages the server's SDR settings:</p>
+<p><img alt="The Receiver settings page, with the default availability timeout and the managed-settings toggle" src="../images/07-hub-settings.png" /></p>
+<p><strong>Device settings</strong> targets one device for a timeout override, motion clear
+delay, or utility-meter calibration. Pick the device at the top of the page and
+the rest of the form rebuilds from it: every field is pre-filled from that
+device, and fields that do not apply to it are not shown — the motion clear delay
+only appears for a device that actually auto-clears, and the base unit and scale
+only once a commodity is chosen.</p>
+<p><img alt="The Device settings page with the device picker, availability timeout override, and meter commodity selector" src="../images/08-device-settings.png" /></p>
+<p>Changing timeout options applies live. Changing the managed-settings toggle
+reloads the hub because the entity set changes.</p>
 <h2 id="ws-wss-and-authentication">ws, wss, and Authentication<a class="headerlink" href="#ws-wss-and-authentication" title="Permanent link">&para;</a></h2>
 <p>By default the integration connects to <code>ws://host:port/path</code>. Turning on
 <strong>Secure</strong> connects with <code>wss://</code>.</p>
