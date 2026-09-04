@@ -1562,6 +1562,10 @@ class Rtl433Panel extends HTMLElement {
       root.querySelector(".settings-fab-slot"),
       { label: "Save", icon: ICON_SAVE, onClick: () => this._saveSettings() }
     );
+    // There are two floating buttons in this shadow root now, so the one that
+    // commits a form keeps a name of its own: the screenshot harness clicks it
+    // by class, and ".panel-fab" would find the overview's as readily.
+    this._el.settingsSave.classList.add("settings-save");
 
     // The two list actions are built rather than templated so they can be Home
     // Assistant's buttons. They are appended in the order they read on the page,

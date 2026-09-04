@@ -124,7 +124,7 @@ The timeout is one of three choices rather than a bare number:
 - **A fixed timeout** — a count of seconds that applies to every device without
   an override of its own.
 
-![The Receiver settings page, with the default availability timeout and the managed-settings toggle](images/07-hub-settings.png)
+![The Receiver settings page, with the availability-timeout choice set to the per-device-type defaults and the managed-settings toggle below it](images/07-hub-settings.png)
 
 **Device settings** targets one device for a timeout override, motion clear
 delay, or utility-meter calibration. Pick the device at the top of the page and

@@ -29,7 +29,7 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
 | `05-mapping-overrides.png` | The **Device mappings** page: the YAML editor pre-filled with an example per-hub override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
-| `07-hub-settings.png` | The **Receiver settings** page (default availability timeout, managed settings) |
+| `07-hub-settings.png` | The **Receiver settings** page (the availability-timeout choice, managed settings) |
 | `08-device-settings.png` | The **Device settings** page for the SCMplus meter: the picker, the timeout override, the commodity pre-filled to `gas`, and the base unit + scale it reveals |
 | `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
