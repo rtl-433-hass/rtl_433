@@ -965,7 +965,12 @@ def ws_get_settings(
     {
         vol.Required("type"): "rtl_433/settings/hub",
         vol.Required("entry_id"): str,
-        vol.Required(CONF_AVAILABILITY_TIMEOUT): vol.All(int, vol.Range(min=0)),
+        # `None` is "use the per-device-type defaults", which is a choice the
+        # panel offers outright rather than encoding as a magic number -- see
+        # `build_hub_options`.
+        vol.Required(CONF_AVAILABILITY_TIMEOUT): vol.Any(
+            None, vol.All(int, vol.Range(min=0))
+        ),
         vol.Required(CONF_MANAGE_SETTINGS): bool,
     }
 )

@@ -76,6 +76,7 @@ from .const import (
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_USER_MAPPINGS,
+    DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MOTION_CLEAR_DELAY,
     DEVICE_CALIBRATION,
     DEVICE_MOTION_CLEAR_DELAY,
@@ -372,30 +373,42 @@ class Rtl433OptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Show and persist the hub-level options (writes ``entry.options``).
 
-        The availability-timeout field is ``vol.Required`` and pre-filled with the
-        plain :data:`DEFAULT_AVAILABILITY_TIMEOUT`, so the form echoes a value back
-        on every save even when the user never touched it. Persisting that default
-        as an *explicit* hub timeout would mask the device-class defaults — most
-        importantly it would expire event-driven devices (doorbells, motion,
-        contacts) that must never go unavailable on silence. So a submitted value
-        equal to the plain default is treated as "use the per-device-type defaults"
-        and the key is dropped; any deliberately chosen value (including ``0`` =
-        never-expire) is persisted unchanged. This mirrors the one-time migration
-        that strips the same sentinel from older entries and stops the entry from
-        re-acquiring it on every options save.
+        The availability-timeout field is ``vol.Required`` and pre-filled with a
+        number, so the form echoes a value back on every save even when the user
+        never touched it — this flow has no way to say "unset". So it carries a
+        sentinel: a submitted value equal to the plain
+        :data:`DEFAULT_AVAILABILITY_TIMEOUT` is read as "use the per-device-type
+        defaults" and passed on as ``None``, which is what
+        :func:`build_hub_options` drops. Persisting it instead would mask the
+        device-class defaults — most importantly it would expire event-driven
+        devices (doorbells, motion, contacts) that must never go unavailable on
+        silence. Any other value (including ``0`` = never-expire) is persisted
+        unchanged. This mirrors the one-time migration that strips the same
+        sentinel from older entries and stops the entry from re-acquiring it on
+        every options save.
+
+        The sentinel is this form's, not the storage rule: the panel's own hub
+        page asks "defaults / never / a number" outright, so it says ``None``
+        when it means it and can store 600 seconds like any other value.
         """
         if user_input is not None:
+            submitted = user_input[CONF_AVAILABILITY_TIMEOUT]
             return self.async_create_entry(
                 title="",
                 data=build_hub_options(
                     self.config_entry,
-                    user_input[CONF_AVAILABILITY_TIMEOUT],
+                    None if submitted == DEFAULT_AVAILABILITY_TIMEOUT else submitted,
                     user_input[CONF_MANAGE_SETTINGS],
                 ),
             )
 
         defaults = hub_defaults(self.config_entry)
+        # `hub_defaults` reports the explicit timeout, and this field needs a
+        # number: an unset hub pre-fills with the same default the submit path
+        # reads back as "unset", so an untouched save is a no-op either way.
         timeout_default = defaults[CONF_AVAILABILITY_TIMEOUT]
+        if timeout_default is None:
+            timeout_default = DEFAULT_AVAILABILITY_TIMEOUT
         manage_default = defaults[CONF_MANAGE_SETTINGS]
 
         schema = vol.Schema(
