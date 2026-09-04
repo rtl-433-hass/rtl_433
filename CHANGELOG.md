@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.21.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.20.1...v0.21.0) (2026-09-04)
+
+
+### Features
+
+* add a live discovery panel ([#221](https://github.com/rtl-433-hass/rtl_433/issues/221)) ([564557f](https://github.com/rtl-433-hass/rtl_433/commit/564557f22aa001f3e2597b02db3c8ef4ac91acbe))
+* **discovery:** add an approval-based workflow ([#222](https://github.com/rtl-433-hass/rtl_433/issues/222)) ([dbbef9c](https://github.com/rtl-433-hass/rtl_433/commit/dbbef9cb2fdf4a9313378df7b7c85cb5c3257934))
+* **frontend:** use native home assistant UI conventions ([#228](https://github.com/rtl-433-hass/rtl_433/issues/228)) ([4210c1d](https://github.com/rtl-433-hass/rtl_433/commit/4210c1d0c8d763d43f1ad14597003c9ef3b75003))
+* redo discovery panel table as cards ([#219](https://github.com/rtl-433-hass/rtl_433/issues/219)) ([9f8d1cb](https://github.com/rtl-433-hass/rtl_433/commit/9f8d1cb7cd73c4fc158920ca3efcfea8c6585cf2))
+* reorganize integration UI location ([#220](https://github.com/rtl-433-hass/rtl_433/issues/220)) ([4afae97](https://github.com/rtl-433-hass/rtl_433/commit/4afae97ff2554fcf190bfd04a7590f5888266a57))
+* **repairs:** advise when the server's event timestamps are unusable ([#233](https://github.com/rtl-433-hass/rtl_433/issues/233)) ([70cca7d](https://github.com/rtl-433-hass/rtl_433/commit/70cca7d686cb14da8f88aea35301508da35f2ee9))
+* replace existing devices in add panel, clear list button ([#218](https://github.com/rtl-433-hass/rtl_433/issues/218)) ([b7246e4](https://github.com/rtl-433-hass/rtl_433/commit/b7246e4dc90b1c26d0bf393e878e257fa8c8229e))
+
+
+### Bug Fixes
+
+* **coordinator:** bound the sixth per-device map, and stop rescanning for nothing ([9d5b6c9](https://github.com/rtl-433-hass/rtl_433/commit/9d5b6c9345a5cc2ea7ea5e12976849542c81f1b5))
+* **coordinator:** cap runtime state for devices that never materialize ([039ecf2](https://github.com/rtl-433-hass/rtl_433/commit/039ecf24048ee68eb0852868f1dcb5ff09148afb))
+
+
+### Documentation
+
+* document which event timestamp formats the integration can read ([#234](https://github.com/rtl-433-hass/rtl_433/issues/234)) ([b9e574e](https://github.com/rtl-433-hass/rtl_433/commit/b9e574e4b78da5334b50d8322695e20402c964b5))
+
 ## [0.20.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.20.0...v0.20.1) (2026-09-03)
 
 
