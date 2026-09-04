@@ -24,13 +24,13 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | File | Shows |
 | --- | --- |
 | `02-device-page.png` | The device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
-| `17-discovery-panel.png` | The **rtl_433 page** (`/rtl_433`): the toolbar, the settings row, and one card per heard device with its sighting count, signal level, latest readings and per-card Replace / Ignore / Add buttons |
+| `17-discovery-panel.png` | The **discovered devices** page (`/rtl_433/discovered`): one card per heard device with its sighting count, signal level, latest readings and per-card Replace / Ignore / Add buttons |
 | `16-ignored-devices.png` | The same page with the ignored section revealed, showing the ignored leak detector and its Un-ignore button |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
-| `05-mapping-overrides.png` | The **Device mappings** dialog: the YAML editor pre-filled with an example per-hub override |
+| `05-mapping-overrides.png` | The **Device mappings** page: the YAML editor pre-filled with an example per-hub override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
-| `07-hub-settings.png` | The **Receiver settings** dialog (default availability timeout, managed settings) |
-| `08-device-settings.png` | The **Device settings** dialog for the SCMplus meter: the picker, the timeout override, the commodity pre-filled to `gas`, and the base unit + scale it reveals |
+| `07-hub-settings.png` | The **Receiver settings** page (default availability timeout, managed settings) |
+| `08-device-settings.png` | The **Device settings** page for the SCMplus meter: the picker, the timeout override, the commodity pre-filled to `gas`, and the base unit + scale it reveals |
 | `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
 | `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
@@ -110,7 +110,7 @@ cd tests/integration
 # or step by step:
 ./run-harness.sh up        # start containers, poll WS-JSON + HA API readiness
 ./run-harness.sh onboard   # seed HA owner + token via the onboarding REST API
-./run-harness.sh shots     # add the hub, capture the panel and its dialogs
+./run-harness.sh shots     # add the hub, capture the panel and its pages
 ./run-harness.sh hubnoise  # restart the decoder, capture the hub noise sensors
 ./run-harness.sh unavailable  # stop replay, wait out the timeout, capture, resume
 ./run-harness.sh down      # tear everything down (removes the shared volume)
