@@ -81,7 +81,7 @@ from ..const import (
     signal_device_update,
     signal_hub_update,
 )
-from ._events import _MAX_TRACKED_DEVICES, _EventProcessingMixin
+from ._events import _MAX_TRACKED_DEVICE_STATES, _EventProcessingMixin
 from ._sdr import _SdrSettingsMixin, _SdrStore
 from ._watchdog import _WATCHDOG_INTERVAL, _AvailabilityMixin
 
@@ -294,11 +294,9 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # liveness/replay) so a device first seen in the backlog can still register
         # on its first genuine post-connection event. Not persisted.
         self._discovered: set[str] = set()
-        # Map size at which the last eviction pass found nothing it was allowed
-        # to drop. Below it the pass would walk the same protected keys to the
-        # same answer, so the ingest path skips it -- which is what keeps a hub
-        # whose devices are all real from scanning a growing map on every frame.
-        self._evict_floor = _MAX_TRACKED_DEVICES
+        # Size the last eviction pass gave up at; see ``_events`` for why it is
+        # worth remembering.
+        self._evict_floor = _MAX_TRACKED_DEVICE_STATES
 
         # --- Managed-SDR desired state (restart-surviving) -------------------
         # ``_desired`` maps a registry key -> the desired value HA wants applied;
@@ -443,7 +441,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
         Called when a device is removed from its device page
         (``async_remove_config_entry_device``), and by the ingest path's cap on
-        never-materialized keys (see ``_events._MAX_TRACKED_DEVICES``). Without
+        never-materialized keys (see ``_events._MAX_TRACKED_DEVICE_STATES``). Without
         this eviction the device would stay in ``devices`` and a later event
         would not be treated as new, so a re-transmitting device could never
         re-appear while discovery is on.
@@ -460,7 +458,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self._logged_timeouts.pop(device_key, None)
         # A removal can only shrink the map, so "nothing was evictable at this
         # size" no longer describes it.
-        self._evict_floor = _MAX_TRACKED_DEVICES
+        self._evict_floor = _MAX_TRACKED_DEVICE_STATES
         # Re-arm discovery so a later live event re-registers the device.
         self._discovered.discard(device_key)
 
