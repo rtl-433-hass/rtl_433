@@ -406,6 +406,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Manual rtl_433 Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#event-timestamps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event Timestamps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -684,6 +701,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Manual rtl_433 Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#event-timestamps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event Timestamps
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -808,6 +842,61 @@ HTTP output enabled, for example:</p>
 bind address such as:</p>
 <div class="highlight"><pre><span></span><code>rtl_433<span class="w"> </span>-F<span class="w"> </span>http://127.0.0.1:8433
 </code></pre></div>
+<h3 id="event-timestamps">Event Timestamps<a class="headerlink" href="#event-timestamps" title="Permanent link">&para;</a></h3>
+<p>Every time Home Assistant connects, rtl_433 re-broadcasts a short buffer of
+recent events. The integration reads the <code>time</code> field on each frame to tell that
+backlog apart from traffic it is hearing live, so devices that have gone quiet
+are not marked available again and their event entities and device triggers do
+not fire a second time.</p>
+<p>That only works if the timestamps can be read. rtl_433 emits <code>time</code> as a JSON
+string in every mode, and these forms are understood:</p>
+<table>
+<thead>
+<tr>
+<th>rtl_433 setting</th>
+<th>Example <code>time</code></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>default</td>
+<td><code>2026-05-25 10:00:00</code></td>
+<td>Local wall clock, whole seconds.</td>
+</tr>
+<tr>
+<td><code>time:iso</code></td>
+<td><code>2026-05-25T10:00:00</code></td>
+<td>ISO-8601. Local, unless you add <code>tz</code> or <code>utc</code>.</td>
+</tr>
+<tr>
+<td><code>time:unix</code></td>
+<td><code>1779703200</code></td>
+<td>Epoch seconds, always UTC.</td>
+</tr>
+<tr>
+<td><code>time:off</code></td>
+<td><em>(no field)</em></td>
+<td><strong>Timestamps off — see below.</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Adding <code>usec</code> to any of them (<code>time:iso:usec</code>) adds a fractional part, and <code>tz</code>
+(or <code>utc</code>) makes the zone explicit. Be explicit if you can: a bare local stamp is
+read in Home Assistant's own time zone, so a server in a different zone puts
+every event hours away from where it belongs. When that lands in the past, each
+frame looks like an event from an old disconnection: values still seed, but
+devices stop refreshing their last-seen and go unavailable, and event entities
+and device triggers stop firing.</p>
+<p>With <strong>no readable timestamp</strong> the integration cannot distinguish a replay from
+a live transmission, so it treats every frame as live — the safe direction for a
+real event, but it means the re-broadcast backlog is ingested afresh on each
+reconnect.</p>
+<p>The recommended setting is the most precise one:</p>
+<div class="highlight"><pre><span></span><code>report_meta time:iso:usec:tz
+</code></pre></div>
+<p>or, on the command line, <code>-M time:iso:usec:tz</code>. A sub-second stamp also lets the
+integration separate two transmissions from the same device inside one second.</p>
 <h2 id="reconfigure-vs-configure">Reconfigure vs Configure<a class="headerlink" href="#reconfigure-vs-configure" title="Permanent link">&para;</a></h2>
 <p>Use <strong>Reconfigure</strong> to point an existing hub at the same server's new address:
 host, port, path, or secure mode. Devices and their history are preserved.</p>

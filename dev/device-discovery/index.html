@@ -720,7 +720,9 @@ frame timestamps to seed runtime state from that backlog without flooding the
 device registry with devices that transmitted before Home Assistant connected.</p>
 <p>A previously unknown device is added the first time it transmits after the
 connection. This assumes the rtl_433 server and Home Assistant clocks are roughly
-in sync.</p>
+in sync, and that the server stamps its events with a readable timestamp — see
+<a href="../configuration/#event-timestamps">Event Timestamps</a> for the accepted forms and
+what changes without one.</p>
 <h2 id="discovery-toggle">Discovery Toggle<a class="headerlink" href="#discovery-toggle" title="Permanent link">&para;</a></h2>
 <p>Each hub has its own discovery toggle. Turning discovery off stops new devices on
 that hub from being added. Devices that already exist keep updating. Turning it
