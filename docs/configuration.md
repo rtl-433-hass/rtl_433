@@ -85,11 +85,6 @@ frame looks like an event from an old disconnection: values still seed, but
 devices stop refreshing their last-seen and go unavailable, and event entities
 and device triggers stop firing.
 
-Epoch stamps are worth calling out: `time:unix` was unreadable before the
-integration picked up pyrtl_433 0.4.0, and an unreadable stamp is treated the
-same as no stamp at all. Servers configured that way were silently getting the
-`time:off` behaviour below, and now work as intended with no change needed.
-
 With **no readable timestamp** the integration cannot distinguish a replay from
 a live transmission, so it treats every frame as live — the safe direction for a
 real event, but it means the re-broadcast backlog is ingested afresh on each
