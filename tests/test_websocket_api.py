@@ -41,6 +41,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from typing import Any
+from unittest.mock import patch
 
 from freezegun import freeze_time
 import pytest
@@ -55,10 +56,20 @@ from custom_components.rtl_433 import (
     PANEL_URL_BASE,
 )
 from custom_components.rtl_433.const import (
+    CALIBRATION_COMMODITY,
+    CALIBRATION_SCALE,
+    CALIBRATION_UNIT,
+    CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
     CONF_IGNORED_DEVICES,
+    CONF_MANAGE_SETTINGS,
     CONF_MODEL,
+    CONF_USER_MAPPINGS,
+    DEFAULT_AVAILABILITY_TIMEOUT,
+    DEVICE_CALIBRATION,
     DEVICE_FIELDS,
+    DEVICE_MOTION_CLEAR_DELAY,
+    DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
 from homeassistant.components.frontend import DATA_PANELS
@@ -109,6 +120,10 @@ _ENTRY_COMMANDS = [
     "rtl_433/devices/unignore",
     "rtl_433/devices/clear",
     "rtl_433/devices/subscribe",
+    "rtl_433/settings/get",
+    "rtl_433/settings/hub",
+    "rtl_433/settings/device",
+    "rtl_433/settings/mappings",
 ]
 _ALL_COMMANDS = ["rtl_433/hubs", *_ENTRY_COMMANDS]
 
@@ -124,8 +139,16 @@ def _message(command: str, entry_id: str) -> dict[str, Any]:
     if command == "rtl_433/hubs":
         return {"type": command}
     message: dict[str, Any] = {"type": command, "entry_id": entry_id}
-    if command.rsplit("/", 1)[-1] in ("add", "ignore", "unignore"):
+    verb = command.rsplit("/", 1)[-1]
+    if verb in ("add", "ignore", "unignore"):
         message["device_keys"] = [_NEW_KEY]
+    elif command == "rtl_433/settings/hub":
+        message[CONF_AVAILABILITY_TIMEOUT] = 900
+        message[CONF_MANAGE_SETTINGS] = True
+    elif command == "rtl_433/settings/device":
+        message["device_key"] = _NEW_KEY
+    elif command == "rtl_433/settings/mappings":
+        message["yaml"] = ""
     return message
 
 
@@ -637,6 +660,53 @@ async def test_add_creates_only_what_was_asked_for_and_reports_the_rest_skipped(
         assert _registry_device(hass, hub, key) is None
 
 
+async def test_an_ignored_device_is_still_named_by_its_model(hass, hub, hass_ws_client):
+    """The ignore list names the device, before and after it transmits again.
+
+    The persisted list is bare keys, and an ignored device has no stored record
+    and no entry in the coordinator's ``devices`` map -- its frames are dropped
+    before they get there. So without the coordinator remembering what it last
+    decoded, the only honest label is "Unknown model" over a key that visibly
+    contains the model, which is what the panel showed.
+
+    Both halves are checked because they cover different moments: the model is
+    seeded at the instant of ignoring (the user is looking straight at the list),
+    and re-seeded by every later transmission (so a neighbour's sensor names
+    itself again after a restart, which is the only way a pre-existing ignore
+    ever gets a model at all).
+    """
+    client = await hass_ws_client(hass)
+    coordinator = _coordinator(hass, hub)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/devices/ignore",
+            "entry_id": hub.entry_id,
+            "device_keys": [_NEW_KEY],
+        },
+    )
+    assert reply["success"] is True
+
+    reply, _ = await _call(client, _message("rtl_433/devices/pending", hub.entry_id))
+    (ignored,) = reply["result"]["ignored"]
+    assert ignored["key"] == _NEW_KEY
+    assert ignored["model"] == _NEW_FRAME["model"]
+
+    # Now forget it the way a restart would, and let the device transmit again.
+    coordinator.ignored_models.clear()
+    _hear(coordinator, _NEW_FRAME)
+    await hass.async_block_till_done()
+
+    reply, _ = await _call(client, _message("rtl_433/devices/pending", hub.entry_id))
+    (ignored,) = reply["result"]["ignored"]
+    assert ignored["model"] == _NEW_FRAME["model"]
+    # ...and it is still ignored: naming it is not un-ignoring it.
+    assert not reply["result"]["pending"] or all(
+        row["key"] != _NEW_KEY for row in reply["result"]["pending"]
+    )
+
+
 async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
     hass, hub, hass_ws_client
 ):
@@ -695,7 +765,11 @@ async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
     reply, _ = await _call(
         client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
     )
-    assert reply["result"]["ignored"] == [{"key": _MID_KEY, "model": ""}]
+    # Named, not just keyed: the coordinator remembers what it was told to
+    # ignore, so the list can say what the user is looking at.
+    assert reply["result"]["ignored"] == [
+        {"key": _MID_KEY, "model": _MID_FRAME["model"]}
+    ]
     assert _MID_KEY not in {row["key"] for row in reply["result"]["pending"]}
 
     # Un-ignoring clears both stores; a key that was never ignored is skipped.
@@ -768,7 +842,7 @@ async def test_clear_empties_the_list_without_undoing_any_decision(
     assert events[-1]["event"]["pending"] == []
 
     # The ignore list is a persisted decision and is left exactly as it was.
-    assert events[-1]["event"]["ignored"] == [{"key": _MID_KEY, "model": ""}]
+    assert [row["key"] for row in events[-1]["event"]["ignored"]] == [_MID_KEY]
     assert hub.data[CONF_IGNORED_DEVICES] == [_MID_KEY]
     assert coordinator.ignored == {_MID_KEY}
 
@@ -829,6 +903,12 @@ async def test_every_command_rejects_a_non_admin(
     wrong order would still reject the caller while having already acted.
     """
     client = await hass_ws_client(hass, hass_read_only_access_token)
+    # The settings commands write ``entry.options`` and parts of ``entry.data``
+    # the approval commands never touch, so the sweep compares whole snapshots
+    # rather than a list of keys -- otherwise it would pass while one of them
+    # quietly wrote somewhere nobody thought to look.
+    before_data = dict(hub.data)
+    before_options = dict(hub.options)
 
     await client.send_json_auto_id(_message(command, hub.entry_id))
     reply = await client.receive_json()
@@ -837,6 +917,8 @@ async def test_every_command_rejects_a_non_admin(
     assert reply["error"]["code"] == "unauthorized"
     assert hub.data.get(CONF_DEVICES, {}) == {}
     assert CONF_IGNORED_DEVICES not in hub.data
+    assert dict(hub.data) == before_data
+    assert dict(hub.options) == before_options
     assert _registry_device(hass, hub, _NEW_KEY) is None
 
 
@@ -951,7 +1033,9 @@ async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribe
     assert reply["success"]
     assert events, "ignoring a candidate must repaint an open panel"
     assert _MID_KEY not in {row["key"] for row in events[-1]["event"]["pending"]}
-    assert events[-1]["event"]["ignored"] == [{"key": _MID_KEY, "model": ""}]
+    assert events[-1]["event"]["ignored"] == [
+        {"key": _MID_KEY, "model": _MID_FRAME["model"]}
+    ]
 
     reply, _ = await _call(
         client, {"type": "unsubscribe_events", "subscription": subscription}
@@ -1156,13 +1240,18 @@ async def test_the_panel_registers_once_and_serves_its_module(
     property (an iframe would cut it off from the frontend's connection *and* its
     theme), and ``require_admin`` matches the gate on the commands the page calls.
 
-    ``config_panel_domain`` must stay **unset**, and that is asserted rather than
-    left implicit. Setting it does not add a route to the panel, it replaces one:
-    the config entry's Configure control becomes a link here, and every
-    options-flow step behind it -- receiver settings, device settings, device
-    mappings, calibration, replace-device -- loses its only entry point. That was
-    briefly the case on this branch and was caught in a real browser, so the
-    assertion exists to keep it caught.
+    ``config_panel_domain`` is set, which is what puts the panel behind this
+    integration's entry in Settings rather than in a top-level sidebar slot. The
+    trade it makes is asserted here because it is easy to make by accident and
+    expensive to notice: it does not *add* a route, it replaces one. The entry's
+    settings control opens this panel, and the options flow behind it has no
+    other entry point -- the row's overflow menu offers reload, rename,
+    reconfigure, enable/disable and delete, and nothing that opens options. So
+    every options step must be reachable from the panel, or it is unreachable.
+
+    No ``sidebar_title``/``sidebar_icon`` for the same reason: with them the
+    panel would take a top-level slot *as well*, which is the placement this
+    replaced.
 
     Finally the module is fetched over HTTP. The element name in the served body
     has to match ``webcomponent_name`` exactly — Home Assistant loads the module
@@ -1179,8 +1268,11 @@ async def test_the_panel_registers_once_and_serves_its_module(
     assert [url_path for url_path in panels if url_path == DOMAIN] == [DOMAIN]
 
     panel = panels[DOMAIN]
-    # Unset, so the entry's Configure control still opens the options flow.
-    assert panel.config_panel_domain is None
+    # Set, so the entry's settings control opens this panel.
+    assert panel.config_panel_domain == DOMAIN
+    # ...and no sidebar slot is taken alongside it.
+    assert panel.sidebar_title is None
+    assert panel.sidebar_icon is None
     assert panel.require_admin is True
     assert panel.component_name == "custom"
     custom = panel.config["_panel_custom"]
@@ -1193,3 +1285,395 @@ async def test_the_panel_registers_once_and_serves_its_module(
     assert response.status == 200
     body = await response.text()
     assert f'customElements.define("{PANEL_ELEMENT_NAME}"' in body
+
+
+# --------------------------------------------------------------------------- #
+# Settings: the hub's options, one device's overrides, the mapping document.   #
+#                                                                             #
+# These are the panel's half of the three forms the options flow also renders. #
+# What is worth protecting is not the transport but the *rules underneath* --  #
+# which submitted value means "clear this", which means "use the default and   #
+# store nothing" -- because those are exactly what a second surface tends to   #
+# get subtly differently, and a difference is invisible until a device stops   #
+# behaving the way its form says it should.                                    #
+# --------------------------------------------------------------------------- #
+_METER_KEY = "SCM-12345"
+_METER_MODEL = "SCM"
+
+
+@pytest.fixture
+async def settings_hub(hass, hub_entry_builder, no_socket):
+    """A loaded hub with one adopted meter, ready for the settings forms."""
+    return await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            _METER_KEY: {
+                CONF_MODEL: _METER_MODEL,
+                DEVICE_FIELDS: ["consumption_data"],
+            }
+        },
+    )
+
+
+async def test_settings_get_answers_with_what_the_three_forms_render(
+    hass, settings_hub, hass_ws_client
+):
+    """One call fills all three dialogs: hub values, device rows, and the tables.
+
+    The commodity tables travel in the payload rather than living in the panel
+    because which units Home Assistant will convert for a gas meter is a fact
+    about :mod:`~custom_components.rtl_433.calibration`, not about a screen. A
+    panel carrying its own copy would eventually offer a unit the entity build
+    refuses, and nothing would fail until someone looked at their energy
+    dashboard.
+    """
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client, {"type": "rtl_433/settings/get", "entry_id": settings_hub.entry_id}
+    )
+
+    assert reply["success"] is True
+    result = reply["result"]
+    # The hub's effective values, not the raw entry: 600 is what the fixture set.
+    assert result["hub"][CONF_AVAILABILITY_TIMEOUT] == 600
+    assert result["hub"][CONF_MANAGE_SETTINGS] is True
+    assert result["defaults"][CONF_AVAILABILITY_TIMEOUT] == DEFAULT_AVAILABILITY_TIMEOUT
+
+    # One row per adopted device, carrying everything its form needs.
+    (device,) = result["devices"]
+    assert device["device_key"] == _METER_KEY
+    assert _METER_MODEL in device["label"]
+    assert device[DEVICE_TIMEOUT_OVERRIDE] is None
+    assert device["calibration"] is None
+    assert device["motion"] is False
+
+    # The tables the calibration control is built from.
+    assert "gas" in result["commodities"]
+    assert "m³" in result["commodity_units"]["gas"]
+    # Nothing overridden yet -> an empty editor, not a document holding "{}".
+    assert result["mappings"] == ""
+    assert result["mappings_docs_url"].startswith("https://")
+
+
+async def test_the_hub_default_timeout_is_dropped_rather_than_stored(
+    hass, settings_hub, hass_ws_client
+):
+    """Saving the plain default stores no timeout; any other value is kept.
+
+    Persisting the default as an *explicit* hub-wide timeout would mask the
+    per-device-class defaults, and the device that suffers is the one that
+    should never expire on silence: a doorbell that has not rung in ten minutes
+    is not unavailable, it is a doorbell. So the sentinel is dropped, and ``0``
+    -- "never expire", a deliberate choice that happens to be falsy -- is not.
+    """
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/settings/hub",
+            "entry_id": settings_hub.entry_id,
+            CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
+            CONF_MANAGE_SETTINGS: True,
+        },
+    )
+    await hass.async_block_till_done()
+    assert reply["success"] is True
+    assert CONF_AVAILABILITY_TIMEOUT not in settings_hub.options
+    assert settings_hub.options[CONF_MANAGE_SETTINGS] is True
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/settings/hub",
+            "entry_id": settings_hub.entry_id,
+            CONF_AVAILABILITY_TIMEOUT: 0,
+            CONF_MANAGE_SETTINGS: True,
+        },
+    )
+    await hass.async_block_till_done()
+    assert reply["success"] is True
+    assert settings_hub.options[CONF_AVAILABILITY_TIMEOUT] == 0
+
+
+async def test_a_device_calibration_round_trips_and_then_clears(
+    hass, settings_hub, hass_ws_client
+):
+    """A real commodity is stored; ``none`` clears it, and so does a bad unit.
+
+    The panel cannot store a calibration the entity build would refuse, whatever
+    its controls do, because the three parts go through
+    :func:`~custom_components.rtl_433.calibration.normalize_calibration` on the
+    way in -- and the normalized result comes back in the reply, so a caller
+    re-renders from what was stored rather than from what it sent.
+    """
+    client = await hass_ws_client(hass)
+    message = {
+        "type": "rtl_433/settings/device",
+        "entry_id": settings_hub.entry_id,
+        "device_key": _METER_KEY,
+        DEVICE_TIMEOUT_OVERRIDE: 1800,
+        CALIBRATION_COMMODITY: "gas",
+        CALIBRATION_UNIT: "m³",
+        CALIBRATION_SCALE: 0.01,
+    }
+
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        reply, _ = await _call(client, message)
+        await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    record = settings_hub.data[CONF_DEVICES][_METER_KEY]
+    assert record[DEVICE_TIMEOUT_OVERRIDE] == 1800
+    assert record[DEVICE_CALIBRATION] == {
+        CALIBRATION_COMMODITY: "gas",
+        CALIBRATION_UNIT: "m³",
+        CALIBRATION_SCALE: 0.01,
+    }
+    assert reply["result"]["calibration"] == record[DEVICE_CALIBRATION]
+
+    # A unit that is not convertible for the commodity is not a calibration at
+    # all -- it clears, rather than storing something the sensor cannot use.
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        reply, _ = await _call(
+            client, {**message, CALIBRATION_UNIT: "furlongs", "timeout_override": None}
+        )
+        await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    assert reply["result"]["calibration"] is None
+    record = settings_hub.data[CONF_DEVICES][_METER_KEY]
+    assert DEVICE_CALIBRATION not in record
+    # The blank timeout cleared with it, rather than persisting as a zero.
+    assert DEVICE_TIMEOUT_OVERRIDE not in record
+
+
+async def test_a_device_clear_delay_lands_where_the_resolver_reads_it(
+    hass, settings_hub, hass_ws_client
+):
+    """The clear-delay is written to options, and read back from there.
+
+    It is the one per-device knob that does not live in ``entry.data``, which is
+    the whole reason it was silently ignored for so long. Asserting the storage
+    location *and* the read-back is what keeps the two ends of that from drifting
+    apart again.
+    """
+    client = await hass_ws_client(hass)
+
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        reply, _ = await _call(
+            client,
+            {
+                "type": "rtl_433/settings/device",
+                "entry_id": settings_hub.entry_id,
+                "device_key": _METER_KEY,
+                DEVICE_MOTION_CLEAR_DELAY: 30,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    assert (
+        settings_hub.options[CONF_DEVICES][_METER_KEY][DEVICE_MOTION_CLEAR_DELAY] == 30
+    )
+    assert reply["result"][DEVICE_MOTION_CLEAR_DELAY] == 30
+
+    # Cleared, the device's sub-map goes away entirely rather than being left as
+    # an empty dict for every device anyone has ever opened the form on.
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        reply, _ = await _call(
+            client,
+            {
+                "type": "rtl_433/settings/device",
+                "entry_id": settings_hub.entry_id,
+                "device_key": _METER_KEY,
+                DEVICE_MOTION_CLEAR_DELAY: None,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    assert _METER_KEY not in settings_hub.options.get(CONF_DEVICES, {})
+
+
+async def test_a_clear_delay_left_in_data_by_the_migration_can_be_cleared(
+    hass, hub_entry_builder, hass_ws_client, no_socket
+):
+    """A hub that came from per-device entries can still blank the delay.
+
+    The migration from per-device config entries writes the clear-delay into
+    ``entry.data``; every edit since writes it to ``entry.options``, and
+    :func:`~custom_components.rtl_433.settings.device_clear_delay` reads options
+    first and falls back to data. Blanking the field only empties the options
+    half, so while the leftover stayed in data the old number came straight back
+    -- the user cleared it, saved, re-opened the form, and there it was again.
+
+    Saving now retires the leftover, which is what makes the second half of this
+    test the interesting one: the form reads back empty, so the device falls back
+    to the descriptor's own default.
+    """
+    migrated = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            _METER_KEY: {
+                CONF_MODEL: _METER_MODEL,
+                DEVICE_FIELDS: ["consumption_data"],
+                # What the migration left behind.
+                DEVICE_MOTION_CLEAR_DELAY: 90,
+            }
+        },
+    )
+    client = await hass_ws_client(hass)
+
+    # The form opens showing the migrated value, so the user sees what they set.
+    reply, _ = await _call(
+        client, {"type": "rtl_433/settings/get", "entry_id": migrated.entry_id}
+    )
+    (device,) = reply["result"]["devices"]
+    assert device[DEVICE_MOTION_CLEAR_DELAY] == 90
+
+    # Blanking the field and saving really clears it.
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        reply, _ = await _call(
+            client,
+            {
+                "type": "rtl_433/settings/device",
+                "entry_id": migrated.entry_id,
+                "device_key": _METER_KEY,
+                DEVICE_MOTION_CLEAR_DELAY: None,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    assert reply["result"][DEVICE_MOTION_CLEAR_DELAY] is None
+    assert DEVICE_MOTION_CLEAR_DELAY not in migrated.data[CONF_DEVICES][_METER_KEY]
+    assert _METER_KEY not in migrated.options.get(CONF_DEVICES, {})
+
+    # And it stays cleared when the form is re-opened.
+    reply, _ = await _call(
+        client, {"type": "rtl_433/settings/get", "entry_id": migrated.entry_id}
+    )
+    (device,) = reply["result"]["devices"]
+    assert device[DEVICE_MOTION_CLEAR_DELAY] is None
+
+
+async def test_settings_for_an_unknown_device_are_refused(
+    hass, settings_hub, hass_ws_client
+):
+    """A device key this hub has never adopted is ``not_found``, not a new record.
+
+    Without the check the write would happily create the record, and the hub
+    would grow a device it has never heard -- from a stale panel, or a typo in a
+    script.
+    """
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/settings/device",
+            "entry_id": settings_hub.entry_id,
+            "device_key": "Nothing-Like-This-1",
+        },
+    )
+
+    assert reply["success"] is False
+    assert reply["error"]["code"] == "not_found"
+    assert set(settings_hub.data[CONF_DEVICES]) == {_METER_KEY}
+
+
+async def test_mapping_overrides_round_trip_as_yaml_text(
+    hass, settings_hub, hass_ws_client
+):
+    """Overrides go out and come back as the YAML the documentation writes.
+
+    Text rather than a JSON object because that is the form the user already has
+    -- copied from the README, or from someone else's hub -- and because the
+    panel has no YAML parser and should not grow one. Parsing on this side is
+    also what keeps ``safe_load`` in charge of a string a client submitted.
+    """
+    client = await hass_ws_client(hass)
+    document = (
+        "temperature_C:\n"
+        "  platform: sensor\n"
+        "  name: Outside Temp\n"
+        "  object_suffix: outside\n"
+        "  unit_of_measurement: \N{DEGREE SIGN}C\n"
+    )
+
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        reply, _ = await _call(
+            client,
+            {
+                "type": "rtl_433/settings/mappings",
+                "entry_id": settings_hub.entry_id,
+                "yaml": document,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    stored = settings_hub.data[CONF_USER_MAPPINGS]
+    assert stored["temperature_C"]["unit_of_measurement"] == "\N{DEGREE SIGN}C"
+    # And it renders back as a document the same editor can re-submit. The unit
+    # is deliberately not plain ASCII: units are where non-ASCII characters live,
+    # and PyYAML escapes them by default, so without ``allow_unicode`` the user
+    # would re-open the editor to ``"\\xB0C"`` and have to decode their own
+    # setting before they could edit the line.
+    document_back = reply["result"]["mappings"]
+    assert "temperature_C:" in document_back
+    assert "unit_of_measurement: \N{DEGREE SIGN}C" in document_back
+    assert "\\x" not in document_back
+
+    # Clearing the editor removes every override rather than being a parse error.
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        reply, _ = await _call(
+            client,
+            {
+                "type": "rtl_433/settings/mappings",
+                "entry_id": settings_hub.entry_id,
+                "yaml": "   \n",
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    assert settings_hub.data[CONF_USER_MAPPINGS] == {}
+
+
+@pytest.mark.parametrize(
+    ("document", "why"),
+    [
+        ("temperature_C: [1,", "not YAML at all"),
+        ("- just\n- a list\n", "YAML, but not a mapping"),
+        ("bad_field:\n  name: X\n  object_suffix: X\n", "a mapping, but invalid"),
+    ],
+)
+async def test_mappings_that_will_not_store_are_refused_and_change_nothing(
+    hass, settings_hub, hass_ws_client, document, why
+):
+    """Three ways to submit a bad document, one answer, and nothing written.
+
+    The three fail at different depths -- the parser, the shape check, the
+    override schema -- and a user fixing a mapping file needs the same treatment
+    from all of them: the overrides they already had, still there.
+    """
+    client = await hass_ws_client(hass)
+    before = dict(settings_hub.data)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/settings/mappings",
+            "entry_id": settings_hub.entry_id,
+            "yaml": document,
+        },
+    )
+
+    assert reply["success"] is False, why
+    assert reply["error"]["code"] == "invalid_mappings", why
+    assert dict(settings_hub.data) == before, why

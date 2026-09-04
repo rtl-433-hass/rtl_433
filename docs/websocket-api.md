@@ -293,7 +293,9 @@ the panel adds no logic of its own on top of them, so anything it can do, these
 can do.
 
 They are the programmatic form of [Device Discovery](device-discovery.md): see
-what the receiver has heard, then add, ignore or un-ignore it.
+what the receiver has heard, then add, ignore or un-ignore it — and, since the
+panel became the integration's configuration page, read and write the hub's
+settings too.
 
 ### Authentication
 
@@ -316,6 +318,12 @@ administrator**, so a token issued for a non-admin user is refused:
 | `rtl_433/devices/ignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
 | `rtl_433/devices/unignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
 | `rtl_433/devices/subscribe` | `entry_id` | A subscription pushing the `pending` payload on change. |
+| `rtl_433/devices/replace` | `entry_id`, `device_key`, `replaces` | Re-points an existing device onto a candidate. |
+| `rtl_433/devices/clear` | `entry_id` | Forgets every candidate; `cleared` counts them. |
+| `rtl_433/settings/get` | `entry_id` | Everything the three settings forms render. |
+| `rtl_433/settings/hub` | `entry_id`, `availability_timeout`, `manage_settings` | The hub's stored options. |
+| `rtl_433/settings/device` | `entry_id`, `device_key`, + overrides | That device's stored settings. |
+| `rtl_433/settings/mappings` | `entry_id`, `yaml` | The stored override document, re-rendered. |
 
 `entry_id` is a hub's config-entry id, from `rtl_433/hubs`. `device_keys` is a
 list, so one message can add or ignore several devices.
@@ -327,6 +335,8 @@ Errors are the usual `{"success": false, "error": {...}}` result:
 | `unauthorized` | The connection's user is not an administrator. |
 | `not_found` | No rtl_433 hub has that `entry_id`. An entry belonging to another integration reads the same way — these commands never reach into one. |
 | `not_loaded` | The hub exists but is not set up — reloading, or its server is unreachable. The discovered list lives in memory, so there is nothing to answer with until it loads. |
+| `replace_failed` | The replacement cannot be made: an unknown survivor, or the same key on both sides. Distinct from `not_loaded` so a script can tell "retry in a moment" from "this request cannot work". |
+| `invalid_mappings` | The submitted device-mapping document is not YAML, is not a mapping, or breaks the override schema. `error.message` carries every problem found. Nothing is stored. |
 
 ### `rtl_433/hubs`
 
@@ -518,3 +528,100 @@ Unsubscribe the standard way, naming the subscription's id:
 ```json
 {"id": 9, "type": "unsubscribe_events", "subscription": 4}
 ```
+
+## Home Assistant settings commands
+
+The same three forms the panel's dialogs render. They are ordinary commands, so
+anything the dialogs do is scriptable — including the parts that are awkward by
+hand, like setting the same calibration on a dozen meters.
+
+### `rtl_433/settings/get`
+
+Everything the three forms need, in one call — they are one screenful, and the
+alternative is three round trips to fill controls the user may never open.
+
+```json
+{"id": 10, "type": "rtl_433/settings/get",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P"}
+```
+
+```json
+{"id": 10, "type": "result", "success": true, "result": {
+  "hub": {"availability_timeout": 600, "manage_settings": true},
+  "defaults": {"availability_timeout": 600, "motion_clear_delay": 90},
+  "devices": [
+    {"device_key": "SCM-12345", "label": "SCM (SCM-12345) — gas detected",
+     "model": "SCM", "timeout_override": null, "motion_clear_delay": null,
+     "motion": false, "commodity": "gas", "calibration": null}
+  ],
+  "commodities": ["none", "energy", "gas", "water"],
+  "commodity_units": {"gas": ["m³", "ft³", "L", "CCF"], "...": []},
+  "mappings": "",
+  "mappings_docs_url": "https://github.com/..."
+}}
+```
+
+`commodity_units` travels in the payload rather than being a constant a client
+carries, because which units Home Assistant will convert for a given commodity is
+a fact about the integration's calibration table. A client with its own copy will
+eventually offer a unit the entity build refuses, and nothing fails visibly — the
+sensor just stops being eligible for the Energy dashboard.
+
+`commodity` is a *suggestion*, not a stored value: it is the device's existing
+calibration when it has one, and otherwise a guess from the `MeterType` /
+`ert_type` fields of its last decoded frame.
+
+### `rtl_433/settings/hub`
+
+```json
+{"id": 11, "type": "rtl_433/settings/hub",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
+ "availability_timeout": 1800, "manage_settings": true}
+```
+
+!!! note "The default timeout is not stored"
+    Submitting `availability_timeout` equal to the shipped default (600) *removes*
+    the stored value rather than saving it, so the per-device-class defaults keep
+    applying. That matters most for event-driven devices — a doorbell that has not
+    rung in ten minutes is not unavailable. Any other value is stored as given,
+    including `0`, which means "never expire".
+
+### `rtl_433/settings/device`
+
+Every override is optional and nullable, and the two mean the same thing: clear
+it, falling back to the hub default or the library descriptor.
+
+```json
+{"id": 12, "type": "rtl_433/settings/device",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
+ "device_key": "SCM-12345",
+ "timeout_override": 1800,
+ "commodity": "gas", "unit": "m³", "scale": 0.01,
+ "motion_clear_delay": null}
+```
+
+The reply is that device's row from `rtl_433/settings/get`, rebuilt from what was
+actually stored. Read the calibration back from it rather than assuming what you
+sent: `{commodity, unit, scale}` is normalized on the way in, and a commodity of
+`none`, an unknown one, or a unit that is not convertible for the commodity all
+store *no* calibration at all.
+
+`motion_clear_delay` only does anything on a device with a field that auto-clears
+(`motion` is `true` in the payload for those); elsewhere it is a control with
+nothing behind it.
+
+### `rtl_433/settings/mappings`
+
+The hub's [device-library overrides](device-library.md), as the YAML text the
+documentation writes them in.
+
+```json
+{"id": 13, "type": "rtl_433/settings/mappings",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
+ "yaml": "temperature_C:\n  platform: sensor\n  unit_of_measurement: K\n"}
+```
+
+An empty or whitespace-only document removes every override — clearing the editor
+is how they are all removed. A document that will not store comes back as
+`invalid_mappings` with every problem found joined into `error.message`, and the
+overrides already stored are left exactly as they were.

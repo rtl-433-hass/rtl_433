@@ -232,6 +232,20 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   and motion clear-delay, written into `entry.data["devices"]`). The picker is a
   separate step so every default on `device_settings` is derived from the
   **selected** device; the picker labels devices whose commodity was detected.
+- **The rules behind those forms live in `settings.py`, not in the flow.** Which
+  submitted value means "clear this", which means "use the default and store
+  nothing", and which of `entry.data` / `entry.options` each lands in are shared
+  with the panel's dialogs (`rtl_433/settings/*`), which render the same three
+  forms. `settings.py` returns plain dicts and writes nothing, because the two
+  callers must persist differently: `async_create_entry` *is* the options write
+  for a flow, and adding an `async_update_entry` beside it would fire the update
+  listener twice and reload the hub twice for one save, while the WebSocket path
+  has no flow to finish and writes data and options in one call.
+- **The per-device motion clear-delay is read from `entry.options` first, then
+  `entry.data`** (`settings.device_clear_delay`). The migration from per-device
+  child entries writes it to `data`; every settings form writes it to `options`.
+  The resolver used to read only `data`, so a clear-delay set by hand persisted,
+  displayed, and did nothing — do not narrow it back to one location.
 - **Utility-meter calibration** (`calibration.py`, options `device_settings` →
   `calibration` step) writes a `DEVICE_CALIBRATION` sub-record (`{commodity,
   unit, scale}`) into `entry.data[CONF_DEVICES][device_key]` next to
@@ -324,9 +338,11 @@ second implementation.
 - **`options_flow.py` and `websocket_api.py` are presentation.** Both call the
   three functions above. A behavioural difference between the form and the panel
   is therefore a duplicated implementation, not a missing feature.
-- **`websocket_api.py`** registers six commands, all
+- **`websocket_api.py`** registers every panel command, all
   `@websocket_api.require_admin`: `rtl_433/hubs`, `rtl_433/devices/pending`,
-  `.../add`, `.../ignore`, `.../unignore`, `.../subscribe`. Registration is per
+  `.../add`, `.../ignore`, `.../unignore`, `.../replace`, `.../clear`,
+  `.../subscribe`, and `rtl_433/settings/get`, `.../hub`, `.../device`,
+  `.../mappings`. Registration is per
   Home Assistant *run*, not per entry — the integration has no `async_setup`, so
   `async_register_commands` is called from every `async_setup_entry` and guarded
   by the `DATA_WS_REGISTERED` sentinel on `hass.data[DOMAIN]`; registering a
@@ -365,25 +381,44 @@ second implementation.
   the shipped filename exactly; a mismatch is a silent blank page.
   `manifest.json` lists `http`, `panel_custom` and `websocket_api` in
   `dependencies` for this.
-- **Never pass `config_panel_domain` while this integration has an options
-  flow.** It does not add a route to the panel, it *replaces* one. Verified in a
-  real browser against Home Assistant 2026.5.4: with it set, the hub row's
-  Configure control on Settings → Devices & services → rtl_433 renders as
-  `<a href="/rtl_433?config_entry=…">` and nothing else opens the options flow —
-  the entry's overflow menu offers only Reload / Rename / Copy entry ID /
+- **`config_panel_domain` replaces the options flow's only route — so the panel
+  has to carry every step it displaces.** It does not add a route to the panel.
+  Verified in a real browser against Home Assistant 2026.5.4: with it set, the
+  hub row's Configure control on Settings → Devices & services → rtl_433 renders
+  as `<a href="/rtl_433?config_entry=…">` and nothing else opens the options
+  flow — the entry's overflow menu offers only Reload / Rename / Copy entry ID /
   Download diagnostics / Reconfigure / System options / Disable / Delete, and the
-  hub device page offers no route either. Every options-flow step (Hub settings,
-  Device settings, Device mappings, calibration, Replace device, Ignored devices)
-  loses its only entry point while still existing and still passing its tests,
-  which is exactly the kind of break no Python test catches. `knx` is the one
-  core integration shipping both a panel and an options flow and it omits the
-  argument for this reason; `dynalite` and `insteon` pass it and have no options
-  flow to lose. The panel is reached from the sidebar instead, and
+  hub device page offers no route either. (Reconfigure still reaches the hub's
+  *connection* settings; that is a config-flow step, not an options one.)
+
+  It is set deliberately, and the panel now renders all six displaced steps: Add
+  and Ignore on the cards, Replace on a card, Ignored devices behind the toggle,
+  and Receiver settings / Device settings / Device mappings as dialogs. **The
+  invariant to keep is that list, not the flag**: an options step with no panel
+  equivalent is unreachable while still existing and still passing its tests,
+  which is exactly the kind of break no Python test catches. `knx` ships both a
+  panel and an options flow and omits the argument for that reason; `dynalite`
+  and `insteon` pass it and have no options flow to lose. Because the flow's
+  steps are now unreachable, they survive only as the shared implementation
+  behind `settings.py`; removing them is a separate, deliberate change.
   `test_the_panel_registers_once_and_serves_its_module` asserts
-  `config_panel_domain is None` so this cannot come back by accident.
+  `config_panel_domain == DOMAIN` and that no sidebar slot is taken alongside
+  it.
 - The frontend passes the entry it was opened for as `?config_entry=<entry_id>`.
   The panel ignores it and opens on the first loaded hub; with two receivers,
   Configure on either lands on the same one.
+- **The panel draws its own toolbar.** Home Assistant renders no chrome around a
+  non-iframe custom panel, and with no sidebar entry there is otherwise no way
+  back out on a phone, where the sidebar is closed. The back button is
+  `history.back()` — the page is always arrived at from somewhere — falling back
+  to `/config/integrations/integration/rtl_433` when opened cold by URL.
+- **A save that reloads the hub must not read as a failure.** Saving a
+  calibration, a mapping override or the manage-settings toggle reloads the
+  entry, and for a second afterwards `rtl_433/devices/subscribe` answers
+  `not_loaded`. The panel re-subscribes after every save (the old subscription
+  would go on pushing a replaced coordinator's state) and retries that specific
+  error for ~10s behind a "waiting for the receiver" status rather than showing
+  an error banner at the moment the user succeeded.
 - **Author CSS beats the user agent's `[hidden]` rule.** Any selector in the
   panel's stylesheet that sets `display` needs its own `[hidden]` rule, or the
   `hidden` property does nothing — this is what kept the single-hub receiver
@@ -1029,7 +1064,7 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
    [add-a-mapping workflow](docs/device-library.md#add-a-mapping-workflow).
 
 For an installation-local change that should **not** be committed, use the
-hub's *Device mappings* options step instead of editing the shipped library (see
+hub's *Device mappings* dialog instead of editing the shipped library (see
 [Adding device mappings](docs/device-library.md#adding-device-mappings)).
 
 ## Running the unit tests

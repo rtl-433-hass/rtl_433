@@ -202,6 +202,10 @@ async def async_unignore_devices(
     selected = set(keys)
     for device_key in keys:
         coordinator.ignored.discard(device_key)
+        # No longer ignored, so nothing is left to name: dropping the
+        # remembered model keeps the map from growing for the life of the
+        # process with devices that are back on the pending list.
+        coordinator.ignored_models.pop(device_key, None)
         if device_key in ignored:
             result.applied.append(device_key)
         else:

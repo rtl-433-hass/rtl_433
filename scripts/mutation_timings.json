@@ -24,6 +24,8 @@
     "custom_components/rtl_433/sdr_settings.py": 3.76,
     "custom_components/rtl_433/select.py": 72.02,
     "custom_components/rtl_433/sensor.py": 914.776,
-    "custom_components/rtl_433/switch.py": 31.852
+    "custom_components/rtl_433/settings.py": 477.907,
+    "custom_components/rtl_433/switch.py": 31.852,
+    "custom_components/rtl_433/websocket_api.py": 4686.476
   }
 }

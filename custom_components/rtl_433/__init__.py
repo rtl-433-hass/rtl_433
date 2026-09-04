@@ -61,7 +61,6 @@ from .const import (
     CONF_USER_MAPPINGS,
     DATA_ENTRY_LIBRARY,
     DEFAULT_MOTION_CLEAR_DELAY,
-    DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     LOGGER,
@@ -85,6 +84,7 @@ from .migration import (
     _migrate_motion_event_to_binary_sensor,
     async_migrate_entry,
 )
+from .settings import device_clear_delay
 from .websocket_api import async_preload_entity_metadata, async_register_commands
 
 # Where the shipped ``frontend/`` directory is served from. Its own path rather
@@ -128,15 +128,13 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     survives that, and it covers the sequential cases (a hub added later, an
     entry reloading) as well.
 
-    ``config_panel_domain`` is deliberately **not** passed, though it would put
-    the panel behind this integration's entry in Settings → Devices & services.
-    It does not add a route, it *replaces* one: the entry's Configure control
-    becomes a link to the panel, and the options flow behind it -- receiver
-    settings, device settings, device mappings, calibration, replace-device --
-    loses its only entry point. ``knx`` is the one core integration that ships
-    both a panel and an options flow, and it omits the argument for the same
-    reason; ``dynalite`` and ``insteon`` pass it and have no options flow to
-    lose. The panel is reached from the sidebar instead.
+    ``config_panel_domain`` puts the panel behind this integration's entry in
+    Settings → Devices & services, and no ``sidebar_title``/``sidebar_icon`` are
+    passed, so it takes no top-level sidebar slot. A custom integration cannot
+    join the Settings list that Bluetooth, Tags and Z-Wave appear in: those are
+    hard-coded routes inside the ``config`` panel, which core's frontend ships
+    compiled (``zwave_js`` registers no panel of its own at all). Behind the
+    integration's own entry is as close to "in Settings" as a custom panel gets.
 
     Two arguments are the whole reason this works the way it does:
 
@@ -177,8 +175,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             module_url=f"{PANEL_URL_BASE}/{PANEL_MODULE_NAME}",
             embed_iframe=False,
             require_admin=True,
-            sidebar_title="rtl_433",
-            sidebar_icon="mdi:radio-tower",
+            config_panel_domain=DOMAIN,
         )
     except Exception:
         domain_data.pop(DATA_PANEL_CLAIMED, None)
@@ -244,17 +241,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def effective_clear_delay_resolver(device_key: str) -> int:
         """Resolve a device's effective motion clear-delay (override > default).
 
-        Reads the per-device ``motion_clear_delay`` from the hub's devices map
-        (``entry.data[CONF_DEVICES][device_key]``); falls back to
-        ``DEFAULT_MOTION_CLEAR_DELAY`` when none is set.
+        Reads the per-device ``motion_clear_delay`` through
+        :func:`.settings.device_clear_delay`, which looks in ``entry.options``
+        before ``entry.data``; falls back to ``DEFAULT_MOTION_CLEAR_DELAY`` when
+        neither holds one.
+
+        Both locations have to be consulted because the two are written by
+        different eras of this integration. The migration from per-device child
+        entries lands the value in ``data``, which is the only place this
+        resolver used to look -- while every edit made through the settings UI
+        writes it to ``options``, where nothing read it. A clear-delay set by
+        hand therefore did nothing at all; consulting options first is what
+        makes that knob take effect, including for anyone who set one long ago
+        and assumed it had.
         """
-        override = (
-            entry.data.get(CONF_DEVICES, {})
-            .get(device_key, {})
-            .get(DEVICE_MOTION_CLEAR_DELAY)
-        )
+        override = device_clear_delay(entry, device_key)
         if override is not None:
-            return int(override)
+            return override
         return DEFAULT_MOTION_CLEAR_DELAY
 
     def new_device_callback(device_key: str, model: str, is_replay: bool) -> None:

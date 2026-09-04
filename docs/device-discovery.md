@@ -13,12 +13,12 @@ trigger them once to make them show up.
 
 ## Adding Devices
 
-Pick **rtl_433** in the sidebar to open the discovery panel, which lists every
-device the receiver has heard and you have not added. The panel is only
-available to administrators; if you do not see it in the sidebar, use the
-options flow below instead.
+Open **Settings → Devices & Services → rtl_433 → Configure**. That is the
+rtl_433 page: it lists every device the receiver has heard and you have not
+added, and it is where the receiver's own settings live too. It is available to
+administrators only.
 
-![The rtl_433 discovery panel: a grid of device cards, each with a blue heading giving the model and device key, then its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Ignore and Add buttons](images/17-discovery-panel.png)
+![The rtl_433 page: a toolbar, a row of Receiver settings / Device settings / Device mappings buttons, then a grid of device cards, each with a blue heading giving the model and device key, its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Ignore and Add buttons](images/17-discovery-panel.png)
 
 Each candidate gets a card, newest discovery first. Cards keep their place as
 devices transmit, so a card does not move under the cursor while you are reading
@@ -57,55 +57,60 @@ counts climb as devices transmit, and nothing needs a reload. So trigger a
 doorbell or open a door sensor and watch it arrive.
 
 The page is for administrators only. Home Assistant hides it from other users
-and refuses its commands. If you are not an administrator, or the page does not
-load, use the options flow below instead: it adds exactly the same devices.
+and refuses its commands.
 
 Everything the page does is also a Home Assistant WebSocket command, so the same
 list and the same actions are available to a script — see [Home Assistant
 discovery commands](websocket-api.md#home-assistant-discovery-commands).
 
-### Adding Devices from the Options Flow
+### Clearing the List
 
-Open **Settings → Devices & Services → rtl_433 → Configure**. The menu starts
-with the two discovery steps:
+A receiver left running for a few weeks in a built-up area accumulates hundreds
+of candidates, and the one you came to add is somewhere among them. **Clear
+discovered devices** empties the list so it refills from live traffic: trigger
+the doorbell, and it is the only thing on the screen.
 
-![The rtl_433 hub options menu, listing Add discovered devices, Ignored devices, Hub settings, Device settings, Device mappings, and Replace device](images/03-options-flow.png)
+Nothing is lost. The list has always been held in memory only, so every device
+cleared comes back on its next transmission. Devices you have ignored stay
+ignored — that is a decision, and this is not the control for undoing it.
 
-Pick **Add discovered devices** to see everything the hub has heard but not
-added yet:
+## Receiver and Device Settings
 
-![The Add discovered devices step, listing the heard devices with their model, id, sighting count, signal level, and last-seen time, above the two selection lists for adding and ignoring](images/15-add-devices.png)
+The same page carries this receiver's settings, as three dialogs above the
+discovered devices.
 
-Each row carries the same details as a card in the panel. The difference is that
-a form is a snapshot: it is built when you open the step, so a device heard
-afterwards only shows up when you close and reopen it.
+**Receiver settings** is the default availability timeout for every device on
+this receiver, and whether Home Assistant manages the server's own SDR settings
+— see [Configuration](configuration.md#reconfigure-vs-configure).
 
-Tick every device you want under **Add these devices** and submit. They are
-created immediately, with their entities, and start recording history from that
-point. Adding several devices is one submit.
+**Device settings** targets one device you have already added: its availability
+timeout override, its motion clear delay, and its
+[utility-meter calibration](calibration.md). Pick the device at the top and the
+rest of the form rebuilds from it, showing only the settings that device
+actually has.
 
-Anything you leave unticked stays on the list and is offered again next time.
+**Device mappings** is this receiver's
+[device-library overrides](device-library.md), as YAML. Clearing the editor
+removes them all. A document that will not store is refused with every problem
+listed, and the overrides you already had are left alone.
 
 ## Ignoring Devices
 
-Devices you never want to see again are ignored. Click **Ignore** on the row in
-the panel, or tick them under **Ignore these devices** in the options flow. An
-ignored device is dropped from the list, is never offered again, and stays
+Devices you never want to see again are ignored. Click **Ignore** on the card.
+An ignored device is dropped from the list, is never offered again, and stays
 ignored across restarts. It is the way to make a neighbour's sensor go away for
 good.
 
 Ignoring is not deleting: an ignored device is simply not offered, and its
 messages are dropped as they arrive.
 
-To undo it, click **Show ignored devices** under the cards in the panel and then
-**Un-ignore**. From the options flow, open **Configure → Ignored devices**, tick
-the devices you want back, and submit:
+To undo it, click **Show ignored devices** under the cards and then
+**Un-ignore**:
 
-![The Ignored devices step, listing an ignored device with a checkbox to stop ignoring it](images/16-ignored-devices.png)
+![The rtl_433 page with the ignored-devices section revealed, showing one ignored device and its Un-ignore button](images/16-ignored-devices.png)
 
-The device reappears under **Add discovered devices** the next time it
-transmits, which for a door or motion sensor means the next time it is
-triggered.
+The device reappears the next time it transmits, which for a door or motion
+sensor means the next time it is triggered.
 
 ## The Discovered List Is Temporary
 
@@ -151,14 +156,19 @@ batteries are changed. rtl_433 identifies a device by that id, so the sensor
 comes back as a brand-new device with new entities and no history, while the
 original stops updating and eventually goes unavailable.
 
-To move the original device onto its new id, open **Settings → Devices &
-Services → rtl_433 → Configure → Replace device**. Pick the **Device to keep** —
-the existing device whose history you want to preserve — then pick the **New
-device**, the one that appeared after the batteries were changed. Devices of the
-same model are listed first, since a battery swap does not change the model.
+You meet this problem from the new device's side: something you did not add has
+appeared on the discovered list, and it is really a sensor you already have. So
+that is where the fix starts.
 
-The device you keep takes over the new id, and the duplicate device and its
-entities are removed. The kept device's entity ids do not change, so its
+Find the new device's card and click **Replace**, then pick the device it
+replaces: the one you already have, whose history you want to keep. Devices of
+the same model are listed first, since a battery swap does not change the model.
+The button only appears once there is at least one added device the candidate
+could stand in for.
+
+The device you keep takes over the new id. If you had already added the
+replacement as a device of its own, it and its entities are removed. The kept
+device's entity ids do not change, so its
 history, statistics, dashboards and automations carry straight through, and its
 calibration, availability timeout override, motion clear delay and event types
 come with it. Any field the replacement has already reported is added to the
@@ -171,11 +181,10 @@ after being re-pointed at id `9f3c`. That is what preserves the history, so it i
 worth leaving alone. You can rename the entity if the stale id bothers you, but
 renaming it starts a new history under the new entity id.
 
-The replacement does not have to be added first. Devices that are only on the
-discovered list are offered too, marked *not added yet*, because after a battery
-change the replacement is usually one of those. It only has to have been heard
-once. If it is not in the list yet, wait until it transmits again and reopen the
-step.
+The replacement does not have to be added first. The card you start from is a
+device you have not added, which is exactly what a battery-swapped sensor looks
+like; it only has to have been heard once. If it is not on the page yet, wait
+until it transmits again.
 
 To confirm you are picking the right device, check the **Serial number** on the
 device info card: it is the id rtl_433 decoded for that device, plus its channel

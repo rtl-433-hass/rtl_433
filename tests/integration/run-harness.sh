@@ -82,7 +82,7 @@ onboard() {
 }
 
 shots() {
-  log "driving Playwright: add hub, capture discovery/device/options (sets 15s timeout)"
+  log "driving Playwright: add hub, capture the panel and its dialogs (sets 15s timeout)"
   HA_BASE="$HA_BASE" RTL_HOST=wsbridge RTL_PORT=8433 RTL_PATH=/ws SHORT_TIMEOUT=15 STAGE=add \
     node ./screenshot.mjs
 }
@@ -101,9 +101,10 @@ hubnoise() {
   HA_BASE="$HA_BASE" STAGE=hubnoise node ./screenshot.mjs
 }
 
-# Stop the replay so the device goes silent. The options flow above lowered the
-# hub availability timeout to 15s and the watchdog ticks every 30s, so ~50s after
-# stopping the replay the device's entities flip to unavailable; then capture it.
+# Stop the replay so the device goes silent. The Receiver settings dialog above
+# lowered the hub availability timeout to 15s and the watchdog ticks every 30s,
+# so ~50s after stopping the replay the device's entities flip to unavailable;
+# then capture it.
 unavailable() {
   log "stopping rtl_433 replay to force device silence"
   $COMPOSE stop rtl433 || true
