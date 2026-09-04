@@ -16,7 +16,6 @@
           "path": "WebSocket path",
           "secure": "Secure (use wss://)",
           "manage_settings": "Manage rtl_433 settings from Home Assistant",
-          "discovery_enabled": "Discover new devices",
           "initial_frequency": "Initial frequency (MHz)"
         },
         "data_description": {
@@ -25,7 +24,6 @@
           "path": "WebSocket endpoint path on the server (default /ws).",
           "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy).",
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
-          "discovery_enabled": "When on, newly observed devices on this server are added automatically as nested devices. You can change this later in the hub options.",
           "initial_frequency": "Set the receiver's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
         }
       },
@@ -62,12 +60,10 @@
         "description": "You are about to add a rtl_433 radio published by the {addon} add-on at `{host}:{port}`.",
         "data": {
           "manage_settings": "Manage rtl_433 settings from Home Assistant",
-          "discovery_enabled": "Discover new devices",
           "initial_frequency": "Initial frequency (MHz)"
         },
         "data_description": {
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
-          "discovery_enabled": "When on, newly observed devices on this server are added automatically as nested devices. You can change this later in the hub options.",
           "initial_frequency": "Set the receiver's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
         }
       }
@@ -89,22 +85,44 @@
         "title": "rtl_433 options",
         "description": "Choose what to configure.",
         "menu_options": {
+          "add_devices": "Add discovered devices",
+          "ignored_devices": "Ignored devices",
           "hub": "Hub settings",
           "device": "Device settings",
           "mappings": "Device mappings",
           "replace": "Replace device"
         }
       },
+      "add_devices": {
+        "title": "Add discovered devices",
+        "description": "These devices have been heard since Home Assistant last started but have not been added yet. Adding one creates it, with its entities, right away. Ignoring one hides it for good: it is never listed again, even after a restart, until you un-ignore it under \"Ignored devices\". Anything you leave unselected stays in this list and is offered again next time. Each entry shows how many times the device has been heard, its signal level when it reports one, and how long ago it last transmitted \u2014 a device heard once, weakly, is usually a bad decode or a neighbour's sensor.",
+        "data": {
+          "add": "Add these devices",
+          "ignore": "Ignore these devices"
+        },
+        "data_description": {
+          "add": "The devices to create in Home Assistant, with their entities.",
+          "ignore": "The devices to hide for good. They stay hidden until you un-ignore them."
+        }
+      },
+      "ignored_devices": {
+        "title": "Ignored devices",
+        "description": "These devices are hidden from the discovered-devices list. Select any you want offered again. Un-ignoring is not retroactive: a device reappears the next time it transmits, which for a door or motion sensor means the next time it is triggered.",
+        "data": {
+          "unignore": "Stop ignoring these devices"
+        },
+        "data_description": {
+          "unignore": "The devices to offer again the next time they transmit."
+        }
+      },
       "hub": {
         "title": "Hub settings",
-        "description": "Configure new-device discovery and the default availability timeout for this rtl_433 server. rtl_433 connection settings are in the three-dot overflow menu under \"reconfigure\".",
+        "description": "Configure the default availability timeout for this rtl_433 server. rtl_433 connection settings are in the three-dot overflow menu under \"reconfigure\".",
         "data": {
-          "discovery_enabled": "Discover new devices",
           "availability_timeout": "Availability timeout (seconds)",
           "manage_settings": "Manage rtl_433 settings from Home Assistant"
         },
         "data_description": {
-          "discovery_enabled": "When on, newly observed devices on this server are added automatically as nested devices.",
           "availability_timeout": "Mark a device unavailable after this many seconds without an event. Use 0 to never mark devices unavailable. Leave this at the default and each device type is handled automatically: devices that send only rare events (door, window, motion, doorbell) are never marked unavailable, while periodic sensors use 600 seconds. Set a specific value to apply it to every device instead.",
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched."
         }
@@ -164,20 +182,24 @@
       },
       "replace_target": {
         "title": "Replace device",
-        "description": "Pick the newly seen device that is really the same hardware as {device}. Its duplicate entities are removed and the device you kept takes over its id. Devices of the same model are listed first.",
+        "description": "Pick the newly seen device that is really the same hardware as {device}. Devices you have not added are listed too, marked \"not added yet\" with how often they have been heard — after a battery change the replacement is usually one of those. Any duplicate entities are removed and the device you kept takes over its id. Devices of the same model are listed first.",
         "data": {
           "device": "New device"
         },
         "data_description": {
-          "device": "The device that appeared after the batteries were changed."
+          "device": "The device that appeared after the batteries were changed. It does not need to be added first."
         }
       }
     },
     "abort": {
+      "hub_not_loaded": "This hub is not running, so its discovered devices are not available. Start or reload the hub, then try again.",
+      "no_pending_devices": "No new devices are waiting to be added. Devices appear here as they transmit, and the list starts empty after every restart, so a sensor that reports infrequently can take a while to show up.",
+      "no_ignored_devices": "No devices are ignored.",
       "no_devices": "No devices have been discovered yet.",
       "no_replacement_candidates": "There is no other device to replace this one with. Wait until the replacement has been heard from at least once, then try again."
     },
     "error": {
+      "add_and_ignore_conflict": "The same device cannot be both added and ignored. Remove it from one of the two lists, then submit again.",
       "invalid_mappings": "Invalid mappings: {problems}",
       "replace_failed": "That device could not be replaced. Go back and pick a different device: the two devices must be different, and the device to keep must still exist."
     }

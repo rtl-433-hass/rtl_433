@@ -191,6 +191,14 @@ escalate_paths = [
 # never a silent floor blind spot.
 [tool.mutmut_ratchet.explicit_test_sources]
 "tests/test_coordinator.py" = ["coordinator/base.py"]
+# The observation-vs-adoption routing contract: the pending/ignored branch lives
+# in ``coordinator/_events.py`` and the adopt/ignore/forget API it feeds lives in
+# ``coordinator/base.py``.
+"tests/test_pending_devices.py" = ["coordinator/base.py", "coordinator/_events.py"]
+# Static guard: reads both flow modules' source for the translation keys they can
+# render, so a mutated abort reason / error key / step id is caught by it as
+# surely as by a flow-driving test.
+"tests/test_translations.py" = ["config_flow.py", "options_flow.py"]
 "tests/test_mut_init.py" = ["__init__.py", "migration.py", "hub_settings.py"]
 "tests/test_config_flow.py" = ["config_flow.py", "options_flow.py"]
 "tests/test_mut_config_flow.py" = ["config_flow.py", "options_flow.py"]
@@ -214,6 +222,9 @@ escalate_paths = [
 "tests/test_fixture_coverage.py" = []
 # Mutation-floor test files: their ``_floor`` suffix does not auto-resolve to a
 # source module via the naming convention, so each is mapped explicitly.
+# The event-routing floor: ``_events`` is a private submodule, so the
+# ``test_mut_<name>_floor`` convention has no ``events.py`` to resolve to.
+"tests/test_mut_events_floor.py" = ["coordinator/_events.py"]
 "tests/test_mut_calibration_floor.py" = ["calibration.py"]
 "tests/test_mut_library_floor.py" = ["library.py"]
 "tests/test_mut_migration_floor.py" = ["migration.py"]

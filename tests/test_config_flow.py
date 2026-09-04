@@ -1,20 +1,30 @@
 """Tests for the rtl_433 config and options flows (single-hub model).
 
 The connectivity check is patched throughout (no sockets are opened). Coverage:
-the hub user step (success + ``cannot_connect``), the hub options step
-(discovery toggle + availability timeout persisted to ``entry.options``), the
-device options step (set/clear a per-device ``timeout_override`` in
-``entry.data["devices"]``, plus the ``no_devices`` abort), and a direct unit
-test of ``async_remove_config_entry_device`` (False for the hub device, True +
+the hub user step (success + ``cannot_connect``), the approval steps that turn a
+heard device into a Home Assistant device (``add_devices`` / ``ignored_devices``:
+the add / ignore / un-ignore round trip, the conflict rejection, and the empty
+and hub-not-loaded aborts), the hub options step (availability timeout persisted
+to ``entry.options``), the device options step (set/clear a per-device
+``timeout_override`` in ``entry.data["devices"]``, plus the ``no_devices``
+abort), the replace pair, and a direct unit test of
+``async_remove_config_entry_device`` (False for the hub device, True +
 map/coordinator eviction for a nested device).
+
+The approval tests populate the pending list by feeding real frames through the
+client's own normalize + classify seam rather than assigning
+``coordinator.pending`` directly, so a change that stopped routing frames into
+the list would fail here instead of quietly passing.
 """
 
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from freezegun import freeze_time
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rtl_433 import async_remove_config_entry_device
@@ -27,8 +37,8 @@ from custom_components.rtl_433.const import (
     COMMODITY_WATER,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
-    CONF_DISCOVERY_ENABLED,
     CONF_HOST,
+    CONF_IGNORED_DEVICES,
     CONF_INITIAL_FREQUENCY,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
@@ -46,8 +56,9 @@ from custom_components.rtl_433.const import (
 from homeassistant.config_entries import SOURCE_HASSIO, SOURCE_USER
 from homeassistant.const import UnitOfVolume
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
+from homeassistant.util import dt as dt_util
 
 VALIDATE = "custom_components.rtl_433.config_flow.Rtl433Coordinator.validate_connection"
 
@@ -126,11 +137,385 @@ async def test_user_step_cannot_connect_shows_error(hass):
 
 
 # --------------------------------------------------------------------------- #
+# Options flow — add / ignore discovered devices (the approval steps).         #
+# --------------------------------------------------------------------------- #
+# The three devices the hub hears in the fixtures below. Keys are what the
+# normalizer derives from ``model`` + ``id``; they are spelled out here so the
+# assertions read as the user's picker does.
+PENDING_OLD = "Acurite-606TX-42"
+PENDING_MID = "GenericDoor-X1-88"
+PENDING_NEW = "EnergyMeter-2000-1234"
+
+PENDING_MID_FRAME = {"model": "GenericDoor-X1", "id": 88, "closed": 0, "battery_ok": 1}
+
+
+def _coordinator(hass, entry):
+    """Return the running coordinator for a loaded hub entry."""
+    return hass.data[DOMAIN][entry.entry_id]
+
+
+def _hear(coordinator, frame):
+    """Inject one live frame through the client's normalize + classify seam.
+
+    Drives ``_process_event`` -> ``_on_client_event``, the exact path an incoming
+    WebSocket frame takes, so these tests exercise the routing code that actually
+    builds the pending list rather than a hand-assembled ``coordinator.pending``
+    (which would keep passing after a routing regression). The frames carry no
+    ``time`` on purpose: a frame with no usable timestamp classifies as a live
+    transmission, while a timestamped frame older than the connect anchor is a
+    reconnect replay and deliberately never becomes a candidate.
+    """
+    coordinator._client._process_event(frame)
+
+
+def _device_entity_unique_ids(hass, entry, device_key) -> set[str]:
+    """Return the unique_ids of every registry entity belonging to a device."""
+    prefix = f"{entry.entry_id}:{device_key}:"
+    return {
+        registry_entry.unique_id
+        for registry_entry in er.async_get(hass).entities.values()
+        if registry_entry.unique_id.startswith(prefix)
+    }
+
+
+def _registry_device(hass, entry, device_key):
+    """Return the registry device for a device key, or ``None``."""
+    return dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, f"{entry.entry_id}:{device_key}")}
+    )
+
+
+async def _hub_hearing_three_devices(hass, hub_entry_builder, **kwargs):
+    """Set up a hub that has heard three devices at three distinct times.
+
+    The sightings are frozen a minute apart so "most recently seen first" is a
+    real ordering rather than an artefact of insertion order (a stable sort over
+    three identical timestamps would silently pass either way), and the newest
+    device is heard twice so its sighting count is distinguishable from the
+    others'. Only that newest device reports a signal level, which is what makes
+    the "omit the level when the device does not report one" branch observable.
+    """
+    entry = hub_entry_builder(availability_timeout=600, **kwargs)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = _coordinator(hass, entry)
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _hear(
+            coordinator,
+            {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4, "humidity": 55},
+        )
+    with freeze_time(start + timedelta(minutes=1)):
+        _hear(coordinator, PENDING_MID_FRAME)
+    with freeze_time(start + timedelta(minutes=2)):
+        _hear(
+            coordinator,
+            {"model": "EnergyMeter-2000", "id": 1234, "power_W": 1450.5, "snr": 11.5},
+        )
+        _hear(
+            coordinator,
+            {"model": "EnergyMeter-2000", "id": 1234, "power_W": 1460.5, "snr": 11.5},
+        )
+    await hass.async_block_till_done()
+    return entry
+
+
+async def _open_add_devices(hass, entry):
+    """Walk the options menu to the add-devices step and return the form."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "add_devices"}
+    )
+
+
+async def test_options_menu_leads_with_the_two_approval_steps(
+    hass, hub_entry_builder, no_socket
+):
+    """The menu offers add_devices and ignored_devices, in that order, first.
+
+    Adding a heard device is the only route by which an RF device reaches Home
+    Assistant at all, so the pair leads the menu; the settings steps keep their
+    established order behind them.
+    """
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.MENU
+    assert result["menu_options"] == [
+        "add_devices",
+        "ignored_devices",
+        "hub",
+        "device",
+        "mappings",
+        "replace",
+    ]
+
+
+async def test_add_devices_adds_ignores_and_leaves_the_rest_pending(
+    hass, hub_entry_builder, no_socket
+):
+    """The whole approval workflow: three heard, one added, one ignored, one left.
+
+    This is the plan's primary contract in a single walk. Nothing reached the
+    device registry from being heard; after the submit exactly the added device
+    exists (with its entities and a record in ``entry.data["devices"]``), exactly
+    the ignored device is on the persistent ignore list and has no device, and
+    the unselected candidate is still waiting to be offered again. The form is
+    checked before the submit because the ordering and the label content are the
+    only things that let a user tell a real sensor from a one-off bad decode
+    without leaving the page.
+    """
+    entry = await _hub_hearing_three_devices(hass, hub_entry_builder)
+
+    result = await _open_add_devices(hass, entry)
+    assert result["step_id"] == "add_devices"
+
+    # Most recently heard first, and both multi-selects offer the same candidates
+    # (one selector serves both fields; only the meaning of a pick differs).
+    assert [value for value, _ in _select_options(result, "add")] == [
+        PENDING_NEW,
+        PENDING_MID,
+        PENDING_OLD,
+    ]
+    assert _select_options(result, "ignore") == _select_options(result, "add")
+
+    labels = dict(_select_options(result, "add"))
+    # Model, key, sighting count and signal level, so a weak one-off decode is
+    # visibly different from a sensor that keeps checking in.
+    assert labels[PENDING_NEW].startswith(
+        f"EnergyMeter-2000 ({PENDING_NEW}) — seen 2x — 11.5 dB — last seen "
+    )
+    assert labels[PENDING_NEW].endswith(" ago")
+    # A device whose frames carry no level simply omits that segment rather than
+    # rendering a placeholder.
+    assert labels[PENDING_OLD].startswith(
+        f"Acurite-606TX ({PENDING_OLD}) — seen 1x — last seen "
+    )
+    assert " dB " not in labels[PENDING_OLD]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"add": [PENDING_NEW], "ignore": [PENDING_MID]}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    # The added device is persisted in the same record shape every other write
+    # path produces, so a restart rebuilds it.
+    assert set(entry.data[CONF_DEVICES]) == {PENDING_NEW}
+    record = entry.data[CONF_DEVICES][PENDING_NEW]
+    assert record[CONF_MODEL] == "EnergyMeter-2000"
+    assert "power_W" in record[DEVICE_FIELDS]
+    # Exactly the ignored device is on the persistent ignore list.
+    assert entry.data[CONF_IGNORED_DEVICES] == [PENDING_MID]
+
+    coordinator = _coordinator(hass, entry)
+    assert PENDING_NEW in coordinator.adopted
+    assert coordinator.ignored == {PENDING_MID}
+    # The unselected candidate is untouched and will be offered again.
+    assert set(coordinator.pending) == {PENDING_OLD}
+
+    # Only the added device reached the device registry, and it arrived with
+    # entities seeded from the frame that was already heard.
+    assert _registry_device(hass, entry, PENDING_NEW) is not None
+    assert _device_entity_unique_ids(hass, entry, PENDING_NEW)
+    for key in (PENDING_MID, PENDING_OLD):
+        assert _registry_device(hass, entry, key) is None
+        assert _device_entity_unique_ids(hass, entry, key) == set()
+
+
+async def test_ignored_device_survives_a_reload_and_never_returns_to_pending(
+    hass, hub_entry_builder, no_socket
+):
+    """Ignoring sticks: across a reload, and against the device's next frame.
+
+    The pending list is in-memory by design, so a reload empties it — but the
+    ignore list lives in ``entry.data`` precisely so the device the user dismissed
+    does not simply walk back in on its next transmission. Feeding that
+    transmission after the reload is what proves the reloaded coordinator seeded
+    ``ignored`` from the entry rather than starting clean.
+    """
+    entry = await _hub_hearing_three_devices(hass, hub_entry_builder)
+
+    result = await _open_add_devices(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"ignore": [PENDING_MID]}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = _coordinator(hass, entry)
+    assert coordinator.pending == {}  # rebuilt from live traffic, by design
+    assert coordinator.ignored == {PENDING_MID}
+
+    _hear(coordinator, PENDING_MID_FRAME)
+    await hass.async_block_till_done()
+
+    assert coordinator.pending == {}
+    assert _registry_device(hass, entry, PENDING_MID) is None
+    assert entry.data[CONF_IGNORED_DEVICES] == [PENDING_MID]
+
+
+async def test_add_and_ignore_conflict_reshows_the_form_and_applies_nothing(
+    hass, hub_entry_builder, no_socket
+):
+    """A key in both lists writes nothing at all — not even the unambiguous half.
+
+    "Add this and also ignore it" is a contradiction the flow refuses to resolve
+    on the user's behalf. Since the submit is rejected, applying its unambiguous
+    part anyway would leave a side effect behind a form the user still has to
+    correct and resubmit, so the whole submit is discarded and the form comes
+    back with its full candidate list intact.
+    """
+    entry = await _hub_hearing_three_devices(hass, hub_entry_builder)
+
+    result = await _open_add_devices(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        # PENDING_OLD is unambiguously "add" and PENDING_MID unambiguously
+        # "ignore"; only PENDING_NEW is contradictory.
+        {
+            "add": [PENDING_NEW, PENDING_OLD],
+            "ignore": [PENDING_NEW, PENDING_MID],
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "add_devices"
+    assert result["errors"] == {"base": "add_and_ignore_conflict"}
+    # The form is re-shown with every candidate still selectable.
+    assert [value for value, _ in _select_options(result, "add")] == [
+        PENDING_NEW,
+        PENDING_MID,
+        PENDING_OLD,
+    ]
+
+    # Nothing was applied: no device stored, nothing ignored, nothing adopted,
+    # and all three candidates still pending.
+    assert entry.data.get(CONF_DEVICES, {}) == {}
+    assert CONF_IGNORED_DEVICES not in entry.data
+    coordinator = _coordinator(hass, entry)
+    assert coordinator.ignored == set()
+    assert set(coordinator.pending) == {PENDING_OLD, PENDING_MID, PENDING_NEW}
+    for key in (PENDING_OLD, PENDING_MID, PENDING_NEW):
+        assert _registry_device(hass, entry, key) is None
+
+
+async def test_approval_steps_abort_when_there_is_nothing_to_show(
+    hass, hub_entry_builder, no_socket
+):
+    """Empty lists abort with an explanation instead of a form with no choices.
+
+    An empty pending list is the normal state shortly after a restart (the list
+    is rebuilt from live traffic), so the abort has to say so rather than look
+    like a broken form.
+    """
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    for step, reason in (
+        ("add_devices", "no_pending_devices"),
+        ("ignored_devices", "no_ignored_devices"),
+    ):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": step}
+        )
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == reason
+
+
+async def test_approval_steps_abort_when_the_hub_is_not_loaded(hass, hub_entry_builder):
+    """Both steps degrade to ``hub_not_loaded`` rather than raising.
+
+    The options flow can be opened while the entry is not loaded (an unreachable
+    server, a disabled hub), and both steps need the running coordinator — the
+    pending list lives only in its memory, and un-ignoring has to reach its
+    mirrored ``ignored`` set to take effect before a reload. The entry carries a
+    non-empty ignore list so the guard is provably checked *before* the
+    empty-list abort rather than being masked by it.
+    """
+    entry = hub_entry_builder(ignored_devices=[PENDING_MID])
+    entry.add_to_hass(hass)  # deliberately never set up
+
+    for step in ("add_devices", "ignored_devices"):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": step}
+        )
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "hub_not_loaded"
+
+
+async def test_ignored_devices_step_unignores_in_entry_data_and_coordinator(
+    hass, hub_entry_builder, no_socket
+):
+    """Un-ignoring clears both stores, and takes effect without a reload.
+
+    ``entry.data`` is what survives a restart and the coordinator's ``ignored``
+    set is what the very next frame is routed against, so a step that updated
+    only one of them would either forget the un-ignore on restart or make the
+    user wait for a reload. Feeding the device's next transmission afterwards is
+    what distinguishes the two.
+    """
+    entry = hub_entry_builder(
+        # The ignored device that was once adopted has a stored record, so its
+        # row can be named; the other was ignored while pending and never had one.
+        devices={
+            PENDING_NEW: {
+                CONF_MODEL: "EnergyMeter-2000",
+                DEVICE_FIELDS: ["power_W"],
+            }
+        },
+        ignored_devices=[PENDING_NEW, PENDING_MID],
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "ignored_devices"}
+    )
+    assert result["step_id"] == "ignored_devices"
+    assert _select_options(result, "unignore") == [
+        (PENDING_NEW, f"EnergyMeter-2000 ({PENDING_NEW})"),
+        (PENDING_MID, PENDING_MID),
+    ]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"unignore": [PENDING_MID]}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    assert entry.data[CONF_IGNORED_DEVICES] == [PENDING_NEW]
+    coordinator = _coordinator(hass, entry)
+    assert coordinator.ignored == {PENDING_NEW}
+
+    # Not retroactive, but live: the device is offered again from its next frame.
+    assert coordinator.pending == {}
+    _hear(coordinator, PENDING_MID_FRAME)
+    await hass.async_block_till_done()
+    assert set(coordinator.pending) == {PENDING_MID}
+
+
+# --------------------------------------------------------------------------- #
 # Options flow — hub step.                                                     #
 # --------------------------------------------------------------------------- #
-async def test_hub_options_step_persists_discovery_and_timeout(hass, hub_entry_builder):
-    """The hub options step persists the discovery toggle + timeout to options."""
-    entry = hub_entry_builder(discovery_enabled=True)
+async def test_hub_options_step_persists_timeout(hass, hub_entry_builder):
+    """The hub options step persists the availability timeout to options."""
+    entry = hub_entry_builder()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -146,10 +531,10 @@ async def test_hub_options_step_persists_discovery_and_timeout(hass, hub_entry_b
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {CONF_DISCOVERY_ENABLED: False, CONF_AVAILABILITY_TIMEOUT: 120},
+        {CONF_MANAGE_SETTINGS: False, CONF_AVAILABILITY_TIMEOUT: 120},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options[CONF_DISCOVERY_ENABLED] is False
+    assert entry.options[CONF_MANAGE_SETTINGS] is False
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == 120
 
 
@@ -163,7 +548,7 @@ async def test_hub_options_step_drops_default_timeout(hass, hub_entry_builder):
     event-driven devices (doorbells/motion/contacts), so the key is dropped — the
     entry carries no explicit hub timeout and the per-device-type defaults apply.
     """
-    entry = hub_entry_builder(discovery_enabled=True)
+    entry = hub_entry_builder()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -173,13 +558,13 @@ async def test_hub_options_step_drops_default_timeout(hass, hub_entry_builder):
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_DISCOVERY_ENABLED: False,
+            CONF_MANAGE_SETTINGS: False,
             CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
         },
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     # The deliberately-changed toggle is persisted...
-    assert entry.options[CONF_DISCOVERY_ENABLED] is False
+    assert entry.options[CONF_MANAGE_SETTINGS] is False
     # ...but the untouched plain-default timeout is not, so class defaults apply.
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
@@ -493,8 +878,8 @@ def _seen_models(hass, entry, models):
     """Stand a coordinator whose ``devices`` map reports a model per device key.
 
     ``_replacement_model`` falls back to the coordinator's last event when a key
-    has no stored record, which is the discovery-disabled case the replace step
-    exists to serve.
+    has no stored record (or one with a blank model), so the replace picker can
+    still name a device the devices map does not describe.
     """
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = SimpleNamespace(
         devices={key: SimpleNamespace(model=model) for key, model in models.items()}
@@ -622,13 +1007,16 @@ async def test_replace_target_aborts_without_candidates(hass, hub_entry_builder)
 async def test_replace_target_offers_unregistered_devices_same_model_first(
     hass, hub_entry_builder
 ):
-    """Candidates union the devices map with what the coordinator has merely heard.
+    """Candidates union the devices map with the coordinator's own device keys.
 
-    With discovery off the replacement never gets a stored record, so a
-    coordinator-only key must still be offered — labelled from its last event —
-    and a battery swap keeps the model, so same-model candidates sort first even
-    when they sort last alphabetically. A candidate whose model is unknown from
-    both sources degrades to its bare key rather than an empty label.
+    The coordinator's runtime state is adopted-only, so the two normally agree —
+    but a device adopted this session is in that state before its devices-map
+    upsert lands, and the upsert is a no-op for a device whose event carried no
+    storable fields, so a coordinator-only key must still be offered, labelled
+    from its last event. A battery swap keeps the model, so same-model candidates
+    sort first even when they sort last alphabetically, and a candidate whose
+    model is unknown from both sources degrades to its bare key rather than an
+    empty label.
     """
     # Deliberately alphabetically *before* the same-model candidate, so the
     # model-first ordering is distinguishable from a plain sort.
@@ -642,7 +1030,8 @@ async def test_replace_target_offers_unregistered_devices_same_model_first(
         }
     )
     entry.add_to_hass(hass)
-    # The replacement is heard but never registered (discovery off).
+    # The replacement is in the coordinator's runtime state without a stored
+    # record (adopted this session, upsert not yet landed).
     _seen_models(hass, entry, {REPLACE_NEW: REPLACE_MODEL})
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -659,6 +1048,86 @@ async def test_replace_target_offers_unregistered_devices_same_model_first(
         (other_key, f"Aaa-Sensor ({other_key})"),
         (unknown_key, unknown_key),
     ]
+
+
+async def test_replace_target_offers_a_pending_device_and_consumes_it(
+    hass, hub_entry_builder, no_socket
+):
+    """A battery swap's new identity is *pending*, so replace must still offer it.
+
+    This is the regression the approval flow introduces: a sensor that draws a
+    new transmitter id when its batteries are changed is heard under that new id
+    and nothing more — it is never added automatically — so a candidate set drawn
+    only from the stored devices map and the coordinator's adopted runtime state
+    would exclude the very device this step exists to adopt. The row is marked
+    "not added yet" because picking it means something different from picking an
+    adopted device: the user is folding a device they have never added onto the
+    history of one they have.
+
+    The other half of the regression is what is left behind afterwards. A replace
+    reloads the entry, which rebuilds the coordinator and with it the in-memory
+    pending list, so the adopted candidate must not linger as a stale "add me"
+    offer sitting next to the device it was just merged into. The coordinator is
+    re-fetched after the submit for exactly that reason: the object captured
+    before the replace was discarded by the reload.
+    """
+    pending_key = "Acurite-986-9999"
+    entry = hub_entry_builder(
+        availability_timeout=600,
+        devices={
+            REPLACE_OLD: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]}
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    survivor = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_OLD}:T"
+    )
+    assert survivor is not None
+
+    # The swapped sensor checks in under its new id: heard, not added.
+    coordinator = _coordinator(hass, entry)
+    _hear(coordinator, {"model": REPLACE_MODEL, "id": 9999, "temperature_C": 21.9})
+    await hass.async_block_till_done()
+    assert set(coordinator.pending) == {pending_key}
+    assert _registry_device(hass, entry, pending_key) is None
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "replace"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": REPLACE_OLD}
+    )
+    assert result["step_id"] == "replace_target"
+
+    # The pending device is the only candidate, described as the add step
+    # describes it and then explicitly marked as not yet added.
+    [(value, label)] = _select_options(result, "device")
+    assert value == pending_key
+    assert label.startswith(f"{REPLACE_MODEL} ({pending_key}) — seen 1x — last seen ")
+    assert label.endswith(" — not added yet")
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"device": pending_key}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    # The kept device was re-keyed onto the new identity, history intact...
+    assert set(entry.data[CONF_DEVICES]) == {pending_key}
+    assert (
+        ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}:{pending_key}:T"
+        )
+        == survivor
+    )
+    # ...and the candidate is gone, not left offering itself for a second add.
+    # The replace reloaded the entry, so this is a different coordinator object.
+    assert _coordinator(hass, entry).pending == {}
 
 
 async def test_replace_target_shows_error_when_the_picker_goes_stale(
@@ -987,7 +1456,7 @@ async def test_mappings_step_valid_submit_writes_data_leaves_options_and_devices
         devices={
             device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
         },
-        options={CONF_DISCOVERY_ENABLED: True},
+        options={CONF_MANAGE_SETTINGS: True},
     )
     entry.add_to_hass(hass)
     options_snapshot = deepcopy(dict(entry.options))
@@ -1106,15 +1575,14 @@ async def test_hassio_discovery_happy_path_creates_entry(hass):
     assert entry.title == "rtl_433 (core-rtl433:8433)"
     # Exact data shape: connection params + the default toggles. Submitting the
     # empty confirm form applies the schema defaults (manage-settings default +
-    # discovery enabled True + the pre-filled 433.92 MHz initial frequency, which
-    # is persisted because manage-settings is on).
+    # the pre-filled 433.92 MHz initial frequency, which is persisted because
+    # manage-settings is on).
     assert entry.data == {
         CONF_HOST: "core-rtl433",
         CONF_PORT: 8433,
         CONF_PATH: "/ws",
         "secure": False,
         CONF_MANAGE_SETTINGS: DEFAULT_MANAGE_SETTINGS,
-        CONF_DISCOVERY_ENABLED: True,
         CONF_INITIAL_FREQUENCY: DEFAULT_INITIAL_FREQUENCY,
     }
 
@@ -1198,7 +1666,9 @@ async def test_hassio_discovery_missing_unique_id_aborts(hass):
 
 async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
     """Discovery of a manually-added host:port re-keys it to the radio id and aborts."""
-    entry = hub_entry_builder(host="core-rtl433", port=8433, path="/ws")
+    entry = hub_entry_builder(
+        host="core-rtl433", port=8433, path="/ws", availability_timeout=42
+    )
     entry.add_to_hass(hass)
     assert entry.unique_id == "hub:core-rtl433:8433"
 
@@ -1231,8 +1701,8 @@ async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
     # Connection data refreshed from discovery...
     assert adopted.data[CONF_PATH] == "/ws2"
     assert adopted.data["secure"] is True
-    # ...while pre-existing keys (the manual entry's discovery toggle) survive.
-    assert adopted.data[CONF_DISCOVERY_ENABLED] is True
+    # ...while pre-existing keys (the manual entry's hub timeout) survive.
+    assert adopted.data[CONF_AVAILABILITY_TIMEOUT] == 42
 
 
 async def test_hassio_readvertisement_reloads_running_hub(hass, no_socket, caplog):
@@ -1684,8 +2154,8 @@ async def test_hassio_confirm_cannot_connect_reshows_form(hass):
 # --------------------------------------------------------------------------- #
 # Setup toggles + initial frequency (manual user step and discovery confirm).  #
 # --------------------------------------------------------------------------- #
-async def test_user_step_persists_discovery_off_and_initial_frequency(hass):
-    """Managed add with discovery off + a frequency persists both into entry.data."""
+async def test_user_step_persists_initial_frequency(hass):
+    """A managed add with an explicit frequency persists it into entry.data."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
@@ -1699,7 +2169,6 @@ async def test_user_step_persists_discovery_off_and_initial_frequency(hass):
                 CONF_PATH: "/ws",
                 "secure": False,
                 CONF_MANAGE_SETTINGS: True,
-                CONF_DISCOVERY_ENABLED: False,
                 CONF_INITIAL_FREQUENCY: 868.3,
             },
         )
@@ -1707,7 +2176,6 @@ async def test_user_step_persists_discovery_off_and_initial_frequency(hass):
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
-    assert entry.data[CONF_DISCOVERY_ENABLED] is False
     # The frequency rides the managed path; persisted as a float (MHz).
     assert entry.data[CONF_INITIAL_FREQUENCY] == 868.3
 
@@ -1727,7 +2195,6 @@ async def test_user_step_applies_default_initial_frequency(hass):
                 CONF_PATH: "/ws",
                 "secure": False,
                 CONF_MANAGE_SETTINGS: True,
-                CONF_DISCOVERY_ENABLED: True,
             },
         )
         await hass.async_block_till_done()
@@ -1752,7 +2219,6 @@ async def test_user_step_drops_initial_frequency_when_unmanaged(hass):
                 CONF_PATH: "/ws",
                 "secure": False,
                 CONF_MANAGE_SETTINGS: False,
-                CONF_DISCOVERY_ENABLED: True,
                 CONF_INITIAL_FREQUENCY: 868.3,
             },
         )
@@ -1764,7 +2230,7 @@ async def test_user_step_drops_initial_frequency_when_unmanaged(hass):
 
 
 async def test_hassio_confirm_persists_toggles_and_frequency(hass):
-    """The discovery confirm form persists manage/discovery/frequency into entry.data."""
+    """The discovery confirm form persists manage-settings + frequency into entry.data."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_HASSIO}, data=_disc()
     )
@@ -1775,7 +2241,6 @@ async def test_hassio_confirm_persists_toggles_and_frequency(hass):
             result["flow_id"],
             {
                 CONF_MANAGE_SETTINGS: True,
-                CONF_DISCOVERY_ENABLED: False,
                 CONF_INITIAL_FREQUENCY: 915.0,
             },
         )
@@ -1784,7 +2249,6 @@ async def test_hassio_confirm_persists_toggles_and_frequency(hass):
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
     assert entry.data[CONF_MANAGE_SETTINGS] is True
-    assert entry.data[CONF_DISCOVERY_ENABLED] is False
     assert entry.data[CONF_INITIAL_FREQUENCY] == 915.0
 
 

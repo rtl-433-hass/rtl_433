@@ -1922,7 +1922,6 @@ async def test_late_field_entity_created_on_new_event(hass, hub_entry_builder):
     hub = await _setup_hub(
         hass,
         hub_entry_builder,
-        discovery_enabled=True,
         devices={
             device_key: {
                 CONF_MODEL: "Acurite-606TX",

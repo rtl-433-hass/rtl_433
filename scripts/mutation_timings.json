@@ -5,7 +5,7 @@
     "custom_components/rtl_433/calibration.py": 216.297,
     "custom_components/rtl_433/config_flow.py": 251.424,
     "custom_components/rtl_433/const.py": 6.435,
-    "custom_components/rtl_433/coordinator/_events.py": 507.173,
+    "custom_components/rtl_433/coordinator/_events.py": 229.606,
     "custom_components/rtl_433/coordinator/_sdr.py": 702.783,
     "custom_components/rtl_433/coordinator/_watchdog.py": 1073.531,
     "custom_components/rtl_433/coordinator/base.py": 3432.419,

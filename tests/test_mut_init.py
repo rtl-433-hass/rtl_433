@@ -25,7 +25,6 @@ from custom_components.rtl_433.const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICE_KEY,
     CONF_DEVICES,
-    CONF_DISCOVERY_ENABLED,
     CONF_ENTRY_TYPE,
     CONF_HOST,
     CONF_HUB_ENTRY_ID,
@@ -54,7 +53,6 @@ from custom_components.rtl_433.hub_settings import (
     _calibration_map,
     _hub_availability_timeout,
     _hub_connection,
-    _hub_discovery_enabled,
     _hub_manage_settings,
     _hub_secure,
 )
@@ -94,6 +92,16 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
     coordinator._client._process_event(event)
 
 
+def _live(event: dict) -> dict:
+    """Strip ``time`` so the frame classifies as a live transmission.
+
+    The fixtures carry a fixed (long-stale) timestamp, which the client would
+    classify as a reconnect replay — and a replay never makes a device a pending
+    candidate.
+    """
+    return {k: v for k, v in event.items() if k != "time"}
+
+
 async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
     hub = hub_entry_builder(availability_timeout=600, devices=devices, **kwargs)
     hub.add_to_hass(hass)
@@ -103,8 +111,8 @@ async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
 
 
 # ===========================================================================
-# Pure helper functions — _hub_secure / _hub_discovery_enabled /
-# _hub_availability_timeout / _hub_manage_settings
+# Pure helper functions — _hub_secure / _hub_availability_timeout /
+# _hub_manage_settings
 # ===========================================================================
 
 
@@ -135,41 +143,6 @@ def test_hub_secure_true_when_set():
 def test_hub_secure_false_when_explicit_false():
     entry = _make_entry(data={"secure": False})
     assert _hub_secure(entry) is False
-
-
-# --- _hub_discovery_enabled ------------------------------------------------
-
-
-def test_hub_discovery_enabled_defaults_true():
-    entry = _make_entry(data={})
-    assert _hub_discovery_enabled(entry) is True
-
-
-def test_hub_discovery_enabled_data_false():
-    entry = _make_entry(data={CONF_DISCOVERY_ENABLED: False})
-    assert _hub_discovery_enabled(entry) is False
-
-
-def test_hub_discovery_enabled_data_true():
-    entry = _make_entry(data={CONF_DISCOVERY_ENABLED: True})
-    assert _hub_discovery_enabled(entry) is True
-
-
-def test_hub_discovery_options_overrides_data_false():
-    """options takes precedence over data."""
-    entry = _make_entry(
-        data={CONF_DISCOVERY_ENABLED: True},
-        options={CONF_DISCOVERY_ENABLED: False},
-    )
-    assert _hub_discovery_enabled(entry) is False
-
-
-def test_hub_discovery_options_overrides_data_true():
-    entry = _make_entry(
-        data={CONF_DISCOVERY_ENABLED: False},
-        options={CONF_DISCOVERY_ENABLED: True},
-    )
-    assert _hub_discovery_enabled(entry) is True
 
 
 # --- _hub_availability_timeout ---------------------------------------------
@@ -698,18 +671,6 @@ async def test_setup_entry_coordinator_gets_correct_host_port(hass, hub_entry_bu
     assert coordinator.port == DEFAULT_PORT
 
 
-async def test_setup_entry_coordinator_discovery_enabled(hass, hub_entry_builder):
-    """discovery_enabled is propagated from the entry to the coordinator."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
-    assert _coordinator(hass, hub).discovery_enabled is True
-
-
-async def test_setup_entry_coordinator_discovery_disabled(hass, hub_entry_builder):
-    """discovery_enabled=False is propagated to the coordinator."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=False)
-    assert _coordinator(hass, hub).discovery_enabled is False
-
-
 async def test_setup_entry_coordinator_manages_settings_default(
     hass, hub_entry_builder
 ):
@@ -907,11 +868,11 @@ async def test_effective_timeout_resolver_int_coercion(hass, hub_entry_builder):
 
 
 async def test_new_device_callback_dispatches_signal(hass, hub_entry_builder, events):
-    """Feeding a new device dispatches the hub-level new-device signal."""
+    """Adopting a heard device dispatches the hub-level new-device signal."""
     from custom_components.rtl_433.const import signal_new_device
 
-    power_event = events("power_sensor.json")[0]
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    power_event = _live(events("power_sensor.json")[0])
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
 
     received: list[tuple] = []
@@ -924,80 +885,19 @@ async def test_new_device_callback_dispatches_signal(hass, hub_entry_builder, ev
         lambda device_key, model: received.append((device_key, model)),
     )
 
+    # Merely hearing the device dispatches nothing: it has no device or entities
+    # to build until the user adopts it.
     _feed(coordinator, power_event)
+    await hass.async_block_till_done()
+    assert received == []
+
+    coordinator.adopt_device("EnergyMeter-2000-1234")
     await hass.async_block_till_done()
 
     assert len(received) == 1
     device_key, model = received[0]
     assert device_key == "EnergyMeter-2000-1234"
     assert model == "EnergyMeter-2000"
-
-
-async def test_new_device_callback_notifies_for_new_device(
-    hass, hub_entry_builder, events
-):
-    """A genuinely new device triggers a persistent notification."""
-    # Drop ``time`` so the frame classifies as a live transmission, not a
-    # reconnect replay (a replay never raises the new-device notification).
-    power_event = {
-        k: v for k, v in events("power_sensor.json")[0].items() if k != "time"
-    }
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
-    coordinator = _coordinator(hass, hub)
-
-    notify_target = "custom_components.rtl_433.persistent_notification.async_create"
-    with patch(notify_target) as mock_notify:
-        _feed(coordinator, power_event)
-        await hass.async_block_till_done()
-
-    mock_notify.assert_called_once()
-    kwargs = mock_notify.call_args.kwargs
-    assert "EnergyMeter-2000-1234" in kwargs["notification_id"]
-    # Message names the device (the raw device key is only in the notification_id)
-    message = mock_notify.call_args.args[1]
-    assert "EnergyMeter-2000" in message
-
-
-async def test_new_device_callback_no_notification_for_known_device(
-    hass, hub_entry_builder
-):
-    """No notification when the device is already in the persisted map."""
-    device_key = "EnergyMeter-2000-1234"
-    hub = await _setup_hub(
-        hass,
-        hub_entry_builder,
-        discovery_enabled=True,
-        devices={
-            device_key: {CONF_MODEL: "EnergyMeter-2000", DEVICE_FIELDS: ["power_W"]}
-        },
-    )
-    coordinator = _coordinator(hass, hub)
-
-    notify_target = "custom_components.rtl_433.persistent_notification.async_create"
-    with patch(notify_target) as mock_notify:
-        _feed(coordinator, {"model": "EnergyMeter-2000", "id": 1234, "power_W": 100.0})
-        await hass.async_block_till_done()
-
-    mock_notify.assert_not_called()
-
-
-async def test_new_device_callback_uses_device_key_as_name_when_no_model(
-    hass, hub_entry_builder
-):
-    """When model is empty, the notification uses the device_key as the name."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
-    coordinator = _coordinator(hass, hub)
-    device_key = "Unknown-0"
-
-    notify_target = "custom_components.rtl_433.persistent_notification.async_create"
-    with patch(notify_target) as mock_notify:
-        _feed(coordinator, {"model": "Unknown", "id": 0})
-        await hass.async_block_till_done()
-
-    if mock_notify.called:
-        message = mock_notify.call_args.args[1]
-        # When no model, device_key is used as the name
-        assert device_key in message or "Unknown" in message
 
 
 # ===========================================================================
@@ -1089,12 +989,13 @@ async def test_remove_hub_device_returns_false(hass, hub_entry_builder):
 
 async def test_remove_nested_device_returns_true(hass, hub_entry_builder, events):
     """Removing a nested RF device returns True."""
-    power_event = events("power_sensor.json")[0]
+    power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
+    coordinator.adopt_device(device_key)
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
@@ -1110,12 +1011,13 @@ async def test_remove_nested_device_drops_from_devices_map(
     hass, hub_entry_builder, events
 ):
     """Removing a nested device drops it from entry.data[CONF_DEVICES]."""
-    power_event = events("power_sensor.json")[0]
+    power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
+    coordinator.adopt_device(device_key)
     await hass.async_block_till_done()
 
     assert device_key in hub.data.get(CONF_DEVICES, {})
@@ -1132,12 +1034,13 @@ async def test_remove_nested_device_calls_forget_device(
     hass, hub_entry_builder, events
 ):
     """Removing a nested device calls coordinator.forget_device."""
-    power_event = events("power_sensor.json")[0]
+    power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
+    coordinator.adopt_device(device_key)
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
@@ -1156,12 +1059,13 @@ async def test_remove_nested_device_calls_device_removers(
     hass, hub_entry_builder, events
 ):
     """Removing a nested device calls each registered device_remover."""
-    power_event = events("power_sensor.json")[0]
+    power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
+    coordinator.adopt_device(device_key)
     await hass.async_block_till_done()
 
     # Register a mock device remover
@@ -1184,12 +1088,13 @@ async def test_remove_device_coordinator_none_branch(hass, hub_entry_builder, ev
     exercises this branch: the device is still removed from the map, but
     forget_device is not called. The function still returns True.
     """
-    power_event = events("power_sensor.json")[0]
+    power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     _feed(coordinator, power_event)
+    coordinator.adopt_device(device_key)
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
@@ -1298,33 +1203,22 @@ async def test_update_listener_reloads_on_unique_id_rebind(hass, hub_entry_build
 
 
 async def test_update_listener_no_reload_for_unrelated_change(hass, hub_entry_builder):
-    """An unrelated options change (e.g. discovery toggle) does not reload."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+    """An options change the coordinator can absorb live (the timeout) does not reload."""
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
-    assert coordinator.discovery_enabled is True
+    assert coordinator.availability_timeout == 600
 
     with patch.object(
         hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
     ) as reload_spy:
         hass.config_entries.async_update_entry(
-            hub, options={CONF_DISCOVERY_ENABLED: False}
+            hub, options={CONF_AVAILABILITY_TIMEOUT: 120}
         )
         await hass.async_block_till_done()
 
     reload_spy.assert_not_called()
-    # The coordinator's discovery_enabled was updated live
-    assert coordinator.discovery_enabled is False
-
-
-async def test_update_listener_updates_discovery_live(hass, hub_entry_builder):
-    """Toggling discovery is applied live without reload."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
-    coordinator = _coordinator(hass, hub)
-
-    hass.config_entries.async_update_entry(hub, options={CONF_DISCOVERY_ENABLED: False})
-    await hass.async_block_till_done()
-
-    assert coordinator.discovery_enabled is False
+    # The coordinator's availability_timeout was updated live instead.
+    assert coordinator.availability_timeout == 120
 
 
 async def test_update_listener_updates_availability_timeout_live(

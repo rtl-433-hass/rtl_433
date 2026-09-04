@@ -9,17 +9,20 @@ connection. Setting one up loads the shipped mapping library (cached once on
 so the entity platforms reuse it, instantiates the push
 :class:`~custom_components.rtl_433.coordinator.Rtl433Coordinator`, injects the
 skip-keys, the effective-timeout resolver, and the new-device callback, registers
-the hub device, starts the coordinator, registers an options-update listener so
-toggling discovery / the timeout takes effect live, and forwards the
+the hub device, starts the coordinator, registers an options-update listener so a
+changed availability timeout takes effect live, and forwards the
 ``sensor`` / ``binary_sensor`` platforms once on the hub entry.
 
 RF devices are represented as **device-registry devices nested under the hub
 entry** (rfxtrx-style), not as their own config entries. They are recreated on
-startup from ``entry.data[CONF_DEVICES]`` and added at runtime via the
-new-device dispatcher signal (gated by the discovery toggle). A single nested
-device can be removed from its device page via
-:func:`async_remove_config_entry_device`; deleting the hub entry removes all
-nested devices and entities automatically.
+startup from ``entry.data[CONF_DEVICES]`` — the restart-safe record of the
+devices the user has adopted — and added at runtime via the new-device
+dispatcher signal when the user approves one from the coordinator's pending
+list. A device the user has not adopted is only ever *heard*; it never reaches
+the device registry. A single nested device can be removed from its device page
+via :func:`async_remove_config_entry_device`, which returns it to the pending
+list; deleting the hub entry removes all nested devices and entities
+automatically.
 
 The library loading lives in :mod:`.library`, the hub-setting resolvers in
 :mod:`.hub_settings`, and the config-entry migration / one-time legacy cleanups
@@ -30,7 +33,6 @@ from __future__ import annotations
 
 from pyrtl_433.library import event_driven_field_keys
 
-from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -41,6 +43,7 @@ from . import repairs
 from .const import (
     CONF_DEVICES,
     CONF_HOST,
+    CONF_IGNORED_DEVICES,
     CONF_INITIAL_FREQUENCY,
     CONF_PATH,
     CONF_PORT,
@@ -61,7 +64,6 @@ from .hub_settings import (
     _explicit_hub_timeout,
     _hub_availability_timeout,
     _hub_connection,
-    _hub_discovery_enabled,
     _hub_manage_settings,
     _hub_secure,
 )
@@ -133,40 +135,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return DEFAULT_MOTION_CLEAR_DELAY
 
     def new_device_callback(device_key: str, model: str, is_replay: bool) -> None:
-        """Dispatch the hub-level new-device signal for a newly observed device.
+        """Dispatch the hub-level new-device signal for an adopted device.
 
-        The coordinator only invokes this when discovery is enabled and the
-        device is new to its in-memory set (``is_new``), so the platform
-        listeners can add the nested device + its entities directly. The signal
-        is dispatched for replay-discovered devices too, so a device first seen
-        via a reconnect replay still gets its entities wired up and seeded.
+        The coordinator invokes this only for devices the user has adopted —
+        either on an adopted device's first frame this process, or from
+        ``adopt_device`` the moment the user approves a pending one — so the
+        platform listeners can add the nested device + its entities directly.
+        There is no notification: a device now exists in Home Assistant only
+        because the user asked for it, so there is nothing to alert them to.
 
-        The in-app persistent notification, however, is raised only for a
-        *genuine* first-time live discovery — a device that is both absent from
-        the persisted ``entry.data[CONF_DEVICES]`` map AND seen on a live (non
-        ``is_replay``) frame. The map is the restart-safe "ever-adopted" record,
-        so a device already in it is a known device re-observed after a
-        restart/reload (``coordinator.devices`` starts empty) and is not
-        re-notified. The ``is_replay`` gate additionally suppresses notifications
-        for the rtl_433 server's reconnect event-buffer replay: those frames are
-        re-broadcasts of already-transmitted events, never a new device's first
-        live transmission, so they must not raise a "new device" alert even if
-        the device has not yet landed in the persisted map. ``is_new_device`` is
-        captured *before* the dispatch, which schedules the deferred
-        ``async_upsert_device`` that adds the key to the map.
+        ``is_replay`` flags that the frame the entities are seeding from is a
+        reconnect re-broadcast rather than a live transmission; it is passed
+        through to the platform listeners unchanged.
         """
-        is_new_device = device_key not in entry.data.get(CONF_DEVICES, {})
         async_dispatcher_send(
             hass, signal_new_device(entry.entry_id), device_key, model
         )
-        if is_new_device and not is_replay:
-            name = model or device_key
-            persistent_notification.async_create(
-                hass,
-                f"A new device '{name}' was discovered on hub '{entry.title}'.",
-                title="rtl_433: New device discovered",
-                notification_id=(f"{DOMAIN}_new_device_{entry.entry_id}_{device_key}"),
-            )
 
     # Register the hub device so nested devices can link to it via ``via_device``.
     # The manufacturer/model start generic and are refined to the real SDR's
@@ -189,12 +173,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port=entry.data[CONF_PORT],
         path=entry.data[CONF_PATH],
         secure=_hub_secure(entry),
-        discovery_enabled=_hub_discovery_enabled(entry),
         manage_settings=_hub_manage_settings(entry),
         availability_timeout=_hub_availability_timeout(entry),
         initial_center_frequency=entry.data.get(CONF_INITIAL_FREQUENCY),
         skip_keys=entry_skip_keys,
         event_driven_keys=entry_event_driven_keys,
+        # The persisted devices map is the restart-safe record of what the user
+        # has approved, so it is what tells the coordinator which frames may
+        # reach Home Assistant; everything else is heard into the pending list.
+        adopted_keys=set(entry.data.get(CONF_DEVICES, {})),
+        ignored_keys=set(entry.data.get(CONF_IGNORED_DEVICES, [])),
     )
 
     @callback
@@ -294,16 +282,27 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     reconfigure, Supervisor-discovery and rebind paths only *write* the new
     target and this listener is the single place that reloads the hub.
 
-    Discovery-toggle and availability-timeout changes are applied live instead
-    (the coordinator reads ``discovery_enabled`` / ``availability_timeout`` on
-    every event and watchdog tick), so no reload is required for those and we
-    avoid the disruption of tearing the socket down.
+    An availability-timeout change is applied live instead (the coordinator
+    reads ``availability_timeout`` on every watchdog tick), so no reload is
+    required for it and we avoid the disruption of tearing the socket down.
+
+    The hub's ignore list is applied live too, and *first*: ignoring or
+    un-ignoring a device changes nothing about the devices and entities that
+    exist, so tearing the WebSocket down for it would be gratuitous. Pushing it
+    before the reload comparisons also means the options flow's ignore-only write
+    can never fall through to one of them, and a change that does reload simply
+    re-seeds the set from ``entry.data`` at setup.
     """
     coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
         entry.entry_id
     )
     if coordinator is None:
         return
+
+    # Applied first, and unconditionally: ignoring a device must take effect on
+    # its very next transmission, and it is the one change here that never needs
+    # a reload, so it must not sit behind an early return below.
+    coordinator.ignored = set(entry.data.get(CONF_IGNORED_DEVICES, []))
 
     if _hub_connection(entry) != coordinator.connection_snapshot:
         # A reconfigure / re-advertised discovery / rebind re-pointed the hub at a
@@ -332,12 +331,10 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
         await hass.config_entries.async_reload(entry.entry_id)
         return
 
-    coordinator.discovery_enabled = _hub_discovery_enabled(entry)
     coordinator.availability_timeout = _hub_availability_timeout(entry)
     LOGGER.debug(
-        "rtl_433 hub %s options updated (discovery=%s, timeout=%ss)",
+        "rtl_433 hub %s options updated (timeout=%ss)",
         entry.title,
-        coordinator.discovery_enabled,
         coordinator.availability_timeout,
     )
 
@@ -367,9 +364,9 @@ async def async_remove_config_entry_device(
     Refuses to remove the hub device itself (identifier
     ``(DOMAIN, entry.entry_id)``) so the hub cannot be deleted out from under its
     config entry. For a nested device, drops it from the hub's devices map and
-    evicts its ``device_key`` from the coordinator's runtime state (so a
-    re-transmitting device is treated as new and can re-appear while discovery is
-    on).
+    un-adopts its ``device_key`` in the coordinator, so the device's next
+    transmission makes it a pending candidate the user can choose to add again
+    rather than silently re-creating the device they just deleted.
     """
     if (DOMAIN, config_entry.entry_id) in device_entry.identifiers:
         return False
@@ -397,8 +394,8 @@ async def async_remove_config_entry_device(
         if coordinator is not None:
             coordinator.forget_device(device_key)
             # Drop the entity platforms' per-device dedup cache and field
-            # listeners so the device re-appears cleanly if it transmits again
-            # while discovery is on.
+            # listeners so the device re-appears cleanly if the user later adds
+            # it back from the pending list.
             for remover in list(coordinator.device_removers):
                 remover(device_key)
 

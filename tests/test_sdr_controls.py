@@ -32,7 +32,6 @@ import pytest
 
 from custom_components.rtl_433.const import (
     CONF_AVAILABILITY_TIMEOUT,
-    CONF_DISCOVERY_ENABLED,
     CONF_MANAGE_SETTINGS,
     DOMAIN,
     sdr_store_key,
@@ -125,6 +124,9 @@ async def coordinator(hass, hub_entry_builder, aioclient_mock):
         host="rtl433.local",
         manage_settings=True,
         skip_keys={"model", "id", "channel", "subtype", "time", "mic"},
+        # Pre-adopted so the "the event stream is undisturbed" assertions see the
+        # frame land in the runtime state rather than the pending list.
+        adopted_keys={"Acurite-606TX-42"},
     )
 
 
@@ -744,11 +746,9 @@ async def test_toggle_manage_settings_triggers_reload(hass, hub_entry_builder):
     reload.assert_called_once_with(hub.entry_id)
 
 
-async def test_timeout_and_discovery_change_applied_live_no_reload(
-    hass, hub_entry_builder
-):
-    """A timeout / discovery-only options change applies live without reload."""
-    hub = await _setup_hub(hass, hub_entry_builder, discovery_enabled=True)
+async def test_timeout_change_applied_live_no_reload(hass, hub_entry_builder):
+    """A timeout-only options change applies live without reloading the entry."""
+    hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = hass.data[DOMAIN][hub.entry_id]
 
     with patch.object(hass.config_entries, "async_reload") as reload:
@@ -756,7 +756,6 @@ async def test_timeout_and_discovery_change_applied_live_no_reload(
             hub,
             options={
                 CONF_AVAILABILITY_TIMEOUT: 123,
-                CONF_DISCOVERY_ENABLED: False,
                 # manage_settings unchanged -> no reload.
                 CONF_MANAGE_SETTINGS: True,
             },
@@ -764,9 +763,8 @@ async def test_timeout_and_discovery_change_applied_live_no_reload(
         await hass.async_block_till_done()
 
     reload.assert_not_called()
-    # The live values were pushed straight into the running coordinator.
+    # The live value was pushed straight into the running coordinator.
     assert coordinator.availability_timeout == 123
-    assert coordinator.discovery_enabled is False
 
 
 # --------------------------------------------------------------------------- #

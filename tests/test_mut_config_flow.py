@@ -57,7 +57,6 @@ from custom_components.rtl_433.const import (
     COMMODITY_WATER,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
-    CONF_DISCOVERY_ENABLED,
     CONF_HOST,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
@@ -590,17 +589,26 @@ async def test_reconfigure_same_host_port_does_not_collide_with_self(
 
 
 async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_builder):
-    """Options init shows 'hub', 'device', 'mappings' and 'replace'."""
+    """Options init offers the approval pair first, then the settings steps.
+
+    The order is part of the contract: adding a heard device is the only way one
+    reaches Home Assistant, so it leads, with "ignored devices" beside it as the
+    place a user looks for a device that stopped being offered; 'replace' stays
+    last as the rarest and most consequential action.
+    """
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
-    assert "hub" in result["menu_options"]
-    assert "device" in result["menu_options"]
-    assert "mappings" in result["menu_options"]
-    assert "replace" in result["menu_options"]
-    assert len(result["menu_options"]) == 4
+    assert result["menu_options"] == [
+        "add_devices",
+        "ignored_devices",
+        "hub",
+        "device",
+        "mappings",
+        "replace",
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -620,26 +628,6 @@ async def test_hub_step_shows_form(hass, hub_entry_builder):
     assert result["step_id"] == "hub"
 
 
-async def test_hub_step_persists_discovery_false(hass, hub_entry_builder):
-    """Hub step writes CONF_DISCOVERY_ENABLED=False to entry.options."""
-    entry = hub_entry_builder(discovery_enabled=True)
-    entry.add_to_hass(hass)
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
-    )
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_DISCOVERY_ENABLED: False,
-            CONF_AVAILABILITY_TIMEOUT: 300,
-            CONF_MANAGE_SETTINGS: True,
-        },
-    )
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert entry.options[CONF_DISCOVERY_ENABLED] is False
-
-
 async def test_hub_step_persists_exact_timeout(hass, hub_entry_builder):
     """Hub step writes CONF_AVAILABILITY_TIMEOUT exactly as submitted."""
     entry = hub_entry_builder()
@@ -651,7 +639,6 @@ async def test_hub_step_persists_exact_timeout(hass, hub_entry_builder):
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_DISCOVERY_ENABLED: True,
             CONF_AVAILABILITY_TIMEOUT: 999,
             CONF_MANAGE_SETTINGS: True,
         },
@@ -671,7 +658,6 @@ async def test_hub_step_persists_manage_settings(hass, hub_entry_builder):
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_DISCOVERY_ENABLED: True,
             CONF_AVAILABILITY_TIMEOUT: 600,
             CONF_MANAGE_SETTINGS: False,
         },
@@ -691,7 +677,6 @@ async def test_hub_step_entry_title_is_empty(hass, hub_entry_builder):
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_DISCOVERY_ENABLED: True,
             CONF_AVAILABILITY_TIMEOUT: 600,
             CONF_MANAGE_SETTINGS: True,
         },
@@ -700,42 +685,15 @@ async def test_hub_step_entry_title_is_empty(hass, hub_entry_builder):
     assert result["title"] == ""
 
 
-async def test_hub_step_default_discovery_from_options(hass, hub_entry_builder):
-    """Hub step pre-fills discovery from entry.options when available."""
-    entry = hub_entry_builder(
-        options={CONF_DISCOVERY_ENABLED: False, CONF_AVAILABILITY_TIMEOUT: 120}
-    )
-    entry.add_to_hass(hass)
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
-    )
-    assert result["type"] is FlowResultType.FORM
-    assert _schema_default(result, CONF_DISCOVERY_ENABLED) is False
-
-
 async def test_hub_step_default_timeout_from_options(hass, hub_entry_builder):
     """Hub step pre-fills timeout from entry.options when available."""
-    entry = hub_entry_builder(
-        options={CONF_DISCOVERY_ENABLED: True, CONF_AVAILABILITY_TIMEOUT: 123}
-    )
+    entry = hub_entry_builder(options={CONF_AVAILABILITY_TIMEOUT: 123})
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "hub"}
     )
     assert _schema_default(result, CONF_AVAILABILITY_TIMEOUT) == 123
-
-
-async def test_hub_step_default_discovery_from_data_fallback(hass, hub_entry_builder):
-    """Hub step falls back to entry.data[CONF_DISCOVERY_ENABLED] when not in options."""
-    entry = hub_entry_builder(discovery_enabled=False)
-    entry.add_to_hass(hass)
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
-    )
-    assert _schema_default(result, CONF_DISCOVERY_ENABLED) is False
 
 
 async def test_hub_step_default_timeout_falls_back_to_constant(hass, hub_entry_builder):

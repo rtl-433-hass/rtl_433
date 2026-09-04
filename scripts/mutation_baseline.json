@@ -26,9 +26,9 @@
       "total": 12
     },
     "custom_components/rtl_433/coordinator/_events.py": {
-      "killed": 83,
-      "score": 0.813725,
-      "total": 102
+      "killed": 149,
+      "score": 0.973856,
+      "total": 153
     },
     "custom_components/rtl_433/coordinator/_sdr.py": {
       "killed": 127,

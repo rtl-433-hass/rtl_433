@@ -43,4 +43,4 @@ Services**, ready to add with one click.
 For any other rtl_433 server, add a hub manually using the
 [configuration guide](configuration.md). You will see the connection form below.
 
-![The rtl_433 config flow form: host, port, WebSocket path, secure toggle, managed-settings and discovery toggles, and initial frequency](images/06-config-user.png)
+![The rtl_433 config flow form: host, port, WebSocket path, secure toggle, managed-settings toggle, and initial frequency](images/06-config-user.png)

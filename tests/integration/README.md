@@ -16,18 +16,21 @@ captures documentation screenshots with Playwright.
 ## What it proves
 
 A single `rtl_433` process replays a real Acurite capture continuously; the
-integration connects over a WebSocket, discovers the device, creates entities
-with correct device classes/units, and flips them to `unavailable` when the
-stream stops. Playwright captures these screenshots (see `../../screenshots/`):
+integration connects over a WebSocket, holds every device it hears as a pending
+candidate, creates entities with correct device classes/units for the ones the
+run adds from the options flow, and flips them to `unavailable` when the stream
+stops. Playwright captures these screenshots (see `../../screenshots/`):
 
 | File | Shows |
 | --- | --- |
 | `02-device-page.png` | The device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
-| `03-options-flow.png` | The hub options flow menu (Hub settings / Device settings / Device mappings) |
+| `03-options-flow.png` | The hub options flow menu (Add discovered devices / Ignored devices / Hub settings / Device settings / Device mappings / Replace device) |
+| `15-add-devices.png` | The **Add discovered devices** step: every heard-but-not-added device, each labelled with its model, key, sighting count, signal level and last-seen, over the Add and Ignore multi-selects |
+| `16-ignored-devices.png` | The **Ignored devices** step, with the ignored leak detector waiting to be un-ignored |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
 | `05-mapping-overrides.png` | The **Device mappings** step: the YAML editor pre-filled with an example per-hub override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
-| `07-hub-settings.png` | The **Hub settings** step (discovery, default availability timeout, managed settings) |
+| `07-hub-settings.png` | The **Hub settings** step (default availability timeout, managed settings) |
 | `13-device-picker.png` | The **Device settings** device picker, with the SCMplus meter labelled `— gas detected` from its `MeterType` |
 | `08-device-settings.png` | The per-device settings step for that meter (timeout override, meter commodity pre-filled to Gas) |
 | `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
@@ -42,6 +45,17 @@ Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
 The doorbell / energy meter / SCMplus gas meter / door / leak devices in the richer shots come from
 `ws-bridge.mjs` replaying the project fixtures in `tests/fixtures/` (configured
 via `FIXTURE_FILES` in `docker-compose.yml`) alongside the live Acurite capture.
+Each fixture event of a round is emitted `FIXTURE_STEP_MS` apart so no two share
+a timestamp: a frame stamped at or before the client's replay high-water mark is
+classified as an already-seen replay, and a replayed frame never becomes a
+pending candidate — a whole round emitted at once would leave only its first
+device visible.
+
+Nothing is added to Home Assistant automatically, so the `shots` stage works the
+approval flow for real: it captures the options menu and the populated
+**Add discovered devices** form, adds five devices, ignores the leak detector,
+captures the **Ignored devices** step, then un-ignores and adds the leak detector
+too — which is why the later shots have a full hub to work with.
 
 ## Prerequisites
 

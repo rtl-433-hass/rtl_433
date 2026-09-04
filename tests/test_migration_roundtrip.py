@@ -12,11 +12,14 @@ isolation), these tests seed a full registry snapshot using the contract's exact
 ``unique_id`` and device ``identifiers`` templates, run ``async_migrate_entry``
 end-to-end, and compare the before/after identity sets:
 
-- **latest entry** (``version=2, minor_version=7``): migration is a no-op that
+- **latest entry** (``version=2, minor_version=8``): migration is a no-op that
   preserves every entity and device unchanged;
 - **legacy entry** (``version=1``): migration reaches ``version=2,
-  minor_version=7`` monotonically (never downgrading) while re-homing — not
-  destroying — the pre-existing registry objects.
+  minor_version=8`` monotonically (never downgrading) while re-homing — not
+  destroying — the pre-existing registry objects;
+- **minor 7 entry**: the retired ``discovery_enabled`` toggle is stripped from
+  both ``data`` and ``options`` while every adopted device, per-device override
+  and calibration survives the upgrade unchanged.
 
 Contract templates encoded here (see COMPATIBILITY_CONTRACT.md §2, §3):
 
@@ -29,11 +32,16 @@ Contract templates encoded here (see COMPATIBILITY_CONTRACT.md §2, §3):
 
 from __future__ import annotations
 
+from copy import deepcopy
 from unittest.mock import patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rtl_433.const import (
+    CALIBRATION_COMMODITY,
+    CALIBRATION_SCALE,
+    CALIBRATION_UNIT,
+    COMMODITY_WATER,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICE_KEY,
     CONF_DEVICES,
@@ -44,7 +52,10 @@ from custom_components.rtl_433.const import (
     CONF_PATH,
     CONF_PORT,
     CONF_USER_MAPPINGS,
+    DEVICE_CALIBRATION,
     DEVICE_FIELDS,
+    DEVICE_MOTION_CLEAR_DELAY,
+    DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
     ENTRY_TYPE_HUB,
@@ -58,7 +69,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 # The current declared schema (COMPATIBILITY_CONTRACT.md §1).
 CONTRACT_VERSION = 2
-CONTRACT_MINOR_VERSION = 7
+CONTRACT_MINOR_VERSION = 8
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +212,7 @@ async def test_latest_entry_roundtrip_preserves_registry_identity(hass):
 async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(hass):
     """A legacy v1 hub (with a v1 child device entry) migrates to v2/m7.
 
-    Asserts the terminal schema is exactly ``version=2, minor_version=7``, that
+    Asserts the terminal schema is exactly ``version=2, minor_version=8``, that
     the version never decreases along the path (monotonic, non-downgrading), and
     that every pre-existing registry device/entity survives — re-homed onto the
     hub, never destroyed or duplicated.
@@ -336,3 +347,136 @@ async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(ha
 
     # The legacy child config entry was consolidated away.
     assert hass.config_entries.async_get_entry(child_id) is None
+
+
+# ===========================================================================
+# Minor 7 -> 8: the retired discovery toggle is stripped, devices are not
+# ===========================================================================
+
+# The retired per-hub toggle, spelled as a literal for the same reason the
+# migration does: the constant is gone, but entries written by older versions
+# still carry the string, and this test is what proves they stop carrying it.
+RETIRED_DISCOVERY_KEY = "discovery_enabled"
+
+
+def _upgraded_devices_map() -> dict[str, dict]:
+    """Three adopted devices carrying the settings a real upgrade would hold.
+
+    Deliberately not a minimal map: a timeout override, a motion clear delay and
+    a utility-meter calibration between them, because those are the per-device
+    settings a careless migration would flatten, and the equality assertion they
+    feed is the one that stands between an upgrade and every current user's
+    configuration.
+    """
+    return {
+        "Acurite-Tower-1234": {
+            CONF_MODEL: "Acurite-Tower",
+            DEVICE_FIELDS: ["humidity", "temperature_C"],
+            DEVICE_TIMEOUT_OVERRIDE: 1800,
+        },
+        "GenericDoor-X1-88": {
+            CONF_MODEL: "GenericDoor-X1",
+            DEVICE_FIELDS: ["closed"],
+            DEVICE_MOTION_CLEAR_DELAY: 45,
+        },
+        "WaterMeter-3000-77": {
+            CONF_MODEL: "WaterMeter-3000",
+            DEVICE_FIELDS: ["consumption_data"],
+            DEVICE_CALIBRATION: {
+                CALIBRATION_COMMODITY: COMMODITY_WATER,
+                CALIBRATION_UNIT: "L",
+                CALIBRATION_SCALE: 0.1,
+            },
+        },
+    }
+
+
+def _minor_7_entry(hass, *, devices, with_toggle: bool) -> MockConfigEntry:
+    """Build (and register) a pre-upgrade hub entry at version 2, minor 7."""
+    data = {
+        CONF_HOST: "rtl433.local",
+        CONF_PORT: 8433,
+        CONF_PATH: "/ws",
+        CONF_USER_MAPPINGS: {},
+        CONF_DEVICES: devices,
+    }
+    options = {CONF_AVAILABILITY_TIMEOUT: 300}
+    if with_toggle:
+        # A real upgrade carries the key in *both* mappings: the add flows wrote
+        # it into ``data`` and the hub options step wrote it into ``options``.
+        data[RETIRED_DISCOVERY_KEY] = True
+        options[RETIRED_DISCOVERY_KEY] = False
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="rtl_433 (rtl433.local)",
+        version=2,
+        minor_version=7,
+        data=data,
+        options=options,
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_minor_7_upgrade_strips_the_toggle_and_preserves_every_device(hass):
+    """The toggle goes from ``data`` and ``options``; nothing else moves.
+
+    Discovery stopped being a toggle — every heard device now waits for an
+    explicit add — so a value left behind would show up in diagnostics and
+    config-entry exports as though it still meant something. The removal has to
+    be exactly that narrow, though: the devices map is every current user's
+    adopted devices, per-device overrides and calibrations, and the equality
+    assertion below is what proves the upgrade does not disturb it.
+    """
+    devices = _upgraded_devices_map()
+    before = deepcopy(devices)
+    entry = _minor_7_entry(hass, devices=devices, with_toggle=True)
+
+    assert await async_migrate_entry(hass, entry) is True
+
+    assert entry.version == CONTRACT_VERSION
+    assert entry.minor_version == CONTRACT_MINOR_VERSION
+    assert RETIRED_DISCOVERY_KEY not in entry.data
+    assert RETIRED_DISCOVERY_KEY not in entry.options
+    # Every adopted device, override and calibration survives byte-for-byte.
+    assert entry.data[CONF_DEVICES] == before
+    # And the strip is narrow: the neighbouring keys are untouched.
+    assert entry.data[CONF_HOST] == "rtl433.local"
+    assert entry.data[CONF_USER_MAPPINGS] == {}
+    assert entry.options == {CONF_AVAILABILITY_TIMEOUT: 300}
+
+
+async def test_toggle_strip_is_idempotent_and_writes_nothing_when_absent(hass):
+    """An entry with no toggle is bumped, not rewritten; a re-run does nothing.
+
+    The strip compares before it writes, which matters twice over: an entry that
+    never carried the key must not be rewritten (a needless write fires the
+    update listener, and on a loaded hub that is a chance to reload for nothing),
+    and re-running migration against an already-migrated entry — which happens on
+    every restart — must be a complete no-op.
+    """
+    devices = _upgraded_devices_map()
+    before = deepcopy(devices)
+    entry = _minor_7_entry(hass, devices=devices, with_toggle=False)
+
+    updates: list[dict] = []
+    original = hass.config_entries.async_update_entry
+
+    def _capture(target_entry, **kwargs):
+        updates.append(kwargs)
+        return original(target_entry, **kwargs)
+
+    with patch.object(hass.config_entries, "async_update_entry", side_effect=_capture):
+        assert await async_migrate_entry(hass, entry) is True
+        # The only write is the version bump: no data / options rewrite.
+        assert updates == [{"version": 2, "minor_version": CONTRACT_MINOR_VERSION}]
+
+        # Re-running against the migrated entry writes nothing at all.
+        updates.clear()
+        assert await async_migrate_entry(hass, entry) is True
+        assert updates == []
+
+    assert entry.version == CONTRACT_VERSION
+    assert entry.minor_version == CONTRACT_MINOR_VERSION
+    assert entry.data[CONF_DEVICES] == before
+    assert entry.options == {CONF_AVAILABILITY_TIMEOUT: 300}

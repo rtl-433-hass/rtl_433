@@ -52,8 +52,6 @@ CONF_PATH: Final = "path"
 # Free-text "new stable radio unique_id" the user supplies when re-pointing a hub
 # at a replacement radio (reconfigure / discovery-replace / unreachable repair).
 CONF_RADIO_ID: Final = "radio_id"
-# Per-hub toggle for surfacing newly observed devices via discovery flow.
-CONF_DISCOVERY_ENABLED: Final = "discovery_enabled"
 # Per-hub toggle: let Home Assistant manage (adopt + enforce) the SDR settings.
 # When on, the hub exposes number/select/switch controls and re-applies the
 # stored desired state after a reconnect; when off, those controls are not
@@ -101,6 +99,12 @@ CONF_MODEL: Final = "model"
 # and their entities on startup, for the dynamic-add listeners, the options-flow
 # per-device override, and the 0.1.0 migration.
 CONF_DEVICES: Final = "devices"
+# Per-hub list of device keys the user has explicitly ignored. Ignored devices
+# never enter the coordinator's pending list, so they cannot be adopted by
+# accident and do not reappear after a restart. Mirrors Home Assistant's
+# "ignored discovered integrations": the user-facing verb is *Ignore*, never
+# "reject". Stored under ``entry.data`` as a list of device keys.
+CONF_IGNORED_DEVICES: Final = "ignored_devices"
 # Sub-keys inside one ``entry.data[CONF_DEVICES][device_key]`` record. The model
 # reuses ``CONF_MODEL`` ("model"); the others are defined here.
 DEVICE_FIELDS: Final = "fields"  # sorted list of observed mapped field keys
@@ -272,9 +276,10 @@ def signal_device_update(hub_entry_id: str, device_key: str) -> str:
     return SIGNAL_DEVICE_UPDATE.format(hub_entry_id=hub_entry_id, device_key=device_key)
 
 
-# Hub-level "a new (previously unknown) device was observed" signal. The
-# coordinator's new-device callback (wired in ``__init__.py``) dispatches this,
-# gated by the per-hub discovery toggle; the entity platforms subscribe to it to
+# Hub-level "an adopted device needs building" signal. The coordinator's
+# new-device callback (wired in ``__init__.py``) dispatches this for a device the
+# user has adopted -- either on its first frame of this process, or the moment it
+# is adopted from the options flow -- and the entity platforms subscribe to it to
 # create the nested device and its entities at runtime (the ``dynamic-devices``
 # Quality Scale rule). Carries ``(device_key, model)``.
 SIGNAL_NEW_DEVICE: Final = "rtl_433_new_device_{hub_entry_id}"
