@@ -293,6 +293,35 @@ async def test_event_time_advisory_silent_before_first_frame(
     unsub()
 
 
+async def test_event_time_advisory_clears_after_a_reload(
+    hass: HomeAssistant, hub_entry_builder
+):
+    """A card raised before a reload is cleared by the tracker that follows it.
+
+    The issue registry outlives a config-entry reload; the tracker's closure does
+    not. If clearing were gated on the in-memory "already flagged" state, a fresh
+    tracker would come up with that state at False and never take down a card
+    raised by its predecessor -- while the card itself promises it clears once
+    timestamps start arriving.
+    """
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+
+    # A card left over from before the reload.
+    repairs.async_raise_event_time_unusable(hass, entry)
+    issue_reg = ir.async_get(hass)
+    issue_id = repairs._event_time_issue_id(entry)
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
+
+    # The reload: a brand-new coordinator and tracker, server now stamping fine.
+    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator._client.time_precision = TimePrecision.SECOND
+    unsub = repairs.async_track_event_time_precision(hass, entry, coordinator)
+
+    assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
+    unsub()
+
+
 async def test_event_time_fix_flow_acknowledges_and_silences(
     hass: HomeAssistant, hub_entry_builder
 ):

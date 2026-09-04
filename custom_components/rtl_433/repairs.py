@@ -1,7 +1,7 @@
 """Repairs surface for the rtl_433 integration.
 
 Scope is deliberately tight: repairs cover only *genuinely
-actionable* problems, not speculative ones). Two hub-scoped issues live here:
+actionable* problems, not speculative ones). Three hub-scoped issues live here:
 
 - **server unreachable** — raised when a hub's WebSocket coordinator has been
   unable to stay connected, cleared automatically the moment it comes back.
@@ -13,12 +13,19 @@ actionable* problems, not speculative ones). Two hub-scoped issues live here:
   decode fine at the low rate, so the advisory is optional; it is edge-triggered
   so a dismissed card is not re-raised while the condition persists, and the
   "keep" choice sets a persisted per-hub flag so it never re-raises again.
+- **event time unusable** — an advisory raised when the server stamps events in a
+  form that cannot be parsed, which switches the library's reconnect-replay
+  suppression off entirely. Its fix flow only acknowledges: the remedy is a
+  server-side ``report_meta`` setting, so confirming sets a persisted per-hub flag
+  and the card otherwise clears itself once readable stamps arrive.
 
 The coordinator package is intentionally left untouched (it owns no HA-repairs
 knowledge). Instead :func:`async_track_hub_reachability` polls the coordinator's
 ``connected`` flag on an interval, and :func:`async_track_sample_rate` re-reads
-``coordinator.meta`` on each ``signal_hub_update``. ``__init__.py`` wires both in
-during hub setup and registers their unsubscribes via ``entry.async_on_unload``.
+``coordinator.meta`` on each ``signal_hub_update``, as
+:func:`async_track_event_time_precision` does for ``coordinator.time_precision``.
+``__init__.py`` wires all three in during hub setup and registers their
+unsubscribes via ``entry.async_on_unload``.
 """
 
 from __future__ import annotations
@@ -326,7 +333,13 @@ def async_track_event_time_precision(
         if unusable and not state["flagged"]:
             state["flagged"] = True
             async_raise_event_time_unusable(hass, entry)
-        elif not unusable and state["flagged"]:
+        elif not unusable:
+            # Cleared without consulting ``flagged``: the issue outlives a
+            # config-entry reload but this closure does not, so a card raised
+            # before the reload would otherwise never be taken down -- and its
+            # text promises it clears itself once timestamps start arriving.
+            # Deleting an absent issue is a no-op, so calling unconditionally
+            # costs nothing.
             state["flagged"] = False
             async_clear_event_time_unusable(hass, entry)
 
@@ -529,12 +542,14 @@ class SampleRateRepairFlow(RepairsFlow):
 class EventTimeRepairFlow(RepairsFlow):
     """Fix flow for the unusable-event-time advisory: acknowledge and silence.
 
-    There is no "apply" branch to offer. The remedy is the server's
-    ``report_meta time:...`` setting, and the ``/cmd`` surface this integration
-    drives has no setter for it — rtl_433 takes it from its own configuration. So
-    the card explains the change to make, and confirming records the durable
-    per-hub flag that keeps the edge-triggered tracker quiet across restarts for
-    a user who deliberately runs without parseable timestamps.
+    There is no "apply" branch to offer. rtl_433 does accept ``report_meta`` over
+    ``/cmd``, but pyrtl_433 exposes no setter for it, and a setting pushed over
+    the socket would not survive the server restart the operator is being asked
+    to make anyway — the durable form of this change lives in rtl_433's own
+    configuration. So the card explains the change to make, and confirming
+    records the durable per-hub flag that keeps the edge-triggered tracker quiet
+    across restarts for a user who deliberately runs without parseable
+    timestamps.
     """
 
     def __init__(self, entry: ConfigEntry) -> None:
@@ -566,7 +581,9 @@ async def async_create_fix_flow(
     radio is what raised it, so this is the natural recovery surface). The
     ``sample_rate_low_for_band`` advisory gets a two-option menu flow that either
     *applies* the recommended 1.024 MS/s rate or *keeps* the current rate and
-    durably silences the advisory for the hub. Every other issue is
+    durably silences the advisory for the hub. ``event_time_unusable`` gets a
+    single confirm step, because its remedy is server-side and only the
+    acknowledgement is ours to record. Every other issue is
     informational/dismissible, so a simple confirm-and-dismiss flow is the right
     surface; those issues also self-clear, so the confirm dialog mainly lets a
     user dismiss a stale card.
