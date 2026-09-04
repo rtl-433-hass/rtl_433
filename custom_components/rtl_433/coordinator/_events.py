@@ -39,15 +39,21 @@ from ..const import CONF_DEVICES, LOGGER
 # per device the receiver hears" is not self-limiting: 433 MHz is a shared band
 # that produces spurious decodes with arbitrary ids, and several real protocols
 # roll their id on a battery change, so an uncapped map grows for the life of the
-# config entry. pyrtl_433 caps its own replay bookkeeping the same way and for
-# the same reason, but that cap covers only the library's map -- these are ours.
+# config entry.
 #
-# Unlike the library we cannot evict blindly: a key with entities behind it must
-# keep its state or those entities lose what they read. So only keys that never
-# materialized into a device are evictable, and an install that genuinely runs
-# more than this many *real* devices simply exceeds the cap rather than breaking.
-# Sized far above the few dozen devices a busy receiver actually hears.
-_MAX_TRACKED_DEVICES = 512
+# What it can bound is narrower than that, and worth being plain about: a key
+# with entities behind it must keep its state or those entities lose what they
+# read, so only keys that never materialized into a device are evictable. With
+# discovery on, every key that arrives registers, so the cap holds nothing back
+# and the map still grows with the device registry -- discovery off (which the
+# docs already recommend in urban areas) is where this does its work. An install
+# genuinely running more real devices than this simply exceeds the cap.
+#
+# Distinct from ``pyrtl_433.client._MAX_TRACKED_DEVICES``, the identically-sized
+# cap the library puts on its own replay bookkeeping for the same reason. That
+# one is a blind LRU over the library's map; this one is ours and protects real
+# devices. Raising one does not raise the other.
+_MAX_TRACKED_DEVICE_STATES = 512
 
 
 class _EventProcessingMixin:
@@ -134,23 +140,37 @@ class _EventProcessingMixin:
         are all real -- which is every hub running with discovery on, since each
         key registers as it arrives -- would rescan a map that only grows, on
         every frame, forever, to reach the same answer.
+
+        The walk itself is read-only, with the victims dropped afterwards: the
+        map cannot be mutated while it is being iterated, and taking a snapshot
+        to iterate instead would copy every key on a path that usually drops one.
         """
         if len(self.devices) <= self._evict_floor:
             return
         adopted = self.entry.data.get(CONF_DEVICES, {})
-        for key in list(self.devices)[:-1]:
-            if key in self._discovered or key in adopted:
+        newest = next(reversed(self.devices))
+        remaining = len(self.devices)
+        victims: list[str] = []
+        for key in self.devices:
+            if remaining <= _MAX_TRACKED_DEVICE_STATES:
+                break
+            # The frame just taken is never its own candidate.
+            if key == newest or key in self._discovered or key in adopted:
                 continue
+            victims.append(key)
+            remaining -= 1
+
+        if not victims:
+            self._evict_floor = len(self.devices)
+            return
+        for key in victims:
             LOGGER.debug(
                 "rtl_433 evicting cold device state for %s (over the %d key cap)",
                 key,
-                _MAX_TRACKED_DEVICES,
+                _MAX_TRACKED_DEVICE_STATES,
             )
             # ``forget_device`` lowers the floor back to the cap for us.
             self.forget_device(key)
-            if len(self.devices) <= _MAX_TRACKED_DEVICES:
-                return
-        self._evict_floor = len(self.devices)
 
     def _trace_unmapped_fields(self, key: str, field_keys: set[str]) -> None:
         """DEBUG-log a device's fields that resolve to no library descriptor.
