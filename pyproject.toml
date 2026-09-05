@@ -23,9 +23,9 @@ requires-python = ">=3.14"
 # they cannot drift apart (the same guard already used for ruff).
 [dependency-groups]
 dev = [
-    "pytest-homeassistant-custom-component==0.13.357",
+    "pytest-homeassistant-custom-component==0.13.362",
     "pyrtl_433==0.4.0",
-    "home-assistant-frontend==20260826.2",
+    "home-assistant-frontend==20260826.4",
     "mutmut==3.7.0",
 ]
 
