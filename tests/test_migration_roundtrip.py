@@ -27,7 +27,7 @@ Contract templates encoded here (see COMPATIBILITY_CONTRACT.md §2, §3):
 - hub control entity ``unique_id`` = ``f"{entry_id}:hub:{suffix}"``
 - hub device ``identifiers`` = ``{(DOMAIN, entry_id)}``
 - per-device ``identifiers`` = ``{(DOMAIN, f"{entry_id}:{device_key}")}`` with
-  ``via_device=(DOMAIN, entry_id)``
+  ``via_device_id`` set to the hub device's id
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ def _device_identifier_map(dev_reg: dr.DeviceRegistry) -> dict[tuple[str, str], 
     two device_ids after migration (which would split one physical device in two).
     """
     result: dict[tuple[str, str], str] = {}
-    for device in dev_reg.devices.values():
+    for device in dev_reg.devices:
         for ident in device.identifiers:
             if ident[0] == DOMAIN:
                 # A registry-level invariant already forbids the same identifier on
@@ -151,12 +151,14 @@ async def test_latest_entry_roundtrip_preserves_registry_identity(hass):
     eid = entry.entry_id
 
     # --- Devices: hub + one nested device per device_key (contract §3) ---
-    dev_reg.async_get_or_create(config_entry_id=eid, identifiers={(DOMAIN, eid)})
+    hub_device = dev_reg.async_get_or_create(
+        config_entry_id=eid, identifiers={(DOMAIN, eid)}
+    )
     for device_key in (device_a, device_b):
         dev_reg.async_get_or_create(
             config_entry_id=eid,
             identifiers={(DOMAIN, f"{eid}:{device_key}")},
-            via_device=(DOMAIN, eid),
+            via_device_id=hub_device.id,
         )
 
     # --- Entities: per-device field entities (contract §2) ---
@@ -254,11 +256,13 @@ async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(ha
 
     # Hub device is owned by the hub entry; nested device + its entities are owned
     # by the *child* entry, exactly as the 0.1.0 per-device model created them.
-    dev_reg.async_get_or_create(config_entry_id=hub_id, identifiers={(DOMAIN, hub_id)})
+    hub_device = dev_reg.async_get_or_create(
+        config_entry_id=hub_id, identifiers={(DOMAIN, hub_id)}
+    )
     nested = dev_reg.async_get_or_create(
         config_entry_id=child_id,
         identifiers={(DOMAIN, f"{hub_id}:{device_key}")},
-        via_device=(DOMAIN, hub_id),
+        via_device_id=hub_device.id,
     )
 
     temp_ent = ent_reg.async_get_or_create(
@@ -326,11 +330,12 @@ async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(ha
 
     # The nested device kept its identifier tuple and was re-homed onto the hub
     # (owned by the hub entry now, no longer by the removed child).
-    rehomed = dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub_id}:{device_key}")})
+    rehomed = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub_id}:{device_key}"), hub_id
+    )
     assert rehomed is not None
     assert rehomed.id == nested.id  # same physical device, not a duplicate
-    assert hub_id in rehomed.config_entries
-    assert child_id not in rehomed.config_entries
+    assert rehomed.config_entry_id == hub_id
 
     # Field entities survived and were re-homed onto the hub.
     for ent in (temp_ent, hum_ent, last_seen_ent):

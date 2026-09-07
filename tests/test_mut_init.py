@@ -402,11 +402,13 @@ async def test_cleanup_phantom_removes_registry_device(hass, hub_entry_builder):
         config_entry_id=hub.entry_id,
         identifiers={phantom_ident},
     )
-    assert dev_reg.async_get_device(identifiers={phantom_ident}) is not None
+    assert (
+        dev_reg.async_get_device_by_identifier(phantom_ident, hub.entry_id) is not None
+    )
 
     _cleanup_phantom_unknown_device(hass, hub, dev_reg)
 
-    assert dev_reg.async_get_device(identifiers={phantom_ident}) is None
+    assert dev_reg.async_get_device_by_identifier(phantom_ident, hub.entry_id) is None
 
 
 async def test_cleanup_phantom_no_registry_device_is_noop(hass, hub_entry_builder):
@@ -434,7 +436,10 @@ async def test_cleanup_phantom_leaves_hub_device_untouched(hass, hub_entry_build
     _cleanup_phantom_unknown_device(hass, hub, dev_reg)
 
     # Hub device still exists
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)}) is not None
+    assert (
+        dev_reg.async_get_device_by_identifier((DOMAIN, hub.entry_id), hub.entry_id)
+        is not None
+    )
 
 
 # ===========================================================================
@@ -577,7 +582,9 @@ async def test_setup_entry_registers_hub_device(hass, hub_entry_builder):
     hub = await _setup_hub(hass, hub_entry_builder)
 
     dev_reg = dr.async_get(hass)
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     assert hub_device is not None
     assert hub_device.manufacturer == "rtl_433"
     assert hub_device.name == hub.title
@@ -598,7 +605,9 @@ async def test_hub_info_callback_updates_hub_device_identity(hass, hub_entry_bui
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     assert hub_device.manufacturer == "Realtek"
     assert hub_device.model == "RTL2838UHIDIR"
     assert hub_device.serial_number == "00000001"
@@ -614,7 +623,9 @@ async def test_hub_info_callback_noop_when_identity_empty(hass, hub_entry_builde
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     assert hub_device.manufacturer == "rtl_433"
     assert hub_device.model == "rtl_433 server"
     assert hub_device.serial_number is None
@@ -980,7 +991,9 @@ async def test_remove_hub_device_returns_false(hass, hub_entry_builder):
     """Attempting to remove the hub device itself returns False."""
     hub = await _setup_hub(hass, hub_entry_builder)
     dev_reg = dr.async_get(hass)
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     assert hub_device is not None
 
     result = await async_remove_config_entry_device(hass, hub, hub_device)
@@ -1000,7 +1013,9 @@ async def test_remove_nested_device_returns_true(hass, hub_entry_builder, events
 
     dev_reg = dr.async_get(hass)
     prefix = f"{hub.entry_id}:{device_key}"
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, prefix), hub.entry_id
+    )
     assert device_entry is not None
 
     result = await async_remove_config_entry_device(hass, hub, device_entry)
@@ -1024,7 +1039,9 @@ async def test_remove_nested_device_drops_from_devices_map(
 
     dev_reg = dr.async_get(hass)
     prefix = f"{hub.entry_id}:{device_key}"
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, prefix), hub.entry_id
+    )
     await async_remove_config_entry_device(hass, hub, device_entry)
 
     assert device_key not in hub.data.get(CONF_DEVICES, {})
@@ -1045,7 +1062,9 @@ async def test_remove_nested_device_calls_forget_device(
 
     dev_reg = dr.async_get(hass)
     prefix = f"{hub.entry_id}:{device_key}"
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, prefix), hub.entry_id
+    )
 
     with patch.object(
         coordinator, "forget_device", wraps=coordinator.forget_device
@@ -1074,7 +1093,9 @@ async def test_remove_nested_device_calls_device_removers(
 
     dev_reg = dr.async_get(hass)
     prefix = f"{hub.entry_id}:{device_key}"
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, prefix), hub.entry_id
+    )
     await async_remove_config_entry_device(hass, hub, device_entry)
 
     assert device_key in removed_keys
@@ -1099,7 +1120,9 @@ async def test_remove_device_coordinator_none_branch(hass, hub_entry_builder, ev
 
     dev_reg = dr.async_get(hass)
     prefix = f"{hub.entry_id}:{device_key}"
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, prefix), hub.entry_id
+    )
     assert device_entry is not None
 
     # Pop DOMAIN entirely from hass.data so .get(DOMAIN, {}).get(entry_id) is None
@@ -1540,11 +1563,13 @@ async def test_migrate_entry_v1_device_rehomes_registry_devices(hass):
     await async_migrate_entry(hass, hub)
 
     # The device is now owned by the hub
-    updated_dev = dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub_id}:{key_a}")})
+    updated_dev = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub_id}:{key_a}"), hub_id
+    )
     assert updated_dev is not None
-    assert hub_id in updated_dev.config_entries
-    # The child entry no longer owns the device
-    assert child.entry_id not in updated_dev.config_entries
+    # A device belongs to exactly one config entry, so this also says the child
+    # entry no longer owns it.
+    assert updated_dev.config_entry_id == hub_id
 
 
 # ===========================================================================
@@ -1560,10 +1585,10 @@ async def test_rehome_device_objects_skips_when_same_entry(hass, hub_entry_build
     dev_reg = dr.async_get(hass)
     er.async_get(hass)
 
-    before_devs = list(dev_reg.devices.keys())
+    before_devs = [device.id for device in dev_reg.devices]
     # Should return immediately without touching anything
     _rehome_device_objects(hass, hub, hub.entry_id)
-    after_devs = list(dev_reg.devices.keys())
+    after_devs = [device.id for device in dev_reg.devices]
     assert before_devs == after_devs
 
 
@@ -1596,21 +1621,21 @@ async def test_rehome_device_objects_moves_devices_to_hub(hass):
         config_entry_id=source_id,
         identifiers={(DOMAIN, f"{hub_id}:MySensor-1")},
     )
-    assert source_id in dev.config_entries
+    assert dev.config_entry_id == source_id
 
     _rehome_device_objects(hass, source, hub_id)
 
-    updated = dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub_id}:MySensor-1")})
-    assert hub_id in updated.config_entries
-    assert source_id not in updated.config_entries
+    updated = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub_id}:MySensor-1"), hub_id
+    )
+    assert updated.config_entry_id == hub_id
 
 
 async def test_rehome_device_objects_idempotent_for_devices(hass):
     """Calling _rehome_device_objects twice is safe (idempotent for devices).
 
-    After re-homing, the device already belongs to hub_entry_id; a second call
-    is a no-op for devices (add_config_entry_id is idempotent, remove finds
-    nothing to remove for the source).
+    After re-homing, the device already belongs to hub_entry_id, so the source
+    entry's device list is empty and the second call finds nothing to move.
     """
     hub_id = "hub-id-001"
     source_id = "child-id-001"
@@ -1637,18 +1662,21 @@ async def test_rehome_device_objects_idempotent_for_devices(hass):
         config_entry_id=source_id,
         identifiers={(DOMAIN, f"{hub_id}:MySensor-42")},
     )
-    assert source_id in dev.config_entries
+    assert dev.config_entry_id == source_id
 
     # First call re-homes the device
     _rehome_device_objects(hass, source, hub_id)
-    dev1 = dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub_id}:MySensor-42")})
-    assert hub_id in dev1.config_entries
-    assert source_id not in dev1.config_entries
+    dev1 = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub_id}:MySensor-42"), hub_id
+    )
+    assert dev1.config_entry_id == hub_id
 
     # Second call is a no-op (device already belongs to hub)
     _rehome_device_objects(hass, source, hub_id)
-    dev2 = dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub_id}:MySensor-42")})
-    assert hub_id in dev2.config_entries
+    dev2 = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub_id}:MySensor-42"), hub_id
+    )
+    assert dev2.config_entry_id == hub_id
 
 
 # ===========================================================================
@@ -1710,7 +1738,7 @@ async def test_phantom_cleanup_during_setup(hass, hub_entry_builder):
 
     assert PHANTOM_DEVICE_KEY not in hub.data.get(CONF_DEVICES, {})
     assert real_key in hub.data[CONF_DEVICES]
-    assert dev_reg.async_get_device(identifiers={phantom_ident}) is None
+    assert dev_reg.async_get_device_by_identifier(phantom_ident, hub.entry_id) is None
 
 
 # ===========================================================================

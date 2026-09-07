@@ -2049,12 +2049,13 @@ class Rtl433Panel extends HTMLElement {
   /**
    * The device ids this hub owns, from the device registry.
    *
-   * `hass.devices` is keyed by device id and each entry lists the config
-   * entries it belongs to, so this is a filter rather than a lookup. The
-   * receiver's own device is *included*, because the row this count sits on
-   * opens Home Assistant's device list filtered to this entry -- and that list
-   * includes it. A count that disagreed with what clicking it shows would read
-   * as a bug in the count.
+   * `hass.devices` is keyed by device id and each entry names the single config
+   * entry that owns it (`config_entry_id`; the older `config_entries` list is
+   * deprecated and goes away in Home Assistant 2027.8), so this is a filter
+   * rather than a lookup. The receiver's own device is *included*, because the
+   * row this count sits on opens Home Assistant's device list filtered to this
+   * entry -- and that list includes it. A count that disagreed with what
+   * clicking it shows would read as a bug in the count.
    */
   _entryDeviceIds() {
     const devices = this._hass && this._hass.devices;
@@ -2062,11 +2063,7 @@ class Rtl433Panel extends HTMLElement {
       return null;
     }
     return Object.values(devices)
-      .filter(
-        (device) =>
-          device.config_entries &&
-          device.config_entries.includes(this._entryId)
-      )
+      .filter((device) => device.config_entry_id === this._entryId)
       .map((device) => device.id);
   }
 

@@ -120,11 +120,11 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
     # Sanity: the state under test really is the collision case.
     assert before_old
     assert before_new
-    old_device_id = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{OLD_KEY}")}
+    old_device_id = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{OLD_KEY}"), hub.entry_id
     ).id
-    duplicate_device_id = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{NEW_KEY}")}
+    duplicate_device_id = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{NEW_KEY}"), hub.entry_id
     ).id
     assert old_device_id != duplicate_device_id
 
@@ -164,13 +164,15 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
 
     # The device row was re-pointed in place, not recreated: same row id, new
     # identifiers, and the serial number now reports the new transmitter id.
-    new_device = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{NEW_KEY}")}
+    new_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{NEW_KEY}"), hub.entry_id
     )
     assert new_device.id == old_device_id
     assert new_device.serial_number == "9f3c"
     assert (
-        dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub.entry_id}:{OLD_KEY}")})
+        dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{hub.entry_id}:{OLD_KEY}"), hub.entry_id
+        )
         is None
     )
 
