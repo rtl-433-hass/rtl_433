@@ -191,11 +191,11 @@ class TestCleanupPhantomUnknownDevice:
             config_entry_id=hub.entry_id,
             identifiers={ident},
         )
-        assert dev_reg.async_get_device(identifiers={ident}) is not None
+        assert dev_reg.async_get_device_by_identifier(ident, hub.entry_id) is not None
 
         _cleanup_phantom_unknown_device(hass, hub, dev_reg)
 
-        assert dev_reg.async_get_device(identifiers={ident}) is None
+        assert dev_reg.async_get_device_by_identifier(ident, hub.entry_id) is None
 
     async def test_different_identifier_not_removed(self, hass, hub_entry_builder):
         """Devices with non-phantom identifiers are not removed."""
@@ -208,12 +208,16 @@ class TestCleanupPhantomUnknownDevice:
             config_entry_id=hub.entry_id,
             identifiers={real_ident},
         )
-        assert dev_reg.async_get_device(identifiers={real_ident}) is not None
+        assert (
+            dev_reg.async_get_device_by_identifier(real_ident, hub.entry_id) is not None
+        )
 
         _cleanup_phantom_unknown_device(hass, hub, dev_reg)
 
         # Real device is still there
-        assert dev_reg.async_get_device(identifiers={real_ident}) is not None
+        assert (
+            dev_reg.async_get_device_by_identifier(real_ident, hub.entry_id) is not None
+        )
 
     async def test_phantom_from_different_hub_not_removed(
         self, hass, hub_entry_builder
@@ -232,7 +236,10 @@ class TestCleanupPhantomUnknownDevice:
         _cleanup_phantom_unknown_device(hass, hub, dev_reg)
 
         # Other hub's phantom is NOT removed
-        assert dev_reg.async_get_device(identifiers={other_ident}) is not None
+        assert (
+            dev_reg.async_get_device_by_identifier(other_ident, hub.entry_id)
+            is not None
+        )
 
     async def test_no_update_when_no_phantom_in_map_but_registry_device_present(
         self, hass, hub_entry_builder
@@ -259,7 +266,7 @@ class TestCleanupPhantomUnknownDevice:
             _cleanup_phantom_unknown_device(hass, hub, dev_reg)
 
         # Registry device removed regardless
-        assert dev_reg.async_get_device(identifiers={ident}) is None
+        assert dev_reg.async_get_device_by_identifier(ident, hub.entry_id) is None
         # But devices-map write only happens when PHANTOM_DEVICE_KEY was in map
         # (it wasn't here)
         assert "real" in hub.data[CONF_DEVICES]
@@ -1215,15 +1222,15 @@ class TestRehomeDeviceObjects:
             config_entry_id=hub.entry_id,
             identifiers={(DOMAIN, f"{hub.entry_id}:Dev-1")},
         )
-        before_entries = set(dev.config_entries)
+        before_entry = dev.config_entry_id
 
         _rehome_device_objects(hass, hub, hub.entry_id)
 
         # Nothing changed
-        updated = dev_reg.async_get_device(
-            identifiers={(DOMAIN, f"{hub.entry_id}:Dev-1")}
+        updated = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{hub.entry_id}:Dev-1"), hub.entry_id
         )
-        assert set(updated.config_entries) == before_entries
+        assert updated.config_entry_id == before_entry
 
     async def test_entity_config_entry_id_repointed_to_hub(self, hass):
         """Entities owned by source entry are moved to hub_entry_id."""
@@ -1261,8 +1268,8 @@ class TestRehomeDeviceObjects:
         updated_ent = ent_reg.async_get(ent.entity_id)
         assert updated_ent.config_entry_id == hub_id
 
-    async def test_device_config_entry_add_before_remove(self, hass):
-        """Hub entry_id is added to device before source entry_id is removed."""
+    async def test_device_moved_to_hub_config_entry(self, hass):
+        """The device is moved from the source entry onto the hub entry."""
         hub_id = "hub-entry-1"
         source_id = "child-entry-1"
 
@@ -1288,13 +1295,12 @@ class TestRehomeDeviceObjects:
             config_entry_id=source_id,
             identifiers={(DOMAIN, "test-dev-1")},
         )
-        assert source_id in dev.config_entries
+        assert dev.config_entry_id == source_id
 
         _rehome_device_objects(hass, source, hub_id)
 
-        updated = dev_reg.async_get_device(identifiers={(DOMAIN, "test-dev-1")})
-        assert hub_id in updated.config_entries
-        assert source_id not in updated.config_entries
+        updated = dev_reg.async_get_device_by_identifier((DOMAIN, "test-dev-1"), hub_id)
+        assert updated.config_entry_id == hub_id
 
     async def test_only_source_entry_devices_are_moved(self, hass):
         """Devices NOT owned by source entry are not touched."""
@@ -1335,8 +1341,10 @@ class TestRehomeDeviceObjects:
 
         _rehome_device_objects(hass, source, hub_id)
 
-        still_there = dev_reg.async_get_device(identifiers={(DOMAIN, "other-dev")})
-        assert other_id in still_there.config_entries
+        still_there = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, "other-dev"), other_id
+        )
+        assert still_there.config_entry_id == other_id
 
 
 # ===========================================================================
@@ -3446,14 +3454,15 @@ class TestKillSurvivingMutants:
             config_entry_id=device.entry_id,
             identifiers={(DOMAIN, f"{hub_id}:Sensor-1")},
         )
-        assert device.entry_id in dev.config_entries
+        assert dev.config_entry_id == device.entry_id
 
         await async_migrate_entry(hass, device)
 
         # Device must be re-homed to hub (not to None)
-        updated = dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub_id}:Sensor-1")})
-        assert hub_id in updated.config_entries
-        assert device.entry_id not in updated.config_entries
+        updated = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{hub_id}:Sensor-1"), hub_id
+        )
+        assert updated.config_entry_id == hub_id
 
     async def test_migrate_entry_minor_2_sets_exact_version_2(self, hass):
         """User mappings step sets version=2, minor_version=2 exactly.

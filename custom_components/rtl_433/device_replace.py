@@ -91,8 +91,8 @@ async def async_replace_device(
         if regent.unique_id.startswith(new_prefix):
             ent_reg.async_remove(regent.entity_id)
 
-    duplicate = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{entry.entry_id}:{new_key}")}
+    duplicate = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:{new_key}"), entry.entry_id
     )
     if duplicate is not None:
         dev_reg.async_remove_device(duplicate.id)
@@ -113,8 +113,8 @@ async def async_replace_device(
     # a user-assigned ``name_by_user`` is a separate registry field that must be
     # preserved, and the generated name is recomputed from the new key when the
     # entities are rebuilt after the reload.
-    old_device = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{entry.entry_id}:{old_key}")}
+    old_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:{old_key}"), entry.entry_id
     )
     if old_device is not None:
         dev_reg.async_update_device(

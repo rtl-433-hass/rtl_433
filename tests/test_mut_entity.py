@@ -409,8 +409,8 @@ async def test_device_info_identifiers(hass, hub_entry_builder):
     )
     dev_reg = dr.async_get(hass)
     # The nested device is registered with the correct identifier
-    device_entry = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{device_key}"), hub.entry_id
     )
     assert device_entry is not None
 
@@ -429,8 +429,8 @@ async def test_device_info_manufacturer(hass, hub_entry_builder):
         },
     )
     dev_reg = dr.async_get(hass)
-    device_entry = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{device_key}"), hub.entry_id
     )
     assert device_entry is not None
     assert device_entry.manufacturer == "rtl_433"
@@ -501,8 +501,8 @@ async def test_device_name_with_model(hass, hub_entry_builder):
         },
     )
     dev_reg = dr.async_get(hass)
-    device_entry = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{device_key}"), hub.entry_id
     )
     assert device_entry is not None
     # Only the distinguishing id suffix follows the model, not the whole key.
@@ -524,8 +524,8 @@ async def test_device_name_without_model_is_device_key(hass, hub_entry_builder):
         },
     )
     dev_reg = dr.async_get(hass)
-    device_entry = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{device_key}"), hub.entry_id
     )
     # The name is device_key when model is falsy
     assert device_entry.name == device_key
@@ -546,8 +546,8 @@ async def test_device_name_model_only_has_no_suffix(hass, hub_entry_builder):
         },
     )
     dev_reg = dr.async_get(hass)
-    device_entry = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{device_key}"), hub.entry_id
     )
     assert device_entry is not None
     # No redundant "Foo (Foo)" and no trailing space — just the model.
@@ -569,8 +569,8 @@ async def test_device_model_set_when_model_present(hass, hub_entry_builder):
         },
     )
     dev_reg = dr.async_get(hass)
-    device_entry = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{device_key}"), hub.entry_id
     )
     assert device_entry.model == model
 
@@ -589,10 +589,12 @@ async def test_device_via_device_links_to_hub(hass, hub_entry_builder):
         },
     )
     dev_reg = dr.async_get(hass)
-    nested = dev_reg.async_get_device(
-        identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+    nested = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{hub.entry_id}:{device_key}"), hub.entry_id
     )
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     assert nested is not None
     assert hub_device is not None
     # via_device_id must be the hub device — not None, not something else
@@ -1550,7 +1552,9 @@ async def test_hub_entity_device_info_identifiers(hass, hub_entry_builder):
     dev_reg = dr.async_get(hass)
     ent_reg = er.async_get(hass)
 
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     assert hub_device is not None
 
     connectivity_eid = ent_reg.async_get_entity_id(

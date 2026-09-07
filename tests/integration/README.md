@@ -226,7 +226,7 @@ change and was out of scope for this harness.
 | Component | Pin |
 | --- | --- |
 | rtl_433 image | `hertzg/rtl_433@sha256:bcfd12afa59efc1ae8316ac21757b5e4161d4a42baaa91f609b4bcca9525dcfd` (rtl_433 25.12, arm64) |
-| Home Assistant | `ghcr.io/home-assistant/home-assistant@sha256:ceb1202133a5a036e8b03e20a10eb113186cc2f871968323c6fc6c3fc4205716` (2026.5.4, arm64) |
+| Home Assistant | `ghcr.io/home-assistant/home-assistant@sha256:612d76760b544cb40b7ba01387fdac964c59a6a550a50a4d30b4773c822d2918` (2026.9.1, arm64) |
 | Node (bridge) | `node@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920` (node:22-alpine, arm64) |
 | Captures submodule | `merbanan/rtl_433_tests` @ `1244ba1f79a9f1bd93fcd989dd2101b0f0c6cbc4`, sparse: `tests/acurite/Acurite_592TXR`, `tests/acurite/Acurite_606TX`, `tests/scmplus/01`, `tests/ert/scm/01` (the SCM dirs feed the golden fixtures, not this harness — see `../fixtures/generated/README.md`) |
 | Playwright | `1.49.1` (see `package.json`) |

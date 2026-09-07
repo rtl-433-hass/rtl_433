@@ -23,8 +23,10 @@ from pyrtl_433.library import FieldDescriptor
 from pyrtl_433.normalizer import NormalizedEvent
 import pytest
 
+from custom_components.rtl_433.const import DOMAIN
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.event import Rtl433Event
+from homeassistant.helpers import device_registry as dr
 
 _TRACE_LOGGER = "custom_components.rtl_433"
 _DEVICE_KEY = "Honeywell-Doorbell-7"
@@ -35,11 +37,16 @@ _FIELD_KEY = "secret_knock"
 async def event_entity(hass, hub_entry_builder) -> Rtl433Event:
     """A doorbell ``secret_knock`` event entity wired to a bare coordinator.
 
-    ``__init__`` only reads ``coordinator.entry.data`` and the descriptor, so a
-    plain coordinator is enough; the dispatch hooks are patched per-test.
+    ``__init__`` reads ``coordinator.entry.data``, the descriptor and the hub
+    device's registry id (for ``via_device_id``), so a plain coordinator plus the
+    hub device ``async_setup_entry`` always registers first is enough; the
+    dispatch hooks are patched per-test.
     """
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={(DOMAIN, entry.entry_id)}
+    )
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
     descriptor = FieldDescriptor(
         field_key=_FIELD_KEY,

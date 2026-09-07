@@ -278,7 +278,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass, signal_new_device(entry.entry_id), device_key, model
         )
 
-    # Register the hub device so nested devices can link to it via ``via_device``.
+    # Register the hub device so nested devices can link to it by ``via_device_id``.
     # The manufacturer/model start generic and are refined to the real SDR's
     # vendor/product/serial once the coordinator connects (``hub_info_callback``).
     device_registry = dr.async_get(hass)
@@ -331,8 +331,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             updates["serial_number"] = info["serial"]
         if not updates:
             return
-        device = device_registry.async_get_device(
-            identifiers={(DOMAIN, entry.entry_id)}
+        device = device_registry.async_get_device_by_identifier(
+            (DOMAIN, entry.entry_id), entry.entry_id
         )
         if device is not None:
             device_registry.async_update_device(device.id, **updates)

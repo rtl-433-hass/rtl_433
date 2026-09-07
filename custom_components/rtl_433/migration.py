@@ -110,8 +110,8 @@ def _cleanup_phantom_unknown_device(
             entry, data={**entry.data, CONF_DEVICES: cleaned}
         )
 
-    phantom = device_registry.async_get_device(
-        identifiers={(DOMAIN, f"{entry.entry_id}:{PHANTOM_DEVICE_KEY}")}
+    phantom = device_registry.async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:{PHANTOM_DEVICE_KEY}"), entry.entry_id
     )
     if phantom is not None:
         device_registry.async_remove_device(phantom.id)
@@ -345,12 +345,11 @@ def _rehome_device_objects(
     identifiers and the entity unique_ids/entity_ids are never touched — only
     *which config entry owns them* changes — so history is preserved.
 
-    For each device-registry device linked to the legacy entry the hub
-    ``config_entry_id`` is **added first**, then the legacy one removed, so the
-    device is never momentarily orphaned. Then every entity belonging to the
-    legacy entry has its ``config_entry_id`` repointed to the hub. The function
-    is idempotent: if a device/entity has already been re-homed it simply finds
-    nothing left to move.
+    Each device-registry device linked to the legacy entry is moved onto the hub
+    entry in a single ``new_config_entry_id`` update, so the device is never
+    momentarily orphaned. Then every entity belonging to the legacy entry has its
+    ``config_entry_id`` repointed to the hub. The function is idempotent: if a
+    device/entity has already been re-homed it simply finds nothing left to move.
     """
     if hub_entry_id == device_entry.entry_id:
         return
@@ -358,12 +357,14 @@ def _rehome_device_objects(
     dev_reg = dr.async_get(hass)
     ent_reg = er.async_get(hass)
 
-    for device in list(dev_reg.devices.values()):
-        if device_entry.entry_id in device.config_entries:
-            dev_reg.async_update_device(device.id, add_config_entry_id=hub_entry_id)
-            dev_reg.async_update_device(
-                device.id, remove_config_entry_id=device_entry.entry_id
-            )
+    # Each move drops the device out of the registry's per-entry index, which is
+    # what backs this lookup. ``async_entries_for_config_entry`` already returns a
+    # fresh list rather than a live view, so the iteration is safe either way; the
+    # ``list(...)`` keeps that independent of the helper's internals.
+    for device in list(
+        dr.async_entries_for_config_entry(dev_reg, device_entry.entry_id)
+    ):
+        dev_reg.async_update_device(device.id, new_config_entry_id=hub_entry_id)
 
     for entity in er.async_entries_for_config_entry(ent_reg, device_entry.entry_id):
         ent_reg.async_update_entity(entity.entity_id, config_entry_id=hub_entry_id)

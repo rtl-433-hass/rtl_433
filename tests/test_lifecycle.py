@@ -221,13 +221,17 @@ async def test_seeded_device_creates_entities_with_metadata(hass, hub_entry_buil
     assert state.attributes["state_class"] == "measurement"
     assert hass.states.get(energy).attributes["state_class"] == "total_increasing"
 
-    # The nested device is registered under the hub via via_device.
+    # The nested device is registered under the hub via via_device_id.
     dev_reg = dr.async_get(hass)
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, prefix), hub.entry_id
+    )
     assert device_entry is not None
     assert device_entry.via_device_id is not None
-    # The via_device is the hub device.
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    # The via device is the hub device.
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     assert device_entry.via_device_id == hub_device.id
 
 
@@ -284,7 +288,9 @@ async def test_hub_connectivity_sensor(hass, hub_entry_builder):
 
     # The entity belongs to the hub device.
     dev_reg = dr.async_get(hass)
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     assert ent_reg.async_get(entity_id).device_id == hub_device.id
 
 
@@ -381,7 +387,9 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
 
     # The surviving hub sensors are diagnostic and live on the hub device.
     dev_reg = dr.async_get(hass)
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     cf_entry = ent_reg.async_get(sensor_id("center_frequency"))
     assert cf_entry.device_id == hub_device.id
     assert cf_entry.entity_category == "diagnostic"
@@ -437,7 +445,9 @@ async def test_hub_noise_sensors_track_autolevel_log_frames(hass, hub_entry_buil
 
     # The log frame never became a phantom device: only the hub device exists.
     dev_reg = dr.async_get(hass)
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     noise_entry = ent_reg.async_get(sensor_id("noise_level"))
     assert noise_entry.device_id == hub_device.id
     assert noise_entry.entity_category == "diagnostic"
@@ -512,14 +522,19 @@ async def test_new_device_added_when_adopted(hass, hub_entry_builder, events):
     # Heard, but nothing exists in Home Assistant until the user asks for it.
     assert device_key in coordinator.pending
     assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is None
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
+    assert (
+        dev_reg.async_get_device_by_identifier((DOMAIN, prefix), hub.entry_id) is None
+    )
     assert device_key not in hub.data.get(CONF_DEVICES, {})
 
     coordinator.adopt_device(device_key)
     await hass.async_block_till_done()
 
     assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is not None
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is not None
+    assert (
+        dev_reg.async_get_device_by_identifier((DOMAIN, prefix), hub.entry_id)
+        is not None
+    )
     # The adopted device was folded into the hub's devices map.
     assert device_key in hub.data.get(CONF_DEVICES, {})
     assert "power_W" in hub.data[CONF_DEVICES][device_key][DEVICE_FIELDS]
@@ -696,12 +711,16 @@ async def test_remove_device_then_re_add_after_adoption(
     dev_reg = dr.async_get(hass)
     prefix = f"{hub.entry_id}:{device_key}"
 
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, prefix), hub.entry_id
+    )
     assert device_entry is not None
     assert device_key in coordinator.devices
 
     # async_remove_config_entry_device refuses the hub device.
-    hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    hub_device = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, hub.entry_id), hub.entry_id
+    )
     assert await async_remove_config_entry_device(hass, hub, hub_device) is False
 
     # Removing the nested device returns True; map + coordinator state cleared.
@@ -715,7 +734,9 @@ async def test_remove_device_then_re_add_after_adoption(
     # delete would), then confirm they are gone.
     dev_reg.async_remove_device(device_entry.id)
     await hass.async_block_till_done()
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
+    assert (
+        dev_reg.async_get_device_by_identifier((DOMAIN, prefix), hub.entry_id) is None
+    )
     assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is None
 
     # The device transmits again: deletion un-adopted it, so it comes back as a
@@ -723,7 +744,9 @@ async def test_remove_device_then_re_add_after_adoption(
     _feed(coordinator, power_event)
     await hass.async_block_till_done()
     assert device_key in coordinator.pending
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
+    assert (
+        dev_reg.async_get_device_by_identifier((DOMAIN, prefix), hub.entry_id) is None
+    )
 
     # Adopting it again re-creates it WITHOUT a reload. This exercises the full
     # eviction path: async_remove_config_entry_device evicts the coordinator
@@ -732,7 +755,10 @@ async def test_remove_device_then_re_add_after_adoption(
     # listener, so re-adoption recreates the device and its entities cleanly.
     coordinator.adopt_device(device_key)
     await hass.async_block_till_done()
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is not None
+    assert (
+        dev_reg.async_get_device_by_identifier((DOMAIN, prefix), hub.entry_id)
+        is not None
+    )
     assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is not None
     assert device_key in hub.data.get(CONF_DEVICES, {})
 
@@ -817,11 +843,16 @@ async def test_phantom_unknown_device_cleaned_up(hass, hub_entry_builder):
     assert "unknown" not in hub.data.get(CONF_DEVICES, {})
     assert real_key in hub.data[CONF_DEVICES]
     assert (
-        dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub.entry_id}:unknown")})
+        dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{hub.entry_id}:unknown"), hub.entry_id
+        )
         is None
     )
     # The hub device itself is untouched.
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)}) is not None
+    assert (
+        dev_reg.async_get_device_by_identifier((DOMAIN, hub.entry_id), hub.entry_id)
+        is not None
+    )
 
     # Re-running setup is a no-op (reload) — nothing left to clean.
     assert await hass.config_entries.async_reload(hub.entry_id)
@@ -829,7 +860,9 @@ async def test_phantom_unknown_device_cleaned_up(hass, hub_entry_builder):
     assert "unknown" not in hub.data.get(CONF_DEVICES, {})
     assert real_key in hub.data[CONF_DEVICES]
     assert (
-        dev_reg.async_get_device(identifiers={(DOMAIN, f"{hub.entry_id}:unknown")})
+        dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{hub.entry_id}:unknown"), hub.entry_id
+        )
         is None
     )
 
@@ -939,13 +972,12 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
 
     # Both devices are now associated with the hub config entry.
     for key in (key_a, key_b):
-        device = dev_reg.async_get_device(
-            identifiers={(DOMAIN, f"{hub_entry_id}:{key}")}
+        device = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{hub_entry_id}:{key}"), hub_entry_id
         )
         assert device is not None
-        assert hub.entry_id in device.config_entries
-        assert device_a.entry_id not in device.config_entries
-        assert device_b.entry_id not in device.config_entries
+        # One owner per device, so this also says neither legacy entry owns it.
+        assert device.config_entry_id == hub.entry_id
 
     # The seeded entities still exist, unchanged, and now owned by the hub.
     for unique_id, entity_id in pre.items():
@@ -2005,7 +2037,9 @@ async def test_delete_then_re_transmit_returns_device_to_pending(
     await hass.async_block_till_done()
 
     # Remove the nested device: drops it from the map + un-adopts it.
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, prefix), hub.entry_id
+    )
     assert device_entry is not None
     assert await async_remove_config_entry_device(hass, hub, device_entry) is True
     dev_reg.async_remove_device(device_entry.id)
@@ -2018,7 +2052,9 @@ async def test_delete_then_re_transmit_returns_device_to_pending(
     await hass.async_block_till_done()
     assert device_key in coordinator.pending
     assert device_key not in hub.data.get(CONF_DEVICES, {})
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
+    assert (
+        dev_reg.async_get_device_by_identifier((DOMAIN, prefix), hub.entry_id) is None
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -2096,8 +2132,8 @@ async def test_adopted_device_matches_a_seeded_device(hass, hub_entry_builder, e
     assert adopted_entities == _entities(seeded_hub)
 
     def _device(hub):
-        return dev_reg.async_get_device(
-            identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")}
+        return dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{hub.entry_id}:{device_key}"), hub.entry_id
         )
 
     adopted_device, seeded_device = _device(adopted_hub), _device(seeded_hub)
@@ -2110,7 +2146,9 @@ async def test_adopted_device_matches_a_seeded_device(hass, hub_entry_builder, e
     )
     # Each nests under its own hub, so an adopted device is not left orphaned.
     for hub, device in ((adopted_hub, adopted_device), (seeded_hub, seeded_device)):
-        hub_device = dev_reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+        hub_device = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, hub.entry_id), hub.entry_id
+        )
         assert device.via_device_id == hub_device.id
 
 
@@ -2147,7 +2185,10 @@ async def test_pending_list_is_empty_after_a_reload(hass, hub_entry_builder, eve
     dev_reg = dr.async_get(hass)
     for key in keys:
         prefix = f"{hub.entry_id}:{key}"
-        assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
+        assert (
+            dev_reg.async_get_device_by_identifier((DOMAIN, prefix), hub.entry_id)
+            is None
+        )
 
 
 async def test_ignored_key_from_entry_data_never_becomes_pending(
@@ -2174,7 +2215,9 @@ async def test_ignored_key_from_entry_data_never_becomes_pending(
     assert device_key not in hub.data.get(CONF_DEVICES, {})
     dev_reg = dr.async_get(hass)
     prefix = f"{hub.entry_id}:{device_key}"
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, prefix)}) is None
+    assert (
+        dev_reg.async_get_device_by_identifier((DOMAIN, prefix), hub.entry_id) is None
+    )
 
 
 # --------------------------------------------------------------------------- #
