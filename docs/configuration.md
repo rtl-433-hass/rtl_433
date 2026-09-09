@@ -104,8 +104,8 @@ Use **Reconfigure** to point an existing hub at the same server's new address:
 host, port, path, or secure mode. Devices and their history are preserved.
 
 Use **Configure** to open the rtl_433 page. It is where devices are added and
-ignored — see [Device Discovery](device-discovery.md) — and it carries three
-settings pages:
+ignored — see [Adding Devices to Home Assistant](device-discovery.md) — and it
+carries three settings pages:
 
 - **Receiver settings**: default availability timeout and the managed-settings
   toggle.

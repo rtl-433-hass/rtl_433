@@ -1,12 +1,10 @@
-# Device Discovery
+# Adding Devices to Home Assistant
 
-Nothing is added to Home Assistant on its own. Every device your rtl_433 server
-decodes is heard and held on a list of discovered devices, and you decide which
-ones become real devices.
-
-That list is where neighbours' sensors, weak signals, and bad decodes end up. In
-a busy area a receiver hears far more than you want to keep, which is why the
-integration waits for you to choose.
+By default, rtl_433 listens for new devices but doesn't add them to Home
+Assistant. In a busy or dense area, you're likely to see far more sensors than
+you want to keep. You may also see devices that don't really exist, due to
+corrupt or weak decodes. Use this page to add the devices you want, and ignore
+those you don't.
 
 Doorbells, remotes, and motion sensors only transmit when something happens, so
 trigger them once to make them show up.

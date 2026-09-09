@@ -46,7 +46,8 @@ integration can connect to any rtl_433 server with HTTP output enabled.
 
 - Install the integration with [Installation](installation.md).
 - Add a hub with [Configuration](configuration.md).
-- Choose which devices to add in [Device Discovery](device-discovery.md).
+- Choose which devices to add in
+  [Adding Devices to Home Assistant](device-discovery.md).
 - Tune timeouts in [Availability](availability.md).
 - Understand doorbells, remotes, and motion sensors in
   [Event-based Devices](event-based-devices.md).
