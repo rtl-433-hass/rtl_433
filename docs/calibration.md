@@ -10,8 +10,8 @@ make it eligible for Home Assistant's Energy dashboard, calibrate the device.
 
 ## Calibrating a Meter
 
-Open **Settings → Devices & Services → rtl_433 → Configure → Device settings**
-and pick the meter.
+Open **Settings → Devices & Services → rtl_433 → Configure (the gear icon) →
+Device settings** and pick the meter.
 
 Meters whose commodity the integration recognized from the signal are labelled
 with it in the picker, so you can tell at a glance which devices are calibratable

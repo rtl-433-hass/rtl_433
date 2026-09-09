@@ -24,7 +24,7 @@ the shipped library.
 You can extend or correct the shipped library **without editing the integration
 files** directly from the Home Assistant UI:
 
-> **Settings → Devices & Services → rtl_433 → Configure → Device mappings**
+> **Settings → Devices & Services → rtl_433 → Configure (the gear icon) → Device mappings**
 
 The *Device mappings* step opens Home Assistant's built-in YAML editor pre-filled
 with that hub's current mappings. You edit mappings as YAML, using the **same
@@ -189,10 +189,10 @@ A stale `on` is never restored across a restart (there would be no live timer to
 clear it): the sensor comes back off/unknown until the next detection.
 
 **Per-device override.** The delay can be tuned per device in *Device settings* —
-**Settings → Devices & Services → rtl_433 → Configure → (device step)** exposes a
-*Motion clear delay (seconds)* field, shown only for motion-bearing devices.
-Leave it blank to use the 90 s default. The override is resolved at runtime
-(per-device value, else the descriptor default).
+**Settings → Devices & Services → rtl_433 → Configure (the gear icon) →
+(device step)** exposes a *Motion clear delay (seconds)* field, shown only for
+motion-bearing devices. Leave it blank to use the 90 s default. The override is
+resolved at runtime (per-device value, else the descriptor default).
 
 ### Availability classification
 
