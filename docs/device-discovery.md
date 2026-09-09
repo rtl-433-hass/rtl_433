@@ -39,9 +39,8 @@ transmitted, this page may be empty until something transmits.
 
 ![The rtl_433 page: a toolbar, a row of Receiver settings / Device settings / Device mappings buttons, then a grid of device cards, each with a blue heading giving the model and device key, its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Ignore and Add buttons](images/17-discovery-panel.png)
 
-The blue heading is the device's identity: the model rtl_433 decoded, and below
-it the device key — the id rtl_433 uses to tell one device of that model from
-another, with its channel and subtype when it reports them.
+Each card shows the device type rtl_433 decoded, and the device key which
+includes any ID, channel, and subtype information.
 
 | On the card | What it tells you |
 | --- | --- |
