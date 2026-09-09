@@ -1128,7 +1128,7 @@ four seconds starting an interpreter and importing Home Assistant *per worker*,
 which costs more than it saves below roughly a hundred tests. Mutation runs pin
 `-n0` themselves; see `[tool.mutmut]` in `pyproject.toml`.
 
-CI runs on Python 3.14 (the minimum Home Assistant 2026.4 supports), and
+CI runs on Python 3.14 (the minimum Home Assistant 2026.9 supports), and
 `pyproject.toml` sets `requires-python = ">=3.14"`. **The codebase uses 3.14-only
 syntax and will not parse on an older interpreter.** In particular it relies on
 [PEP 758](https://peps.python.org/pep-0758/), which allows unparenthesized

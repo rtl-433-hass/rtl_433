@@ -133,7 +133,7 @@ Migration sweeps depend on these tails and MUST stay valid:
 | Device | Identifier tuple | Source |
 |---|---|---|
 | Hub device | `(DOMAIN, entry.entry_id)` | `__init__.py:175`, `__init__.py:219`; hub entities `(DOMAIN, hub_entry_id)` at `entity.py:297` |
-| Per-device (nested) | `(DOMAIN, f"{hub_entry_id}:{device_key}")` | `entity.py:182`; linked to the hub via `via_device=(DOMAIN, hub_entry_id)` at `entity.py:186` |
+| Per-device (nested) | `(DOMAIN, f"{hub_entry_id}:{device_key}")` | `entity.py:165`; linked to the hub by `via_device_id`, resolved from `(DOMAIN, hub_entry_id)` at `entity.py:173` |
 | Phantom `unknown` (legacy cleanup target only) | `(DOMAIN, f"{entry.entry_id}:{PHANTOM_DEVICE_KEY}")` | `migration.py:106` |
 
 `PHANTOM_DEVICE_KEY == "unknown"` — **defined in `migration.py:64`, not `const.py`**
@@ -164,7 +164,7 @@ MUST use `entry.entry_id` wherever these templates reference `hub_entry_id`.
 ## Change control
 
 Any change to a `version`/`minor_version` value or migration step (§1), a
-`unique_id` template (§2), or a device `identifiers`/`via_device` tuple (§3) is a
+`unique_id` template (§2), or a device `identifiers` tuple / its hub link (§3) is a
 **breaking ABI change**. It requires:
 1. a forward-only, non-downgrading migration, and
 2. the identical change and migration shipped in **both** the HACS build and the

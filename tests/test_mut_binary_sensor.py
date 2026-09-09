@@ -139,7 +139,9 @@ async def test_init_model_passed_to_super(hass, hub_entry_builder):
     hub = await _setup_hub(hass, hub_entry_builder, devices=_door_devices())
     dev_reg = dr.async_get(hass)
     prefix = f"{hub.entry_id}:{_DOOR_KEY}"
-    device_entry = dev_reg.async_get_device(identifiers={(DOMAIN, prefix)})
+    device_entry = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, prefix), hub.entry_id
+    )
     assert device_entry is not None
     # If None was passed as model, device_entry.model would be None.
     assert device_entry.model == _DOOR_MODEL

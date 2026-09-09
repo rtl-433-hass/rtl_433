@@ -6,7 +6,7 @@ four concerns the platforms would otherwise duplicate:
 
 * **Device registry** — a single :class:`DeviceInfo` keyed by
   ``{hub_entry_id}:{device_key}`` and linked to the hub device via
-  ``via_device`` so every device groups under its hub.
+  ``via_device_id`` so every device groups under its hub.
 * **Dispatcher subscription** — each entity subscribes to the per-device signal
   ``signal_device_update(hub_entry_id, device_key)`` that the coordinator fans a
   :class:`~pyrtl_433.normalizer.NormalizedEvent` out on, and
@@ -42,6 +42,7 @@ from pyrtl_433.naming import display_name, identity_suffix
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, Entity, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -166,7 +167,14 @@ class Rtl433Entity(RestoreEntity):
             model=model or None,
             serial_number=identity_suffix(model, device_key),
             manufacturer=MANUFACTURER,
-            via_device=(DOMAIN, hub_entry_id),
+            # The hub device is registered by ``async_setup_entry`` before any
+            # platform is forwarded, so the lookup always resolves; ``via_device``
+            # (the identifier tuple) is deprecated and gone from ``DeviceInfo``.
+            via_device_id=dr.async_get_device_id_by_identifier(
+                coordinator.hass,
+                (DOMAIN, hub_entry_id),
+                config_entry_id=hub_entry_id,
+            ),
         )
 
         self._unsub_dispatcher: Callable[[], None] | None = None

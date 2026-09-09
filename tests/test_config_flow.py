@@ -180,8 +180,8 @@ def _device_entity_unique_ids(hass, entry, device_key) -> set[str]:
 
 def _registry_device(hass, entry, device_key):
     """Return the registry device for a device key, or ``None``."""
-    return dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, f"{entry.entry_id}:{device_key}")}
+    return dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:{device_key}"), entry.entry_id
     )
 
 
