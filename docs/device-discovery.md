@@ -33,16 +33,11 @@ the receiver it belongs to.
 
 ## Adding Devices
 
-Click **Add or replace device**. Every device your receiver has heard and you
-have not added is here, newest first. If nothing has transmitted yet the page
-says it is still searching — which is normal, and the next section explains
-why.
+Click **Add or replace device**. Every device that has been seen is listed here,
+newest first. If you recently restarted Home Assistant and nothing has
+transmitted, this page may be empty until something transmits.
 
 ![The rtl_433 page: a toolbar, a row of Receiver settings / Device settings / Device mappings buttons, then a grid of device cards, each with a blue heading giving the model and device key, its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Ignore and Add buttons](images/17-discovery-panel.png)
-
-Each candidate gets a card. Cards keep their place as
-devices transmit, so a card does not move under the cursor while you are reading
-it.
 
 The blue heading is the device's identity: the model rtl_433 decoded, and below
 it the device key — the id rtl_433 uses to tell one device of that model from
