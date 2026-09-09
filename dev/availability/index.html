@@ -808,12 +808,18 @@ INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
 <p>The effective availability timeout is resolved in this order:</p>
 <ol>
 <li>Per-device override from <strong>Device settings</strong>.</li>
-<li>Hub default from <strong>Hub settings</strong>, if set.</li>
+<li>Hub default from <strong>Receiver settings</strong>, if set.</li>
 <li>Device-class default.</li>
 <li>600 second fallback.</li>
 </ol>
 <p>Set a timeout to <code>0</code> to make a device never expire. This is already the automatic
 default for event-driven devices.</p>
+<p><strong>Receiver settings</strong> asks which of the three you want outright — <em>Per-device-type
+defaults</em>, <em>Never expire</em>, or <em>a fixed timeout</em> — so leaving the receiver on the
+class defaults is a choice you make rather than a number you have to leave alone.
+A fixed timeout of 600 seconds is a hub default like any other, and stops at step
+2; it is not the same as the step-4 fallback, which only applies to devices no
+earlier step has claimed.</p>
 <h2 id="restart-behavior">Restart Behavior<a class="headerlink" href="#restart-behavior" title="Permanent link">&para;</a></h2>
 <p>On Home Assistant restart, the last known states are restored first. The timeout
 then runs from the restart time, and entities flip to unavailable only after the

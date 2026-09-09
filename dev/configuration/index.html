@@ -906,8 +906,17 @@ settings pages:</p>
 <li><strong>Device mappings</strong>: this receiver's mapping overrides.</li>
 </ul>
 <p><strong>Receiver settings</strong> configures the default availability timeout for every
-device on the hub, and whether Home Assistant manages the server's SDR settings:</p>
-<p><img alt="The Receiver settings page, with the default availability timeout and the managed-settings toggle" src="../images/07-hub-settings.png" /></p>
+device on the hub, and whether Home Assistant manages the server's SDR settings.
+The timeout is one of three choices rather than a bare number:</p>
+<ul>
+<li><strong>Per-device-type defaults</strong> — the default, and what keeps event-driven
+  devices (doorbells, motion, contacts) from going unavailable on silence.</li>
+<li><strong>Never expire</strong> — nothing on this receiver is ever marked unavailable for
+  going quiet.</li>
+<li><strong>A fixed timeout</strong> — a count of seconds that applies to every device without
+  an override of its own.</li>
+</ul>
+<p><img alt="The Receiver settings page, with the availability-timeout choice set to the per-device-type defaults and the managed-settings toggle below it" src="../images/07-hub-settings.png" /></p>
 <p><strong>Device settings</strong> targets one device for a timeout override, motion clear
 delay, or utility-meter calibration. Pick the device at the top of the page and
 the rest of the form rebuilds from it: every field is pre-filled from that
