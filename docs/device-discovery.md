@@ -80,7 +80,8 @@ doorbell or open a door sensor and watch it arrive.
 
 Everything the page does is also a Home Assistant WebSocket command, so the same
 list and the same actions are available to a script — see [Home Assistant
-discovery commands](websocket-api.md#home-assistant-discovery-commands).
+discovery commands](https://github.com/rtl-433-hass/rtl_433/blob/main/WEBSOCKET_API.md#home-assistant-discovery-commands)
+in the repository's protocol reference.
 
 ### Clearing the List
 

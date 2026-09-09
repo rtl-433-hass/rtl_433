@@ -468,7 +468,7 @@ async function capturePanel(page) {
   );
 
   // Dump what the commands themselves return, from the same live hub, so the
-  // payloads quoted in docs/websocket-api.md are transcribed from a real
+  // payloads quoted in WEBSOCKET_API.md are transcribed from a real
   // response rather than composed by hand. `callWS` goes over the frontend's
   // own authenticated connection -- the same one the panel uses.
   const api = await page.evaluate(async () => {

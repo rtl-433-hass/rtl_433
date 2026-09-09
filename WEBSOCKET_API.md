@@ -1,5 +1,10 @@
 # rtl_433 WebSocket API
 
+Machine-oriented protocol reference for AI agents and maintainers working on this
+integration; it is not part of the end-user documentation site. For end-user docs
+see [`docs/`](docs/index.md), and for the rest of the machine-oriented notes see
+[`AGENTS.md`](AGENTS.md).
+
 This document describes the WebSocket control/streaming API exposed by the
 rtl_433 HTTP server. It is derived from the implementation in `src/http_server.c`
 (`ev_handler`, `json_parse`, `rpc_exec`, `rpc_response_ws`).
@@ -292,7 +297,7 @@ they are equally usable from a script or from the browser's developer console â€
 the panel adds no logic of its own on top of them, so anything it can do, these
 can do.
 
-They are the programmatic form of [Device Discovery](device-discovery.md): see
+They are the programmatic form of [Device Discovery](docs/device-discovery.md): see
 what the receiver has heard, then add, ignore or un-ignore it â€” and, since the
 panel became the integration's configuration page, read and write the hub's
 settings too.
@@ -612,7 +617,7 @@ nothing behind it.
 
 ### `rtl_433/settings/mappings`
 
-The hub's [device-library overrides](device-library.md), as the YAML text the
+The hub's [device-library overrides](docs/device-library.md), as the YAML text the
 documentation writes them in.
 
 ```json
