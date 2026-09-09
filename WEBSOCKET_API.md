@@ -297,10 +297,10 @@ they are equally usable from a script or from the browser's developer console �
 the panel adds no logic of its own on top of them, so anything it can do, these
 can do.
 
-They are the programmatic form of [Device Discovery](docs/device-discovery.md): see
-what the receiver has heard, then add, ignore or un-ignore it — and, since the
-panel became the integration's configuration page, read and write the hub's
-settings too.
+They are the programmatic form of [Adding Devices to Home
+Assistant](docs/device-discovery.md): see what the receiver has heard, then add,
+ignore or un-ignore it — and, since the panel became the integration's
+configuration page, read and write the hub's settings too.
 
 ### Authentication
 
