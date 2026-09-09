@@ -26,7 +26,7 @@ repos:
         args: ["--ignore-words-list=hass,keep-alives,retuned", "--quiet-level=2"]
         types_or: [python, markdown, rst]
         exclude_types: [csv, json, html]
-        files: ^(custom_components/|tests/|scripts/|README\.md|CONTRIBUTING\.md|AGENTS\.md)
+        files: ^(custom_components/|tests/|scripts/|README\.md|CONTRIBUTING\.md|AGENTS\.md|WEBSOCKET_API\.md)
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
