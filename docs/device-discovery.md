@@ -11,10 +11,10 @@ trigger them once to make them show up.
 
 ## The rtl_433 Page
 
-Open **Settings → Devices & Services → rtl_433 → Configure**. This is the
-rtl_433 page, and it works like the Zigbee and Z-Wave pages: it opens on an
-overview of the receiver, with everything else one click away. It is available
-to administrators only.
+Open **Settings → Devices & Services → rtl_433 → Configure (the gear icon)**.
+This is the rtl_433 page, and it works like the Zigbee and Z-Wave pages: it
+opens on an overview of the receiver, with everything else one click away. It is
+available to administrators only.
 
 The overview has three parts:
 
