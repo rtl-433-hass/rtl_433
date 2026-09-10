@@ -48,7 +48,7 @@ includes any ID, channel, and subtype information.
 | **Sightings** | How many times the device has transmitted since Home Assistant started. A real sensor keeps checking in; a bad decode is usually heard once. |
 | **Signal** | The signal-to-noise ratio of the most recent message, or its RSSI when no SNR was reported. Only shown when the server reports levels; your own sensors are normally the strongest. |
 | **Last seen** | How long ago the device last transmitted. Hover over it for the exact first and last times. |
-| **Readings** | The most recent message, shown as the entities adding it would create — `Temperature 21.4 °C`, not `temperature_C: 21.4`. This is usually the quickest way to tell two identical sensors apart. |
+| **Readings** | The most recent message, shown as the entities adding it would create. |
 
 The readings are the ones you would actually get. A field the device library
 does not map creates no entity, and one it maps as disabled by default (the
