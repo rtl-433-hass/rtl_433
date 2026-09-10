@@ -5,13 +5,14 @@
 // JSON (verified with ws-probe.mjs).
 //
 // Captured shots: 06 (empty config-flow form), 17 (the panel, live and
-// populated), 16 (the ignored-devices section), 09 (integration overview / docs
-// home hero), 02 (device page), 11 (doorbell event entity), 07 (Receiver
-// settings dialog), 05 (Device mappings editor), 08 (Device settings dialog),
-// 10 (device page with the signal-diagnostic sensors enabled and populated),
-// 14 (the hub device's Diagnostic card with the receiver-noise sensors),
-// 04 (unavailable). The doorbell / energy meter / door / leak devices come from
-// ws-bridge replaying tests/fixtures.
+// populated), 16 (the ignored-devices section), 18 (the panel's own overview
+// page, once the devices are added), 09 (integration overview / docs home
+// hero), 02 (device page), 11 (doorbell event entity), 07 (Receiver settings
+// dialog), 05 (Device mappings editor), 08 (Device settings dialog), 10 (device
+// page with the signal-diagnostic sensors enabled and populated), 14 (the hub
+// device's Diagnostic card with the receiver-noise sensors), 04 (unavailable).
+// The doorbell / energy meter / door / leak devices come from ws-bridge
+// replaying tests/fixtures.
 //
 // **Everything but the config flow is now driven through the panel.** The hub
 // entry registers it with `config_panel_domain`, so Configure on the entry opens
@@ -29,7 +30,9 @@
 //              somebody clicks Add, so the run captures the panel, ignores the
 //              leak detector to capture the ignored section, then un-ignores it
 //              and adds every device the later shots need (approveDevices). It
-//              then captures the integration overview and the device page; opens
+//              then captures the panel's overview page -- which counts those
+//              devices, so it is only worth a shot once they exist -- the
+//              integration overview and the device page; opens
 //              Receiver settings, sets a low availability timeout (15s) so the
 //              unavailable stage is fast and captures the dialog; then Device
 //              mappings with an example override, Device settings against the
@@ -38,6 +41,9 @@
 //              already-running harness; for iterating.
 //   panel    - re-capture only the panel itself against an already-running
 //              harness (hub added, devices still pending); for iterating.
+//   overview - re-capture only the panel's overview page against an
+//              already-running harness (hub added and its devices added, so the
+//              status card has something to count); for iterating.
 //   unavail  - (after run-harness.sh stops the rtl433 replay and waits past the
 //              timeout) capture the device page with all entities Unavailable.
 //   device   - re-capture only the Device settings dialog against an
@@ -154,6 +160,11 @@ async function addHubAndCapture(page) {
   // person adds it. This drives the cards, captures the ignored-devices section,
   // and leaves the hub holding the devices the later shots need.
   await approveDevices(page);
+
+  // --- The rtl_433 page itself (docs: device-discovery.md) -----------------
+  // The overview that Configure on the config entry lands on, captured after the
+  // approval so its status card and My network rows have real devices to count.
+  await captureOverview(page);
 
   // --- Integration overview (docs home-page hero) --------------------------
   await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
@@ -599,6 +610,63 @@ async function approveDevices(page) {
   await page.waitForTimeout(4000);
 }
 
+// Capture the panel's overview -- the page Configure on the config entry opens:
+//
+//   18-rtl-433-page.png  the status card (the receiver Online with its device
+//                        count), the My network rows out to this receiver's
+//                        devices and entities, the Receiver settings / Device
+//                        settings / Device mappings rows, and the
+//                        "Add or replace device" button
+//
+// Run AFTER approveDevices(). The status card and both My network rows count
+// what Home Assistant actually holds for this entry, so an overview captured
+// while every device is still pending reads "0 devices" and photographs as an
+// empty instance rather than the page the documentation describes.
+//
+// What the rows say is read back out of the shadow root before the shot, for the
+// same reason every other panel stage does it: a settings row that is not there
+// is a settings form that has lost its entry point, and that is worth a warning
+// rather than a screenshot of whatever rendered instead.
+async function captureOverview(page) {
+  await openPanel(page, { cards: 0 });
+  // The card and the rows are drawn from the device registry and the receiver's
+  // own payload, neither of which is there on the first frame; bounded poll
+  // (~30s) until the receiver reports itself online with a count beside it.
+  let state = null;
+  for (let i = 0; i < 30; i++) {
+    state = await inPanel(
+      page,
+      `(panel) => {
+        const root = panel.shadowRoot;
+        const text = (selector) =>
+          (root.querySelector(selector)?.textContent || "").trim();
+        const list = (selector) =>
+          [...root.querySelectorAll(selector)].map((el) => el.textContent.trim());
+        const fab = root.querySelector(".panel-fab");
+        return {
+          headline: text(".status-headline"),
+          devices: text(".status-supporting"),
+          network: list(".network-card .row-headline"),
+          counts: list(".network-card .row-supporting"),
+          rows: list(".settings-card .row-headline"),
+          // ha-fab carries its label as a property, not as child text.
+          fab: fab ? fab.label || fab.textContent.trim() : "",
+        };
+      }`,
+    );
+    if (state && /online/i.test(state.headline || "") && state.devices) break;
+    await page.waitForTimeout(1000);
+  }
+  console.log("screenshot: overview -> " + JSON.stringify(state));
+  if (!state || (state.rows || []).length < 3) {
+    console.log(
+      "screenshot: WARNING overview did not render its settings rows; skipping 18-rtl-433-page.png",
+    );
+    return;
+  }
+  await shot(page, "18-rtl-433-page.png");
+}
+
 async function captureHubNoise(page) {
   await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2000);
@@ -860,6 +928,11 @@ async function run() {
       // harness (hub added, devices still pending). Not part of the full
       // pipeline.
       await capturePanel(page);
+    } else if (STAGE === "overview") {
+      // Iterate only the overview capture against an already running harness
+      // (hub added and its devices added, so the status card has something to
+      // count). Not part of the full pipeline.
+      await captureOverview(page);
     } else if (STAGE === "approve") {
       // Iterate only the approval + ignored-devices captures against an already
       // running harness (hub already added, devices still pending). Not part of

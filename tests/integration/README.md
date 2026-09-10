@@ -24,6 +24,7 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | File | Shows |
 | --- | --- |
 | `02-device-page.png` | The device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
+| `18-rtl-433-page.png` | The **rtl_433 page** (`/rtl_433`), the overview Configure lands on: the status card reading Online with its device count, the My network rows out to this receiver's devices and entities, the three settings rows, and the Add or replace device button |
 | `17-discovery-panel.png` | The **discovered devices** page (`/rtl_433/discovered`): one card per heard device with its sighting count, signal level, latest readings and per-card Replace / Ignore / Add buttons |
 | `16-ignored-devices.png` | The same page with the ignored section revealed, showing the ignored leak detector and its Un-ignore button |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
