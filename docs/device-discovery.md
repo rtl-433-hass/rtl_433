@@ -57,8 +57,7 @@ devices and fields.
 Select an **Area** to assign the device there, or leave it blank if that doesn't
 make sense.
 
-**Add** creates that device and its entities straight away, and starts
-recording history from that point. The card stays where it is and turns green,
+Click **Add** to create the device. The card stays where it is and turns green,
 with a link to the device that was just created:
 
 ![An Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics](images/02-device-page.png)
