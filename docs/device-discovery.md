@@ -68,7 +68,7 @@ Devices](#ignoring-devices).
 ### Clearing the List
 
 A receiver left running for a few weeks in a built-up area accumulates hundreds
-of candidates, and the one you came to add is somewhere among them. **Clear
+of devices, and the one you came to add is somewhere among them. **Clear
 discovered devices** empties the list so it refills from live traffic: trigger
 the doorbell, and it is the only thing on the screen.
 
