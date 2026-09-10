@@ -50,13 +50,12 @@ includes any ID, channel, and subtype information.
 | **Last seen** | How long ago the device last transmitted. Hover over it for the exact first and last times. |
 | **Readings** | The most recent message, shown as the entities adding it would create. |
 
-The readings are the ones you would actually get. A field the device library
-does not map creates no entity, and one it maps as disabled by default (the
-`SNR`, `RSSI` and `Noise` diagnostics) is not something you would see on the
-device page, so neither is listed here.
+Readings that cannot be mapped to Home Assistant will not show here. See
+[Device Library](device-library.md) for information about adding support for new
+devices and fields.
 
-Pick an **Area** before adding to have the new device filed there straight away.
-Leave it on *No area* to sort it out later on the device page.
+Select an **Area** to assign the device there, or leave it blank if that doesn't
+make sense.
 
 **Add** creates that device and its entities straight away, and starts
 recording history from that point. The card stays where it is and turns green,
