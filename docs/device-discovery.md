@@ -69,12 +69,8 @@ Devices](#ignoring-devices).
 
 A receiver left running for a few weeks in a built-up area accumulates hundreds
 of devices, and the one you came to add is somewhere among them. **Clear
-discovered devices** empties the list so it refills from live traffic: trigger
-the doorbell, and it is the only thing on the screen.
-
-Nothing is lost. The list has always been held in memory only, so every device
-cleared comes back on its next transmission. Devices you have ignored stay
-ignored — that is a decision, and this is not the control for undoing it.
+discovered devices** will empty the list so you can easily add the ones you
+want.
 
 ## Receiver and Device Settings
 
