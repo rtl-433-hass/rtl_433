@@ -60,6 +60,8 @@ make sense.
 Click **Add** to create the device. The card stays where it is and turns green,
 with a link to the device that was just created.
 
+![An Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics](images/02-device-page.png)
+
 Otherwise, **Ignore** hides the device.
 
 ### Clearing the List
@@ -70,10 +72,6 @@ discovered devices** will empty the list so you can easily add the ones you
 want.
 
 ## Receiver and Device Settings
-
-The three rows on the overview each open a settings page. Each one has its own
-address, so you can bookmark it or link someone straight to it, and the back
-arrow returns you to the overview.
 
 **Receiver settings** is the default availability timeout for every device on
 this receiver, and whether Home Assistant manages the server's own SDR settings
