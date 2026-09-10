@@ -28,6 +28,8 @@ The overview has three parts:
 and, bottom right, an **Add or replace device** button. That is the one that
 takes you to the discovered devices.
 
+![The rtl_433 page: a status card with a green tick reading Online and 7 devices; a My network card listing Devices, 7 devices and Entities, 33 entities, each with a chevron; then a card of three rows — Receiver settings (availability timeout and whether Home Assistant manages the receiver), Device settings (per-device timeout overrides and utility-meter calibration) and Device mappings (YAML overrides for how fields become entities); and a blue Add or replace device button in the bottom right](images/18-rtl-433-page.png)
+
 If you have more than one receiver, each gets its own settings card, headed by
 the receiver it belongs to.
 
