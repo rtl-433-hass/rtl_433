@@ -1,4 +1,4 @@
-# Replacing a Device That Changed Id
+# Managing Devices That Change IDs
 
 Many battery-powered sensors pick a new random transmitter id every time their
 batteries are changed. rtl_433 identifies a device by that id, so the sensor
