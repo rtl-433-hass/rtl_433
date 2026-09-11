@@ -13,12 +13,9 @@ replaces. Devices of the same model are listed first, since a battery swap does
 not change the model. The button only appears once there is at least one added
 device the candidate could stand in for.
 
-The device you keep takes over the new ID. The kept device's entity IDs do not
-change, so its history, statistics, dashboards and automations carry straight
-through, and its calibration, availability timeout override, motion clear delay
-and event types come with it. Any field the replacement has already reported is
-added to the device's known fields. The short history the duplicate recorded
-before the replace is discarded along with it.
+The device is updated to take over the new ID. Entity IDs **do not change** even
+if they contain the old ID. Automations, history, dashboards, and so on will all
+keep working as they did before.
 
 Because those entity IDs are kept exactly as they were, they still spell out
 the *old* ID — an entity named `sensor.acurite_986_1a2b_temperature` keeps that
