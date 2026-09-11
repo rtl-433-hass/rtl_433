@@ -402,7 +402,7 @@ SNR/RSSI-weighted packet selection within the debounce window; a UI affordance t
 **Validation Gates:**
 - Reference: `/config/hooks/POST_PHASE.md`
 
-> **Task files are stale.** The seven task files under `tasks/` were generated against the pre-rebase plan and predate Components 6–8 and Clarifications #9–#15. Re-run task generation for plan 27 before executing this blueprint.
+> **Task files have been removed.** The seven task files previously under `tasks/` were generated against the pre-rebase plan and predated Components 6–8 and Clarifications #9–#15, so they were deleted rather than left to mislead an executor. Run task generation for plan 27 to regenerate them from the phases below before executing this blueprint.
 
 ### Dependency Diagram
 
