@@ -127,11 +127,7 @@ The timeout is one of three choices rather than a bare number:
 ![The Receiver settings page, with the availability-timeout choice set to the per-device-type defaults and the managed-settings toggle below it](images/07-hub-settings.png)
 
 **Device settings** targets one device for a timeout override, motion clear
-delay, or utility-meter calibration. Pick the device at the top of the page and
-the rest of the form rebuilds from it: every field is pre-filled from that
-device, and fields that do not apply to it are not shown — the motion clear delay
-only appears for a device that actually auto-clears, and the base unit and scale
-only once a commodity is chosen.
+delay, or utility-meter calibration.
 
 ![The Device settings page with the device picker, availability timeout override, and meter commodity selector](images/08-device-settings.png)
 
