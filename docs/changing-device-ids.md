@@ -9,10 +9,9 @@ rtl_433 can't tell the difference between a new device and one that changed its
 ID. To re-link the device, go to the **Add or replace device** page.
 
 Find the new device's card and click **Replace**, then pick the device it
-replaces: the one you already have, whose history you want to keep. Devices of
-the same model are listed first, since a battery swap does not change the model.
-The button only appears once there is at least one added device the candidate
-could stand in for.
+replaces. Devices of the same model are listed first, since a battery swap does
+not change the model. The button only appears once there is at least one added
+device the candidate could stand in for.
 
 The device you keep takes over the new id. If you had already added the
 replacement as a device of its own, it and its entities are removed. The kept
