@@ -85,8 +85,8 @@ actually has.
 
 **Device mappings** is this receiver's
 [device-library overrides](device-library.md), as YAML. Clearing the editor
-removes them all. A document that will not store is refused with every problem
-listed, and the overrides you already had are left alone.
+removes them all. The device mappings are automatically validated (but not
+tested!) when saving.
 
 ## Ignoring Devices
 
