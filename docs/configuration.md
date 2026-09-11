@@ -67,7 +67,7 @@ are not marked available again and their event entities and device triggers do
 not fire a second time.
 
 That only works if the timestamps can be read. rtl_433 emits `time` as a JSON
-string in every mode, and these forms are understood:
+string in every mode, and these formats are understood:
 
 | rtl_433 setting | Example `time` | |
 | --- | --- | --- |
