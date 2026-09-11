@@ -17,12 +17,6 @@ The device is updated to take over the new ID. Entity IDs **do not change** even
 if they contain the old ID. Automations, history, dashboards, and so on will all
 keep working as they did before.
 
-Because those entity IDs are kept exactly as they were, they still spell out
-the *old* ID — an entity named `sensor.acurite_986_1a2b_temperature` keeps that
-name after being re-pointed at ID `9f3c`. That is what preserves the history, so
-it is worth leaving alone. You can rename the entity if the stale ID bothers
-you, but renaming it starts a new history under the new entity ID.
-
 The replacement does not have to be added first. The card you start from is a
 device you have not added, which is exactly what a battery-swapped sensor looks
 like; it only has to have been heard once. If it is not on the page yet, wait
