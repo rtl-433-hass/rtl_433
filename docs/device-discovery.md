@@ -112,7 +112,7 @@ instead.
 
 ## Post-Connection Registration
 
-Only devices heard after the integration connects count as live sightings. On
+Only devices seen after the integration connects count as live sightings. On
 connect, the rtl_433 server replays its recent backlog. The integration uses
 frame timestamps to tell that replay apart from live traffic: backlog frames
 refresh the values of devices you have already added, but they never put a
