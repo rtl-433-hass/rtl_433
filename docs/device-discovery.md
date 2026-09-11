@@ -109,18 +109,3 @@ Deleting removes the device and its entities from Home Assistant, but it does no
 stop the transmitter. The device returns to the discovered list the next time it
 transmits, so you can add it back. To keep it out of the list, ignore it
 instead.
-
-## Post-Connection Registration
-
-Only devices seen after the integration connects count as live sightings. On
-connect, the rtl_433 server replays its recent backlog. The integration uses
-frame timestamps to tell that replay apart from live traffic: backlog frames
-refresh the values of devices you have already added, but they never put a
-device on the discovered list, so a reconnect does not fill it with everything
-that transmitted while Home Assistant was away.
-
-A device you have not added appears the first time it transmits after the
-connection. This assumes the rtl_433 server and Home Assistant clocks are roughly
-in sync, and that the server stamps its events with a readable timestamp — see
-[Event Timestamps](configuration.md#event-timestamps) for the accepted forms and
-what changes without one.
