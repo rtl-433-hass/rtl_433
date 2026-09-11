@@ -2,7 +2,10 @@
 
 Machine-oriented notes for AI agents and maintainers working on this
 integration. For end-user docs see [README.md](README.md); for contribution
-conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
+conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md); for
+the rtl_433 server's WebSocket protocol and the discovery commands this
+integration adds to Home Assistant's own WebSocket API see
+[WEBSOCKET_API.md](WEBSOCKET_API.md).
 
 ## Repository shape
 
@@ -715,7 +718,7 @@ because these are the contracts the integration relies on:
   SDR retune, so without the tick the actual sensor could stay stale until the
   next reconnect.
 - **Verified Data Contracts** (do not invent fields — see
-  [docs/websocket-api.md](docs/websocket-api.md)):
+  [WEBSOCKET_API.md](WEBSOCKET_API.md)):
   - `get_meta` → `center_frequency`, `samp_rate`, `conversion_mode`,
     `frequencies[]`, `hop_times[]`, `duration`, `stats_interval`, `report_*`
     flags (**no `gain`, no `ppm`**).
@@ -877,7 +880,7 @@ keep this contributor-facing.
     `conversion_val_to_label`).
   - `hop_interval` → number, command `hop_interval`, `val` = seconds; read
     `hop_times[0]`.
-  Commands and arg/val kinds follow [docs/websocket-api.md](docs/websocket-api.md)
+  Commands and arg/val kinds follow [WEBSOCKET_API.md](WEBSOCKET_API.md)
   exactly — **do not invent fields**. Number bounds are deliberately wide
   (`NumberMode.BOX`); the server clamps/rejects, HA is not the authority on
   ranges. Each entry carries a **`capability` gate** (`Callable[[meta], bool]`,
