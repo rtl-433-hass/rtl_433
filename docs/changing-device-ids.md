@@ -5,9 +5,8 @@ batteries are changed. rtl_433 identifies a device by that id, so the sensor
 comes back as a brand-new device with new entities and no history, while the
 original stops updating and eventually goes unavailable.
 
-You meet this problem from the new device's side: something you did not add has
-appeared on the discovered list, and it is really a sensor you already have. So
-that is where the fix starts.
+rtl_433 can't tell the difference between a new device and one that changed its
+ID. To re-link the device, go to the **Add or replace device** page.
 
 Find the new device's card and click **Replace**, then pick the device it
 replaces: the one you already have, whose history you want to keep. Devices of
