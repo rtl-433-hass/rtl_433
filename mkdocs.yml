@@ -39,7 +39,7 @@ nav:
   - Installation: installation.md
   - Configuration: configuration.md
   - Adding Devices to Home Assistant: device-discovery.md
-  - Managing Devices That Change IDs: replacing-a-device.md
+  - Managing Devices That Change IDs: changing-device-ids.md
   - Availability: availability.md
   - Event-based Devices: event-based-devices.md
   - Diagnostics & Debugging: diagnostics.md
