@@ -90,15 +90,9 @@ tested!) when saving.
 
 ## Ignoring Devices
 
-Devices you never want to see again are ignored. Click **Ignore** on the card.
-An ignored device is dropped from the list, is never offered again, and stays
-ignored across restarts. It is the way to make a neighbour's sensor go away for
-good.
-
-Ignoring is not deleting: an ignored device is simply not offered, and its
-messages are dropped as they arrive.
-
-To undo it, go back to **Add or replace device**, click **Show ignored
+Sometimes devices are detected that you will never want to add to Home
+Assistant. Click **Ignore** on the card to hide it at the bottom of the list. If
+you made a mistake, go back to **Add or replace device**, click **Show ignored
 devices** under the cards, and then **Un-ignore**:
 
 ![The rtl_433 page with the ignored-devices section revealed, showing one ignored device and its Un-ignore button](images/16-ignored-devices.png)
