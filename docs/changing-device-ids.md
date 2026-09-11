@@ -17,11 +17,6 @@ The device is updated to take over the new ID. Entity IDs **do not change** even
 if they contain the old ID. Automations, history, dashboards, and so on will all
 keep working as they did before.
 
-The replacement does not have to be added first. The card you start from is a
-device you have not added, which is exactly what a battery-swapped sensor looks
-like; it only has to have been heard once. If it is not on the page yet, wait
-until it transmits again.
-
 To confirm you are picking the right device, check the **Serial number** on the
 device info card: it is the ID rtl_433 decoded for that device, plus its channel
 and subtype when it has them. Unlike the device name, the serial number is not
