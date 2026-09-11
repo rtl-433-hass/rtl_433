@@ -154,7 +154,7 @@ lists identity and transport fields (`model`, `id`, `channel`, `mic`, `mod`,
 `protocol`, …) that must never become entities; a UI mapping can add to that
 list with a top-level `skip_keys:` sequence.
 
-`object_suffix` is part of every entity's unique id, so **changing it orphans
+`object_suffix` is part of every entity's unique ID, so **changing it orphans
 existing entities**. Treat it as frozen once shipped.
 
 Two attributes change how an entity *behaves* in Home Assistant rather than just
