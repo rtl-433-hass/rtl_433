@@ -31,7 +31,6 @@ from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.repairs import ISSUE_MOTION_MOVED
 from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from homeassistant.util import dt as dt_util
-from tests.conftest import receiver_id
 from tests.test_lifecycle import _coordinator, _feed, _setup_receiver
 
 # A PIR/occupancy device whose only field is ``motion`` (raw value 1 on detect).
@@ -60,7 +59,7 @@ def _motion_eid(hass, receiver):
     """Resolve the device's motion ``binary_sensor`` entity_id (must exist)."""
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver_id(receiver)}:{_DEVICE_KEY}:motion"
+        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DEVICE_KEY}:motion"
     )
     assert eid is not None
     return eid
@@ -264,7 +263,7 @@ async def test_migration_removes_event_entity_and_raises_issue(
     # Pre-seed the orphaned pre-fix ``event.*_motion`` registry entry, under the
     # receiver that heard the device (which is what scopes a device's identity).
     ent_reg = er.async_get(hass)
-    motion_unique_id = f"{receiver_id(receiver)}:{_DEVICE_KEY}:motion"
+    motion_unique_id = f"{receiver.entry_id}:{_DEVICE_KEY}:motion"
     event_entry = ent_reg.async_get_or_create(
         "event",
         DOMAIN,

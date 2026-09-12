@@ -6,13 +6,19 @@ per rtl_433 server. Setting one up loads the shipped mapping library (cached onc
 on ``hass.data[DOMAIN][DATA_LIBRARY]``), merges the location's stored
 ``entry.data[CONF_USER_MAPPINGS]`` over it and caches the per-entry merged
 ``(registry, skip_keys)`` on ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]``
-so the entity platforms reuse it, then walks the receiver subentries: each gets a
+so the entity platforms reuse it, registers the **location device** (the root of
+the entry's device tree, and what every merged RF device links to with
+``via_device_id``), then walks the receiver subentries: each gets a
 receiver device, a push
 :class:`~custom_components.rtl_433.coordinator.Rtl433Coordinator` (the WebSocket
 transport is per endpoint, so one per receiver) with the skip-keys, the
 effective-timeout resolver and the new-device callback injected, and its own
 reachability watchers. Each coordinator is stored on ``hass.data[DOMAIN]`` under
-its **receiver id** (the subentry id). Finally an options-update listener is
+its **receiver id** (the subentry id). A **location aggregator**
+(:mod:`.aggregator`) is then started over those coordinators: it dedupes the
+frames several receivers decode from one transmission and re-emits them on a
+single location-scoped signal, which is what lets one physical sensor carry one
+merged device and one entity per field. Finally an options-update listener is
 registered so a changed availability timeout takes effect live, and the entity
 platforms are forwarded **once**, on the location entry.
 
@@ -68,6 +74,7 @@ from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from . import repairs
+from .aggregator import Rtl433LocationAggregator
 from .const import (
     CONF_DEVICES,
     CONF_HOST,
@@ -75,6 +82,7 @@ from .const import (
     CONF_PATH,
     CONF_PORT,
     CONF_USER_MAPPINGS,
+    DATA_AGGREGATOR,
     DATA_ENTRY_LIBRARY,
     DEFAULT_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
@@ -214,6 +222,7 @@ async def _async_setup_receiver(
     entry_event_driven_keys: frozenset[str],
     effective_timeout_resolver: Callable[[str], int | None],
     effective_clear_delay_resolver: Callable[[str], int],
+    location_device_id: str,
 ) -> Rtl433Coordinator:
     """Register one receiver's device and build + start its coordinator.
 
@@ -252,10 +261,12 @@ async def _async_setup_receiver(
         """
         async_dispatcher_send(hass, signal_new_device(receiver_id), device_key, model)
 
-    # Register the receiver device so nested devices can link to it by
-    # ``via_device_id``. The manufacturer/model start generic and are refined to
-    # the real SDR's vendor/product/serial once the coordinator connects
-    # (``receiver_info_callback``).
+    # Register the receiver device, hung off the location device. The
+    # manufacturer/model start generic and are refined to the real SDR's
+    # vendor/product/serial once the coordinator connects
+    # (``receiver_info_callback``). Nested RF devices link to the *location*, not
+    # here: a merged device may be fed by several receivers, so a link to one of
+    # them would claim the sensor sits behind that server alone.
     device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         config_subentry_id=receiver_id,
@@ -263,6 +274,7 @@ async def _async_setup_receiver(
         manufacturer=MANUFACTURER,
         name=subentry.title,
         model="rtl_433 server",
+        via_device_id=location_device_id,
     )
 
     coordinator = Rtl433Coordinator(
@@ -445,6 +457,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _cleanup_phantom_unknown_device(hass, entry, device_registry)
     _migrate_motion_event_to_binary_sensor(hass, entry, er.async_get(hass))
 
+    # The location device: the root of this entry's device tree and the target
+    # every merged RF device links to with ``via_device_id``. Registered before
+    # the receivers so both that link and the receivers' own resolve on the first
+    # pass. It is owned by the entry with **no** ``config_subentry_id`` -- it
+    # describes the location, which outlives any one receiver in it.
+    location_device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        manufacturer=MANUFACTURER,
+        name=entry.title,
+        model="rtl_433 location",
+        entry_type=dr.DeviceEntryType.SERVICE,
+    )
+
     for subentry in subentries:
         await _async_setup_receiver(
             hass,
@@ -456,7 +482,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry_event_driven_keys=entry_event_driven_keys,
             effective_timeout_resolver=effective_timeout_resolver,
             effective_clear_delay_resolver=effective_clear_delay_resolver,
+            location_device_id=location_device.id,
         )
+
+    # The union's fan-in. Started once every receiver's coordinator exists (it
+    # subscribes to each of them) and before the platforms are forwarded, so the
+    # merged devices' entities find a live location-scoped stream the moment they
+    # subscribe to it.
+    aggregator = Rtl433LocationAggregator(hass, entry)
+    aggregator.async_start()
+    hass.data[DOMAIN].setdefault(DATA_AGGREGATOR, {})[entry.entry_id] = aggregator
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -567,9 +602,14 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a location config entry and every receiver in it.
 
     Stops each receiver's coordinator, drops its runtime state, clears its
-    reachability repair issue, and unloads the entity platforms that were
-    forwarded once on the location.
+    reachability repair issue, tears down the location aggregator, and unloads
+    the entity platforms that were forwarded once on the location.
     """
+    aggregator = (
+        hass.data.get(DOMAIN, {}).get(DATA_AGGREGATOR, {}).pop(entry.entry_id, None)
+    )
+    if aggregator is not None:
+        aggregator.async_stop()
     # Driven from what is *running*, not from what is stored, so a receiver whose
     # subentry was deleted still has its socket closed and its card cleared.
     for receiver_id, coordinator in running_coordinators(hass, entry).items():
@@ -585,36 +625,38 @@ async def async_remove_config_entry_device(
 ) -> bool:
     """Allow removing a single nested RF device from its device page.
 
-    Refuses to remove a **receiver** device so a receiver cannot be deleted out
-    from under its subentry: removing one is subentry surgery (delete the
-    receiver), not the "forget this RF device" this handler implements. A
-    receiver's identifier is the three-segment
+    Refuses to remove the **location** device (identifier ``(DOMAIN, entry_id)``,
+    one segment) and a **receiver** device, so neither can be deleted out from
+    under the entry it structures: removing a receiver is subentry surgery
+    (delete the receiver) and removing the location is deleting the entry,
+    not the "forget this RF device" this handler implements. A receiver's
+    identifier is the three-segment
     ``f"{location_entry_id}:receiver:{receiver_subentry_id}"``, recognised by the
     reserved ``receiver`` marker rather than by guessing at which ids are entry
     ids, so it is never decoded into a bogus ``device_key``.
 
-    For a nested RF device -- identifier ``(DOMAIN, f"{receiver_id}:{device_key}")``,
-    where ``device_key`` never contains a colon (``pyrtl_433.naming.safe_token``)
-    -- the key is dropped from the location's devices map and un-adopted in every
-    receiver's coordinator, so the device's next transmission from *any* receiver
-    makes it a pending candidate the user can choose to add again rather than
-    silently re-creating the device they just deleted.
+    For a merged RF device -- identifier
+    ``(DOMAIN, f"{location_entry_id}:{device_key}")``, where ``device_key`` never
+    contains a colon (``pyrtl_433.naming.safe_token``) -- the key is dropped from
+    the location's devices map and un-adopted in every receiver's coordinator, so
+    the device's next transmission from *any* receiver makes it a pending
+    candidate the user can choose to add again rather than silently re-creating
+    the device they just deleted.
     """
     coordinators = receiver_coordinators(hass, config_entry)
-    prefixes = {
-        f"{subentry.subentry_id}:": subentry.subentry_id
-        for subentry in receiver_subentries(config_entry)
-    }
 
     device_key: str | None = None
     for domain, ident in device_entry.identifiers:
         if domain != DOMAIN:
             continue
+        if ident == config_entry.entry_id:
+            # The location device itself.
+            return False
         parts = ident.split(":")
         if len(parts) == 3 and is_reserved_device_key(parts[1]):
             # A receiver device.
             return False
-        if len(parts) != 2 or parts[0] + ":" not in prefixes:
+        if len(parts) != 2 or parts[0] != config_entry.entry_id:
             continue
         if is_reserved_device_key(parts[1]):
             return False
