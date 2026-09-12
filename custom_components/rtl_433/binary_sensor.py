@@ -27,12 +27,12 @@ from homeassistant.components.binary_sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.restore_state import RestoredExtraData
 
-from .const import DOMAIN
 from .entity import Rtl433Entity, Rtl433ReceiverEntity, async_setup_receiver_platform
+from .receiver_settings import receiver_coordinators
 
 if TYPE_CHECKING:
     from pyrtl_433.library import FieldDescriptor
@@ -180,10 +180,10 @@ class Rtl433ReceiverConnectivity(Rtl433ReceiverEntity, BinarySensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_name = "Connectivity"
 
-    def __init__(self, coordinator: Rtl433Coordinator, receiver_entry_id: str) -> None:
+    def __init__(self, coordinator: Rtl433Coordinator) -> None:
         """Initialize the connectivity entity with a stable unique_id."""
-        super().__init__(coordinator, receiver_entry_id)
-        self._attr_unique_id = f"{receiver_entry_id}:hub:connectivity"
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.receiver_identity}:connectivity"
 
     @property
     def is_on(self) -> bool:
@@ -199,11 +199,21 @@ class Rtl433ReceiverConnectivity(Rtl433ReceiverEntity, BinarySensorEntity):
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up rtl_433 binary sensors for every device under the receiver entry."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([Rtl433ReceiverConnectivity(coordinator, entry.entry_id)])
+    """Set up rtl_433 binary sensors for every device of every receiver.
+
+    One connectivity sensor per receiver, added **with** that receiver's
+    ``config_subentry_id``: it reports whether *that* server's socket is open and
+    lives on that receiver's device, so the subentry owns it. The per-device
+    sensors that follow are added with none, because their devices belong to the
+    location.
+    """
+    for receiver_id, coordinator in receiver_coordinators(hass, entry).items():
+        async_add_entities(
+            [Rtl433ReceiverConnectivity(coordinator)],
+            config_subentry_id=receiver_id,
+        )
     await async_setup_receiver_platform(
         hass, entry, async_add_entities, PLATFORM, Rtl433BinarySensor
     )

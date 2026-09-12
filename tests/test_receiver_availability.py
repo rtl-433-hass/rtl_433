@@ -42,7 +42,12 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
-from tests.conftest import mark_receiver_connected
+from tests.conftest import (
+    mark_receiver_connected,
+    receiver_id,
+    receiver_scope,
+    receiver_subentry,
+)
 from tests.test_lifecycle import _coordinator, _feed, _setup_receiver
 
 DISPATCH = "custom_components.rtl_433.coordinator._watchdog.async_dispatcher_send"
@@ -81,7 +86,9 @@ async def coordinator(hass, receiver_entry_builder):
     """
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
-    coord = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coord = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     coord._started = True
     _connect(coord)
     return coord
@@ -99,12 +106,12 @@ def _drop(coordinator: Rtl433Coordinator) -> None:
     coordinator._emit_receiver_update()
 
 
-def _availability_signals(dispatch, entry_id: str) -> list:
-    """Pull the availability-gate dispatches out of a patched dispatcher."""
+def _availability_signals(dispatch, scope: str) -> list:
+    """Pull one receiver's availability-gate dispatches out of a patched dispatcher."""
     return [
         call
         for call in dispatch.call_args_list
-        if call.args[1] == signal_receiver_availability(entry_id)
+        if call.args[1] == signal_receiver_availability(scope)
     ]
 
 
@@ -150,7 +157,9 @@ async def test_receiver_unavailable_before_start(hass, receiver_entry_builder):
     """
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    coord = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coord = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     assert coord.connected is False
     assert coord.receiver_available is False
 
@@ -207,7 +216,9 @@ async def test_start_leaves_the_receiver_unavailable_until_it_connects(
     """
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    coord = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coord = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
 
     start = dt_util.utcnow()
     with freeze_time(start), patch.object(coord._client, "start"):
@@ -233,38 +244,38 @@ async def test_no_timer_is_ever_armed(hass, coordinator):
 # --------------------------------------------------------------------------- #
 async def test_drop_dispatches_the_repaint_once(hass, coordinator):
     """The disconnect edge repaints every device entity exactly once."""
-    entry_id = coordinator.entry.entry_id
+    scope = coordinator.receiver_id
     with patch(DISPATCH) as dispatch:
         _drop(coordinator)
-        assert len(_availability_signals(dispatch, entry_id)) == 1
+        assert len(_availability_signals(dispatch, scope)) == 1
 
         # The gate is already closed: re-checking it does not re-dispatch.
         coordinator._async_sync_receiver_availability()
         await coordinator._async_watchdog(dt_util.utcnow())
-        assert len(_availability_signals(dispatch, entry_id)) == 1
+        assert len(_availability_signals(dispatch, scope)) == 1
     assert coordinator._devices_offline is True
 
 
 async def test_reconnect_dispatches_the_recovery_repaint(hass, coordinator):
     """Coming back repaints the devices once."""
-    entry_id = coordinator.entry.entry_id
+    scope = coordinator.receiver_id
     _drop(coordinator)
 
     with patch(DISPATCH) as dispatch:
         _connect(coordinator)
-        assert len(_availability_signals(dispatch, entry_id)) == 1
+        assert len(_availability_signals(dispatch, scope)) == 1
     assert coordinator._devices_offline is False
 
 
 async def test_watchdog_is_a_backstop_for_a_missed_edge(hass, coordinator):
     """A tick reconciles the gate if a connection edge was ever missed."""
-    entry_id = coordinator.entry.entry_id
+    scope = coordinator.receiver_id
     # Drop the socket without driving the callback, so no edge was seen.
     coordinator._client.connected = False
 
     with patch(DISPATCH) as dispatch:
         await coordinator._async_watchdog(dt_util.utcnow())
-        assert len(_availability_signals(dispatch, entry_id)) == 1
+        assert len(_availability_signals(dispatch, scope)) == 1
     assert coordinator._devices_offline is True
 
 
@@ -331,7 +342,9 @@ async def test_the_device_count_is_restart_safe(hass, receiver_entry_builder, ca
         }
     )
     entry.add_to_hass(hass)
-    coord = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coord = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     coord._started = True
     _connect(coord)
 
@@ -364,7 +377,9 @@ async def test_first_connect_is_not_reported_as_a_recovery(
     """Startup stamps the same clock, but the first connect is not a reconnect."""
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    coord = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coord = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
 
     caplog.set_level(logging.INFO, logger=_LOGGER_NAME)
     with patch.object(coord._client, "start"):
@@ -425,10 +440,10 @@ async def test_offline_receiver_takes_every_device_entity_unavailable(
     await hass.async_block_till_done()
     ent_reg = er.async_get(hass)
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
     )
     button_eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:button"
     )
     assert temp_eid is not None
     assert button_eid is not None
@@ -476,7 +491,7 @@ async def test_removal_unsubscribes_from_both_signals(hass, receiver_entry_build
     )
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
     entity = hass.data["entity_components"]["sensor"].get_entity(watts_eid)
     assert entity is not None
@@ -488,7 +503,7 @@ async def test_removal_unsubscribes_from_both_signals(hass, receiver_entry_build
     assert entity._unsub_dispatcher is None
 
     with patch.object(entity, "async_write_ha_state") as write:
-        async_dispatcher_send(hass, signal_receiver_availability(receiver.entry_id))
+        async_dispatcher_send(hass, signal_receiver_availability(receiver_id(receiver)))
         _feed(
             _coordinator(hass, receiver),
             {"model": "EnergyMeter-2000", "id": 1234, "power_W": 6.0},
@@ -521,13 +536,13 @@ async def test_offline_receiver_takes_the_receiver_diagnostic_sensors_unavailabl
 
     ent_reg = er.async_get(hass)
     freq_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:hub:center_frequency"
+        "sensor", DOMAIN, f"{receiver_scope(receiver)}:center_frequency"
     )
     ook_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:hub:ook_frames"
+        "sensor", DOMAIN, f"{receiver_scope(receiver)}:ook_frames"
     )
     conn_eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver.entry_id}:hub:connectivity"
+        "binary_sensor", DOMAIN, f"{receiver_scope(receiver)}:connectivity"
     )
     assert freq_eid is not None
     assert ook_eid is not None
@@ -570,13 +585,13 @@ async def test_receiver_entity_repaints_on_the_availability_signal(
     receiver = await _setup_receiver(hass, receiver_entry_builder)
     ent_reg = er.async_get(hass)
     freq_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:hub:center_frequency"
+        "sensor", DOMAIN, f"{receiver_scope(receiver)}:center_frequency"
     )
     entity = hass.data["entity_components"]["sensor"].get_entity(freq_eid)
     assert entity is not None
 
     with patch.object(entity, "async_write_ha_state") as write:
-        async_dispatcher_send(hass, signal_receiver_availability(receiver.entry_id))
+        async_dispatcher_send(hass, signal_receiver_availability(receiver_id(receiver)))
         await hass.async_block_till_done()
         write.assert_called_once()
 
@@ -604,7 +619,7 @@ async def test_missing_receiver_key_reads_unknown_not_unavailable(
 
     ent_reg = er.async_get(hass)
     freq_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:hub:center_frequency"
+        "sensor", DOMAIN, f"{receiver_scope(receiver)}:center_frequency"
     )
     assert hass.states.get(freq_eid).state == "unknown"
 
@@ -616,7 +631,7 @@ async def test_receiver_entity_removal_unsubscribes_from_both_signals(
     receiver = await _setup_receiver(hass, receiver_entry_builder)
     ent_reg = er.async_get(hass)
     freq_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:hub:center_frequency"
+        "sensor", DOMAIN, f"{receiver_scope(receiver)}:center_frequency"
     )
     entity = hass.data["entity_components"]["sensor"].get_entity(freq_eid)
     assert entity._unsub_receiver is not None
@@ -627,8 +642,8 @@ async def test_receiver_entity_removal_unsubscribes_from_both_signals(
     assert entity._unsub_receiver_availability is None
 
     with patch.object(entity, "async_write_ha_state") as write:
-        async_dispatcher_send(hass, signal_receiver_availability(receiver.entry_id))
-        async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+        async_dispatcher_send(hass, signal_receiver_availability(receiver_id(receiver)))
+        async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
         await hass.async_block_till_done()
         write.assert_not_called()
 
@@ -654,7 +669,7 @@ async def test_offline_receiver_takes_the_last_seen_sensor_unavailable(
     )
     ent_reg = er.async_get(hass)
     last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:last_seen"
     )
     assert last_seen_eid is not None
     await _enable_entity(hass, receiver, last_seen_eid)

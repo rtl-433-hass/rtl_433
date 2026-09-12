@@ -102,7 +102,7 @@ from .const import (
 from .coordinator import Rtl433Coordinator
 from .device_replace import DeviceReplaceError, async_replace_device
 from .entity import resolve_event_type
-from .receiver_settings import _receiver_ignored_devices
+from .receiver_settings import _receiver_ignored_devices, receiver_coordinator
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,
@@ -191,7 +191,10 @@ def _async_get_coordinator(
         )
         return None
 
-    coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
+    # A location's first receiver: these commands still speak the one-server
+    # model, and re-scoping them onto a location plus a receiver id is its own
+    # change. A single-receiver location -- every install today -- has exactly one.
+    coordinator = receiver_coordinator(hass, entry)
     if coordinator is None or entry.state is not ConfigEntryState.LOADED:
         connection.send_error(
             msg["id"],
@@ -834,7 +837,7 @@ def ws_subscribe_devices(
         rather than absorbed by a second wrapper per trigger.
         """
         nonlocal last_sent
-        live: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        live = receiver_coordinator(hass, entry)
         if live is None:
             return
         payload = _pending_payload(hass, entry, live)
@@ -844,7 +847,7 @@ def ws_subscribe_devices(
         connection.send_message(websocket_api.event_message(msg["id"], payload))
 
     remove_signal = async_dispatcher_connect(
-        hass, signal_pending_update(entry.entry_id), _push_if_changed
+        hass, signal_pending_update(coordinator.receiver_id), _push_if_changed
     )
     remove_timer = async_track_time_interval(
         hass,

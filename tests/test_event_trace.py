@@ -27,6 +27,7 @@ from custom_components.rtl_433.const import DOMAIN
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.event import Rtl433Event
 from homeassistant.helpers import device_registry as dr
+from tests.conftest import receiver_id, receiver_scope, receiver_subentry
 
 _TRACE_LOGGER = "custom_components.rtl_433"
 _DEVICE_KEY = "Honeywell-Doorbell-7"
@@ -45,9 +46,13 @@ async def event_entity(hass, receiver_entry_builder) -> Rtl433Event:
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id, identifiers={(DOMAIN, entry.entry_id)}
+        config_entry_id=entry.entry_id,
+        config_subentry_id=receiver_id(entry),
+        identifiers={(DOMAIN, receiver_scope(entry))},
     )
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     descriptor = FieldDescriptor(
         field_key=_FIELD_KEY,
         platform="event",

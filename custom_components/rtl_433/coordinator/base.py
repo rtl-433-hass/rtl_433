@@ -66,7 +66,7 @@ from typing import Any
 from pyrtl_433 import CannotConnect as CannotConnect, Rtl433Client, TimePrecision
 from pyrtl_433.normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -79,6 +79,7 @@ from ..const import (
     DEFAULT_PORT,
     LOGGER,
     SDR_STORE_VERSION,
+    receiver_identity,
     sdr_store_key,
     signal_device_update,
     signal_pending_update,
@@ -96,7 +97,10 @@ from ._watchdog import _WATCHDOG_INTERVAL, _AvailabilityMixin
 class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityMixin):
     """HA adapter that owns and drives a :class:`pyrtl_433.Rtl433Client` for one receiver.
 
-    All state is scoped to a single config entry, so multiple receivers coexist.
+    All state is scoped to a single **receiver config subentry**, so the several
+    receivers of one location coexist inside one config entry. ``receiver_id``
+    (the subentry id) is that scope: dispatcher signals, the desired-state Store
+    and the receiver's device identity are all keyed by it.
     Behavior is grouped into the mixins listed in the module docstring; every
     runtime attribute those mixins read is declared in :meth:`__init__` below.
 
@@ -147,7 +151,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         ``stats``: ``dict[str, Any]`` latest server-stats payload (client-sourced).
 
     Managed-SDR desired state (restart-surviving, persisted to a ``Store`` keyed
-    by ``sdr_store_key(entry_id)``):
+    by ``sdr_store_key(receiver_id)``):
         ``_desired``: ``dict[str, Any]`` desired value per managed registry key
             (gain is two keys: ``gain`` dB float + ``gain_auto`` bool).
         ``_managed``: ``set[str]`` registry keys Home Assistant is managing.
@@ -160,6 +164,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
+        subentry: ConfigSubentry,
         *,
         host: str,
         port: int = DEFAULT_PORT,
@@ -175,7 +180,17 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
     ) -> None:
         """Initialize the coordinator with connection params and runtime state."""
         self.hass = hass
+        # The location config entry this receiver belongs to, and the receiver
+        # config subentry that *is* this receiver. The entry owns the devices
+        # map, the ignore list and the user mappings (they describe sensors, not
+        # servers); the subentry owns the connection target and the radio
+        # settings. ``receiver_id`` is the subentry id -- the scope every
+        # dispatcher signal, the desired-state Store and this receiver's device
+        # identity are keyed by, so two receivers in one location never collide.
         self.entry = entry
+        self.subentry = subentry
+        self.receiver_id = subentry.subentry_id
+        self.receiver_identity = receiver_identity(entry.entry_id, self.receiver_id)
 
         self.host = host
         self.port = port
@@ -341,7 +356,8 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # --- Managed-SDR desired state (restart-surviving) -------------------
         # ``_desired`` maps a registry key -> the desired value HA wants applied;
         # ``_managed`` is the subset of registry keys HA is actively managing.
-        # Both are persisted to a per-receiver ``Store`` keyed by ``entry_id`` so a
+        # Both are persisted to a per-receiver ``Store`` keyed by the receiver's
+        # subentry id so a
         # value change never churns the config entry, and loaded once at start.
         # All ``/cmd`` issuance is serialized inside the client (its own ``/cmd``
         # lock) so a user write and a reconnect replay can never interleave.
@@ -354,7 +370,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # re-applies after the user later changes the frequency via the control.
         self._initial_freq_seeded: bool = False
         self._store: _SdrStore = _SdrStore(
-            hass, SDR_STORE_VERSION, sdr_store_key(entry.entry_id)
+            hass, SDR_STORE_VERSION, sdr_store_key(self.receiver_id)
         )
 
         # --- The transport client (owns the WS/HTTP transport) ---------------
@@ -482,7 +498,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             self.hass,
             self._async_watchdog,
             _WATCHDOG_INTERVAL,
-            name=f"rtl_433 watchdog {self.entry.entry_id}",
+            name=f"rtl_433 watchdog {self.receiver_id}",
         )
         LOGGER.debug("rtl_433 coordinator started for %s", self.ws_url)
 
@@ -629,7 +645,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
                 self.entry.async_create_background_task(
                     self.hass,
                     self._on_connect(),
-                    name=f"rtl_433 sdr adopt {self.entry.entry_id}",
+                    name=f"rtl_433 sdr adopt {self.receiver_id}",
                 )
         elif not connected and self._was_connected:
             # Disconnect edge: stamp the outage clock, log the loss, and repaint
@@ -642,7 +658,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
                 self._async_note_disconnected()
 
         self._maybe_refresh_receiver_identity()
-        async_dispatcher_send(self.hass, signal_receiver_update(self.entry.entry_id))
+        async_dispatcher_send(self.hass, signal_receiver_update(self.receiver_id))
 
     async def _on_connect(self) -> None:
         """Adopt + enforce the managed SDR settings on a (re)connect.
@@ -720,7 +736,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         counts in the websocket layer (a slow, change-detecting re-send) leaves
         this class a pure state holder that never learns a UI exists.
         """
-        async_dispatcher_send(self.hass, signal_pending_update(self.entry.entry_id))
+        async_dispatcher_send(self.hass, signal_pending_update(self.receiver_id))
 
     @callback
     def pending_candidates(self) -> list[PendingDevice]:
@@ -802,7 +818,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             )
         async_dispatcher_send(
             self.hass,
-            signal_device_update(self.entry.entry_id, device_key),
+            signal_device_update(self.receiver_id, device_key),
             normalized,
         )
 

@@ -77,6 +77,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_id
 
 # The three devices the receiver hears in the fixture below, spelled out as the
 # normalizer derives them from ``model`` + ``id`` so the assertions read the way
@@ -154,7 +155,7 @@ def _message(command: str, entry_id: str) -> dict[str, Any]:
 
 def _coordinator(hass, entry):
     """Return the running coordinator for a loaded receiver entry."""
-    return hass.data[DOMAIN][entry.entry_id]
+    return hass.data[DOMAIN][receiver_id(entry)]
 
 
 def _hear(coordinator, frame: dict[str, Any]) -> None:
@@ -173,13 +174,13 @@ def _hear(coordinator, frame: dict[str, Any]) -> None:
 def _registry_device(hass, entry, device_key):
     """Return the registry device for a device key, or ``None``."""
     return dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{entry.entry_id}:{device_key}"), entry.entry_id
+        (DOMAIN, f"{receiver_id(entry)}:{device_key}"), entry.entry_id
     )
 
 
 def _device_entity_unique_ids(hass, entry, device_key) -> set[str]:
     """Return the unique_ids of every registry entity belonging to a device."""
-    prefix = f"{entry.entry_id}:{device_key}:"
+    prefix = f"{receiver_id(entry)}:{device_key}:"
     return {
         registry_entry.unique_id
         for registry_entry in er.async_get(hass).entities.values()
@@ -1160,7 +1161,10 @@ def _adopted_snapshot(hass, entry, device_key) -> dict[str, Any]:
     """
     device = _registry_device(hass, entry, device_key)
     assert device is not None
-    prefix = f"{entry.entry_id}:"
+    # Identity is scoped by the receiver that heard the device, so the prefix
+    # stripped here is the receiver id -- otherwise two locations' snapshots
+    # would differ only by the id this helper exists to normalise away.
+    prefix = f"{receiver_id(entry)}:"
     return {
         "model": device.model,
         "manufacturer": device.manufacturer,

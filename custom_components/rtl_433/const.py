@@ -25,7 +25,8 @@ MANUFACTURER: Final = "rtl_433"
 # Module-level logger; other modules use ``from .const import LOGGER``.
 LOGGER: Final[logging.Logger] = logging.getLogger(__package__)
 
-# Platforms forwarded once on the receiver config entry.
+# Platforms forwarded once on the location config entry. Every receiver
+# subentry's entities are added through the same forwarded platform.
 PLATFORMS: Final[list[Platform]] = [
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
@@ -111,6 +112,12 @@ CONF_DEVICE_KEY: Final = "device_key"
 RECEIVER_SEGMENT: Final = "receiver"
 RESERVED_DEVICE_KEYS: Final = frozenset({RECEIVER_SEGMENT})
 
+# The ``subentry_type`` of a receiver config subentry. A location config entry
+# holds one of these per rtl_433 server; the literal doubles as the reserved
+# identity marker above, because both answer the same question ("is this segment
+# naming a receiver?") and a second spelling would let them drift apart.
+SUBENTRY_TYPE_RECEIVER: Final = RECEIVER_SEGMENT
+
 
 def is_reserved_device_key(device_key: str) -> bool:
     """Return whether ``device_key`` collides with a structural identity marker.
@@ -119,6 +126,23 @@ def is_reserved_device_key(device_key: str) -> bool:
     reserved set has exactly one definition (see ``RESERVED_DEVICE_KEYS``).
     """
     return device_key in RESERVED_DEVICE_KEYS
+
+
+def receiver_identity(entry_id: str, receiver_id: str) -> str:
+    """Return the identity root of one receiver inside one location.
+
+    ``f"{location_entry_id}:receiver:{receiver_subentry_id}"`` — the receiver
+    device's registry identifier, and the prefix every receiver-owned control /
+    diagnostic entity's ``unique_id`` is built on. Three segments, with the
+    reserved ``receiver`` marker in the middle, so the identity parsers can tell
+    it apart from a device-scoped ``f"{scope}:{device_key}"`` without knowing
+    which ids are entry ids and which are subentry ids.
+
+    The location entry id leads because a receiver only exists inside a location:
+    moving a receiver between locations is a new subentry, never a re-label of
+    this string.
+    """
+    return f"{entry_id}:{RECEIVER_SEGMENT}:{receiver_id}"
 
 
 # The rtl_433 ``model`` string for the device (e.g. "Acurite-606TXN").
@@ -286,35 +310,35 @@ def class_default_timeout(
 
 # --- Managed-SDR desired-state Store ---------------------------------------
 # The coordinator persists the desired SDR settings in a
-# ``homeassistant.helpers.storage.Store`` keyed by the receiver ``entry_id`` so a
-# value change never churns the config entry. ``SDR_STORE_VERSION`` is the Store
-# schema version; ``sdr_store_key`` builds the per-receiver key.
+# ``homeassistant.helpers.storage.Store`` keyed by the receiver's config
+# *subentry* id so a value change never churns the config entry.
+# ``SDR_STORE_VERSION`` is the Store schema version; ``sdr_store_key`` builds
+# the per-receiver key, so two receivers in one location keep separate desired
+# state.
 # Version 2 stores ``center_frequency`` in MHz; version 1 stored it in Hz and is
 # migrated on load by the coordinator's Store (see ``_SdrStore``).
 SDR_STORE_VERSION: Final = 2
 
 
-def sdr_store_key(entry_id: str) -> str:
-    """Return the desired-state Store key for one receiver entry."""
-    return f"{DOMAIN}.sdr_{entry_id}"
+def sdr_store_key(receiver_id: str) -> str:
+    """Return the desired-state Store key for one receiver subentry."""
+    return f"{DOMAIN}.sdr_{receiver_id}"
 
 
 # --- Dispatcher signal -----------------------------------------------------
 # Template for the per-device dispatcher signal. The coordinator sends and the
 # entities subscribe using the same formatted key so updates fan out only to
 # the device they belong to. Use ``signal_device_update(...)`` to format it.
-SIGNAL_DEVICE_UPDATE: Final = "rtl_433_device_update_{receiver_entry_id}_{device_key}"
+SIGNAL_DEVICE_UPDATE: Final = "rtl_433_device_update_{receiver_id}_{device_key}"
 
 
-def signal_device_update(receiver_entry_id: str, device_key: str) -> str:
+def signal_device_update(receiver_id: str, device_key: str) -> str:
     """Return the dispatcher signal name for one device under one receiver.
 
     Coordinator and entities must agree on this key, so both call this helper
     rather than formatting the template independently.
     """
-    return SIGNAL_DEVICE_UPDATE.format(
-        receiver_entry_id=receiver_entry_id, device_key=device_key
-    )
+    return SIGNAL_DEVICE_UPDATE.format(receiver_id=receiver_id, device_key=device_key)
 
 
 # Receiver-level "an adopted device needs building" signal. The coordinator's
@@ -323,24 +347,24 @@ def signal_device_update(receiver_entry_id: str, device_key: str) -> str:
 # is adopted from the options flow -- and the entity platforms subscribe to it to
 # create the nested device and its entities at runtime (the ``dynamic-devices``
 # Quality Scale rule). Carries ``(device_key, model)``.
-SIGNAL_NEW_DEVICE: Final = "rtl_433_new_device_{receiver_entry_id}"
+SIGNAL_NEW_DEVICE: Final = "rtl_433_new_device_{receiver_id}"
 
 
-def signal_new_device(receiver_entry_id: str) -> str:
+def signal_new_device(receiver_id: str) -> str:
     """Return the receiver-level new-device dispatcher signal for one receiver."""
-    return SIGNAL_NEW_DEVICE.format(receiver_entry_id=receiver_entry_id)
+    return SIGNAL_NEW_DEVICE.format(receiver_id=receiver_id)
 
 
 # Receiver-level "connectivity / SDR meta / server stats changed" signal. The
 # coordinator dispatches this (no payload) whenever the receiver's connection state,
 # meta/SDR configuration, or server stats change; the statically-registered receiver
 # entities subscribe and re-read the coordinator's receiver state.
-SIGNAL_RECEIVER_UPDATE: Final = "rtl_433_receiver_update_{receiver_entry_id}"
+SIGNAL_RECEIVER_UPDATE: Final = "rtl_433_receiver_update_{receiver_id}"
 
 
-def signal_receiver_update(receiver_entry_id: str) -> str:
+def signal_receiver_update(receiver_id: str) -> str:
     """Return the receiver-level update dispatcher signal for one receiver."""
-    return SIGNAL_RECEIVER_UPDATE.format(receiver_entry_id=receiver_entry_id)
+    return SIGNAL_RECEIVER_UPDATE.format(receiver_id=receiver_id)
 
 
 # Receiver-level "the connection-backed availability gate flipped" signal. The
@@ -350,14 +374,12 @@ def signal_receiver_update(receiver_entry_id: str) -> str:
 # separate from
 # :data:`SIGNAL_RECEIVER_UPDATE` — which also fires on every meta/stats refresh — so
 # a routine receiver poll never writes state for hundreds of device entities.
-SIGNAL_RECEIVER_AVAILABILITY: Final = (
-    "rtl_433_receiver_availability_{receiver_entry_id}"
-)
+SIGNAL_RECEIVER_AVAILABILITY: Final = "rtl_433_receiver_availability_{receiver_id}"
 
 
-def signal_receiver_availability(receiver_entry_id: str) -> str:
+def signal_receiver_availability(receiver_id: str) -> str:
     """Return the receiver-level availability-gate dispatcher signal for one receiver."""
-    return SIGNAL_RECEIVER_AVAILABILITY.format(receiver_entry_id=receiver_entry_id)
+    return SIGNAL_RECEIVER_AVAILABILITY.format(receiver_id=receiver_id)
 
 
 # Receiver-level "the pending-device list changed" signal. Fired when the *membership*
@@ -373,9 +395,9 @@ def signal_receiver_availability(receiver_entry_id: str) -> str:
 # *websocket layer* re-sends on a slow timer and only when the rendered payload
 # actually differs (see ``websocket_api.py``). Keeping that coalescing there
 # leaves the coordinator a pure state holder with no idea a UI exists.
-SIGNAL_PENDING_UPDATE: Final = "rtl_433_pending_update_{receiver_entry_id}"
+SIGNAL_PENDING_UPDATE: Final = "rtl_433_pending_update_{receiver_id}"
 
 
-def signal_pending_update(receiver_entry_id: str) -> str:
+def signal_pending_update(receiver_id: str) -> str:
     """Return the receiver-level pending-list-changed dispatcher signal for one receiver."""
-    return SIGNAL_PENDING_UPDATE.format(receiver_entry_id=receiver_entry_id)
+    return SIGNAL_PENDING_UPDATE.format(receiver_id=receiver_id)

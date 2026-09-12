@@ -41,6 +41,7 @@ from custom_components.rtl_433.device_replace import (
     async_replace_device,
 )
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from tests.conftest import receiver_id
 
 MODEL = "Acurite-986"
 OLD_KEY = f"{MODEL}-1a2b"
@@ -80,7 +81,7 @@ async def _setup_receiver(hass, receiver_entry_builder, devices):
 def _rows(hass, receiver, device_key) -> dict[str, tuple[str, str]]:
     """Map ``unique_id -> (entity_id, registry row id)`` for one nested device."""
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}:"
+    prefix = f"{receiver_id(receiver)}:{device_key}:"
     return {
         entry.unique_id: (entry.entity_id, entry.id)
         for entry in er.async_entries_for_config_entry(ent_reg, receiver.entry_id)
@@ -122,10 +123,10 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
     assert before_old
     assert before_new
     old_device_id = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{OLD_KEY}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{OLD_KEY}"), receiver.entry_id
     ).id
     duplicate_device_id = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{NEW_KEY}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{NEW_KEY}"), receiver.entry_id
     ).id
     assert old_device_id != duplicate_device_id
 
@@ -136,10 +137,13 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
 
     # Each survivor moved from ':{OLD_KEY}:{suffix}' to ':{NEW_KEY}:{suffix}'
     # with the suffix byte-for-byte unchanged, and the *same* row carried it.
-    old_prefix = f"{receiver.entry_id}:{OLD_KEY}:"
+    old_prefix = f"{receiver_id(receiver)}:{OLD_KEY}:"
     for old_unique_id, (entity_id, row_id) in before_old.items():
         suffix = old_unique_id[len(old_prefix) :]
-        assert after[f"{receiver.entry_id}:{NEW_KEY}:{suffix}"] == (entity_id, row_id)
+        assert after[f"{receiver_id(receiver)}:{NEW_KEY}:{suffix}"] == (
+            entity_id,
+            row_id,
+        )
 
     # Nothing is left behind on the old key.
     assert _rows(hass, receiver, OLD_KEY) == {}
@@ -150,7 +154,8 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
     # -- are not part of the rewrite; Home Assistant restores those rows itself
     # when the platforms rebuild, which is its behaviour to define, not ours.)
     survivor_unique_ids = {
-        f"{receiver.entry_id}:{NEW_KEY}:{uid[len(old_prefix) :]}" for uid in before_old
+        f"{receiver_id(receiver)}:{NEW_KEY}:{uid[len(old_prefix) :]}"
+        for uid in before_old
     }
     contested = survivor_unique_ids & set(before_new)
     assert contested, "expected the duplicate to have claimed a survivor's unique_id"
@@ -166,13 +171,13 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
     # The device row was re-pointed in place, not recreated: same row id, new
     # identifiers, and the serial number now reports the new transmitter id.
     new_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{NEW_KEY}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{NEW_KEY}"), receiver.entry_id
     )
     assert new_device.id == old_device_id
     assert new_device.serial_number == "9f3c"
     assert (
         dev_reg.async_get_device_by_identifier(
-            (DOMAIN, f"{receiver.entry_id}:{OLD_KEY}"), receiver.entry_id
+            (DOMAIN, f"{receiver_id(receiver)}:{OLD_KEY}"), receiver.entry_id
         )
         is None
     )
@@ -228,10 +233,10 @@ async def test_replace_adopts_new_key_with_no_record(
 
     # The rows still moved in place even with nothing to free first.
     after = _rows(hass, receiver, NEW_KEY)
-    old_prefix = f"{receiver.entry_id}:{OLD_KEY}:"
+    old_prefix = f"{receiver_id(receiver)}:{OLD_KEY}:"
     for old_unique_id, row in before_old.items():
         suffix = old_unique_id[len(old_prefix) :]
-        assert after[f"{receiver.entry_id}:{NEW_KEY}:{suffix}"] == row
+        assert after[f"{receiver_id(receiver)}:{NEW_KEY}:{suffix}"] == row
 
 
 @pytest.mark.parametrize(

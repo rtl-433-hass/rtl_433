@@ -25,6 +25,7 @@ from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.sdr_settings import KEY_GAIN_AUTO, SDR_SETTINGS_BY_KEY
 from custom_components.rtl_433.switch import PLATFORM, Rtl433SwitchControl
+from tests.conftest import receiver_id, receiver_scope
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -63,7 +64,7 @@ def _make_switch_entity() -> tuple[Rtl433SwitchControl, MagicMock]:
     coordinator.meta = {}
     coordinator.get_desired = MagicMock(return_value=None)
 
-    entity = Rtl433SwitchControl(coordinator, "entry_test", setting)
+    entity = Rtl433SwitchControl(coordinator, setting)
     return entity, coordinator
 
 
@@ -243,12 +244,12 @@ async def test_setup_entry_only_creates_switch_platform_entities(
 
     # Verify the single expected switch is the gain_auto one.
     uids = {e.unique_id for e in receiver_switches}
-    assert f"{receiver.entry_id}:hub:gain_auto" in uids
+    assert f"{receiver_scope(receiver)}:gain_auto" in uids
 
     # Confirm that number-platform settings are NOT present as switches.
     for setting in SDR_SETTINGS_BY_KEY.values():
         if setting.platform != PLATFORM:
-            assert f"{receiver.entry_id}:hub:{setting.object_suffix}" not in uids, (
+            assert f"{receiver_scope(receiver)}:{setting.object_suffix}" not in uids, (
                 f"non-switch setting {setting.key!r} must not appear as a switch"
             )
 
@@ -342,7 +343,7 @@ async def test_setup_entry_capability_receives_coordinator_meta_object(
         assert await hass.config_entries.async_setup(receiver.entry_id)
         await hass.async_block_till_done()
 
-    coordinator: Rtl433Coordinator = hass.data[DOMAIN][receiver.entry_id]
+    coordinator: Rtl433Coordinator = hass.data[DOMAIN][receiver_id(receiver)]
 
     # All calls received coordinator.meta (the same dict object), not None.
     assert len(capability_args) >= 1
@@ -365,13 +366,13 @@ async def test_setup_entry_entity_coordinator_is_not_none(hass, receiver_entry_b
     would then be None, breaking is_on and any other property.
     """
     receiver = await _setup_receiver(hass, receiver_entry_builder)
-    hass.data[DOMAIN][receiver.entry_id]
+    hass.data[DOMAIN][receiver_id(receiver)]
 
     from homeassistant.helpers import entity_registry as er
 
     ent_reg = er.async_get(hass)
     gain_auto_eid = ent_reg.async_get_entity_id(
-        "switch", DOMAIN, f"{receiver.entry_id}:hub:gain_auto"
+        "switch", DOMAIN, f"{receiver_scope(receiver)}:gain_auto"
     )
     assert gain_auto_eid is not None
 
@@ -396,17 +397,17 @@ async def test_setup_entry_entity_reads_coordinator_meta(hass, receiver_entry_bu
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
     receiver = await _setup_receiver(hass, receiver_entry_builder)
-    coordinator: Rtl433Coordinator = hass.data[DOMAIN][receiver.entry_id]
+    coordinator: Rtl433Coordinator = hass.data[DOMAIN][receiver_id(receiver)]
 
     ent_reg = er.async_get(hass)
     gain_auto_eid = ent_reg.async_get_entity_id(
-        "switch", DOMAIN, f"{receiver.entry_id}:hub:gain_auto"
+        "switch", DOMAIN, f"{receiver_scope(receiver)}:gain_auto"
     )
     assert gain_auto_eid is not None
 
     # Update coordinator state and trigger repaint (meta is client-owned).
     coordinator._client.meta = {"gain": ""}
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
 
     state = hass.states.get(gain_auto_eid)
