@@ -29,10 +29,12 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     **exclusion set**: `rssi` / `snr` / `last_seen` measure the link between one
     receiver and the sensor, so they are partitioned out and stay per receiver.
     It additionally owns **merged availability** (`receiver_vouches` /
-    `device_available`, see [Merged availability](#merged-availability-across-a-locations-receivers))
-    and the **coverage map** (`ReceiverCoverage` / `coverage`), which records the
+    `device_available`, see [Merged availability](#merged-availability-across-a-locations-receivers)),
+    the **coverage map** (`ReceiverCoverage` / `coverage`), which records the
     link half of every frame per `(device_key, receiver)` so the panel can show
-    "heard by Attic (−62 dB) / Garage (−89 dB)" with no entity enabled.
+    "heard by Attic (−62 dB) / Garage (−89 dB)" with no entity enabled, and the
+    **merged candidate list** (`MergedCandidate` / `merged_candidates` /
+    `enforce_pending_cap`) behind the union add-device page.
   - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`,
     `diagnostics.py`, `repairs.py`, `sensor.py`, `binary_sensor.py`,
     `event.py`, `translations/en.json`. There is no local `mapping/` package or
@@ -172,7 +174,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
 - **Observation and adoption are separate states; nothing is ever auto-added.**
   A frame whose `device_key` is not in the coordinator's `adopted` set (seeded
   from `entry.data["devices"]`) is routed by `_record_pending`
-  (`coordinator/_events.py`) into the coordinator's in-memory `pending` map — a
+  (`coordinator/_events.py`) into that receiver's in-memory `pending` map — a
   `PendingDevice` per candidate (latest `NormalizedEvent`, sighting count,
   first/last seen) — and goes **no further**: no registry device, no entities, no
   dispatch, and none of the adopted-device runtime state (`devices`,
@@ -184,20 +186,41 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   registration gate applied to candidacy — see the coordinator's
   replay/registration notes. The pending map is **memory-only by design**: empty
   after a restart or reload, refilled by live traffic. Do not add persistence or
-  a TTL. It *is* capped, at `_events._MAX_PENDING_CANDIDATES` (512), dropping
-  the least recently heard candidate first: 433 MHz is a shared band where a bad
-  decode mints a device key of its own, so without a ceiling the list grows for
-  the life of the config entry and every entry in it is rendered into the payload
-  pushed to every open panel. Adopted devices are never in this map, so the cap
-  needs no notion of a protected key and cannot reach state an entity is
-  reading.
-  A device becomes real only through `coordinator.adopt_device` (from the
-  options flow, below), which promotes the stored event into runtime state and
-  fires the **same** `new_device_callback` / `SIGNAL_NEW_DEVICE` seam a live
-  sighting used — one registration path, not two. There is **no** persistent
-  notification for a heard device (the per-device notification, and the per-receiver
-  discovery toggle that used to gate auto-add, were both removed); the
-  `INFO` log line in `_record_pending` is the only signal.
+  a TTL.
+- **Approval is the location's, and so is the candidate list.** `adopted` and
+  `ignored` are decisions about a *sensor*, so they live on the location entry
+  (`entry.data["devices"]` / `["ignored_devices"]`) and every receiver's
+  coordinator holds a mirror of them — written across all of them by
+  `adoption.py`, so one click applies to the whole location. `pending` stays per
+  receiver because it is an ingestion buffer behind that receiver's own
+  replay/backlog gate; the list the user is offered is
+  `aggregator.merged_candidates(hass, entry)`, one row per `device_key` however
+  many receivers heard it, showing **last-received-wins** data (the most recently
+  *arrived* frame from any receiver, with no debounce — a preview needs the
+  freshest sample, where a recorded entity value needs the union's
+  anti-regression guard) and carrying each hearing receiver's coverage. The
+  order is: per-receiver replay/backlog gate → merge → cap. The cap
+  (`_events.MAX_PENDING_CANDIDATES`, 512) is enforced on the **merged** list by
+  `aggregator.enforce_pending_cap` (hooked onto every coordinator's
+  `pending_listeners`), dropping the least recently heard candidate first and
+  from *every* receiver's map, so N receivers cannot hold N × 512 candidates:
+  433 MHz is a shared band where a bad decode mints a device key of its own, so
+  without a ceiling the list grows for the life of the config entry and every
+  entry in it is rendered into the payload pushed to every open panel. Adopted
+  devices are never in this map, so the cap needs no notion of a protected key
+  and cannot reach state an entity is reading. A key on **both** stored lists
+  (only a deliberate consolidation can do that) resolves to **ignored**
+  (`receiver_settings._location_adopted_devices`).
+  A device becomes real only through `adoption.async_adopt_devices`, which
+  promotes the merged record through every receiver's `coordinator.adopt_device`
+  (or `mark_adopted`, for a receiver that never heard it) and fires the **same**
+  `new_device_callback` / `SIGNAL_NEW_DEVICE` seam a live sighting used — one
+  registration path, not two, and one device, because the entity platforms share
+  their created-`unique_id` bookkeeping across a location's receivers. There is
+  **no** persistent notification for a heard device (the per-device
+  notification, and the per-receiver discovery toggle that used to gate
+  auto-add, were both removed); the `INFO` log line in `_record_pending` is the
+  only signal.
 - `async_remove_config_entry_device` (`__init__.py`) backs the per-device
   **Delete** affordance (the `stale-devices` rule): it returns `False` for the
   receiver device (so the receiver can't be removed out from under its entry) and `True`
@@ -340,16 +363,20 @@ Adopting, ignoring and un-ignoring a discovered device is reachable from
 **three** surfaces backed by **one** implementation. Add a caller, never a
 second implementation.
 
-- **`adoption.py` is that implementation.** `async_adopt_devices`,
-  `async_ignore_devices` and `async_unignore_devices` each take
-  `(hass, entry, coordinator, device_keys)` and return an `AdoptionResult`
-  (`applied` / `skipped`). A key that is no longer pending is **reported** as
-  skipped rather than silently dropped, because a WebSocket caller has to be
-  able to explain the click that did nothing. Adopt promotes the pending record
-  via `coordinator.adopt_device` + `async_upsert_device`; ignore writes
-  `entry.data["ignored_devices"]`; un-ignore removes the key and is **not
-  retroactive** (the device returns on its next transmission). Every membership
-  change dispatches `signal_pending_update(entry_id)` (`const.py`).
+- **`adoption.py` is that implementation, and it is scoped to the location.**
+  `async_adopt_devices`, `async_ignore_devices` and `async_unignore_devices`
+  each take `(hass, entry, device_keys)` — the **location** entry, no
+  coordinator — and return an `AdoptionResult` (`applied` / `skipped`). A key
+  that is no longer pending is **reported** as skipped rather than silently
+  dropped, because a WebSocket caller has to be able to explain the click that
+  did nothing. Adopt promotes the **merged** candidate
+  (`aggregator.merged_candidate`) through every receiver's
+  `coordinator.adopt_device` / `mark_adopted`, then `async_upsert_device`;
+  ignore writes `entry.data["ignored_devices"]` and updates every receiver's
+  `ignored`; un-ignore removes the key everywhere and is **not retroactive**
+  (the device returns on its next transmission). Every membership change
+  dispatches the location-scoped `signal_pending_update(location_entry_id)`
+  (`const.py`) — once, whichever receiver heard the device.
 - **`options_flow.py` and `websocket_api.py` are presentation.** Both call the
   three functions above. A behavioural difference between the form and the panel
   is therefore a duplicated implementation, not a missing feature.

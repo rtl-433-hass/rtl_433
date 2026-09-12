@@ -213,6 +213,17 @@ escalate_paths = [
 # never a silent floor blind spot.
 [tool.mutmut_ratchet.explicit_test_sources]
 "tests/test_coordinator.py" = ["coordinator/base.py"]
+# The location union, end to end. The stem resolves to ``aggregator.py`` alone,
+# which under-scopes it: the union's add-device half drives the location-scoped
+# adoption verbs (``adoption.py``), the coordinator's candidate/adopt API
+# (``coordinator/base.py``) and the adopted-vs-ignored resolution the
+# coordinators are seeded from (``receiver_settings.py``).
+"tests/test_aggregator.py" = [
+    "aggregator.py",
+    "adoption.py",
+    "coordinator/base.py",
+    "receiver_settings.py",
+]
 # The observation-vs-adoption routing contract: the pending/ignored branch lives
 # in ``coordinator/_events.py`` and the adopt/ignore/forget API it feeds lives in
 # ``coordinator/base.py``.
