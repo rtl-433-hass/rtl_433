@@ -25,7 +25,15 @@ tests pin what the integration does with that:
   state so nothing has to be enabled to see it; and
 * **receiver removal** -- deleting a receiver takes its own device and its signal
   entities, keeps every merged device and its history, and leaves a device only
-  that receiver ever heard unavailable rather than deleted.
+  that receiver ever heard unavailable rather than deleted;
+* **the merged candidate list** -- a sensor two receivers hear is ONE row on the
+  add-device page, showing the last frame to *arrive* (no debounce, unlike the
+  adopted-value rule above) and naming who heard it, with each receiver's
+  replay / backlog gate applied before the merge and the candidate cap applied
+  after it; and
+* **location-scoped adoption** -- adopting or ignoring a device once applies to
+  every receiver in the location, and ``ignored`` wins if a consolidation ever
+  puts a key on both lists.
 
 Frames are fed straight into each receiver's client (``_process_event``), the
 same seam the rest of the suite uses, with an explicit ``time`` because the
@@ -38,26 +46,38 @@ from datetime import datetime, timedelta
 import logging
 
 from freezegun import freeze_time
+from pyrtl_433.normalizer import NormalizedEvent
 import pytest
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
+from custom_components.rtl_433.adoption import (
+    async_adopt_devices,
+    async_ignore_devices,
+    async_unignore_devices,
+)
 from custom_components.rtl_433.aggregator import (
     _MERGE_DEBOUNCE,
     LAST_SEEN_FIELD,
     LINK_FIELD_KEYS,
     Rtl433LocationAggregator,
+    clear_pending,
     is_link_field,
     location_aggregator,
+    merged_candidate,
+    merged_candidates,
     partition_fields,
 )
 from custom_components.rtl_433.const import (
     CONF_DEVICES,
+    CONF_IGNORED_DEVICES,
     CONF_MODEL,
     DATA_AGGREGATOR,
     DEVICE_FIELDS,
     DOMAIN,
     signal_location_device_update,
+    signal_pending_update,
 )
+from custom_components.rtl_433.coordinator import MAX_PENDING_CANDIDATES
 from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -1235,3 +1255,650 @@ async def test_a_device_only_the_removed_receiver_heard_goes_unavailable_not_del
     # no remaining receiver has ever heard this sensor, so none can vouch.
     with freeze_time(dt_util.utcnow() + timedelta(seconds=6000)):
         assert entity.available is False
+
+
+# --------------------------------------------------------------------------- #
+# The union add-device page: one merged candidate list for the location.      #
+# --------------------------------------------------------------------------- #
+# A device the location has *not* adopted, so its frames become candidates
+# instead of taking the adopted path the tests above exercise.
+_CANDIDATE_KEY = "Acurite-606TX-55"
+
+
+def _dt(offset_seconds: float) -> datetime:
+    """Return :data:`_NOW` shifted by ``offset_seconds``, as a datetime."""
+    return datetime.fromisoformat(_NOW) + timedelta(seconds=offset_seconds)
+
+
+def _heard(
+    coordinator,
+    *,
+    key: str = _CANDIDATE_KEY,
+    model: str = _MODEL,
+    fields: dict | None = None,
+    is_replay: bool = False,
+    event_time: datetime | None = None,
+) -> None:
+    """Feed one already-classified frame into a receiver's Home Assistant side.
+
+    The candidate tests drive ``_on_client_event`` rather than the client's
+    ``_process_event`` (which the union tests above use) because what they are
+    about is the *verdict*: whether a frame this receiver classified as a replay,
+    as pre-connection backlog, or as live becomes a candidate at all. Handing the
+    verdict in makes each case one line instead of a reconstruction of the wire
+    conditions that would produce it -- the same seam ``tests/test_pending_devices``
+    uses for the single-receiver half of this contract.
+    """
+    coordinator._on_client_event(
+        NormalizedEvent(
+            device_key=key,
+            model=model,
+            fields={"temperature_C": 21.4} if fields is None else fields,
+            is_replay=is_replay,
+            event_time=event_time,
+        )
+    )
+
+
+async def test_one_sensor_heard_by_both_receivers_is_one_candidate(hass):
+    """Two receivers, one sensor, ONE row to approve.
+
+    The regression the union exists to prevent: without the merge the same
+    physical sensor queues once per receiver and has to be approved twice, which
+    is exactly the "approve a sensor once" the location model promises.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _heard(attic)
+    with freeze_time(_dt(1)):
+        _heard(garage)
+
+    # Each receiver really did record its own sighting: the merge is a view over
+    # both, not one receiver winning the race to record.
+    assert set(attic.pending) == {_CANDIDATE_KEY}
+    assert set(garage.pending) == {_CANDIDATE_KEY}
+
+    candidates = merged_candidates(hass, location)
+    assert [candidate.key for candidate in candidates] == [_CANDIDATE_KEY]
+    # The location heard it twice, which is the count a user judges a candidate
+    # by -- a real sensor keeps checking in, a bad decode is heard once.
+    assert candidates[0].record.count == 2
+    assert candidates[0].record.first_seen == _dt(0)
+    assert candidates[0].record.last_seen == _dt(1)
+
+
+async def test_the_merged_row_shows_the_last_received_frame(hass):
+    """Last-received-wins, by arrival -- not by the frame's own timestamp.
+
+    ``event_time`` is stamped by the decoding *host*, so two receivers disagree
+    by their clock skew; here the attic's clock runs a minute fast. A preview
+    that trusted it would show the older reading indefinitely. The rule is
+    deliberately the simple one -- the freshest sample to arrive, with none of
+    the debounce the *adopted* value path needs -- so the card tracks the sensor.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _heard(attic, fields={"temperature_C": 21.4}, event_time=_dt(60))
+    with freeze_time(_dt(1)):
+        _heard(garage, fields={"temperature_C": 22.9}, event_time=_dt(0))
+
+    candidate = merged_candidate(hass, location, _CANDIDATE_KEY)
+    assert candidate is not None
+    assert candidate.record.event.fields == {"temperature_C": 22.9}
+    assert candidate.record.fields["temperature_C"] == 22.9
+
+
+async def test_the_merged_row_accumulates_what_either_receiver_heard(hass):
+    """A sensor that splits its readings across frames shows the whole device.
+
+    An Acurite-5n1 sends wind in one message and rain in another, and radio being
+    what it is, the two can reach different receivers. The row unions both halves
+    -- so the user sees the whole device before deciding, and adoption creates all
+    of its entities at once -- while a field both receivers report keeps the
+    newest value.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _heard(attic, fields={"wind_avg_km_h": 12.0, "temperature_C": 21.4})
+    with freeze_time(_dt(1)):
+        _heard(garage, fields={"rain_mm": 3.5, "temperature_C": 22.9})
+
+    candidate = merged_candidate(hass, location, _CANDIDATE_KEY)
+    assert candidate is not None
+    assert candidate.record.fields == {
+        "wind_avg_km_h": 12.0,
+        "rain_mm": 3.5,
+        "temperature_C": 22.9,
+    }
+
+
+async def test_the_merged_row_records_which_receivers_heard_it(hass):
+    """The row carries its coverage, so the page can show it before adoption.
+
+    The aggregator's ``coverage`` map cannot answer this: it is fed by the
+    per-device dispatch, and a device nobody has adopted dispatches nothing. So
+    the candidate's own records supply it -- and only the receivers that actually
+    heard the sensor appear, because before adoption that is the whole question.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    attic_id, garage_id = receiver_id(location, 0), receiver_id(location, 1)
+
+    with freeze_time(_NOW):
+        _heard(attic, fields={"temperature_C": 21.4, "rssi": -62.0, "snr": 11.5})
+        _heard(garage, fields={"temperature_C": 21.4, "rssi": -89.0, "snr": 3.0})
+        # A second sensor only the attic is in range of.
+        _heard(attic, key="Bresser-3CH-7", model="Bresser-3CH")
+
+    candidate = merged_candidate(hass, location, _CANDIDATE_KEY)
+    assert candidate is not None
+    assert candidate.receivers == (attic_id, garage_id)
+    coverage = {entry.receiver_id: entry for entry in candidate.coverage}
+    # The per-receiver signal detail the merged row itself cannot show.
+    assert coverage[attic_id].rssi == -62.0
+    assert coverage[attic_id].snr == 11.5
+    assert coverage[garage_id].rssi == -89.0
+    assert coverage[garage_id].snr == 3.0
+    assert all(entry.connected for entry in candidate.coverage)
+    assert all(entry.last_seen == _dt(0) for entry in candidate.coverage)
+
+    attic_only = merged_candidate(hass, location, "Bresser-3CH-7")
+    assert attic_only is not None
+    assert attic_only.receivers == (attic_id,)
+
+
+async def test_a_replayed_or_backlog_frame_never_joins_the_merge(hass):
+    """The reconnect gate is per receiver, and it runs before the merge.
+
+    Each receiver classifies its own frames against its own connection, so the
+    gate cannot move to the merge without losing what it is measuring. Applying
+    it first is what keeps one receiver's reconnect from refilling the *location's*
+    candidate list with devices that were heard and dismissed hours ago.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    garage._connection_time = _dt(0)
+
+    with freeze_time(_NOW):
+        _heard(attic, fields={"temperature_C": 21.4}, event_time=_dt(5))
+        # The garage reconnects and the server re-broadcasts its backlog: frames
+        # stamped well before this connection came up, plus the library's own
+        # replay verdict on the stale ones.
+        _heard(garage, fields={"temperature_C": 99.0}, event_time=_dt(-600))
+        _heard(garage, fields={"temperature_C": 98.0}, is_replay=True)
+
+    assert garage.pending == {}
+    candidate = merged_candidate(hass, location, _CANDIDATE_KEY)
+    assert candidate is not None
+    # One row, from the receiver that genuinely heard it, with none of the
+    # backlog's values anywhere in it.
+    assert candidate.receivers == (receiver_id(location, 0),)
+    assert candidate.record.count == 1
+    assert candidate.record.fields == {"temperature_C": 21.4}
+
+
+async def test_the_candidate_cap_is_enforced_on_the_merged_list(hass):
+    """N receivers cannot hold N times as many candidates as one.
+
+    The cap exists because every candidate is rendered into the payload pushed to
+    every open panel, and 433 MHz mints spurious keys indefinitely. That bound has
+    to be on the merged list the user is actually offered: here neither receiver
+    ever reaches its own ceiling, and without the merged pass the location would
+    be holding 601 of them.
+
+    The eviction is coldest-first across the merge, so the key both receivers
+    heard *first* goes, and it goes from **both** of their maps -- leaving it in
+    one would put the row straight back on the next merge.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    each = 300
+
+    _heard(attic, key="Shared-Cold-1", model="Noise")
+    _heard(garage, key="Shared-Cold-1", model="Noise")
+    for index in range(each):
+        _heard(attic, key=f"Noise-a{index}", model="Noise")
+    for index in range(each):
+        _heard(garage, key=f"Noise-b{index}", model="Noise")
+
+    assert len(merged_candidates(hass, location)) == MAX_PENDING_CANDIDATES
+    # Neither receiver is anywhere near its own ceiling, so the merged pass is
+    # the only thing that can have done this.
+    assert len(attic.pending) < MAX_PENDING_CANDIDATES
+    assert len(garage.pending) < MAX_PENDING_CANDIDATES
+    assert "Shared-Cold-1" not in attic.pending
+    assert "Shared-Cold-1" not in garage.pending
+    # The warm end is untouched: the newest arrival is the one a user is most
+    # likely waiting to see.
+    assert f"Noise-b{each - 1}" in garage.pending
+
+
+async def test_the_candidate_list_announces_on_one_location_scoped_signal(hass):
+    """One list, one signal -- whichever receiver heard the device.
+
+    The panel subscribes once per location, so both receivers announce on the
+    *location's* signal rather than each on its own: a subscriber has exactly one
+    thing to listen to, and never has to work out which receiver's list a signal
+    referred to.
+
+    A repeat sighting stays silent, as it always has: a busy receiver decodes
+    constantly, and dispatching per frame would push a whole list down every open
+    socket so one count could tick up.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    announced: list[str] = []
+    unsub = async_dispatcher_connect(
+        hass,
+        signal_pending_update(location.entry_id),
+        lambda: announced.append("location"),
+    )
+
+    with freeze_time(_NOW):
+        _heard(attic)
+        # The same receiver hearing it again changes no membership, so it says
+        # nothing at all.
+        _heard(attic)
+        await hass.async_block_till_done()
+    assert announced == ["location"]
+
+    # The second receiver's first sighting changes what the merged row says
+    # (it now names two receivers), and is announced on the same one signal.
+    with freeze_time(_dt(1)):
+        _heard(garage)
+        await hass.async_block_till_done()
+    assert announced == ["location", "location"]
+
+    unsub()
+
+
+async def test_a_row_takes_its_model_from_whichever_receiver_decoded_one(hass):
+    """A frame that decodes without a model does not leave the row unnamed.
+
+    ``model`` is what the user reads first, and a row that showed nothing because
+    the last frame to arrive happened to omit it would be unjudgeable.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _heard(attic, model=_MODEL)
+    with freeze_time(_dt(1)):
+        _heard(garage, model="")
+
+    candidate = merged_candidate(hass, location, _CANDIDATE_KEY)
+    assert candidate is not None
+    assert candidate.record.model == _MODEL
+
+    # When nobody decoded a model there is nothing to fall back to, and the row
+    # goes out unnamed rather than carrying a placeholder the panel would render
+    # as a model name.
+    with freeze_time(_dt(2)):
+        _heard(attic, key="Unknown-1", model="")
+        _heard(garage, key="Unknown-1", model="")
+    unnamed = merged_candidate(hass, location, "Unknown-1")
+    assert unnamed is not None
+    assert unnamed.record.model == ""
+
+
+async def test_candidates_are_offered_most_recently_discovered_first(hass):
+    """One order for the whole location, and it does not shuffle under the cursor.
+
+    The panel draws a card per candidate and re-renders every few seconds, and
+    the options form renders the same list, so the order is decided once -- by
+    when the *location* first heard each device, which (unlike last-seen) does
+    not move every time a sensor transmits. The key breaks a tie so two devices
+    first heard in the same instant still have a stable order.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _heard(attic, key="Bresser-3CH-1", model="Bresser-3CH")
+    with freeze_time(_dt(1)):
+        _heard(garage, key="Bresser-3CH-2", model="Bresser-3CH")
+    with freeze_time(_dt(2)):
+        # Heard in the same instant by different receivers: the tie-break is the
+        # key, not whichever map was iterated first.
+        _heard(attic, key="Bresser-3CH-4", model="Bresser-3CH")
+        _heard(garage, key="Bresser-3CH-3", model="Bresser-3CH")
+
+    assert [candidate.key for candidate in merged_candidates(hass, location)] == [
+        "Bresser-3CH-4",
+        "Bresser-3CH-3",
+        "Bresser-3CH-2",
+        "Bresser-3CH-1",
+    ]
+
+
+async def test_one_sensor_heard_twice_is_one_candidate_against_the_cap(hass):
+    """The bound counts rows, so overlap does not spend it twice.
+
+    Two receivers that hear the same 300 sensors are offering 300 candidates, not
+    600 -- the whole reason the cap is applied to the merge rather than to the
+    sum of the maps.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    shared = 300
+
+    for index in range(shared):
+        _heard(attic, key=f"Noise-{index}", model="Noise")
+        _heard(garage, key=f"Noise-{index}", model="Noise")
+
+    # The per-receiver maps sum to more than the cap, and nothing is evicted.
+    assert len(attic.pending) + len(garage.pending) > MAX_PENDING_CANDIDATES
+    assert len(merged_candidates(hass, location)) == shared
+    assert "Noise-0" in attic.pending
+
+
+async def test_clearing_counts_and_clears_merged_rows(hass):
+    """Clearing a list of rows clears rows, and reports what the user saw go.
+
+    Counting per-receiver records would tell a user with two receivers that they
+    had just cleared twice as many devices as the page was showing.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _heard(attic)
+        _heard(garage)
+        _heard(attic, key="Bresser-3CH-7", model="Bresser-3CH")
+
+    assert clear_pending(hass, location) == 2
+    assert attic.pending == {}
+    assert garage.pending == {}
+    assert merged_candidates(hass, location) == []
+
+
+# --------------------------------------------------------------------------- #
+# Location-scoped adoption: one decision, every receiver.                      #
+# --------------------------------------------------------------------------- #
+def _merged_devices(hass, location, device_key) -> list:
+    """Return every registry device carrying one merged device's identifier.
+
+    A list rather than a lookup because the assertion worth making is *how many*
+    there are: adopting a sensor two receivers both hear must produce one device,
+    and a second one is the regression.
+    """
+    identifier = (DOMAIN, f"{location.entry_id}:{device_key}")
+    return [
+        device
+        for device in dr.async_entries_for_config_entry(
+            dr.async_get(hass), location.entry_id
+        )
+        if identifier in device.identifiers
+    ]
+
+
+def _entity_ids_for(hass, location, device_key) -> list[str]:
+    """Return the *merged* entity ids built for one device, in registry order.
+
+    Only the receiver-agnostic ones: a merged field entity's ``unique_id`` is
+    three segments (``{entry}:{device_key}:{suffix}``) while the per-receiver
+    link entities carry a fourth, and counting those would make "one entity per
+    mapped field" read as one per field per receiver.
+    """
+    prefix = f"{location.entry_id}:{device_key}:"
+    return [
+        entry.entity_id
+        for entry in er.async_get(hass).entities.values()
+        if entry.unique_id.startswith(prefix) and entry.unique_id.count(":") == 2
+    ]
+
+
+async def test_adopting_once_adds_the_device_for_the_whole_location(hass):
+    """One click, one device -- not one per receiver that heard the sensor."""
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    # The ordinary case: both receivers decode the same transmission.
+    with freeze_time(_NOW):
+        _heard(attic, fields={"temperature_C": 21.4})
+    with freeze_time(_dt(1)):
+        _heard(garage, fields={"temperature_C": 21.4})
+
+    with freeze_time(_dt(2)):
+        result = await async_adopt_devices(hass, location, [_CANDIDATE_KEY])
+        await hass.async_block_till_done()
+        # Seeded from what was actually heard, so the device arrives carrying a
+        # real reading rather than an unavailable placeholder waiting for the
+        # next transmission.
+        entity_ids = _entity_ids_for(hass, location, _CANDIDATE_KEY)
+        assert len(entity_ids) == 1
+        assert hass.states.get(entity_ids[0]).state == "21.4"
+
+    assert result.applied == [_CANDIDATE_KEY]
+    assert result.skipped == []
+    # Gone from the candidate list of every receiver, so it cannot be offered
+    # (or approved) a second time.
+    assert attic.pending == {}
+    assert garage.pending == {}
+    assert merged_candidates(hass, location) == []
+    assert _CANDIDATE_KEY in attic.adopted
+    assert _CANDIDATE_KEY in garage.adopted
+
+    # Exactly one device, with exactly one entity per mapped field -- and no
+    # ``_2`` suffix, which is what a second receiver minting a duplicate
+    # ``unique_id`` would leave behind.
+    assert len(_merged_devices(hass, location, _CANDIDATE_KEY)) == 1
+    assert not entity_ids[0].endswith("_2")
+    assert _CANDIDATE_KEY in location.data[CONF_DEVICES]
+
+
+async def test_adopting_seeds_from_the_merged_record(hass):
+    """The device is built from what the *location* heard, not one receiver.
+
+    A field only the garage ever decoded still creates its entity, because the
+    record adoption seeds from is the merged one the user was looking at.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _heard(attic, fields={"temperature_C": 21.4})
+    with freeze_time(_dt(1)):
+        _heard(garage, fields={"humidity": 61})
+
+    await async_adopt_devices(hass, location, [_CANDIDATE_KEY])
+    await hass.async_block_till_done()
+
+    stored = location.data[CONF_DEVICES][_CANDIDATE_KEY]
+    assert set(stored[DEVICE_FIELDS]) == {"temperature_C", "humidity"}
+    assert len(_entity_ids_for(hass, location, _CANDIDATE_KEY)) == 2
+
+
+async def test_adopting_reaches_a_receiver_that_never_heard_the_device(hass):
+    """The deaf receiver adopts the key too, and stops re-queueing the sensor.
+
+    Otherwise the first frame it ever decodes for an already-added device would
+    be treated as a brand-new sighting and put the device back on the page the
+    user added it from.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _heard(attic, fields={"temperature_C": 21.4})
+    await async_adopt_devices(hass, location, [_CANDIDATE_KEY])
+    await hass.async_block_till_done()
+
+    assert _CANDIDATE_KEY in garage.adopted
+    # No liveness is invented for a receiver that has not heard it: a faked
+    # last_seen would let the garage vouch for a sensor it cannot hear.
+    assert _CANDIDATE_KEY not in garage.last_seen
+
+    with freeze_time(_dt(1)):
+        _heard(garage, fields={"temperature_C": 22.9})
+    assert garage.pending == {}
+    assert garage.devices[_CANDIDATE_KEY].fields == {"temperature_C": 22.9}
+
+
+async def test_adopting_a_key_no_receiver_offers_is_skipped(hass):
+    """A stale click reports the miss rather than inventing a device."""
+    location = await _setup_two_receivers(hass)
+
+    result = await async_adopt_devices(hass, location, ["Ghost-Device-1"])
+    await hass.async_block_till_done()
+
+    assert result.applied == []
+    assert result.skipped == ["Ghost-Device-1"]
+    assert _merged_devices(hass, location, "Ghost-Device-1") == []
+    assert "Ghost-Device-1" not in location.data.get(CONF_DEVICES, {})
+
+
+async def test_ignoring_once_hides_the_device_from_every_receiver(hass):
+    """ "I do not want my neighbour's sensor" is not a per-server statement."""
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _heard(attic)
+        _heard(garage)
+
+    result = await async_ignore_devices(hass, location, [_CANDIDATE_KEY])
+    await hass.async_block_till_done()
+
+    assert result.applied == [_CANDIDATE_KEY]
+    assert location.data[CONF_IGNORED_DEVICES] == [_CANDIDATE_KEY]
+    assert merged_candidates(hass, location) == []
+    for coordinator in (attic, garage):
+        assert _CANDIDATE_KEY in coordinator.ignored
+        assert coordinator.pending == {}
+
+    # The next transmission is dropped whichever receiver decodes it -- one
+    # receiver still offering the row would put it straight back on the page.
+    with freeze_time(_dt(1)):
+        _heard(garage)
+        _heard(attic)
+    assert merged_candidates(hass, location) == []
+
+
+async def test_unignoring_once_offers_the_device_again_everywhere(hass):
+    """Un-ignoring is location-wide too, and takes effect on the next frame."""
+    location = await _setup_two_receivers(hass, ignored_devices=[_CANDIDATE_KEY])
+    attic, garage = _coordinators(hass, location)
+    assert _CANDIDATE_KEY in attic.ignored
+    assert _CANDIDATE_KEY in garage.ignored
+
+    result = await async_unignore_devices(hass, location, [_CANDIDATE_KEY])
+    await hass.async_block_till_done()
+
+    assert result.applied == [_CANDIDATE_KEY]
+    assert location.data[CONF_IGNORED_DEVICES] == []
+    for coordinator in (attic, garage):
+        assert _CANDIDATE_KEY not in coordinator.ignored
+
+    with freeze_time(_NOW):
+        _heard(garage)
+    assert [candidate.key for candidate in merged_candidates(hass, location)] == [
+        _CANDIDATE_KEY
+    ]
+
+
+async def test_an_adopted_device_cannot_be_ignored_anywhere_in_the_location(hass):
+    """Ignoring an adopted device is a contradiction, so it is reported, not stored."""
+    location = await _setup_two_receivers(hass)
+
+    result = await async_ignore_devices(hass, location, [_DEVICE_KEY])
+    await hass.async_block_till_done()
+
+    assert result.applied == []
+    assert result.skipped == [_DEVICE_KEY]
+    assert location.data.get(CONF_IGNORED_DEVICES, []) == []
+    for coordinator in _coordinators(hass, location):
+        assert _DEVICE_KEY not in coordinator.ignored
+
+
+async def test_ignore_reads_both_halves_of_the_locations_adopted_answer(hass):
+    """ "Is this adopted?" is the stored map *and* every receiver's live mirror.
+
+    The two disagree in both directions for a beat: a device adopted a moment ago
+    is in the mirrors before the entry write lands, and a device adopted in an
+    earlier session is in the stored map before any receiver has heard it this
+    process. Reading only one of them would let an ignore land on an adopted
+    device -- a persisted contradiction the event path would then ignore, since
+    it checks ``adopted`` first.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+
+    # Stored, but not in any live mirror.
+    for coordinator in (attic, garage):
+        coordinator.adopted.discard(_DEVICE_KEY)
+    stored_only = await async_ignore_devices(hass, location, [_DEVICE_KEY])
+    assert stored_only.skipped == [_DEVICE_KEY]
+
+    # In a live mirror, but not yet stored.
+    attic.adopted.add("Bresser-3CH-7")
+    live_only = await async_ignore_devices(hass, location, ["Bresser-3CH-7"])
+    assert live_only.skipped == ["Bresser-3CH-7"]
+
+    assert location.data.get(CONF_IGNORED_DEVICES, []) == []
+
+
+async def test_both_lists_reach_every_receiver_of_the_location(hass):
+    """Adopted and ignored are the location's, so both receivers start from them.
+
+    This is the union half of a deliberate consolidation: folding a second
+    receiver in gives it the same approvals and the same ignore list as the
+    first, rather than a private copy it would have to be taught again.
+    """
+    location = await _setup_two_receivers(hass, ignored_devices=[_CANDIDATE_KEY])
+
+    for coordinator in _coordinators(hass, location):
+        assert coordinator.adopted == {_DEVICE_KEY}
+        assert coordinator.ignored == {_CANDIDATE_KEY}
+
+
+async def test_ignored_wins_when_a_consolidation_puts_a_key_on_both_lists(hass):
+    """A device the user explicitly hid stays hidden, even if it was also added.
+
+    The two lists are normally disjoint -- the approval surfaces refuse to ignore
+    an adopted device -- so this is the consolidation case: merging two installs
+    into one location unions both lists and a device one of them added while the
+    other hid it lands on both. The conservative answer wins, and un-ignoring is
+    how the user changes their mind.
+    """
+    location = await _setup_two_receivers(hass, ignored_devices=[_DEVICE_KEY])
+    attic, garage = _coordinators(hass, location)
+
+    for coordinator in (attic, garage):
+        assert _DEVICE_KEY in coordinator.ignored
+        assert _DEVICE_KEY not in coordinator.adopted
+
+    # Its frames are dropped outright: not adopted (no runtime state, no
+    # dispatch) and not offered as a candidate either.
+    with freeze_time(_NOW):
+        _heard(attic, key=_DEVICE_KEY)
+    assert attic.devices == {}
+    assert merged_candidates(hass, location) == []
+
+
+async def test_ignoring_a_key_that_is_also_adopted_takes_effect_without_a_reload(hass):
+    """The same rule applies live, when the stored lists change under a reload.
+
+    A consolidation writes the union into ``entry.data``; the update listener is
+    what makes the losing half stop reaching Home Assistant now rather than at
+    the next restart.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    assert _DEVICE_KEY in attic.adopted
+
+    hass.config_entries.async_update_entry(
+        location,
+        data={**location.data, CONF_IGNORED_DEVICES: [_DEVICE_KEY]},
+    )
+    await hass.async_block_till_done()
+
+    for coordinator in (attic, garage):
+        assert _DEVICE_KEY in coordinator.ignored
+        assert _DEVICE_KEY not in coordinator.adopted
