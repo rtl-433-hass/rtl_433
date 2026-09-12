@@ -20,15 +20,21 @@
 #             integration bind-mounted into /config/custom_components. HA reaches
 #             the stream at ws://wsbridge:8433/ws (compose DNS name).
 #
-# Images are pinned by digest. The rtl433 and wsbridge digests were resolved on
-# linux/arm64; the Home Assistant one is a multi-arch index digest (resolved on
-# linux/amd64), so it pulls on either.
+# Images are pinned as `tag@sha256:digest`. The digest is what actually gets
+# pulled, so the pin stays immutable; the tag is there so Renovate can see a
+# version to compare against -- a bare `@sha256:` gives its docker-compose
+# manager nothing to resolve, and the dependency goes unmanaged. renovate.json
+# also has to un-ignore this path: config:recommended pulls in
+# :ignoreModulesAndTests, whose ignorePaths cover `**/tests/**`.
 # Bring-up MUST be backgrounded and polled (Clarification #14); see run-harness.sh.
 
 services:
   rtl433:
-    # hertzg/rtl_433:latest == rtl_433 25.12 (resolved 2026-05-25, linux/arm64)
-    image: hertzg/rtl_433@sha256:bcfd12afa59efc1ae8316ac21757b5e4161d4a42baaa91f609b4bcca9525dcfd
+    # rtl_433 25.12. The tag has since been rebuilt onto a newer Alpine base, so
+    # it no longer resolves to this digest; the digest is the build every capture
+    # fixture and screenshot in this repo was decoded by, and Renovate will offer
+    # the rebuild as a digest update.
+    image: hertzg/rtl_433:25.12@sha256:bcfd12afa59efc1ae8316ac21757b5e4161d4a42baaa91f609b4bcca9525dcfd
     container_name: rtl433_harness
     entrypoint: ["/bin/sh", "/opt/rtl433-entrypoint.sh"]
     environment:
@@ -54,8 +60,8 @@ services:
     restart: "no"
 
   wsbridge:
-    # node:22-alpine (resolved 2026-05-25, linux/arm64). Pinned by digest.
-    image: node@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920
+    # node:22-alpine (digest resolved 2026-05-25, linux/arm64).
+    image: node:22-alpine@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920
     container_name: wsbridge_harness
     working_dir: /app
     command: ["node", "/app/ws-bridge.mjs"]
@@ -91,7 +97,8 @@ services:
     # This tag tracks the `homeassistant` key in hacs.json exactly -- it is the
     # oldest Home Assistant we claim to support, so it is the one worth running
     # against: on a newer release the harness would pass while the integration
-    # was quietly broken for everyone sitting on the minimum. It moves when the
+    # was quietly broken for everyone sitting on the minimum. Renovate is
+    # deliberately not allowed to bump it (see renovate.json); it moves when the
     # hacs.json floor moves, and tests/test_harness_pins.py fails if the two
     # drift apart.
     #

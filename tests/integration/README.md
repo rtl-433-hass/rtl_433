@@ -223,15 +223,18 @@ change and was out of scope for this harness.
 
 ## Pinned versions
 
-The Home Assistant tag tracks the `homeassistant` key in `hacs.json` — the
+Every image is pinned as `tag@sha256:digest`. The digest is what Docker pulls,
+so the pin stays immutable; the tag is there so Renovate can see a version to
+compare against (a bare `@sha256:` leaves the dependency unmanaged). The Home
+Assistant tag additionally tracks the `homeassistant` key in `hacs.json` — the
 oldest release we claim to support, and so the one worth testing against;
 `tests/test_harness_pins.py` fails if the two drift apart.
 
 | Component | Pin |
 | --- | --- |
-| rtl_433 image | `hertzg/rtl_433@sha256:bcfd12afa59efc1ae8316ac21757b5e4161d4a42baaa91f609b4bcca9525dcfd` (rtl_433 25.12, arm64) |
+| rtl_433 image | `hertzg/rtl_433:25.12@sha256:bcfd12afa59efc1ae8316ac21757b5e4161d4a42baaa91f609b4bcca9525dcfd` (rtl_433 25.12, arm64) |
 | Home Assistant | `ghcr.io/home-assistant/home-assistant:2026.9.0@sha256:372d991e58882a1d8c68c07e9aa3f3b509276e695355f73ccdb03baa70407293` (2026.9.0, multi-arch) |
-| Node (bridge) | `node@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920` (node:22-alpine, arm64) |
+| Node (bridge) | `node:22-alpine@sha256:968df39aedcea65eeb078fb336ed7191baf48f972b4479711397108be0966920` (node:22-alpine, arm64) |
 | Captures submodule | `merbanan/rtl_433_tests` @ `1244ba1f79a9f1bd93fcd989dd2101b0f0c6cbc4`, sparse: `tests/acurite/Acurite_592TXR`, `tests/acurite/Acurite_606TX`, `tests/scmplus/01`, `tests/ert/scm/01` (the SCM dirs feed the golden fixtures, not this harness — see `../fixtures/generated/README.md`) |
 | Playwright | `1.49.1` (see `package.json`) |
 
