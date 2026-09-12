@@ -5,7 +5,7 @@ cover every class and every branch in the module:
 
 * ``_NON_RESTORABLE`` membership (None / "unknown" / "unavailable" rejected,
   a real value accepted).
-* ``_LAST_SEEN_FIELD`` sentinel value, ``LAST_SEEN_DESCRIPTOR`` field_key,
+* ``LAST_SEEN_FIELD`` sentinel value, ``LAST_SEEN_DESCRIPTOR`` field_key,
   platform, name, object_suffix, device_class, entity_category.
 * ``_gain`` helper: None key -> None, empty-string -> "auto", real value ->
   passthrough.
@@ -59,11 +59,11 @@ from custom_components.rtl_433.const import (
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.sensor import (
-    _LAST_SEEN_FIELD,
     _NON_RESTORABLE,
     _SENSOR_PRIVATE_OPTIONS,
     _SUGGESTED_UNIT_OPTION,
     LAST_SEEN_DESCRIPTOR,
+    LAST_SEEN_FIELD,
     RECEIVER_SENSORS,
     Rtl433ReceiverSensor,
     Rtl433Sensor,
@@ -139,7 +139,7 @@ async def _enable_last_seen(hass, receiver, device_key):
 
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:last_seen"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
     )
     assert eid is not None
     ent_reg.async_update_entity(eid, disabled_by=None)
@@ -178,13 +178,13 @@ class TestNonRestorable:
 
 
 class TestLastSeenSentinel:
-    """_LAST_SEEN_FIELD and LAST_SEEN_DESCRIPTOR are exactly as declared."""
+    """LAST_SEEN_FIELD and LAST_SEEN_DESCRIPTOR are exactly as declared."""
 
     def test_field_key_value(self):
-        assert _LAST_SEEN_FIELD == "__last_seen__"
+        assert LAST_SEEN_FIELD == "__last_seen__"
 
     def test_descriptor_field_key_equals_sentinel(self):
-        assert LAST_SEEN_DESCRIPTOR.field_key == _LAST_SEEN_FIELD
+        assert LAST_SEEN_DESCRIPTOR.field_key == LAST_SEEN_FIELD
 
     def test_descriptor_platform(self):
         assert LAST_SEEN_DESCRIPTOR.platform == "sensor"
@@ -675,7 +675,7 @@ async def test_sensor_device_class_state_class_unit_from_descriptor(
     )
 
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{device_key}"
+    prefix = f"{receiver.entry_id}:{device_key}"
 
     # Feed a live event so entities have values.
     _feed(
@@ -755,7 +755,7 @@ async def test_fahrenheit_sensor_converts_to_metric_unit_system(
 
     ent_reg = er.async_get(hass)
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:F"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:F"
     )
     assert temp_eid is not None
     state = hass.states.get(temp_eid)
@@ -784,7 +784,7 @@ async def test_sensor_battery_ok_zero_value(hass, receiver_entry_builder):
 
     ent_reg = er.async_get(hass)
     bat_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:B"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:B"
     )
     assert bat_eid is not None
     state = hass.states.get(bat_eid)
@@ -810,7 +810,7 @@ async def test_sensor_wind_speed_transform(hass, receiver_entry_builder):
 
     ent_reg = er.async_get(hass)
     ws_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:WS"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:WS"
     )
     assert ws_eid is not None
     state = hass.states.get(ws_eid)
@@ -837,7 +837,7 @@ async def test_sensor_rain_mm_transform(hass, receiver_entry_builder):
 
     ent_reg = er.async_get(hass)
     rt_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:RT"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:RT"
     )
     assert rt_eid is not None
     state = hass.states.get(rt_eid)
@@ -862,7 +862,7 @@ async def test_sensor_unique_id_format(hass, receiver_entry_builder):
         },
     )
     ent_reg = er.async_get(hass)
-    watts_uid = f"{receiver_id(receiver)}:{device_key}:watts"
+    watts_uid = f"{receiver.entry_id}:{device_key}:watts"
     watts_eid = ent_reg.async_get_entity_id("sensor", DOMAIN, watts_uid)
     assert watts_eid is not None
     entry = ent_reg.async_get(watts_eid)
@@ -896,7 +896,7 @@ async def test_sensor_seeds_value_from_coordinator_on_init(
 
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
     )
     assert watts_eid is not None
     state = hass.states.get(watts_eid)
@@ -917,7 +917,7 @@ async def test_sensor_apply_value_multiple_updates(hass, receiver_entry_builder)
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
     )
     assert watts_eid is not None
 
@@ -952,7 +952,7 @@ async def test_sensor_async_restore_state_live_value_wins(hass, receiver_entry_b
 
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
     )
     # The live value (5.0) wins over the restored (99.9).
     assert hass.states.get(watts_eid).state == "5.0"
@@ -978,7 +978,7 @@ async def test_sensor_async_restore_state_restores_when_no_live_value(
     )
     ent_reg = er.async_get(hass)
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
     )
     assert temp_eid is not None
     assert hass.states.get(temp_eid).state == "19.9"
@@ -1015,7 +1015,7 @@ async def test_sensor_async_restore_state_non_restorable_states_not_applied(
 
     ent_reg = er.async_get(hass)
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
     )
     # Real value restored.
     assert hass.states.get(temp_eid).state == "19.9"
@@ -1042,7 +1042,7 @@ async def test_sensor_async_restore_state_non_restorable_states_not_applied(
 
         ent_reg2 = er.async_get(hass)
         temp_eid2 = ent_reg2.async_get_entity_id(
-            "sensor", DOMAIN, f"{receiver_id(receiver2)}:{device_key}:T"
+            "sensor", DOMAIN, f"{receiver2.entry_id}:{device_key}:T"
         )
         coordinator2 = _coordinator(hass, receiver2)
         # Feed a live event: the live value must appear (non-restorable was not stored).
@@ -1186,7 +1186,7 @@ async def test_last_seen_restores_datetime_when_no_live_value(
     )
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:last_seen"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
     )
     assert eid is not None
     assert eid == restore_eid
@@ -1269,7 +1269,7 @@ async def test_last_seen_stays_available_after_timeout_watchdog(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
     )
 
     start = dt_util.utcnow()
@@ -1545,7 +1545,7 @@ async def test_per_device_sensor_and_last_seen_created_on_setup(
         },
     )
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{device_key}"
+    prefix = f"{receiver.entry_id}:{device_key}"
 
     # Regular sensor entity.
     watts_eid = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts")
@@ -1578,10 +1578,10 @@ async def test_last_seen_enabled_by_default_for_event_driven_device(
     ent_reg = er.async_get(hass)
 
     motion_ls = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{motion_key}:last_seen"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{motion_key}:last_seen"
     )
     temp_ls = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{temp_key}:last_seen"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{temp_key}:last_seen"
     )
     assert motion_ls is not None and temp_ls is not None
 
@@ -1788,7 +1788,7 @@ async def test_sensor_energy_state_class_total_increasing(hass, receiver_entry_b
 
     ent_reg = er.async_get(hass)
     kwh_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:kwh"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:kwh"
     )
     assert kwh_eid is not None
     state = hass.states.get(kwh_eid)
@@ -1824,7 +1824,7 @@ async def test_sensor_voltage_and_current(hass, receiver_entry_builder):
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{device_key}"
+    prefix = f"{receiver.entry_id}:{device_key}"
 
     v_eid = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:V")
     a_eid = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:A")
@@ -1879,7 +1879,7 @@ async def test_temperature_pin_cleared_without_deleting_device(
 
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:F"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:F"
     )
     assert eid is not None
     # A fresh install already converts to the unit system.
@@ -2209,7 +2209,7 @@ async def test_restore_extra_data_converts_from_the_stored_native_unit(
 
     ent_reg = er.async_get(hass)
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
     )
     assert temp_eid is not None
     assert float(hass.states.get(temp_eid).state) == pytest.approx(2.78, abs=0.05)
@@ -2253,7 +2253,7 @@ async def test_restore_extra_data_reads_the_0_20_0_unitless_shape(
 
     ent_reg = er.async_get(hass)
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
     )
     assert temp_eid is not None
     assert float(hass.states.get(temp_eid).state) == pytest.approx(19.9)
