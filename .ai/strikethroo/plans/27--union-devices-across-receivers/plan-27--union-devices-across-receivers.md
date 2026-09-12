@@ -519,10 +519,10 @@ graph TD
 - ✔️ Task 006: WebSocket API rename and location re-scoping (depends on: 005)
 - ✔️ Task 007: Panel rework — location view, receiver cards, union add-device page, per-receiver signal display from aggregator state (depends on: 006)
 
-### Phase 6: Migration + contract
+### ✅ Phase 6: Migration + contract
 **Parallel Tasks:**
-- Task 008: v2→v3 migration, control unique-id rewrite, non-merging conversion, consolidation via `device_replace.py` (depends on: 004, 005)
-- Task 009: `COMPATIBILITY_CONTRACT.md` revision + `CORE_UPSTREAM.md` realignment (depends on: 008)
+- ✔️ Task 008: v2→v3 migration, control unique-id rewrite, non-merging conversion, consolidation via `device_replace.py` (depends on: 004, 005)
+- ✔️ Task 009: `COMPATIBILITY_CONTRACT.md` revision + `CORE_UPSTREAM.md` realignment (depends on: 008)
 
 ### Phase 7: Tests & docs (file-disjoint, parallel)
 **Parallel Tasks:**
