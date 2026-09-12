@@ -26,25 +26,27 @@ files** directly from the Home Assistant UI:
 
 > **Settings → Devices & Services → rtl_433 → Configure → Device mappings**
 
-The *Device mappings* step opens Home Assistant's built-in YAML editor pre-filled
-with that receiver's current mappings. You edit mappings as YAML, using the **same
+The *Device mappings* page opens Home Assistant's built-in YAML editor pre-filled
+with that location's current mappings. You edit mappings as YAML, using the **same
 schema** as the shipped library ([reference](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/)): top-level keys are rtl_433
 field names, values are entry mappings. They may optionally include a `skip_keys:` list to add extra
 skip entries, and an optional [`models:` block](#model-scoped-mappings-models) to
 add or override model-scoped descriptors.
 
-Mappings are stored **per receiver** in that receiver's config entry — each receiver has its own
-independent set. The editor:
+Mappings are stored **per location** in that location's config entry — each
+location has its own independent set, and it applies to every receiver in it,
+because a mapping describes how a *sensor's* fields become entities rather than
+anything about a particular server. The editor:
 
 - **Blocks invalid YAML syntax** before you can submit.
 - **Validates the mapping schema on save** and rejects bad input with a
   per-field error naming the offending field and the reason.
-- **Reloads the receiver automatically.**
+- **Reloads the location automatically.**
 
 ![Device mappings step showing the YAML editor pre-filled with an example mapping](images/05-mapping-overrides.png)
 
 To find fields your device reports that do not yet have entities, download
-diagnostics for the receiver from **Settings → Devices & Services → the rtl_433
+diagnostics for the location from **Settings → Devices & Services → the rtl_433
 integration → ⋮ → Download diagnostics** and inspect `unmatched_field_keys`. Each
 key is either a candidate for a mapping or, if it is genuinely noise/identity
 data, an entry for `skip_keys:`.

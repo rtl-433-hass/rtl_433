@@ -46,7 +46,7 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
   - `__init__.py` keeps only the steady-state config-entry lifecycle
     (`async_setup_entry` / `async_unload_entry` / `_async_update_listener` /
     `async_remove_config_entry_device`). Three sibling modules hold the rest:
-    `migration.py` (config-entry v1→v2 migration + one-time legacy cleanups,
+    `migration.py` (the config-entry v1→v2→v3 ladder + one-time legacy cleanups,
     re-exported `async_migrate_entry`), `library.py` (device-library load/merge
     over `pyrtl_433.library`, cached on `hass.data`),
     and `receiver_settings.py` (receiver-entry setting resolvers: `_receiver_*`,
@@ -54,7 +54,9 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
 - `docs/device-library.md` — the Home-Assistant-facing device-library guide (UI
   overrides, diagnostics, workflow). The **authoritative schema reference** is
   upstream: <https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/>.
-- `tests/` — unit tests. `tests/integration/` — container/screenshot harness.
+- `tests/` — unit tests. `tests/frontend/` — Node (`node --test`) unit tests for
+  the panel's exported helpers and its string table. `tests/integration/` —
+  container/screenshot harness.
   `tests/fixtures/generated/` — **do not hand-edit**: golden events decoded from
   real `.cu8` captures by `scripts/regen_capture_fixtures.py` and diffed in CI,
   so the device library is checked against rtl_433's real wire output rather
@@ -158,19 +160,56 @@ own copy of any of that; it consumes the library:
   `/cmd` issuance is serialized **inside the client** (its own send lock), so a user
   write and a reconnect enforcement replay can never interleave.
 
-## Config-entry model (receiver + nested devices)
+## Config-entry model (location entry + receiver subentries + nested devices)
 
-The integration is **rfxtrx-style**, not Battery-Notes-style:
+**Vocabulary, and it is load-bearing: a _receiver_ is a computer running
+rtl_433; it contains a _radio_ (the SDR).** The word "hub" is retired — it
+survives only as frozen legacy storage (`CONF_RECEIVER_ENTRY_ID ==
+"hub_entry_id"`, the `hub:{host}:{port}` manual `unique_id`, the retired `:hub:`
+unique-id infix the v3 migration reads once) and as `pyrtl_433`'s own
+`on_hub_update` callback name. No new user-facing string, panel string, or
+runtime identifier may use it.
 
-- **One config entry per rtl_433 server** (the receiver, `integration_type: "receiver"`).
-  Platforms are forwarded once on that entry
-  (`async_forward_entry_setups(entry, PLATFORMS)`).
-- The RF devices it decodes are **device-registry devices nested under the receiver
-  entry**, *not* separate config entries. They are recreated on startup from the
-  per-receiver `entry.data["devices"]` map (the single source of truth: model,
+The integration is **rfxtrx-style**, not Battery-Notes-style, with one more level
+on top:
+
+- **A config entry is a LOCATION; one config SUBENTRY per rtl_433 server is a
+  receiver.** (`SUBENTRY_TYPE_RECEIVER`, `const.py`.) The location is a
+  user-named grouping with no hardware identity of its own — the connection
+  target and the server `unique_id` live on the subentry. Platforms are forwarded
+  once on the location entry (`async_forward_entry_setups(entry, PLATFORMS)`), and
+  each receiver gets its own `Rtl433Coordinator` keyed by
+  `subentry.subentry_id`. `async_step_user` creates the location **and** its first
+  receiver in one flow, so a receiver-less location is unreachable by
+  construction.
+- **A location is a place whose receivers can hear the same sensors**; two
+  locations are for genuinely distant sites. Devices never merge across
+  locations, which HA's single-owner registry now enforces for us
+  (Clarification #16).
+- **Deleting a location's LAST receiver deletes the location.** HA offers no veto
+  hook for a subentry removal (`async_remove_subentry` is a plain callback, and
+  `supported_subentry_types` gates only whether a *type* supports add/reconfigure),
+  so refusing the delete is impossible. The update listener removes the entry when
+  its subentries empty, rather than leaving an entry `async_setup_entry` would
+  refuse forever. Removing a *non-final* receiver is the other rule, and is
+  unchanged: drop its own entities, keep the merged devices.
+- The RF devices the location's receivers decode are **device-registry devices
+  nested under the location entry**, *not* separate config entries and *not*
+  under a receiver. They are recreated on startup from the location's
+  `entry.data["devices"]` map (the single source of truth: model,
   observed mapped fields, optional per-device timeout override) and added at
   runtime via the new-device dispatcher signal (the Quality-Scale
   `dynamic-devices` rule).
+- **The aggregation layer is `aggregator.py`**, one `Rtl433LocationAggregator`
+  per location, keyed by location `entry_id` under
+  `hass.data[DOMAIN][DATA_AGGREGATOR]` (`aggregator.location_aggregator` is the
+  lookup). It subscribes to every receiver's per-device dispatch and re-emits one
+  receiver-agnostic
+  `signal_location_device_update(location_entry_id, device_key)`, which is what a
+  merged device's field entities listen to. Its durable invariants have their own
+  sections: [the union and its dedup](#the-union-and-its-dedup),
+  [merged availability](#merged-availability-across-a-locations-receivers), and
+  [per-receiver signal entities](#per-receiver-signal-entities-and-receiver-removal).
 - **Observation and adoption are separate states; nothing is ever auto-added.**
   A frame whose `device_key` is not in the coordinator's `adopted` set (seeded
   from `entry.data["devices"]`) is routed by `_record_pending`
@@ -239,14 +278,35 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   or entity `unique_id`s; do not open-code a re-key elsewhere. It re-emits the
   `COMPATIBILITY_CONTRACT.md` identifier/unique_id templates verbatim (only the
   `device_key` value changes), so the contract is unaffected by a replace.
-- `async_migrate_entry` (`migration.py`, config-entry `VERSION` 1 → 2) performs a
+  **That rule now also covers location consolidation.**
+  `async_consolidate_location` (same module) is the same problem one scope up —
+  every row under a source location's `entry_id` re-pointed onto a target's — and
+  it reuses the same load-bearing ordering (*free the duplicate rows first, then
+  mutate survivors in place via `async_update_entity`*). It is the **only**
+  sanctioned place for that too; do not add registry surgery to `migration.py`.
+  Where both locations already recorded the same physical sensor, HA allows only
+  one row per `unique_id`, so the merge keeps the **earliest-added receiver's**
+  entity (subentry creation order), removes the other, and raises the
+  `history_merged_on_consolidation` Repairs notice naming what was dropped.
+- `async_migrate_entry` (`migration.py`, config-entry `VERSION` 1 → 3) performs a
   **seamless in-place upgrade from 0.1.0**: it re-homes the legacy per-device
-  config entries' registry devices/entities onto the receiver entry (preserving
-  unique_ids, entity_ids, and history), folds their state into the receiver's devices
+  config entries' registry devices/entities onto the server entry (preserving
+  unique_ids, entity_ids, and history), folds their state into that entry's devices
   map, and removes the obsolete per-device entries. The minor-7 → 8 step
   (`_strip_discovery_toggle`) drops the retired discovery key from `entry.data`
   and `entry.options`; it never rewrites `entry.data["devices"]`, so every
   already-adopted device, override and calibration is preserved untouched.
+- **The v2 → v3 step turns each existing entry into its own LOCATION**, keeping
+  its `entry_id` (which is what makes the merged-device identifiers and the
+  unioned field unique_ids byte-identical across the break), minting one receiver
+  subentry for the server it already was, re-keying the `:hub:` receiver-owned
+  rows onto `:receiver:{subentry_id}:`, and inserting the receiver segment into
+  the three link fields. It is deliberately **non-merging**: two of a user's
+  existing entries are never folded into one location, because the integration
+  cannot know which are co-located and folding them would force two histories onto
+  one `unique_id`. **Union is opt-in**, and the upgrade itself can never lose
+  history. The full ladder, its guards and its ordering constraints are the ABI:
+  see `COMPATIBILITY_CONTRACT.md` §1 (revision 2).
 - Adoption and per-device configuration live in the **receiver OptionsFlow**
   (`options_flow.py`): a menu led by the two approval steps — `add_devices`
   (renders `coordinator.pending` newest-first, one row per candidate labelled
@@ -331,7 +391,11 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
 - **Config-flow sources and dual identity scheme.** `Rtl433ConfigFlow` supports
   `user` (manual add), `reconfigure`, and `hassio` (Supervisor add-on discovery),
   plus the options flow above. Two `unique_id` schemes coexist:
-  - **Manual receivers** key on `unique_id = hub:{host}:{port}` (`_receiver_unique_id`).
+  - **Manual receivers** key on `unique_id = hub:{host}:{port}`
+    (`_receiver_unique_id`), on the receiver **subentry**. The `hub:` prefix is
+    frozen storage — it is already written into existing installs' subentry
+    unique_ids and is matched on as a placeholder marker; it is not the
+    vocabulary and must not spread.
   - **Add-on-discovered radios** key on the add-on's advertised stable per-radio
     `unique_id` (`serial:…` / `usbpath:…` / `template:…`), carried in the
     `hassio` discovery message.
@@ -450,10 +514,17 @@ second implementation.
   receiver device page offers no route either. (Reconfigure still reaches the receiver's
   *connection* settings; that is a config-flow step, not an options one.)
 
-  It is set deliberately, and the panel now renders all six displaced steps: Add
+  It is set deliberately, and the panel renders every displaced step: Add
   and Ignore on the cards, Replace on a card, Ignored devices behind the toggle,
-  and Receiver settings / Device settings / Device mappings as subviews, each on
-  its own deep-linkable path. **The
+  and **four** settings subviews — **Location settings** (`options`),
+  **Receiver settings** (`receiver`), **Device settings** (`device-settings`) and
+  **Device mappings** (`mappings`) — plus the read-only **Signal coverage** page
+  (`coverage`), each on its own deep-linkable path. `VIEWS`
+  (`rtl_433-panel.js`) is the one table of them and is **exported so a test
+  sweeps the real thing**; a view added without a title should fail, not pass
+  unnoticed. The settings split follows the topology: a setting about *sensors*
+  is the location's, and only the manage-radio toggle is a receiver's — which is
+  why `receiver` is the one path carrying **both** ids. **The
   invariant to keep is that list, not the flag**: an options step with no panel
   equivalent is unreachable while still existing and still passing its tests,
   which is exactly the kind of break no Python test catches. `knx` ships both a
@@ -465,28 +536,39 @@ second implementation.
   `config_panel_domain == DOMAIN` and that no sidebar slot is taken alongside
   it.
 - The frontend passes the entry it was opened for as `?config_entry=<entry_id>`.
-  The panel ignores it and opens on the first loaded receiver; with two receivers,
-  Configure on either lands on the same one.
+  The panel ignores it and opens on the first **loaded** location
+  (`_loadLocations`, preferring a loaded one over one mid-reload); with two
+  locations, Configure on either lands on the same one. The overview still
+  renders **every** location as its own group — heading, Receivers card, settings
+  rows — and each row deep-links with that location's `entry_id` in the URL, so a
+  link is unambiguous the moment a second location exists.
 - **The panel draws its own toolbar.** Home Assistant renders no chrome around a
   non-iframe custom panel, and with no sidebar entry there is otherwise no way
   back out on a phone, where the sidebar is closed. The back button is
   `history.back()` — the page is always arrived at from somewhere — falling back
   to `/config/integrations/integration/rtl_433` when opened cold by URL.
-- **A save that reloads the receiver must not read as a failure.** Saving a
-  calibration, a mapping override or the manage-settings toggle reloads the
-  entry, and for a second afterwards `rtl_433/devices/subscribe` answers
-  `not_loaded`. The panel re-subscribes after every save (the old subscription
-  would go on pushing a replaced coordinator's state) and retries that specific
-  error for ~10s behind a "waiting for the receiver" status rather than showing
-  an error banner at the moment the user succeeded.
+- **A save that reloads the location must not read as a failure.** Saving a
+  calibration, a mapping override or a receiver's manage-radio toggle reloads the
+  location entry — every receiver in it — and for a second afterwards
+  `rtl_433/devices/subscribe` answers `not_loaded`. The panel re-subscribes after
+  every save (the old subscription would go on pushing replaced coordinators'
+  state) and retries that specific error for ~10s behind the
+  `status.waiting_for_reload` status rather than showing an error banner at the
+  moment the user succeeded.
 - **Author CSS beats the user agent's `[hidden]` rule.** Any selector in the
   panel's stylesheet that sets `display` needs its own `[hidden]` rule, or the
   `hidden` property does nothing — this is what kept the receiver
-  picker on screen with a single receiver until it was fixed. There is no JS test harness in this
-  repository, by choice: the panel is covered by the Python registration test
-  and by the container harness, whose `STAGE=panel` capture
-  (`17-discovery-panel.png`) is also the only check that a real browser loads
-  the module, hands it `hass`, and updates the table live.
+  picker on screen with a single receiver until it was fixed.
+- **The panel IS unit-tested**, by `node --test tests/frontend/*.test.mjs`
+  (added with the panel's translation work, #247). The tests import the panel's
+  named exports directly — no DOM, no build step, which is exactly what the
+  no-imports rule above buys — and cover navigation/`VIEWS`, the settings forms,
+  coverage rendering, and the string table ("the built-in English matches
+  `translations/en.json` key for key"). A new panel string or view belongs in
+  those tests. They complement, and do not replace, the Python registration test
+  and the container harness, whose `STAGE=panel` capture
+  (`17-discovery-panel.png`) is still the only check that a **real browser**
+  loads the module, hands it `hass`, and updates the table live.
 
 ## Per-device "Last seen" sensor (synthetic, non-field-driven)
 
@@ -802,6 +884,39 @@ because these are the contracts the integration relies on:
   registry device `(DOMAIN, f"{entry_id}:unknown")`. Safe on every setup; the
   classifier above prevents recreation.
 
+## The union and its dedup
+
+Durable contract for what a location's receivers do to one sensor's *values*
+(`aggregator.py`). End-user prose is in
+[docs/device-discovery.md](docs/device-discovery.md).
+
+- **One sensor, one merged device, one entity per mapped field**, however many of
+  a location's receivers decode it. The field unique_id therefore carries **no**
+  receiver segment (`entity.py`'s `field_unique_id` is the single definition of
+  both shapes — the entity and the platform helper's dedup bookkeeping both call
+  it, so they cannot disagree about whether a field is one entity or several).
+- **`rssi` / `snr` / `last_seen` are the exclusion set** (`LINK_FIELD_KEYS`):
+  they measure the *link* between one receiver and the sensor, not the sensor,
+  so they are partitioned out, never deduped, never re-emitted on the location
+  signal, and stay subscribed to their own receiver's signal. Do not union them —
+  the merged value would be whichever receiver won the debounce race, which is
+  meaningless for a signal measurement.
+- **Dedup is a debounce window, not newest-`event_time`-wins.** `event_time` is
+  each receiver's *own host clock* at decode, so a strict comparison is invertible
+  by clock skew. The aggregator keeps the last-applied `(event_time, applied_at)`
+  per `(device_key, field)` and: within `_MERGE_DEBOUNCE` (3 s) → the **same
+  transmission heard twice**, ignored (first applied wins); clearly older → a
+  stale frame or a reconnect-backlog replay, **rejected**; clearly newer →
+  applied. Sized from below by repeat transmissions plus decode/delivery latency
+  plus modest skew, and from above by the fact that no mapped periodic sensor
+  re-transmits a new reading faster than tens of seconds.
+- **A frame with no parseable `event_time` is APPLIED, not guessed at.** The cost
+  is a redundant state write (and a second `event` fire); the cost of guessing
+  wrong is dropping a real reading for good. Same degraded mode the
+  `event_time_unusable` repair already raises for.
+- **The policy lives here, not in `pyrtl_433`.** It is a Home-Assistant-side merge
+  over *several* clients; the library has no idea the other receiver exists.
+
 ## Merged availability across a location's receivers
 
 Durable contract for how the two gates combine once a location has more than one
@@ -1083,8 +1198,8 @@ Assistant entity descriptor. The files ship **inside the `pyrtl_433` wheel**
 (`pyrtl_433/library/data/*.yaml`), not in this repository; the loader merges
 every `*.yaml` (except `_skip_keys.yaml`) into one field-keyed table cached in
 `DATA_LIBRARY`.
-`DATA_LIBRARY` now caches the **shipped library only** — per-receiver user overrides
-are merged separately per entry (see [Per-receiver user overrides](#per-receiver-user-overrides-data-flow)).
+`DATA_LIBRARY` now caches the **shipped library only** — per-location user overrides
+are merged separately per entry (see [Per-location user overrides](#per-location-user-overrides-data-flow)).
 
 A mapping entry, keyed by the exact rtl_433 field name:
 
@@ -1117,7 +1232,7 @@ descriptor}`, same per-field schema; `pyrtl_433.library` `Registry.models`) carr
 model-scoped → global → `None`. Precedence is **specificity-first**: per-device
 calibration > model-scoped (user > shipped) > global (user > shipped), so a
 *shipped* model entry beats a *user-override global* entry for a matching model.
-Per-receiver user overrides support `models:` too. Full detail (incl. the
+Per-location user overrides support `models:` too. Full detail (incl. the
 illustrative non-real-model worked example) is in `docs/device-library.md`; do
 not duplicate it here.
 
@@ -1128,14 +1243,18 @@ skip-keys file — is defined upstream, where the library now lives:
 - **<https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/>**
   (authoritative schema reference).
 - **[docs/device-library.md](docs/device-library.md)** — the Home-Assistant-facing
-  half: per-receiver user overrides, the options-flow editor, diagnostics.
+  half: per-location user overrides, the mappings editor, diagnostics.
 
-## Per-receiver user overrides (data flow)
+## Per-location user overrides (data flow)
 
-User overrides are **per receiver**, stored in `entry.data[CONF_USER_MAPPINGS]`
-(`CONF_USER_MAPPINGS = "user_mappings"`, `const.py`) — **not** a global file.
+User overrides are **per location**, stored in `entry.data[CONF_USER_MAPPINGS]`
+on the location entry (`CONF_USER_MAPPINGS = "user_mappings"`, `const.py`) —
+**not** a global file, and **not** per receiver. A mapping says how a *sensor's*
+fields become entities, which cannot sensibly differ between two servers that
+hear the same sensor; scoping it to the receiver would make a merged device's
+entity set depend on which server decoded a frame.
 
-- **`DATA_LIBRARY` caches the shipped library only.** Per-receiver overrides are
+- **`DATA_LIBRARY` caches the shipped library only.** A location's overrides are
   merged into a per-entry library cached in `DATA_ENTRY_LIBRARY[entry_id]`; the
   lookup at entity build reads that per-entry merged registry. There is **no**
   global override layer.
@@ -1146,17 +1265,20 @@ User overrides are **per receiver**, stored in `entry.data[CONF_USER_MAPPINGS]`
   config-entry migration, any existing `<config>/rtl_433_mappings.yaml` is read
   **once**, normalized, and folded into each existing entry's
   `CONF_USER_MAPPINGS`. The file is then **ignored and left untouched** on disk
-  (never edited or deleted). Receivers added after the upgrade start with empty
-  overrides.
-- **Editing surface: `async_step_mappings`** (the options-flow *Device mappings*
-  step, `config_flow.py`). It presents an `ObjectSelector` / `ha-yaml-editor`
-  pre-filled with the receiver's current `CONF_USER_MAPPINGS`. The editor blocks
-  invalid YAML syntax; on submit the integration **validates the mapping schema**
-  and re-shows the form with a **per-field error** (offending field + reason)
-  instead of silently dropping invalid entries. A successful save writes
-  `CONF_USER_MAPPINGS` into `entry.data` and triggers an **automatic reload** of
-  that receiver (entities rebuild) — no HA restart. The editor returns parsed YAML, so
-  comments/formatting are not preserved.
+  (never edited or deleted). Locations created after the upgrade start with empty
+  overrides; a receiver added to an existing location inherits that location's.
+- **Editing surface: the panel's *Device mappings* page** (`rtl_433/settings/mappings`,
+  with `async_step_mappings` as the same-shaped options step behind it — see
+  [Approval surfaces](#approval-surfaces-adoption-service-websocket-api-panel)
+  for why both exist and why `settings.py` owns the rules). It presents an
+  `ObjectSelector` / `ha-yaml-editor` pre-filled with the location's current
+  `CONF_USER_MAPPINGS`. The editor blocks invalid YAML syntax; on submit the
+  integration **validates the mapping schema** and re-shows the form with a
+  **per-field error** (offending field + reason) instead of silently dropping
+  invalid entries. A successful save writes `CONF_USER_MAPPINGS` into
+  `entry.data` and triggers an **automatic reload** of the location (every
+  receiver's entities rebuild) — no HA restart. The editor returns parsed YAML,
+  so comments/formatting are not preserved.
 
 ## Add-a-mapping workflow
 
@@ -1412,6 +1534,35 @@ Full runbook:
 
 ## Guardrails for automated changes
 
+- **Vocabulary.** A **receiver** is a computer running rtl_433; it contains a
+  **radio** (the SDR). Never reintroduce "hub" in a user-facing string, a panel
+  string, a doc sentence, or a runtime identifier — see
+  [Config-entry model](#config-entry-model-location-entry--receiver-subentries--nested-devices)
+  for the three frozen-legacy exceptions.
+- **Subentry ownership: an entity passes a `config_subentry_id` ONLY when the
+  device it attaches to is that subentry's own receiver device.** Everything on a
+  merged or location device passes none — including the per-receiver `rssi` /
+  `snr` / `last_seen` entities, which are *about* a receiver but *hang off the
+  merged device*. Passing one there asks HA to assign one device to two
+  subentries: today that silently moves the device and logs a deprecation, and it
+  **raises in HA Core 2027.8**. The receiver association travels in the
+  `unique_id` and the entity name instead. `COMPATIBILITY_CONTRACT.md` §5 is the
+  authoritative table.
+- **`receiver` is a RESERVED identity token: no `device_key` may equal it.**
+  Colon-separated identity strings are parsed positionally, by segment count plus
+  that literal marker, and `pyrtl_433.naming.safe_token` passes the word
+  `receiver` through unchanged. `RECEIVER_SEGMENT` / `RESERVED_DEVICE_KEYS` /
+  `is_reserved_device_key` (`const.py`) are the single definition — an identity
+  parser calls the helper, never compares against the literal. Both parsers
+  (`device_trigger.py`, `__init__.py`'s orphan scan) already do; a third must too.
+  The same literal is `SUBENTRY_TYPE_RECEIVER` on purpose: both answer "is this
+  naming a receiver?", and a second spelling would let them drift.
+  `COMPATIBILITY_CONTRACT.md` §6 is the grammar.
+- **Adoption is location-scoped.** `adopted` / `ignored` are decisions about a
+  *sensor*, so they live on the location entry and `adoption.py` writes them
+  across every receiver's mirror; `pending` stays per receiver as an ingestion
+  buffer, merged for display by `aggregator.merged_candidates`. Approving once
+  covers the location. Do not add a per-receiver approval path.
 - Prefer **YAML library edits** over Python: most device support is data.
 - Keep `object_suffix` values **stable** — changing one orphans existing
   entities.
