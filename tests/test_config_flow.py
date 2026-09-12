@@ -25,7 +25,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from freezegun import freeze_time
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rtl_433 import async_remove_config_entry_device
 from custom_components.rtl_433.const import (
@@ -59,6 +58,12 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.service_info.hassio import HassioServiceInfo
 from homeassistant.util import dt as dt_util
+from tests.conftest import (
+    build_location_entry,
+    receiver_id,
+    receiver_scope,
+    receiver_subentry,
+)
 
 VALIDATE = "custom_components.rtl_433.config_flow.Rtl433Coordinator.validate_connection"
 
@@ -107,10 +112,19 @@ async def test_user_step_success_creates_receiver(hass):
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "rtl_433 (rtl433.local)"
-    assert result["data"][CONF_HOST] == "rtl433.local"
-    assert result["data"][CONF_PORT] == 8433
-    # No per-device entry_type discriminator in the single-receiver model.
-    assert "entry_type" not in result["data"]
+    # One flow, two objects: the location entry, and its first receiver
+    # subentry. The connection lives on the receiver; the location's own data
+    # starts empty and fills with the devices the user adopts.
+    entry = result["result"]
+    assert entry.data == {}
+    assert entry.unique_id is None
+    receiver = receiver_subentry(entry)
+    assert receiver.title == "rtl_433 (rtl433.local)"
+    assert receiver.unique_id == "hub:rtl433.local:8433"
+    assert receiver.data[CONF_HOST] == "rtl433.local"
+    assert receiver.data[CONF_PORT] == 8433
+    # No per-device entry_type discriminator.
+    assert "entry_type" not in receiver.data
 
 
 async def test_user_step_cannot_connect_shows_error(hass):
@@ -151,7 +165,7 @@ PENDING_MID_FRAME = {"model": "GenericDoor-X1", "id": 88, "closed": 0, "battery_
 
 def _coordinator(hass, entry):
     """Return the running coordinator for a loaded receiver entry."""
-    return hass.data[DOMAIN][entry.entry_id]
+    return hass.data[DOMAIN][receiver_id(entry)]
 
 
 def _hear(coordinator, frame):
@@ -170,7 +184,7 @@ def _hear(coordinator, frame):
 
 def _device_entity_unique_ids(hass, entry, device_key) -> set[str]:
     """Return the unique_ids of every registry entity belonging to a device."""
-    prefix = f"{entry.entry_id}:{device_key}:"
+    prefix = f"{receiver_id(entry)}:{device_key}:"
     return {
         registry_entry.unique_id
         for registry_entry in er.async_get(hass).entities.values()
@@ -181,7 +195,7 @@ def _device_entity_unique_ids(hass, entry, device_key) -> set[str]:
 def _registry_device(hass, entry, device_key):
     """Return the registry device for a device key, or ``None``."""
     return dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{entry.entry_id}:{device_key}"), entry.entry_id
+        (DOMAIN, f"{receiver_id(entry)}:{device_key}"), entry.entry_id
     )
 
 
@@ -787,7 +801,7 @@ def _seed_coordinator_last_event(hass, entry, fields_by_device):
             for key, fields in fields_by_device.items()
         }
     )
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {})[receiver_id(entry)] = coordinator
 
 
 async def _open_device_step(hass, entry):
@@ -931,7 +945,7 @@ def _seen_models(hass, entry, models):
     has no stored record (or one with a blank model), so the replace picker can
     still name a device the devices map does not describe.
     """
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = SimpleNamespace(
+    hass.data.setdefault(DOMAIN, {})[receiver_id(entry)] = SimpleNamespace(
         devices={key: SimpleNamespace(model=model) for key, model in models.items()}
     )
 
@@ -966,7 +980,7 @@ async def test_replace_options_flow_rekeys_device(
 
     ent_reg = er.async_get(hass)
     survivor = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_OLD}:T"
+        "sensor", DOMAIN, f"{receiver_id(entry)}:{REPLACE_OLD}:T"
     )
     assert survivor is not None
 
@@ -1001,13 +1015,13 @@ async def test_replace_options_flow_rekeys_device(
     # The row moved onto the new unique_id keeping its entity_id...
     assert (
         ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_NEW}:T"
+            "sensor", DOMAIN, f"{receiver_id(entry)}:{REPLACE_NEW}:T"
         )
         == survivor
     )
     assert (
         ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_OLD}:T"
+            "sensor", DOMAIN, f"{receiver_id(entry)}:{REPLACE_OLD}:T"
         )
         is None
     )
@@ -1136,7 +1150,7 @@ async def test_replace_target_offers_a_pending_device_and_consumes_it(
 
     ent_reg = er.async_get(hass)
     survivor = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_OLD}:T"
+        "sensor", DOMAIN, f"{receiver_id(entry)}:{REPLACE_OLD}:T"
     )
     assert survivor is not None
 
@@ -1173,7 +1187,7 @@ async def test_replace_target_offers_a_pending_device_and_consumes_it(
     assert set(entry.data[CONF_DEVICES]) == {pending_key}
     assert (
         ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{entry.entry_id}:{pending_key}:T"
+            "sensor", DOMAIN, f"{receiver_id(entry)}:{pending_key}:T"
         )
         == survivor
     )
@@ -1237,11 +1251,11 @@ async def test_replace_target_shows_error_when_the_picker_goes_stale(
 # async_remove_config_entry_device (direct unit test).                         #
 # --------------------------------------------------------------------------- #
 async def test_remove_receiver_device_is_refused(hass, receiver_entry_builder):
-    """Removing the receiver device itself returns False (cannot be deleted)."""
+    """Removing a receiver device returns False (it belongs to its subentry)."""
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
-    receiver_device = SimpleNamespace(identifiers={(DOMAIN, entry.entry_id)})
+    receiver_device = SimpleNamespace(identifiers={(DOMAIN, receiver_scope(entry))})
 
     assert await async_remove_config_entry_device(hass, entry, receiver_device) is False
 
@@ -1266,10 +1280,10 @@ async def test_remove_nested_device_evicts_map_and_coordinator(
     coordinator = SimpleNamespace(
         forget_device=forgotten.append, device_removers=[removed.append]
     )
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {})[receiver_id(entry)] = coordinator
 
     nested_device = SimpleNamespace(
-        identifiers={(DOMAIN, f"{entry.entry_id}:{device_key}")}
+        identifiers={(DOMAIN, f"{receiver_id(entry)}:{device_key}")}
     )
 
     assert await async_remove_config_entry_device(hass, entry, nested_device) is True
@@ -1313,7 +1327,7 @@ async def test_reconfigure_updates_data_and_preserves_devices(
     original_entry_id = entry.entry_id
     devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reconfigure"
 
@@ -1323,7 +1337,7 @@ async def test_reconfigure_updates_data_and_preserves_devices(
         patch(VALIDATE, return_value=True),
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_HOST: "new.local",
@@ -1338,19 +1352,19 @@ async def test_reconfigure_updates_data_and_preserves_devices(
     assert result["reason"] == "reconfigure_successful"
 
     # Connection params updated in place.
-    assert entry.data[CONF_HOST] == "new.local"
-    assert entry.data[CONF_PORT] == 9000
-    assert entry.data[CONF_PATH] == "/socket"
-    assert entry.data["secure"] is True
+    assert receiver_subentry(entry).data[CONF_HOST] == "new.local"
+    assert receiver_subentry(entry).data[CONF_PORT] == 9000
+    assert receiver_subentry(entry).data[CONF_PATH] == "/socket"
+    assert receiver_subentry(entry).data["secure"] is True
 
     # Same entry, preserved nested state and manage_settings (data_updates merge).
     assert entry.entry_id == original_entry_id
     assert entry.data[CONF_DEVICES] == devices_snapshot
-    assert entry.data[CONF_MANAGE_SETTINGS] is True
+    assert receiver_subentry(entry).data[CONF_MANAGE_SETTINGS] is True
 
     # unique_id reconciled to the new host:port, and the title follows the host.
-    assert entry.unique_id == "hub:new.local:9000"
-    assert entry.title == "rtl_433 (new.local)"
+    assert receiver_subentry(entry).unique_id == "hub:new.local:9000"
+    assert receiver_subentry(entry).title == "rtl_433 (new.local)"
 
 
 async def test_reconfigure_cannot_connect_keeps_form_and_data(
@@ -1361,15 +1375,15 @@ async def test_reconfigure_cannot_connect_keeps_form_and_data(
 
     entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
-    data_snapshot = deepcopy(dict(entry.data))
-    unique_id_snapshot = entry.unique_id
+    data_snapshot = deepcopy(dict(receiver_subentry(entry).data))
+    unique_id_snapshot = receiver_subentry(entry).unique_id
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reconfigure"
 
     with patch(VALIDATE, side_effect=CannotConnect("nope")):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_HOST: "unreachable",
@@ -1384,8 +1398,8 @@ async def test_reconfigure_cannot_connect_keeps_form_and_data(
     assert result["errors"] == {"base": "cannot_connect"}
 
     # Nothing persisted.
-    assert dict(entry.data) == data_snapshot
-    assert entry.unique_id == unique_id_snapshot
+    assert dict(receiver_subentry(entry).data) == data_snapshot
+    assert receiver_subentry(entry).unique_id == unique_id_snapshot
 
 
 async def test_reconfigure_collision_aborts_and_mutates_neither(
@@ -1397,17 +1411,17 @@ async def test_reconfigure_collision_aborts_and_mutates_neither(
     entry_a.add_to_hass(hass)
     entry_b.add_to_hass(hass)
 
-    a_data_snapshot = deepcopy(dict(entry_a.data))
-    a_unique_id_snapshot = entry_a.unique_id
-    b_data_snapshot = deepcopy(dict(entry_b.data))
-    b_unique_id_snapshot = entry_b.unique_id
+    a_data_snapshot = deepcopy(dict(receiver_subentry(entry_a).data))
+    a_unique_id_snapshot = receiver_subentry(entry_a).unique_id
+    b_data_snapshot = deepcopy(dict(receiver_subentry(entry_b).data))
+    b_unique_id_snapshot = receiver_subentry(entry_b).unique_id
 
-    result = await entry_a.start_reconfigure_flow(hass)
+    result = await entry_a.start_subentry_reconfigure_flow(hass, receiver_id(entry_a))
     assert result["step_id"] == "reconfigure"
 
     # Validation passes, but the new host:port collides with entry_b.
     with patch(VALIDATE, return_value=True):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_HOST: "b.local",
@@ -1421,10 +1435,10 @@ async def test_reconfigure_collision_aborts_and_mutates_neither(
     assert result["reason"] == "already_configured"
 
     # Neither entry's data changed.
-    assert dict(entry_a.data) == a_data_snapshot
-    assert entry_a.unique_id == a_unique_id_snapshot
-    assert dict(entry_b.data) == b_data_snapshot
-    assert entry_b.unique_id == b_unique_id_snapshot
+    assert dict(receiver_subentry(entry_a).data) == a_data_snapshot
+    assert receiver_subentry(entry_a).unique_id == a_unique_id_snapshot
+    assert dict(receiver_subentry(entry_b).data) == b_data_snapshot
+    assert receiver_subentry(entry_b).unique_id == b_unique_id_snapshot
 
 
 async def test_reconfigure_reloads_entry_exactly_once(
@@ -1450,8 +1464,8 @@ async def test_reconfigure_reloads_entry_exactly_once(
             hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
         ) as reload_spy,
     ):
-        result = await entry.start_reconfigure_flow(hass)
-        result = await hass.config_entries.flow.async_configure(
+        result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_HOST: "new.local",
@@ -1465,8 +1479,8 @@ async def test_reconfigure_reloads_entry_exactly_once(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     reload_spy.assert_called_once_with(entry.entry_id)
-    assert entry.data[CONF_HOST] == "new.local"
-    assert entry.data[CONF_PORT] == 9000
+    assert receiver_subentry(entry).data[CONF_HOST] == "new.local"
+    assert receiver_subentry(entry).data[CONF_PORT] == 9000
     assert "should use it for scheduling a reload" not in caplog.text
 
 
@@ -1587,13 +1601,14 @@ def _radio_entry(host="core-rtl433", port=8433, uid="serial:0123", devices=None)
         "secure": False,
         CONF_MANAGE_SETTINGS: False,
     }
-    if devices is not None:
-        data[CONF_DEVICES] = devices
-    return MockConfigEntry(
-        domain=DOMAIN,
+    # The adopted devices belong to the *location*, not to the receiver that
+    # happened to decode them, so they are seeded on the entry.
+    return build_location_entry(
+        receiver_data=data,
+        receiver_unique_id=uid,
         title=f"rtl_433 ({host})",
-        unique_id=uid,
-        data=data,
+        receiver_title=f"rtl_433 ({host})",
+        data={} if devices is None else {CONF_DEVICES: devices},
         version=2,
     )
 
@@ -1629,13 +1644,18 @@ async def test_hassio_discovery_happy_path_creates_entry(hass):
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
-    assert entry.unique_id == "serial:0123"
+    receiver = receiver_subentry(entry)
+    # The stable radio id describes the *receiver*, so it keys the subentry; the
+    # location it lands in has no hardware identity of its own.
+    assert entry.unique_id is None
+    assert receiver.unique_id == "serial:0123"
     assert entry.title == "rtl_433 (core-rtl433:8433)"
+    assert receiver.title == "rtl_433 (core-rtl433:8433)"
     # Exact data shape: connection params + the default toggles. Submitting the
     # empty confirm form applies the schema defaults (manage-settings default +
     # the pre-filled 433.92 MHz initial frequency, which is persisted because
     # manage-settings is on).
-    assert entry.data == {
+    assert receiver.data == {
         CONF_HOST: "core-rtl433",
         CONF_PORT: 8433,
         CONF_PATH: "/ws",
@@ -1674,10 +1694,10 @@ async def test_hassio_discovery_non_default_fields_propagate(hass):
         await hass.async_block_till_done()
 
     validate.assert_called_once_with(hass, "core-rtl433", 8500, "/socket", secure=True)
-    entry = result["result"]
-    assert entry.unique_id == "usbpath:1-1.4"
-    assert entry.data[CONF_PATH] == "/socket"
-    assert entry.data["secure"] is True
+    receiver = receiver_subentry(result["result"])
+    assert receiver.unique_id == "usbpath:1-1.4"
+    assert receiver.data[CONF_PATH] == "/socket"
+    assert receiver.data["secure"] is True
 
 
 async def test_hassio_discovery_missing_optional_fields_use_defaults(hass):
@@ -1702,9 +1722,9 @@ async def test_hassio_discovery_missing_optional_fields_use_defaults(hass):
         result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
         await hass.async_block_till_done()
 
-    entry = result["result"]
-    assert entry.data[CONF_PATH] == "/ws"
-    assert entry.data["secure"] is False
+    receiver = receiver_subentry(result["result"])
+    assert receiver.data[CONF_PATH] == "/ws"
+    assert receiver.data["secure"] is False
 
 
 async def test_hassio_discovery_missing_unique_id_aborts(hass):
@@ -1728,7 +1748,7 @@ async def test_hassio_discovery_adopts_manual_entry(hass, receiver_entry_builder
         host="core-rtl433", port=8433, path="/ws", availability_timeout=42
     )
     entry.add_to_hass(hass)
-    assert entry.unique_id == "hub:core-rtl433:8433"
+    assert receiver_subentry(entry).unique_id == "hub:core-rtl433:8433"
 
     # Advertise a different path/secure so we can prove the connection data is
     # refreshed (not just the unique_id re-keyed) during adoption.
@@ -1755,11 +1775,12 @@ async def test_hassio_discovery_adopts_manual_entry(hass, receiver_entry_builder
     entries = hass.config_entries.async_entries(DOMAIN)
     assert len(entries) == 1
     adopted = entries[0]
-    assert adopted.unique_id == "serial:0123"
+    adopted_receiver = receiver_subentry(adopted)
+    assert adopted_receiver.unique_id == "serial:0123"
     # Connection data refreshed from discovery...
-    assert adopted.data[CONF_PATH] == "/ws2"
-    assert adopted.data["secure"] is True
-    # ...while pre-existing keys (the manual entry's receiver timeout) survive.
+    assert adopted_receiver.data[CONF_PATH] == "/ws2"
+    assert adopted_receiver.data["secure"] is True
+    # ...while the location's own settings (its availability timeout) survive.
     assert adopted.data[CONF_AVAILABILITY_TIMEOUT] == 42
 
 
@@ -1787,8 +1808,9 @@ async def test_hassio_readvertisement_reloads_running_receiver(hass, no_socket, 
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
-    assert entry.data[CONF_HOST] == "core-rtl433-2"
-    assert entry.data[CONF_PORT] == 8500
+    readvertised = receiver_subentry(entry)
+    assert readvertised.data[CONF_HOST] == "core-rtl433-2"
+    assert readvertised.data[CONF_PORT] == 8500
     reload_spy.assert_called_once_with(entry.entry_id)
     assert "should use it for scheduling a reload" not in caplog.text
 
@@ -1814,7 +1836,7 @@ async def test_hassio_discovery_does_not_rekey_populated_different_radio(hass):
     # The existing radio's identity and devices are untouched.
     entries = hass.config_entries.async_entries(DOMAIN)
     assert len(entries) == 1
-    assert entries[0].unique_id == "serial:AAA"
+    assert receiver_subentry(entries[0]).unique_id == "serial:AAA"
     assert entries[0].data[CONF_DEVICES] == {"Acurite-606TX-1": {}}
 
 
@@ -1829,7 +1851,7 @@ async def test_hassio_discovery_adopt_aborts_on_unique_id_collision(
     """
     placeholder = receiver_entry_builder(host="core-rtl433", port=8433)
     placeholder.add_to_hass(hass)
-    assert placeholder.unique_id == "hub:core-rtl433:8433"
+    assert receiver_subentry(placeholder).unique_id == "hub:core-rtl433:8433"
 
     owner = _radio_entry(
         host="other-host", port=8433, uid="serial:0123", devices={"Acurite-606TX-1": {}}
@@ -1846,7 +1868,7 @@ async def test_hassio_discovery_adopt_aborts_on_unique_id_collision(
 
     # Placeholder NOT re-keyed (would collide); owner untouched; no duplicates.
     entries = hass.config_entries.async_entries(DOMAIN)
-    assert sorted(e.unique_id for e in entries) == [
+    assert sorted(receiver_subentry(e).unique_id for e in entries) == [
         "hub:core-rtl433:8433",
         "serial:0123",
     ]
@@ -1886,9 +1908,12 @@ async def test_hassio_discovery_distinct_port_can_become_new_radio(hass):
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["result"].unique_id == "serial:NEW"
+    assert receiver_subentry(result["result"]).unique_id == "serial:NEW"
     entries = hass.config_entries.async_entries(DOMAIN)
-    assert {e.unique_id for e in entries} == {"serial:0123", "serial:NEW"}
+    assert {receiver_subentry(e).unique_id for e in entries} == {
+        "serial:0123",
+        "serial:NEW",
+    }
 
 
 async def test_hassio_discovery_updates_changed_port_in_place(hass):
@@ -1919,9 +1944,10 @@ async def test_hassio_discovery_updates_changed_port_in_place(hass):
 
     entries = hass.config_entries.async_entries(DOMAIN)
     assert len(entries) == 1
-    assert entries[0].data[CONF_PORT] == 8434
-    assert entries[0].data[CONF_PATH] == "/ws9"
-    assert entries[0].data["secure"] is True
+    updated = receiver_subentry(entries[0])
+    assert updated.data[CONF_PORT] == 8434
+    assert updated.data[CONF_PATH] == "/ws9"
+    assert updated.data["secure"] is True
 
 
 async def test_user_step_dedups_against_discovered_entry(hass):
@@ -1953,14 +1979,14 @@ async def test_reconfigure_preserves_stable_radio_unique_id(hass):
     entry = _radio_entry(host="core-rtl433", port=8433, uid="serial:0123")
     entry.add_to_hass(hass)
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     assert result["step_id"] == "reconfigure"
 
     with (
         patch(VALIDATE, return_value=True),
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_HOST: "new.local",
@@ -1974,11 +2000,11 @@ async def test_reconfigure_preserves_stable_radio_unique_id(hass):
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     # Stable radio id preserved, not rewritten to hub:host:port.
-    assert entry.unique_id == "serial:0123"
-    assert entry.data[CONF_HOST] == "new.local"
-    assert entry.data[CONF_PORT] == 9000
-    assert entry.data[CONF_PATH] == "/socket"
-    assert entry.data["secure"] is True
+    assert receiver_subentry(entry).unique_id == "serial:0123"
+    assert receiver_subentry(entry).data[CONF_HOST] == "new.local"
+    assert receiver_subentry(entry).data[CONF_PORT] == 9000
+    assert receiver_subentry(entry).data[CONF_PATH] == "/socket"
+    assert receiver_subentry(entry).data["secure"] is True
 
 
 async def test_reconfigure_rebinds_to_new_radio_id_preserving_entry(hass):
@@ -1999,14 +2025,14 @@ async def test_reconfigure_rebinds_to_new_radio_id_preserving_entry(hass):
     original_entry_id = entry.entry_id
     devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     assert result["step_id"] == "reconfigure"
 
     with (
         patch(VALIDATE, return_value=True),
         patch.object(hass.config_entries, "async_reload"),
     ):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_RADIO_ID: "radio-new",
@@ -2022,11 +2048,11 @@ async def test_reconfigure_rebinds_to_new_radio_id_preserving_entry(hass):
     assert result["reason"] == "reconfigure_successful"
 
     # Rebound to the new stable id, in place (same entry_id), devices preserved.
-    assert entry.unique_id == "radio-new"
+    assert receiver_subentry(entry).unique_id == "radio-new"
     assert entry.entry_id == original_entry_id
     assert entry.data[CONF_DEVICES] == devices_snapshot
-    assert entry.data[CONF_HOST] == "new.local"
-    assert entry.data[CONF_PORT] == 9000
+    assert receiver_subentry(entry).data[CONF_HOST] == "new.local"
+    assert receiver_subentry(entry).data[CONF_PORT] == 9000
     # Exactly one entry remains (no orphan/clone created).
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
@@ -2043,14 +2069,14 @@ async def test_reconfigure_rebind_collision_with_populated_entry_aborts(hass):
     entry.add_to_hass(hass)
     other.add_to_hass(hass)
 
-    entry_data_snapshot = deepcopy(dict(entry.data))
-    other_data_snapshot = deepcopy(dict(other.data))
+    entry_data_snapshot = deepcopy(dict(receiver_subentry(entry).data))
+    other_data_snapshot = deepcopy(dict(receiver_subentry(other).data))
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     assert result["step_id"] == "reconfigure"
 
     with patch(VALIDATE, return_value=True):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_RADIO_ID: "radio-new",
@@ -2065,10 +2091,10 @@ async def test_reconfigure_rebind_collision_with_populated_entry_aborts(hass):
     assert result["reason"] == "already_configured"
 
     # Nothing changed: both entries still present with their original ids + data.
-    assert entry.unique_id == "radio-old"
-    assert dict(entry.data) == entry_data_snapshot
-    assert other.unique_id == "radio-new"
-    assert dict(other.data) == other_data_snapshot
+    assert receiver_subentry(entry).unique_id == "radio-old"
+    assert dict(receiver_subentry(entry).data) == entry_data_snapshot
+    assert receiver_subentry(other).unique_id == "radio-new"
+    assert dict(receiver_subentry(other).data) == other_data_snapshot
     assert len(hass.config_entries.async_entries(DOMAIN)) == 2
 
 
@@ -2083,14 +2109,14 @@ async def test_reconfigure_rebind_collision_with_empty_orphan_succeeds(hass):
     orphan_id = orphan.entry_id
     devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     assert result["step_id"] == "reconfigure"
 
     with (
         patch(VALIDATE, return_value=True),
         patch.object(hass.config_entries, "async_reload"),
     ):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_RADIO_ID: "radio-new",
@@ -2107,7 +2133,7 @@ async def test_reconfigure_rebind_collision_with_empty_orphan_succeeds(hass):
 
     # Orphan removed; the reconfigured entry took over "radio-new" with devices.
     assert hass.config_entries.async_get_entry(orphan_id) is None
-    assert entry.unique_id == "radio-new"
+    assert receiver_subentry(entry).unique_id == "radio-new"
     assert entry.data[CONF_DEVICES] == devices_snapshot
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
@@ -2123,7 +2149,8 @@ async def test_hassio_replace_rebinds_chosen_receiver(hass):
         host="old.local", port=8433, uid="radio-old", devices=devices
     )
     receiver.add_to_hass(hass)
-    receiver_id = receiver.entry_id
+    location_id = receiver.entry_id
+    replaces = receiver_id(receiver)
     devices_snapshot = deepcopy(receiver.data[CONF_DEVICES])
 
     # An unknown radio on a distinct host:port -> the replace step is shown.
@@ -2140,19 +2167,21 @@ async def test_hassio_replace_rebinds_chosen_receiver(hass):
         patch.object(hass.config_entries, "async_reload"),
     ):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"replaces": receiver_id}
+            result["flow_id"], {"replaces": replaces}
         )
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "rebind_successful"
 
-    # The same receiver entry was rebound onto the new radio + connection target.
-    rebound = hass.config_entries.async_get_entry(receiver_id)
+    # The same receiver subentry was rebound onto the new radio + connection
+    # target, inside the same location -- so its devices are untouched.
+    rebound = hass.config_entries.async_get_entry(location_id)
     assert rebound is not None
-    assert rebound.unique_id == "radio-new"
-    assert rebound.data[CONF_HOST] == "new.local"
-    assert rebound.data[CONF_PORT] == 9000
+    rebound_receiver = receiver_subentry(rebound)
+    assert rebound_receiver.unique_id == "radio-new"
+    assert rebound_receiver.data[CONF_HOST] == "new.local"
+    assert rebound_receiver.data[CONF_PORT] == 9000
     assert rebound.data[CONF_DEVICES] == devices_snapshot
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
@@ -2163,9 +2192,9 @@ async def test_legacy_receiver_reconfigure_rebinds_via_host_port(
     """A legacy receiver: entry still rebinds its unique_id via host:port on reconfigure."""
     entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
-    assert entry.unique_id == "hub:old.local:8433"
+    assert receiver_subentry(entry).unique_id == "hub:old.local:8433"
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     assert result["step_id"] == "reconfigure"
     # No radio_id field is offered for a legacy receiver: entry.
     assert CONF_RADIO_ID not in _schema_keys(result)
@@ -2174,7 +2203,7 @@ async def test_legacy_receiver_reconfigure_rebinds_via_host_port(
         patch(VALIDATE, return_value=True),
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_HOST: "new.local",
@@ -2187,7 +2216,7 @@ async def test_legacy_receiver_reconfigure_rebinds_via_host_port(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    assert entry.unique_id == "hub:new.local:9000"
+    assert receiver_subentry(entry).unique_id == "hub:new.local:9000"
 
 
 async def test_hassio_confirm_cannot_connect_reshows_form(hass):
@@ -2238,8 +2267,9 @@ async def test_user_step_persists_initial_frequency(hass):
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
+    receiver = receiver_subentry(entry)
     # The frequency rides the managed path; persisted as a float (MHz).
-    assert entry.data[CONF_INITIAL_FREQUENCY] == 868.3
+    assert receiver.data[CONF_INITIAL_FREQUENCY] == 868.3
 
 
 async def test_user_step_applies_default_initial_frequency(hass):
@@ -2263,7 +2293,8 @@ async def test_user_step_applies_default_initial_frequency(hass):
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
-    assert entry.data[CONF_INITIAL_FREQUENCY] == DEFAULT_INITIAL_FREQUENCY
+    receiver = receiver_subentry(entry)
+    assert receiver.data[CONF_INITIAL_FREQUENCY] == DEFAULT_INITIAL_FREQUENCY
 
 
 async def test_user_step_drops_initial_frequency_when_unmanaged(hass):
@@ -2310,8 +2341,9 @@ async def test_hassio_confirm_persists_toggles_and_frequency(hass):
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
-    assert entry.data[CONF_MANAGE_SETTINGS] is True
-    assert entry.data[CONF_INITIAL_FREQUENCY] == 915.0
+    receiver = receiver_subentry(entry)
+    assert receiver.data[CONF_MANAGE_SETTINGS] is True
+    assert receiver.data[CONF_INITIAL_FREQUENCY] == 915.0
 
 
 # --------------------------------------------------------------------------- #
@@ -2343,9 +2375,13 @@ async def test_hassio_replace_form_lists_receivers_and_new_option(hass):
         "host": "new.local",
         "port": "9000",
     }
-    # Options: the existing receiver keyed by entry_id->title, then the new-radio choice.
+    # Options: each existing receiver keyed by its subentry id, labelled with the
+    # location it sits in, then the new-radio choice.
     options = _select_options(result, "replaces")
-    assert (receiver.entry_id, "rtl_433 (old.local)") in options
+    assert (
+        receiver_id(receiver),
+        "rtl_433 (old.local) / rtl_433 (old.local)",
+    ) in options
     assert ("__new__", "It's a new radio") in options
     # The form defaults to "add as new" so a careless submit never rebinds a receiver.
     assert _schema_default(result, "replaces") == "__new__"
@@ -2355,7 +2391,8 @@ async def test_hassio_replace_rebind_sets_title_to_new_host(hass):
     """Rebinding via the replace step retitles the receiver to the new host."""
     receiver = _radio_entry(host="old.local", port=8433, uid="radio-old")
     receiver.add_to_hass(hass)
-    receiver_id = receiver.entry_id
+    location_id = receiver.entry_id
+    replaces = receiver_id(receiver)
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -2367,11 +2404,11 @@ async def test_hassio_replace_rebind_sets_title_to_new_host(hass):
         patch.object(hass.config_entries, "async_reload"),
     ):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"replaces": receiver_id}
+            result["flow_id"], {"replaces": replaces}
         )
         await hass.async_block_till_done()
 
-    rebound = hass.config_entries.async_get_entry(receiver_id)
+    rebound = receiver_subentry(hass.config_entries.async_get_entry(location_id))
     assert rebound.unique_id == "radio-new"
     assert rebound.title == "rtl_433 (new.local)"
 
@@ -2385,14 +2422,14 @@ async def test_reconfigure_connection_only_keeps_id_and_updates_title(hass):
     entry.add_to_hass(hass)
     devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     assert result["step_id"] == "reconfigure"
 
     with (
         patch(VALIDATE, return_value=True),
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_RADIO_ID: "",  # explicitly cleared -> connection-only update
@@ -2407,10 +2444,10 @@ async def test_reconfigure_connection_only_keeps_id_and_updates_title(hass):
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     # Stable id untouched (no rebind), connection + title updated, devices kept.
-    assert entry.unique_id == "serial:0123"
-    assert entry.title == "rtl_433 (new.local)"
-    assert entry.data[CONF_HOST] == "new.local"
-    assert entry.data[CONF_PORT] == 9000
+    assert receiver_subentry(entry).unique_id == "serial:0123"
+    assert receiver_subentry(entry).title == "rtl_433 (new.local)"
+    assert receiver_subentry(entry).data[CONF_HOST] == "new.local"
+    assert receiver_subentry(entry).data[CONF_PORT] == 9000
     assert entry.data[CONF_DEVICES] == devices_snapshot
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
@@ -2420,12 +2457,12 @@ async def test_reconfigure_rebind_strips_whitespace_and_sets_title(hass):
     entry = _radio_entry(host="old.local", port=8433, uid="radio-old")
     entry.add_to_hass(hass)
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     with (
         patch(VALIDATE, return_value=True),
         patch.object(hass.config_entries, "async_reload"),
     ):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_RADIO_ID: "  radio-new  ",
@@ -2438,28 +2475,28 @@ async def test_reconfigure_rebind_strips_whitespace_and_sets_title(hass):
         await hass.async_block_till_done()
 
     assert result["reason"] == "reconfigure_successful"
-    assert entry.unique_id == "radio-new"
-    assert entry.title == "rtl_433 (new.local)"
+    assert receiver_subentry(entry).unique_id == "radio-new"
+    assert receiver_subentry(entry).title == "rtl_433 (new.local)"
 
 
 async def test_reconfigure_empty_unique_id_uses_legacy_receiver_scheme(hass):
     """An entry with no unique_id reconfigures via the legacy hub:host:port scheme."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="rtl_433 (old.local)",
-        unique_id=None,
-        data={
+    entry = build_location_entry(
+        receiver_data={
             CONF_HOST: "old.local",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
             "secure": False,
             CONF_MANAGE_SETTINGS: False,
         },
+        receiver_unique_id=None,
+        title="rtl_433 (old.local)",
+        receiver_title="rtl_433 (old.local)",
         version=2,
     )
     entry.add_to_hass(hass)
 
-    result = await entry.start_reconfigure_flow(hass)
+    result = await entry.start_subentry_reconfigure_flow(hass, receiver_id(entry))
     assert result["step_id"] == "reconfigure"
     # No stable radio id -> no radio_id field offered.
     assert CONF_RADIO_ID not in _schema_keys(result)
@@ -2468,7 +2505,7 @@ async def test_reconfigure_empty_unique_id_uses_legacy_receiver_scheme(hass):
         patch(VALIDATE, return_value=True),
         patch.object(hass.config_entries, "async_schedule_reload"),
     ):
-        result = await hass.config_entries.flow.async_configure(
+        result = await hass.config_entries.subentries.async_configure(
             result["flow_id"],
             {
                 CONF_HOST: "new.local",
@@ -2480,4 +2517,152 @@ async def test_reconfigure_empty_unique_id_uses_legacy_receiver_scheme(hass):
         await hass.async_block_till_done()
 
     assert result["reason"] == "reconfigure_successful"
-    assert entry.unique_id == "hub:new.local:9000"
+    assert receiver_subentry(entry).unique_id == "hub:new.local:9000"
+
+
+# --------------------------------------------------------------------------- #
+# Receiver subentry flow — adding a second receiver to a location.             #
+# --------------------------------------------------------------------------- #
+async def _add_receiver(hass, entry, **overrides):
+    """Drive the receiver subentry's add flow and return the result."""
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "receiver"), context={"source": SOURCE_USER}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    user_input = {
+        CONF_HOST: "garage.local",
+        CONF_PORT: 8433,
+        CONF_PATH: "/ws",
+        "secure": False,
+        CONF_MANAGE_SETTINGS: True,
+    }
+    user_input.update(overrides)
+    return await hass.config_entries.subentries.async_configure(
+        result["flow_id"], user_input
+    )
+
+
+async def test_subentry_flow_adds_a_second_receiver_to_a_location(
+    hass, receiver_entry_builder
+):
+    """Adding a receiver is a subentry of the location, not a second entry.
+
+    This is the primary path into the device union: both servers feed one config
+    entry, which is what lets their views of a sensor be merged later.
+    """
+    entry = receiver_entry_builder(host="attic.local")
+    entry.add_to_hass(hass)
+
+    with patch(VALIDATE, return_value=True):
+        result = await _add_receiver(hass, entry)
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    receivers = [
+        subentry
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == "receiver"
+    ]
+    assert [r.data[CONF_HOST] for r in receivers] == ["attic.local", "garage.local"]
+    assert receivers[1].unique_id == "hub:garage.local:8433"
+    assert receivers[1].title == "rtl_433 (garage.local)"
+
+
+async def test_subentry_flow_refuses_a_server_already_configured(
+    hass, receiver_entry_builder
+):
+    """The same endpoint cannot be added twice, even into a different location.
+
+    Home Assistant only enforces subentry unique_ids within one entry, so the
+    guard scans every location: two coordinators against one server would be two
+    sockets reading the same frames.
+    """
+    entry = receiver_entry_builder(host="attic.local")
+    entry.add_to_hass(hass)
+    other = receiver_entry_builder(host="garage.local")
+    other.add_to_hass(hass)
+
+    with patch(VALIDATE, return_value=True):
+        result = await _add_receiver(hass, entry)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_subentry_flow_reports_an_unreachable_server(
+    hass, receiver_entry_builder
+):
+    """A failed connection re-shows the form rather than adding a dead receiver."""
+    from custom_components.rtl_433.coordinator import CannotConnect
+
+    entry = receiver_entry_builder(host="attic.local")
+    entry.add_to_hass(hass)
+
+    with patch(VALIDATE, side_effect=CannotConnect("nope")):
+        result = await _add_receiver(hass, entry)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "cannot_connect"}
+    assert len(entry.subentries) == 1
+
+
+async def test_hassio_confirm_defaults_to_a_new_location(hass):
+    """Discovery offers the existing locations but defaults to a new one.
+
+    A discovered server is usually a second site, and merging two sites' devices
+    is the one outcome a user cannot undo by editing a form.
+    """
+    existing = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    existing.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="new.local", port=9000, uid="radio-new"),
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"replaces": "__new__"}
+    )
+    assert result["step_id"] == "hassio_confirm"
+    options = _select_options(result, "location")
+    assert ("__new__", "A new location") in options
+    assert (existing.entry_id, existing.title) in options
+    assert _schema_default(result, "location") == "__new__"
+
+
+async def test_hassio_confirm_can_attach_to_an_existing_location(hass):
+    """Choosing a location adds the discovered server to it as a receiver.
+
+    That is the opt-in: the receiver now feeds the same entry as its neighbour,
+    which is what puts their devices in one place.
+    """
+    existing = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    existing.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="new.local", port=9000, uid="radio-new"),
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"replaces": "__new__"}
+    )
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"location": existing.entry_id}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "receiver_added"
+    # One location, two receivers -- no second config entry was created.
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    receivers = [
+        subentry
+        for subentry in existing.subentries.values()
+        if subentry.subentry_type == "receiver"
+    ]
+    assert [r.unique_id for r in receivers] == ["radio-old", "radio-new"]
+    assert receivers[1].data[CONF_HOST] == "new.local"

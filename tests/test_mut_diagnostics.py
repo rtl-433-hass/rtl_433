@@ -31,6 +31,7 @@ from custom_components.rtl_433.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 from homeassistant.core import HomeAssistant
+from tests.conftest import receiver_id
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -101,7 +102,7 @@ def _setup_hass_with_coordinator(
             registry,
             skip_keys or set(),
         )
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data[DOMAIN][receiver_id(entry)] = coordinator
 
 
 # ---------------------------------------------------------------------------
@@ -132,11 +133,11 @@ def test_to_redact_does_not_contain_path() -> None:
 async def test_resolve_coordinator_returns_coordinator_when_present(
     hass: HomeAssistant, receiver_entry_builder
 ) -> None:
-    """_resolve_coordinator returns the coordinator stored under hass.data[DOMAIN][entry_id]."""
+    """_resolve_coordinator returns the coordinator stored under its receiver id."""
     entry = receiver_entry_builder(entry_id="test-entry-123")
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
-    hass.data[DOMAIN] = {entry.entry_id: coordinator}
+    hass.data[DOMAIN] = {receiver_id(entry): coordinator}
     result = _resolve_coordinator(hass, entry)
     assert result is coordinator
 
@@ -172,7 +173,7 @@ async def test_resolve_coordinator_uses_domain_key(
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     # Store under a wrong key — must not be found
-    hass.data["wrong_domain"] = {entry.entry_id: coordinator}
+    hass.data["wrong_domain"] = {receiver_id(entry): coordinator}
     result = _resolve_coordinator(hass, entry)
     assert result is None
 
@@ -333,7 +334,7 @@ async def test_diag_coordinator_absent_uses_domain_key(
     entry.add_to_hass(hass)
     # Store coordinator under DOMAIN — if DOMAIN key is wrong, None is returned
     coordinator = _FakeCoordinator()
-    hass.data[DOMAIN] = {entry.entry_id: coordinator}
+    hass.data[DOMAIN] = {receiver_id(entry): coordinator}
     diag = await async_get_config_entry_diagnostics(hass, entry)
     # coordinator IS present, so loaded must be True
     assert diag["coordinator_loaded"] is True
@@ -364,7 +365,7 @@ async def test_diag_data_library_key_used(
     hass.data.setdefault(DOMAIN, {})
     # Diagnostics resolves the per-entry library from DATA_ENTRY_LIBRARY[entry_id].
     hass.data[DOMAIN][DATA_ENTRY_LIBRARY] = {entry.entry_id: (registry, set())}
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data[DOMAIN][receiver_id(entry)] = coordinator
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     # With real code and correct key: field is matched -> NOT in unmatched_field_keys
