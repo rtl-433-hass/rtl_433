@@ -30,12 +30,12 @@ const PANEL = resolve(COMPONENT, "frontend/rtl_433-panel.js");
 
 const {
   STRINGS,
+  VIEWS,
+  TIMEOUT_MODES,
   formatFallback,
   pluralCategory,
   translate,
-  translateCount,
   formatAge,
-  viewFor,
 } = await import(PANEL);
 
 /** The key `translate` actually asks a localizer for. */
@@ -76,19 +76,17 @@ const t = (key, args) => formatFallback(STRINGS[key], args);
 
 // -- The two copies of the English say the same thing -------------------------
 
-test("en.json carries a config_panel section at all", () => {
-  // Every assertion below is vacuous without it, and losing the section is
-  // exactly the kind of merge accident this file exists to catch. The section
-  // is `config_panel` because that is the one Home Assistant reserves for a
-  // config panel's own words -- and the only one hassfest lets an integration
-  // shape freely.
-  assert.ok(english.config_panel, "translations/en.json has no `config_panel`");
-});
-
 test("the built-in English matches translations/en.json key for key", () => {
+  // `config_panel` is the section Home Assistant reserves for a config panel's
+  // own words, and the only one hassfest lets an integration shape freely.
+  // Losing it is the merge accident this file exists to catch, and it would
+  // make every assertion below vacuous.
+  assert.ok(english.config_panel, "translations/en.json has no `config_panel`");
   const shipped = flatten(english.config_panel);
-  // Whole-set differences, so a failure names precisely what drifted rather
-  // than the first key that happened to differ.
+  // The two key-set differences first, because a key added to one side and not
+  // the other is the usual drift and this names exactly which -- where a whole
+  // -object comparison would print all ~88 pairs and leave the reader to spot
+  // it. The deepEqual behind them then catches a changed *value*.
   assert.deepEqual(
     Object.keys(STRINGS).filter((key) => !(key in shipped)).sort(),
     [],
@@ -97,11 +95,9 @@ test("the built-in English matches translations/en.json key for key", () => {
   assert.deepEqual(
     Object.keys(shipped).filter((key) => !(key in STRINGS)).sort(),
     [],
-    "keys in en.json's panel section the panel has no built-in English for",
+    "keys in en.json's config_panel section the panel has no English for",
   );
-  for (const [key, value] of Object.entries(shipped)) {
-    assert.equal(STRINGS[key], value, key);
-  }
+  assert.deepEqual(STRINGS, shipped);
 });
 
 // -- Every key the panel asks for is a key that exists ------------------------
@@ -117,27 +113,26 @@ test("every string the panel looks up by name is translated", () => {
   // Sanity: a regex that stopped matching would make this pass on nothing.
   assert.ok(asked.size > 30, `only ${asked.size} literal lookups found`);
   assert.deepEqual(
-    [...asked].filter((key) => !(key in STRINGS)).sort(),
+    [...asked].filter((key) => !defines(key)).sort(),
     [],
     "the panel asks for these keys and nothing defines them",
   );
 });
 
-test("every counted string has at least the plural form English needs", () => {
-  // Listed rather than swept: one of the three reaches `_plural` through
-  // `_setRowCount`, so its key is written at the call site and not beside the
-  // word `_plural` for a regex to find.
-  for (const key of [
-    "overview.device_count",
-    "overview.entity_count",
-    "discovered.cleared",
-  ]) {
-    // "other" is the form `_plural` falls back to, so it is the one that may
-    // never be missing; "one" is what English needs beside it.
-    assert.ok(`${key}.other` in STRINGS, `${key}.other`);
-    assert.ok(`${key}.one` in STRINGS, `${key}.one`);
-  }
-});
+/**
+ * Whether `STRINGS` answers for `key`, the way `pluralCandidates` resolves it.
+ *
+ * A counted string is a group rather than a string, so it is defined by having
+ * an `other` member -- the form every language has and the one a lookup lands
+ * on last.
+ */
+function defines(key) {
+  return key in STRINGS || `${key}.other` in STRINGS;
+}
+
+// The English plural groups themselves are guarded in tests/test_translations.py,
+// which owns `en.json` -- and the test above ties `STRINGS` to it key for key,
+// so asserting them here again would be the same rule kept in two languages.
 
 // -- Which answer wins --------------------------------------------------------
 
@@ -177,19 +172,17 @@ test("no localizer at all still renders the page, in English", () => {
   );
 });
 
-test("a counted string asks for its own plural form first", () => {
+// -- Counted strings ----------------------------------------------------------
+
+test("a counted string asks for its own plural form", () => {
   const polish = localizer({
     [`${QUALIFIED}overview.device_count.few`]: "{count} urządzenia",
     [`${QUALIFIED}overview.device_count.other`]: "{count} urządzeń",
   });
-  assert.equal(
-    translateCount([polish], "overview.device_count", "pl", 2),
-    "2 urządzenia",
-  );
-  assert.equal(
-    translateCount([polish], "overview.device_count", "pl", 5),
-    "5 urządzeń",
-  );
+  const count = (n) =>
+    translate([polish], "overview.device_count", { count: n }, "pl");
+  assert.equal(count(2), "2 urządzenia");
+  assert.equal(count(5), "5 urządzeń");
 });
 
 test("a plural form nobody translated falls back to the plural", () => {
@@ -200,16 +193,56 @@ test("a plural form nobody translated falls back to the plural", () => {
     [`${QUALIFIED}overview.device_count.other`]: "{count} urządzeń",
   });
   assert.equal(
-    translateCount([partial], "overview.device_count", "pl", 2),
+    translate([partial], "overview.device_count", { count: 2 }, "pl"),
     "2 urządzeń",
   );
 });
 
 test("counted strings fall back to English like any other", () => {
-  assert.equal(translateCount([], "overview.device_count", "en", 1), "1 device");
   assert.equal(
-    translateCount([], "overview.entity_count", "en", 7),
+    translate([], "overview.device_count", { count: 1 }, "en"),
+    "1 device",
+  );
+  assert.equal(
+    translate([], "overview.entity_count", { count: 7 }, "en"),
     "7 entities",
+  );
+});
+
+test("any string handed a count may be pluralized by a translation", () => {
+  // The point of folding the plural lookup into `translate`: "12s ago" is one
+  // sentence in English and needs agreement in Polish, and a translator can
+  // split it into forms without the panel knowing. Before this, only the three
+  // keys a call site had routed through a separate helper could ever do that.
+  const polish = localizer({
+    [`${QUALIFIED}age.seconds.few`]: "{count} sekundy temu",
+    [`${QUALIFIED}age.seconds.other`]: "{count} sekund temu",
+  });
+  const at = (n) => translate([polish], "age.seconds", { count: n }, "pl");
+  assert.equal(at(2), "2 sekundy temu");
+  assert.equal(at(5), "5 sekund temu");
+  // And the English, which is a single un-split sentence, still resolves.
+  assert.equal(translate([], "age.seconds", { count: 5 }, "en"), "5s ago");
+});
+
+test("a plain key still wins over its own plural forms", () => {
+  // A translation that kept one sentence gets that sentence, even though the
+  // forms are looked for: the direct key is tried first.
+  const dutch = localizer({
+    [`${QUALIFIED}age.seconds`]: "{count}s geleden",
+    [`${QUALIFIED}age.seconds.other`]: "nooit",
+  });
+  assert.equal(
+    translate([dutch], "age.seconds", { count: 5 }, "nl"),
+    "5s geleden",
+  );
+});
+
+test("a non-numeric count is not treated as a counted string", () => {
+  // `{device}`-style arguments must not send the lookup hunting for forms.
+  assert.equal(
+    translate([], "action.already_ignored", { device: "Foo-1", count: "x" }),
+    "Foo-1 was already ignored.",
   );
 });
 
@@ -245,13 +278,18 @@ test("a count that is not a number is the plural form", () => {
 });
 
 test("the keys the panel builds rather than writes are translated too", () => {
-  // Four families are assembled at runtime, so the sweep above cannot see them:
-  // the toolbar title per view, the three availability-timeout modes, and a
+  // Three families are assembled at runtime, so the sweep above cannot see
+  // them: the toolbar title per view, the availability-timeout modes, and a
   // label and description per settings field.
-  for (const segment of ["", "discovered", "options", "device-settings", "mappings"]) {
-    assert.ok(viewFor(segment).title in STRINGS, `view ${segment || "(overview)"}`);
+  //
+  // The first two sweep the panel's own tables rather than a copy of them, so
+  // a view or a mode added without its string fails here -- which a hand-kept
+  // list beside them could not do.
+  for (const [segment, view] of Object.entries(VIEWS)) {
+    assert.ok(view.title in STRINGS, `view "${segment}" title ${view.title}`);
   }
-  for (const mode of ["defaults", "never", "custom"]) {
+  assert.ok(TIMEOUT_MODES.length, "no timeout modes to check");
+  for (const mode of TIMEOUT_MODES) {
     assert.ok(`settings.timeout_mode.${mode}` in STRINGS, mode);
   }
   // Every name `_settingsSchema` can put in a schema. A field whose label is
@@ -269,7 +307,7 @@ test("the keys the panel builds rather than writes are translated too", () => {
     "scale",
     "mappings",
   ]) {
-    assert.ok(`settings.data.${field}` in STRINGS, field);
+    assert.ok(defines(`settings.data.${field}`), field);
   }
 });
 
@@ -337,16 +375,11 @@ test("something that is not a placeholder is left where it is", () => {
 
 // -- Which age unit a timestamp falls in --------------------------------------
 
-test("an age under a minute is counted in seconds", () => {
-  const now = Date.parse("2026-09-12T12:00:00Z");
-  assert.equal(formatAge(t, "2026-09-12T11:59:58Z", now), "2s ago");
-  assert.equal(formatAge(t, "2026-09-12T11:59:01Z", now), "59s ago");
-});
-
 test("each threshold moves to the next unit and no sooner", () => {
   const now = Date.parse("2026-09-12T12:00:00Z");
   const at = (seconds) =>
     formatAge(t, new Date(now - seconds * 1000).toISOString(), now);
+  assert.equal(at(2), "2s ago");
   assert.equal(at(59), "59s ago");
   assert.equal(at(60), "1m ago");
   assert.equal(at(3599), "59m ago");

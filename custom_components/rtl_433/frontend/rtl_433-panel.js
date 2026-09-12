@@ -94,7 +94,7 @@ const DOMAIN = "rtl_433";
  *
  * Two things it does *not* get, both because that file is validated as Python
  * format strings rather than as ICU messages: a placeholder has to be a bare
- * identifier, and there is no `{n, plural, …}`. Hence `_plural` below.
+ * identifier, and there is no `{n, plural, …}`. Hence `pluralCandidates` below.
  *
  * Every key is addressed by the part after the prefix, so a call site reads
  * `this._t("card.add")` rather than repeating the component path.
@@ -227,7 +227,7 @@ export const STRINGS = {
   "settings.data_description.timeout_override":
     "Blank uses the receiver's timeout. 0 means never expire.",
   "settings.data_description.motion_clear_delay":
-    "How long after a detection this device is reported clear. Blank uses {seconds} seconds.",
+    "How long after a detection this device is reported clear. Blank uses {motion_clear_delay} seconds.",
   "settings.data_description.commodity":
     "Setting a commodity turns this device's counter into an Energy-dashboard sensor. “none” leaves it as the library describes it.",
   "settings.data_description.unit": "One unit of what the counter counts.",
@@ -313,36 +313,53 @@ export function pluralCategory(language, count) {
  * translations that cannot be seen on screen: a page that has quietly stopped
  * asking Home Assistant anything looks exactly like a page in English.
  */
-export function translate(localizers, key, args) {
-  const full = `${TRANSLATION_PREFIX}${key}`;
+export function translate(localizers, key, args, language) {
   for (const localize of localizers) {
     if (typeof localize !== "function") {
       continue;
     }
-    const text = args ? localize(full, args) : localize(full);
-    if (text) {
-      return text;
+    for (const candidate of pluralCandidates(key, args, language)) {
+      const full = `${TRANSLATION_PREFIX}${candidate}`;
+      const text = args ? localize(full, args) : localize(full);
+      if (text) {
+        return text;
+      }
     }
   }
-  return formatFallback(STRINGS[key], args);
+  for (const candidate of pluralCandidates(key, args, language)) {
+    const text = STRINGS[candidate];
+    if (typeof text === "string") {
+      return formatFallback(text, args);
+    }
+  }
+  return "";
 }
 
 /**
- * One counted string: "1 device", "12 devices".
+ * The keys one lookup may resolve to: the plain one, then its plural forms.
  *
- * `key` names a group of strings rather than one, with a member per plural
- * form, and `count` picks between them. A form with no string of its own -- a
- * translator who filled in "one" and "other" and not "few" -- falls back to
- * "other", which is the form English calls the plural and every language
- * defines.
+ * A counted string is stored as a *group* -- one member per plural form, keyed
+ * `<key>.one`, `<key>.other` and so on -- because a Home Assistant translation
+ * file cannot hold an ICU plural: hassfest parses every value as a Python
+ * format string, and that raises on `{n, plural, ...}`.
+ *
+ * Which shape a given string is in is therefore the translation's business, not
+ * the panel's. Any string handed a numeric `count` is tried both ways, so a
+ * translator can split one into forms -- or collapse one back into a single
+ * sentence -- without a line changing here. That is what keeps "12s ago" and
+ * "Show ignored devices (3)" pluralizable in the languages that need agreement
+ * on them, having been written as plain sentences in the one that does not.
+ *
+ * `other` comes last because it is the form English calls the plural and the
+ * one form every language defines, so it is what a half-finished translation
+ * lands on rather than nothing.
  */
-export function translateCount(localizers, key, language, count) {
-  const form = pluralCategory(language, count);
-  const args = { count };
-  return (
-    translate(localizers, `${key}.${form}`, args) ||
-    translate(localizers, `${key}.other`, args)
-  );
+function pluralCandidates(key, args, language) {
+  const count = args && args.count;
+  if (typeof count !== "number" || !Number.isFinite(count)) {
+    return [key];
+  }
+  return [key, `${key}.${pluralCategory(language, count)}`, `${key}.other`];
 }
 
 /**
@@ -355,8 +372,11 @@ export function translateCount(localizers, key, language, count) {
  *
  * `title` is a translation key rather than a title: the toolbar is the one
  * place these are rendered, and it looks them up when it draws them.
+ *
+ * Exported so a test can sweep the real table rather than a copy of it -- a
+ * view added without its title should fail, not pass unnoticed.
  */
-const VIEWS = {
+export const VIEWS = {
   "": { view: "overview", title: "title" },
   discovered: { view: "discovered", title: "view.discovered" },
   options: { view: "settings", title: "view.hub_settings", form: "hub" },
@@ -437,8 +457,11 @@ const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
  * The names are the stored vocabulary and the tail of a translation key
  * (`settings.timeout_mode.<mode>`); the words the dropdown shows are looked up
  * when the schema is built, so they follow the user's language.
+ *
+ * Exported for the same reason as `VIEWS`: a fourth mode should fail a test
+ * rather than quietly ship a dropdown with a blank row in it.
  */
-const TIMEOUT_MODES = ["defaults", "never", "custom"];
+export const TIMEOUT_MODES = ["defaults", "never", "custom"];
 
 /**
  * Which of `TIMEOUT_MODES` a stored hub timeout is in.
@@ -513,19 +536,6 @@ export function backAction(segment, pushed, historyLength) {
 const BACK_ARROW_PATH = "M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2z";
 
 /**
- * Format a signal level for a card, or an em dash when there is none.
- *
- * The number and its unit are joined by a translated template rather than here,
- * because where a unit goes relative to its number is a fact about a language.
- */
-function formatSignal(t, value) {
-  if (value === null || value === undefined) {
-    return "—";
-  }
-  return t("card.signal_value", { value: value.toFixed(1) });
-}
-
-/**
  * Format an ISO timestamp as a coarse age relative to `now` (epoch ms).
  *
  * Deliberately not `Intl.RelativeTimeFormat`: this is a stat in a card beside
@@ -594,30 +604,6 @@ function formatReadingValue(reading) {
 }
 
 /**
- * Turn whatever a rejected call threw into something a person can read.
- *
- * `sendMessagePromise` rejects with the backend's `{code, message}`, but a
- * dropped connection rejects with an `Error` and a programming mistake could
- * reject with anything at all. A button that fails silently is the worst
- * outcome on this page, so every shape has to end up as *some* sentence.
- */
-function describeError(t, error) {
-  if (!error) {
-    return t("common.unknown_error");
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error.message) {
-    return error.message;
-  }
-  if (error.code) {
-    return error.code;
-  }
-  return String(error);
-}
-
-/**
  * Create `tag` if the frontend has registered it, else `fallback()`.
  *
  * The registration check is the whole point. An unknown element is inert until
@@ -629,6 +615,21 @@ function describeError(t, error) {
  */
 function haControl(tag, fallback) {
   return customElements.get(tag) ? document.createElement(tag) : fallback();
+}
+
+/**
+ * Turn a promise into one that always resolves, to `{value}` or `{error}`.
+ *
+ * For a request started before the code that reads it is ready to. A promise
+ * that rejects while nothing is awaiting it is an unhandled rejection -- logged
+ * by the browser, and fatal under some configurations -- so the rejection is
+ * caught the moment the request is made and carried as a value instead.
+ */
+function settled(promise) {
+  return promise.then(
+    (value) => ({ value }),
+    (error) => ({ error })
+  );
 }
 
 /**
@@ -1009,20 +1010,42 @@ class Rtl433Panel extends HTMLElement {
    * Load this panel's strings, then build the page out of them.
    *
    * The strings come first because most of this page is written exactly once,
-   * while the tree is built: the toolbar, the two list actions, the dialog's
-   * buttons and every card heading are given a label and thereafter only
+   * while the tree is built: the two list actions, the dialog's buttons, the
+   * search heading and every card heading are given a label and thereafter only
    * reconciled, so a translation that arrived afterwards would have nothing to
-   * update. What that costs is one WebSocket round trip on the first visit of a
-   * session -- the frontend caches a category it has already loaded, so every
-   * later visit resolves without touching the network.
+   * update. (The toolbar title is the exception -- it is re-applied on every
+   * render, because it changes with the view.) Making the rest re-appliable
+   * would mean a kept reference per label and a sweep over all of them; waiting
+   * is five lines.
+   *
+   * What that costs is one WebSocket round trip on the first visit of a session
+   * -- the frontend caches a category it has already loaded, so every later
+   * visit resolves without touching the network.
+   *
+   * That round trip is also the one moment this panel is started but not yet
+   * running, so the panel may be gone by the time it lands: navigating away
+   * during it runs `disconnectedCallback`, and everything below would then
+   * start a clock and a subscription with nothing left to tear them down. So
+   * the start is abandoned and `_started` put back, which is what lets a
+   * re-attach begin again from the top.
    */
   async _begin() {
+    // The strings and the hub list are independent round trips, so they are
+    // asked for together rather than one behind the other: what the page says
+    // and what it has to show have nothing to do with each other, and waiting
+    // out the first before sending the second would put a whole extra round
+    // trip between opening the panel and seeing a device.
+    const hubs = settled(this._call({ type: "rtl_433/hubs" }));
     await this._loadStrings();
+    if (!this.isConnected) {
+      this._started = false;
+      return;
+    }
     this._buildDom();
     this._status = this._t("common.loading");
     this._render();
     this._startClock();
-    this._loadHubs();
+    this._loadHubs(hubs);
     this._loadBrandLogo();
   }
 
@@ -1066,29 +1089,65 @@ class Rtl433Panel extends HTMLElement {
     return [this._hass && this._hass.localize, this._localize];
   }
 
-  /** One of this panel's own strings, in the user's language. */
+  /**
+   * One of this panel's own strings, in the user's language.
+   *
+   * A `count` in `args` also makes the lookup a counted one, so "12 devices"
+   * needs no separate call: see `pluralCandidates`.
+   */
   _t(key, args) {
-    return translate(this._localizers(), key, args);
-  }
-
-  /** One of this panel's counted strings: "1 device", "12 devices". */
-  _plural(key, count) {
-    return translateCount(this._localizers(), key, this._language(), count);
+    return translate(this._localizers(), key, args, this._language());
   }
 
   /**
    * The language the user is reading this page in.
    *
-   * `hass.locale` is where the frontend keeps the user's own choice, and
-   * `hass.language` is the instance's -- the first is the one to prefer and the
-   * second is what older frontends carry.
+   * `hass.locale` is where the frontend keeps the user's own choice and
+   * `hass.language` is the instance's, so the first is preferred and the second
+   * is what an older frontend carries. Neither needs a default here --
+   * `pluralCategory` is the only consumer and supplies its own.
    */
   _language() {
-    const hass = this._hass;
-    if (!hass) {
-      return "en";
+    const hass = this._hass || {};
+    return (hass.locale && hass.locale.language) || hass.language;
+  }
+
+  /**
+   * Turn whatever a rejected call threw into something a person can read.
+   *
+   * `sendMessagePromise` rejects with the backend's `{code, message}`, but a
+   * dropped connection rejects with an `Error` and a programming mistake could
+   * reject with anything at all. A button that fails silently is the worst
+   * outcome on this page, so every shape has to end up as *some* sentence.
+   */
+  _describeError(error) {
+    if (!error) {
+      return this._t("common.unknown_error");
     }
-    return (hass.locale && hass.locale.language) || hass.language || "en";
+    if (typeof error === "string") {
+      return error;
+    }
+    if (error.message) {
+      return error.message;
+    }
+    if (error.code) {
+      return error.code;
+    }
+    return String(error);
+  }
+
+  /**
+   * Format a signal level for a card, or an em dash when there is none.
+   *
+   * The number and its unit are joined by a translated template rather than
+   * here, because where a unit goes relative to its number is a fact about a
+   * language.
+   */
+  _formatSignal(value) {
+    if (value === null || value === undefined) {
+      return "—";
+    }
+    return this._t("card.signal_value", { value: value.toFixed(1) });
   }
 
   _startClock() {
@@ -1119,13 +1178,11 @@ class Rtl433Panel extends HTMLElement {
     this._render();
   }
 
-  async _loadHubs() {
-    let result;
-    try {
-      result = await this._call({ type: "rtl_433/hubs" });
-    } catch (error) {
+  async _loadHubs(pending) {
+    const { value: result, error } = await pending;
+    if (error) {
       this._status = "";
-      this._setBanner(describeError(this._t, error), "error");
+      this._setBanner(this._describeError(error), "error");
       return;
     }
     this._hubs = result.hubs || [];
@@ -1229,7 +1286,7 @@ class Rtl433Panel extends HTMLElement {
         return;
       }
       this._status = "";
-      this._setBanner(describeError(this._t, error), "error");
+      this._setBanner(this._describeError(error), "error");
       return;
     }
 
@@ -1305,7 +1362,7 @@ class Rtl433Panel extends HTMLElement {
         this._setBanner(
           this._t("action.area_failed", {
             device: key,
-            error: describeError(this._t, error),
+            error: this._describeError(error),
           }),
           "notice"
         );
@@ -1343,7 +1400,7 @@ class Rtl433Panel extends HTMLElement {
         onApplied();
       }
     } catch (error) {
-      this._setBanner(describeError(this._t, error), "error");
+      this._setBanner(this._describeError(error), "error");
     } finally {
       this._busy.delete(deviceKey);
       this._render();
@@ -1893,7 +1950,6 @@ class Rtl433Panel extends HTMLElement {
       status: root.querySelector(".status"),
       grid: root.querySelector(".grid"),
       searching: root.querySelector(".searching"),
-      searchingTitle: root.querySelector(".searching-title"),
       searchingHint: root.querySelector(".searching-hint"),
       searchingSpinner: root.querySelector(".searching-spinner"),
       back: this._buildBack(root.querySelector(".back-slot")),
@@ -1919,8 +1975,10 @@ class Rtl433Panel extends HTMLElement {
     this._el.root = root;
     // The skeleton is a fixed shape, so the two lines of copy in it are written
     // here rather than baked into the markup -- markup has nowhere to look a
-    // string up from.
-    this._el.searchingTitle.textContent = this._t("discovered.searching");
+    // string up from. The heading needs no kept reference: unlike the hint,
+    // which is shown and hidden as cards arrive, it is never touched again.
+    root.querySelector(".searching-title").textContent =
+      this._t("discovered.searching");
     this._el.searchingHint.textContent = this._t("discovered.hint");
     this._el.searchingSpinner.append(
       haControl("ha-spinner", () => {
@@ -2022,7 +2080,10 @@ class Rtl433Panel extends HTMLElement {
     this._el.viewOverview.hidden = view.view !== "overview";
     this._el.viewDiscovered.hidden = view.view !== "discovered";
     this._el.viewSettings.hidden = view.view !== "settings";
-    this._el.title.textContent = this._t(view.title);
+    // Through `_text`, so a render that changed nothing writes nothing: this
+    // runs on every push from the receiver and on the clock tick, and the title
+    // only moves when the view does.
+    this._text(this._el.title, this._t(view.title));
 
     if (view.form) {
       this._showSettingsHub();
@@ -2272,7 +2333,7 @@ class Rtl433Panel extends HTMLElement {
     element.classList.toggle("added", card.added);
 
     this._text(parts.count, String(row.count));
-    this._text(parts.signal, formatSignal(this._t, row.signal));
+    this._text(parts.signal, this._formatSignal(row.signal));
     this._text(parts.age, formatAge(this._t, row.last_seen, now));
     this._title(
       parts.age,
@@ -2482,7 +2543,9 @@ class Rtl433Panel extends HTMLElement {
           : "status.problem"
     );
     status.supporting.textContent =
-      devices === null ? "" : this._plural("overview.device_count", devices);
+      devices === null
+        ? ""
+        : this._t("overview.device_count", { count: devices });
 
     this._setRowCount(this._el.rowDevices, devices, "overview.device_count");
     this._setRowCount(
@@ -2498,14 +2561,14 @@ class Rtl433Panel extends HTMLElement {
    * The count and its noun are one translated string rather than a number with
    * a noun concatenated onto it: which of the two English writes depends on the
    * number, and in most languages so does the shape of the number's own
-   * ending. `_plural` picks the form.
+   * ending. Passing `count` is what makes the lookup pick the form.
    */
   _setRowCount(row, count, key) {
     const line = row.querySelector(".row-supporting");
     if (!line) {
       return;
     }
-    line.textContent = count === null ? "" : this._plural(key, count);
+    line.textContent = count === null ? "" : this._t(key, { count });
     line.hidden = count === null;
   }
 
@@ -2602,11 +2665,11 @@ class Rtl433Panel extends HTMLElement {
       // clear had half worked.
       this._added.clear();
       this._setBanner(
-        this._plural("discovered.cleared", result.cleared),
+        this._t("discovered.cleared", { count: result.cleared }),
         "notice"
       );
     } catch (error) {
-      this._setBanner(describeError(this._t, error), "error");
+      this._setBanner(this._describeError(error), "error");
     } finally {
       this._el.clear.disabled = false;
       this._render();
@@ -2667,7 +2730,7 @@ class Rtl433Panel extends HTMLElement {
         this._settingsFor = entryId;
       } catch (error) {
         this._el.settingsBody.textContent = "";
-        this._el.settingsProblem.textContent = describeError(this._t, error);
+        this._el.settingsProblem.textContent = this._describeError(error);
         this._el.settingsProblem.hidden = false;
         return;
       } finally {
@@ -2777,6 +2840,27 @@ class Rtl433Panel extends HTMLElement {
    * field -- which is the whole point of going through `ha-form` rather than
    * assembling `ha-input` and `ha-select` here by hand.
    */
+  /**
+   * A number field counted in seconds, which is most of the numbers here.
+   *
+   * The unit is on the schema because that is where `ha-form` reads it from --
+   * it draws it as a suffix inside the field -- and it is looked up rather than
+   * written because "seconds" is a word. Built in one place so the three fields
+   * that use it cannot drift apart in `mode`, in unit, or in what they call it.
+   */
+  _secondsField(name, min) {
+    return {
+      name,
+      selector: {
+        number: {
+          min,
+          mode: "box",
+          unit_of_measurement: this._t("settings.seconds"),
+        },
+      },
+    };
+  }
+
   _settingsSchema(kind) {
     const settings = this._settings;
     if (kind === "hub") {
@@ -2798,16 +2882,7 @@ class Rtl433Panel extends HTMLElement {
         },
       ];
       if (this._settingsData.availability_mode === "custom") {
-        schema.push({
-          name: "availability_timeout",
-          selector: {
-            number: {
-              min: 0,
-              mode: "box",
-              unit_of_measurement: this._t("settings.seconds"),
-            },
-          },
-        });
+        schema.push(this._secondsField("availability_timeout", 0));
       }
       schema.push({ name: "manage_settings", selector: { boolean: {} } });
       return schema;
@@ -2834,16 +2909,7 @@ class Rtl433Panel extends HTMLElement {
           },
         },
       },
-      {
-        name: "timeout_override",
-        selector: {
-          number: {
-            min: 0,
-            mode: "box",
-            unit_of_measurement: this._t("settings.seconds"),
-          },
-        },
-      },
+      this._secondsField("timeout_override", 0),
     ];
     if (!device) {
       return schema;
@@ -2851,16 +2917,7 @@ class Rtl433Panel extends HTMLElement {
     // Only for devices with a field that actually auto-clears; anywhere else
     // this would be a control with nothing behind it.
     if (device.motion) {
-      schema.push({
-        name: "motion_clear_delay",
-        selector: {
-          number: {
-            min: 1,
-            mode: "box",
-            unit_of_measurement: this._t("settings.seconds"),
-          },
-        },
-      });
+      schema.push(this._secondsField("motion_clear_delay", 1));
     }
     schema.push({
       name: "commodity",
@@ -2914,11 +2971,10 @@ class Rtl433Panel extends HTMLElement {
   _settingsCopy(name) {
     return [
       this._t(`settings.data.${name}`) || name,
-      this._t(`settings.data_description.${name}`, {
-        // Only `motion_clear_delay` names it, and an argument the message does
-        // not mention costs nothing.
-        seconds: this._settings.defaults.motion_clear_delay,
-      }),
+      // The hub's defaults *are* the arguments: a description that wants to
+      // name one cites it by its own name (`{motion_clear_delay}`), and a new
+      // one becomes citable without a line changing here.
+      this._t(`settings.data_description.${name}`, this._settings.defaults),
     ];
   }
 
@@ -3255,7 +3311,7 @@ class Rtl433Panel extends HTMLElement {
     try {
       await this._call(message);
     } catch (error) {
-      this._el.settingsProblem.textContent = describeError(this._t, error);
+      this._el.settingsProblem.textContent = this._describeError(error);
       this._el.settingsProblem.hidden = false;
       return;
     } finally {
@@ -3393,7 +3449,7 @@ class Rtl433Panel extends HTMLElement {
         "notice"
       );
     } catch (error) {
-      this._setBanner(describeError(this._t, error), "error");
+      this._setBanner(this._describeError(error), "error");
     } finally {
       this._busy.delete(row.key);
       this._render();

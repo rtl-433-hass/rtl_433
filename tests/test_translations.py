@@ -246,9 +246,10 @@ def test_the_counted_panel_strings_have_a_string_per_plural_form(translations):
         "discovered.cleared": panel["discovered"]["cleared"],
     }
     for name, group in groups.items():
-        assert "other" in group, f"{name} has no fallback plural form"
-        # English needs exactly these two; a translation may add its own.
-        assert {"one", "other"} <= set(group), name
+        # "other" is the form the panel falls back to when a language needs a
+        # form nobody filled in, so it is the one that may never be missing;
+        # "one" is what English needs beside it. A translation may add its own.
+        assert {"one", "other"} <= set(group), f"{name}: {sorted(group)}"
         for form, value in group.items():
             assert "{count}" in value, f"{name}.{form} never shows the count"
 

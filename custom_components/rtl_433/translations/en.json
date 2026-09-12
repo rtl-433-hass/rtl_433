@@ -386,7 +386,7 @@
         "availability_timeout": "Applies to every device without an override of its own.",
         "manage_settings": "Adds frequency, gain and sample-rate entities to this receiver's device page.",
         "timeout_override": "Blank uses the receiver's timeout. 0 means never expire.",
-        "motion_clear_delay": "How long after a detection this device is reported clear. Blank uses {seconds} seconds.",
+        "motion_clear_delay": "How long after a detection this device is reported clear. Blank uses {motion_clear_delay} seconds.",
         "commodity": "Setting a commodity turns this device's counter into an Energy-dashboard sensor. “none” leaves it as the library describes it.",
         "unit": "One unit of what the counter counts.",
         "scale": "Multiplier on the raw counter, to reach one base unit."
