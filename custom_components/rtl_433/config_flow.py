@@ -1,15 +1,15 @@
-"""Hub config flow for the rtl_433 integration.
+"""Receiver config flow for the rtl_433 integration.
 
-Implements the add/reconfigure/discovery flow for a hub config entry
+Implements the add/reconfigure/discovery flow for a receiver config entry
 (:class:`Rtl433ConfigFlow`):
 
-- **Hub user flow** (``async_step_user``): collects a single rtl_433 HTTP
+- **Receiver user flow** (``async_step_user``): collects a single rtl_433 HTTP
   server's WebSocket connection parameters (host/port/path, optional ``wss://``
   via a ``secure`` toggle), validates reachability with the coordinator's
-  ``validate_connection`` helper, and creates the hub config entry. The hub's
+  ``validate_connection`` helper, and creates the receiver config entry. The receiver's
   unique_id is derived from host/port so the same server cannot be added twice.
 - **Reconfigure** (``async_step_reconfigure``) and **Supervisor discovery**
-  (``async_step_hassio`` / ``async_step_hassio_confirm``) edit/adopt a hub in
+  (``async_step_hassio`` / ``async_step_hassio_confirm``) edit/adopt a receiver in
   place under the dual host:port / stable-radio-id identity scheme.
 
 The **options flow** lives in :mod:`.options_flow` (:class:`Rtl433OptionsFlow`);
@@ -61,28 +61,28 @@ from .options_flow import Rtl433OptionsFlow
 CONF_SECURE = "secure"
 
 
-def _hub_unique_id(host: str, port: int) -> str:
-    """Return the unique_id for a hub entry (one per host:port)."""
+def _receiver_unique_id(host: str, port: int) -> str:
+    """Return the unique_id for a receiver entry (one per host:port)."""
     return f"hub:{host}:{port}"
 
 
-async def async_rebind_hub(
+async def async_rebind_receiver(
     hass: HomeAssistant,
     entry: ConfigEntry,
     new_unique_id: str,
     conn_updates: dict[str, Any],
     title: str | None = None,
 ) -> str:
-    """Re-point a hub entry at a new stable radio unique_id, in place.
+    """Re-point a receiver entry at a new stable radio unique_id, in place.
 
     Preserves entry_id (so all nested devices/entities/history survive). When a
     *different* entry already owns ``new_unique_id``: if that entry has a
-    populated devices map it is a real hub -> return ``"already_configured"`` and
+    populated devices map it is a real receiver -> return ``"already_configured"`` and
     change nothing; if it is an empty orphan (e.g. a duplicate auto-created by
     discovery on a new host:port) it is removed and the rebind proceeds.
     Returns ``"ok"`` on success.
 
-    The write alone re-points the hub: ``_async_update_listener`` sees the changed
+    The write alone re-points the receiver: ``_async_update_listener`` sees the changed
     connection target / unique_id and reloads the entry. Reloading here as well is
     what Home Assistant deprecated in 2026.6 (an update listener combined with a
     flow-side reload double-reloads and races), so this function never reloads.
@@ -134,7 +134,7 @@ STEP_USER_SCHEMA = vol.Schema(
 
 
 class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle setup of an rtl_433 hub (one config entry per server)."""
+    """Handle setup of an rtl_433 receiver (one config entry per server)."""
 
     VERSION = 2
     MINOR_VERSION = 8
@@ -165,12 +165,12 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # ------------------------------------------------------------------ #
-    # Hub user flow                                                      #
+    # Receiver user flow                                                      #
     # ------------------------------------------------------------------ #
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Collect hub connection params, validate, and create a hub entry."""
+        """Collect receiver connection params, validate, and create a receiver entry."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -191,7 +191,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                 # (which keys entries by a stable radio id, not host:port).
                 if self._find_entry_by_host_port(host, port) is not None:
                     return self.async_abort(reason="already_configured")
-                await self.async_set_unique_id(_hub_unique_id(host, port))
+                await self.async_set_unique_id(_receiver_unique_id(host, port))
                 self._abort_if_unique_id_configured()
                 data: dict[str, Any] = {
                     CONF_HOST: host,
@@ -217,7 +217,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # ------------------------------------------------------------------ #
-    # Hub reconfigure flow                                               #
+    # Receiver reconfigure flow                                               #
     # ------------------------------------------------------------------ #
     @staticmethod
     def _reconfigure_schema(entry: ConfigEntry) -> vol.Schema:
@@ -246,13 +246,13 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Edit an existing hub's connection target in place.
+        """Edit an existing receiver's connection target in place.
 
         Validates the new host/port/path/secure, recomputes the host:port
         unique_id (guarding against collision with a *different* configured
-        hub), then merges the new connection params into the entry via
+        receiver), then merges the new connection params into the entry via
         ``data_updates=`` — preserving the entry_id, ``entry.data["devices"]``,
-        and ``manage_settings``. The write alone re-points the hub:
+        and ``manage_settings``. The write alone re-points the receiver:
         ``_async_update_listener`` sees the changed connection target and reloads
         the entry, so this step uses the *non*-reloading
         ``async_update_and_abort`` (Home Assistant deprecated combining an update
@@ -277,7 +277,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                 current_uid = entry.unique_id or ""
                 if current_uid.startswith("hub:") or not current_uid:
                     # Legacy manual entry: keep the host:port identity scheme.
-                    new_unique_id = _hub_unique_id(host, port)
+                    new_unique_id = _receiver_unique_id(host, port)
                     await self.async_set_unique_id(new_unique_id)
                     # Abort only if a *different* entry already owns this
                     # unique_id; the entry being reconfigured must not abort
@@ -310,7 +310,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                     entry.unique_id or ""
                 )
                 if new_uid and new_uid != entry.unique_id:
-                    status = await async_rebind_hub(
+                    status = await async_rebind_receiver(
                         self.hass, entry, new_uid, conn, title=f"rtl_433 ({host})"
                     )
                     if status == "already_configured":
@@ -361,9 +361,9 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             and self._safe_to_adopt(existing)
         ):
             # Never create a duplicate unique_id: if another entry already owns
-            # this radio id, leave it untouched when it is a real (populated) hub
+            # this radio id, leave it untouched when it is a real (populated) receiver
             # or drop it when it is an empty orphan, before re-keying. Mirrors the
-            # collision handling in ``async_rebind_hub``.
+            # collision handling in ``async_rebind_receiver``.
             collision = next(
                 (
                     other
@@ -414,7 +414,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             "addon": addon,
         }
         self.context["title_placeholders"] = {"name": f"{addon} ({host}:{port})"}
-        # Offer a guided replace when other hubs already exist; else add as new.
+        # Offer a guided replace when other receivers already exist; else add as new.
         if self._async_current_entries():
             return await self.async_step_hassio_replace()
         return await self.async_step_hassio_confirm()
@@ -427,7 +427,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
         Shows a confirmation form (``addon``/``host``/``port`` placeholders) that
         offers the same setup choices as the manual flow: the manage-settings and
         discover-new-devices toggles and an optional initial frequency. On submit,
-        validates connectivity and creates the hub entry; a failed validation
+        validates connectivity and creates the receiver entry; a failed validation
         re-shows the form with ``cannot_connect``.
         """
         assert self._discovery is not None
@@ -491,11 +491,11 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_hassio_replace(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Offer to rebind an existing hub to a newly discovered radio.
+        """Offer to rebind an existing receiver to a newly discovered radio.
 
-        Shown when discovery sees an unknown radio id while hubs already exist (the
+        Shown when discovery sees an unknown radio id while receivers already exist (the
         likely "replacement landed on a new host:port" case). The user explicitly
-        chooses to replace a specific hub or to add the radio as new; we never
+        chooses to replace a specific receiver or to add the radio as new; we never
         auto-rebind silently.
         """
         assert self._discovery is not None
@@ -522,7 +522,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             # The discovered radio id reached this step only because
             # ``_abort_if_unique_id_configured`` did not abort, so no entry owns
             # it — the rebind can never collide here and always succeeds.
-            await async_rebind_hub(
+            await async_rebind_receiver(
                 self.hass,
                 entry,
                 disc["unique_id"],
@@ -555,5 +555,5 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Return the hub options flow (one entry == one hub)."""
+        """Return the receiver options flow (one entry == one receiver)."""
         return Rtl433OptionsFlow()

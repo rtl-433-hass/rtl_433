@@ -1,7 +1,7 @@
-"""Shared builders for the three settings a hub's owner can edit.
+"""Shared builders for the three settings a receiver's owner can edit.
 
-The hub's availability timeout and manage-settings toggle, a device's timeout
-override / calibration / motion clear-delay, and the hub's device-library
+The receiver's availability timeout and manage-settings toggle, a device's timeout
+override / calibration / motion clear-delay, and the receiver's device-library
 mapping overrides are each edited from two places now -- the panel's settings
 pages (over :mod:`.websocket_api`) and the options flow (:mod:`.options_flow`)
 -- and the two must not drift.
@@ -12,7 +12,7 @@ instead, and which of ``entry.data`` / ``entry.options`` it goes in. None of
 those is obvious from the code that calls these builders, so they are written
 down here:
 
-- A hub timeout of ``None`` means "use the per-device-type defaults" and is
+- A receiver timeout of ``None`` means "use the per-device-type defaults" and is
   dropped rather than stored; every ``int`` is a deliberate choice and is stored
   as given. Storing a value where the user meant "defaults" would mask the
   per-device-class defaults and expire event-driven devices -- a doorbell that
@@ -26,7 +26,7 @@ So this module owns the rules and returns **plain dicts**; it performs no
 writes. That split is what lets the options flow keep its own persistence
 semantics -- ``async_create_entry`` *is* the options write, and calling
 ``async_update_entry`` as well would fire the update listener twice and reload
-the hub twice -- while the WebSocket path, which has no flow to finish, writes
+the receiver twice -- while the WebSocket path, which has no flow to finish, writes
 data and options in a single ``async_update_entry``.
 """
 
@@ -52,7 +52,7 @@ from .const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
-from .hub_settings import _explicit_hub_timeout, _hub_manage_settings
+from .receiver_settings import _explicit_receiver_timeout, _receiver_manage_settings
 
 if TYPE_CHECKING:
     from pyrtl_433.library import Registry
@@ -68,31 +68,31 @@ MAPPINGS_DOCS_URL = (
 )
 
 
-def hub_defaults(entry: ConfigEntry) -> dict[str, Any]:
-    """Return the hub-level form's current values.
+def receiver_defaults(entry: ConfigEntry) -> dict[str, Any]:
+    """Return the receiver-level form's current values.
 
-    These come straight from the resolvers :mod:`.hub_settings` uses at runtime,
+    These come straight from the resolvers :mod:`.receiver_settings` uses at runtime,
     rather than from a second copy of the options-then-data-then-default rule --
     including the int/bool coercion, so a value stored as a string still reaches
     a form as a number.
 
-    The timeout reported is the *explicit* one, so ``None`` when the hub has none
+    The timeout reported is the *explicit* one, so ``None`` when the receiver has none
     and the per-device-type defaults apply. A form that was handed the resolved
-    value instead could not tell "unset" from a hub timeout that happens to equal
+    value instead could not tell "unset" from a receiver timeout that happens to equal
     :data:`~.const.DEFAULT_AVAILABILITY_TIMEOUT`, and the two behave differently:
     the first leaves a doorbell never expiring, the second expires it after ten
     minutes. A form wanting a number to pre-fill applies that default itself.
     """
     return {
-        CONF_AVAILABILITY_TIMEOUT: _explicit_hub_timeout(entry),
-        CONF_MANAGE_SETTINGS: _hub_manage_settings(entry),
+        CONF_AVAILABILITY_TIMEOUT: _explicit_receiver_timeout(entry),
+        CONF_MANAGE_SETTINGS: _receiver_manage_settings(entry),
     }
 
 
-def build_hub_options(
+def build_receiver_options(
     entry: ConfigEntry, availability_timeout: int | None, manage_settings: bool
 ) -> dict[str, Any]:
-    """Return the options a hub-settings submission should persist.
+    """Return the options a receiver-settings submission should persist.
 
     ``None`` means "use the per-device-type defaults", so the key is dropped
     instead of stored; every ``int`` is a value the user chose -- ``0`` (never
@@ -102,10 +102,10 @@ def build_hub_options(
     Intent, not the value, is what decides: a caller whose form cannot express
     "unset" collapses its own sentinel to ``None`` before calling (the options
     flow does, since a ``vol.Required`` number field echoes its default back on
-    every save). Deciding it here instead is what made a hub-wide 600 seconds
+    every save). Deciding it here instead is what made a receiver-wide 600 seconds
     unstorable -- the one value a ten-minute default makes it natural to type.
 
-    Everything else already in ``entry.options`` carries over: the hub form owns
+    Everything else already in ``entry.options`` carries over: the receiver form owns
     two keys, and the per-device sub-map lives alongside them.
     """
     options = dict(entry.options)
@@ -118,9 +118,9 @@ def build_hub_options(
 
 
 def entry_registry(hass: HomeAssistant, entry: ConfigEntry) -> Registry | None:
-    """Return this hub's merged device-library registry, cached at setup.
+    """Return this receiver's merged device-library registry, cached at setup.
 
-    ``None`` while the hub is still loading, which callers read as "cannot tell
+    ``None`` while the receiver is still loading, which callers read as "cannot tell
     yet" rather than as "no": the motion test below is one such caller, and its
     knob then simply does not appear. The WebSocket reading preview is the
     other.
@@ -243,7 +243,7 @@ def build_device_data(
     """Return ``entry.data`` with this device's override + calibration applied.
 
     ``None`` clears rather than stores in both cases: a blank timeout falls back
-    to the hub default, and a cleared calibration falls back to the library
+    to the receiver default, and a cleared calibration falls back to the library
     descriptor. Every level is copied, so the caller's ``async_update_entry`` is
     handed a genuinely new mapping and the nested dicts are not shared with the
     live entry.
@@ -252,7 +252,7 @@ def build_device_data(
     per-device entries. That value is only ever a leftover -- every edit writes
     the delay to ``options`` (see :func:`build_device_options`), and
     :func:`device_clear_delay` reads options first and falls back to data. Leave
-    the leftover in place and a user on a migrated hub could never clear the
+    the leftover in place and a user on a migrated receiver could never clear the
     delay: blanking the field empties options, the read falls back to data, and
     the old number reappears. Retiring it here makes options the only copy from
     the first save onwards.
@@ -284,7 +284,7 @@ def build_device_options(
 
     The clear-delay is the one per-device knob kept in options rather than data,
     so it is written on its own path. A device whose sub-map empties is dropped
-    from the map entirely rather than left as an empty dict, which keeps a hub
+    from the map entirely rather than left as an empty dict, which keeps a receiver
     that has never overridden anything from accumulating one entry per device.
     """
     options = dict(entry.options)

@@ -7,15 +7,15 @@ unique_ids — to kill mutants that substitute constants, flip conditions, drop
 assignments, or alter dict manipulations.
 
 Coverage targets:
-- _hub_unique_id format
+- _receiver_unique_id format
 - STEP_USER_SCHEMA defaults
 - async_step_user: success path (data keys/values, title, unique_id), cannot_connect error
-- async_step_user: duplicate hub aborted by _abort_if_unique_id_configured
+- async_step_user: duplicate receiver aborted by _abort_if_unique_id_configured
 - _reconfigure_schema defaults from entry.data
 - async_step_reconfigure: success path (data_updates, unique_id, title), cannot_connect, collision
 - async_get_options_flow
 - async_step_init: menu options list
-- async_step_hub: defaults from options then data, persists to entry.options
+- async_step_receiver: defaults from options then data, persists to entry.options
 - _device_commodity_default: coordinator lookup path
 - _registry: hass.data lookup path
 - _is_motion_bearing: True/False, model-scoped lookup
@@ -23,7 +23,7 @@ Coverage targets:
   set/clear, opt_record present/absent, options[CONF_DEVICES] written
 - async_step_device: no_devices abort, device picker options
 - async_step_device_settings: commodity=none finish, commodity!=none goto calibration,
-  per-device commodity pre-fill (incl. on a multi-device hub), motion-bearing field
+  per-device commodity pre-fill (incl. on a multi-device receiver), motion-bearing field
   shown/hidden per selected device, clear_default read from the selected device's
   record, motion_clear_delay carried to calibration step
 - async_step_calibration: form shown with correct step_id/placeholders, unit/scale persisted,
@@ -44,8 +44,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.rtl_433.calibration import COMMODITY_UNITS
 from custom_components.rtl_433.config_flow import (
     CONF_SECURE,
-    _hub_unique_id,
-    async_rebind_hub,
+    _receiver_unique_id,
+    async_rebind_receiver,
 )
 from custom_components.rtl_433.const import (
     CALIBRATION_COMMODITY,
@@ -111,23 +111,23 @@ def _schema_keys(result: dict[str, Any]) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# _hub_unique_id unit tests
+# _receiver_unique_id unit tests
 # ---------------------------------------------------------------------------
 
 
-def test_hub_unique_id_format():
-    """_hub_unique_id returns exact 'hub:{host}:{port}' string."""
-    assert _hub_unique_id("myhost", 8433) == "hub:myhost:8433"
+def test_receiver_unique_id_format():
+    """_receiver_unique_id returns exact 'hub:{host}:{port}' string."""
+    assert _receiver_unique_id("myhost", 8433) == "hub:myhost:8433"
 
 
-def test_hub_unique_id_different_hosts_differ():
+def test_receiver_unique_id_different_hosts_differ():
     """Different hosts produce different unique_ids."""
-    assert _hub_unique_id("a.local", 8433) != _hub_unique_id("b.local", 8433)
+    assert _receiver_unique_id("a.local", 8433) != _receiver_unique_id("b.local", 8433)
 
 
-def test_hub_unique_id_different_ports_differ():
+def test_receiver_unique_id_different_ports_differ():
     """Different ports produce different unique_ids."""
-    assert _hub_unique_id("host", 8433) != _hub_unique_id("host", 9000)
+    assert _receiver_unique_id("host", 8433) != _receiver_unique_id("host", 9000)
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +193,8 @@ async def test_user_step_creates_entry_secure_true(hass):
     assert result["data"][CONF_PATH] == "/socket"
 
 
-async def test_user_step_unique_id_set_on_hub(hass):
-    """The hub entry's unique_id is 'hub:{host}:{port}'."""
+async def test_user_step_unique_id_set_on_receiver(hass):
+    """The receiver entry's unique_id is 'hub:{host}:{port}'."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
@@ -290,9 +290,9 @@ async def test_user_step_cannot_connect_then_success(hass):
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
-async def test_user_step_duplicate_host_port_aborted(hass, hub_entry_builder):
-    """A second hub with the same host:port is aborted (already_configured)."""
-    entry = hub_entry_builder(host="dup.local", port=8433)
+async def test_user_step_duplicate_host_port_aborted(hass, receiver_entry_builder):
+    """A second receiver with the same host:port is aborted (already_configured)."""
+    entry = receiver_entry_builder(host="dup.local", port=8433)
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.flow.async_init(
@@ -318,9 +318,9 @@ async def test_user_step_duplicate_host_port_aborted(hass, hub_entry_builder):
 # ---------------------------------------------------------------------------
 
 
-async def test_reconfigure_form_pre_fills_host(hass, hub_entry_builder):
+async def test_reconfigure_form_pre_fills_host(hass, receiver_entry_builder):
     """Reconfigure form is pre-filled with entry.data host."""
-    entry = hub_entry_builder(host="prefill.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="prefill.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     assert result["type"] is FlowResultType.FORM
@@ -328,33 +328,35 @@ async def test_reconfigure_form_pre_fills_host(hass, hub_entry_builder):
     assert _schema_default(result, CONF_HOST) == "prefill.local"
 
 
-async def test_reconfigure_form_pre_fills_port(hass, hub_entry_builder):
+async def test_reconfigure_form_pre_fills_port(hass, receiver_entry_builder):
     """Reconfigure form is pre-filled with entry.data port."""
-    entry = hub_entry_builder(host="x.local", port=9999, path="/ws")
+    entry = receiver_entry_builder(host="x.local", port=9999, path="/ws")
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     assert _schema_default(result, CONF_PORT) == 9999
 
 
-async def test_reconfigure_form_pre_fills_path(hass, hub_entry_builder):
+async def test_reconfigure_form_pre_fills_path(hass, receiver_entry_builder):
     """Reconfigure form is pre-filled with entry.data path."""
-    entry = hub_entry_builder(host="x.local", port=8433, path="/custom")
+    entry = receiver_entry_builder(host="x.local", port=8433, path="/custom")
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     assert _schema_default(result, CONF_PATH) == "/custom"
 
 
-async def test_reconfigure_form_pre_fills_secure(hass, hub_entry_builder):
+async def test_reconfigure_form_pre_fills_secure(hass, receiver_entry_builder):
     """Reconfigure form is pre-filled with entry.data secure flag."""
-    entry = hub_entry_builder(host="x.local", port=8433, secure=True)
+    entry = receiver_entry_builder(host="x.local", port=8433, secure=True)
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     assert _schema_default(result, CONF_SECURE) is True
 
 
-async def test_reconfigure_form_has_no_manage_settings_field(hass, hub_entry_builder):
+async def test_reconfigure_form_has_no_manage_settings_field(
+    hass, receiver_entry_builder
+):
     """Reconfigure schema omits manage_settings (it's an options-flow field)."""
-    entry = hub_entry_builder(host="x.local", port=8433)
+    entry = receiver_entry_builder(host="x.local", port=8433)
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     assert result["type"] is FlowResultType.FORM
@@ -369,10 +371,12 @@ async def test_reconfigure_form_has_no_manage_settings_field(hass, hub_entry_bui
 
 
 async def test_reconfigure_success_updates_host_port_path_secure(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Successful reconfigure updates all connection fields in entry.data."""
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws", secure=False)
+    entry = receiver_entry_builder(
+        host="old.local", port=8433, path="/ws", secure=False
+    )
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     with (
@@ -396,9 +400,9 @@ async def test_reconfigure_success_updates_host_port_path_secure(
     assert entry.data[CONF_SECURE] is True
 
 
-async def test_reconfigure_success_unique_id_updated(hass, hub_entry_builder):
+async def test_reconfigure_success_unique_id_updated(hass, receiver_entry_builder):
     """Reconfigure updates the entry's unique_id to match the new host:port."""
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     with (
@@ -417,9 +421,9 @@ async def test_reconfigure_success_unique_id_updated(hass, hub_entry_builder):
     assert entry.unique_id == "hub:new.local:7777"
 
 
-async def test_reconfigure_success_title_uses_new_host(hass, hub_entry_builder):
+async def test_reconfigure_success_title_uses_new_host(hass, receiver_entry_builder):
     """Reconfigure updates the entry title to 'rtl_433 ({new_host})'."""
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     with (
@@ -438,9 +442,9 @@ async def test_reconfigure_success_title_uses_new_host(hass, hub_entry_builder):
     assert entry.title == "rtl_433 (titled.local)"
 
 
-async def test_reconfigure_preserves_manage_settings(hass, hub_entry_builder):
+async def test_reconfigure_preserves_manage_settings(hass, receiver_entry_builder):
     """Reconfigure does not clobber manage_settings (data_updates merge)."""
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_MANAGE_SETTINGS: False}
@@ -462,10 +466,10 @@ async def test_reconfigure_preserves_manage_settings(hass, hub_entry_builder):
     assert entry.data[CONF_MANAGE_SETTINGS] is False
 
 
-async def test_reconfigure_preserves_devices_map(hass, hub_entry_builder):
+async def test_reconfigure_preserves_devices_map(hass, receiver_entry_builder):
     """Reconfigure leaves entry.data['devices'] untouched."""
     device_key = "Foo-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         host="old.local",
         port=8433,
         devices={device_key: {CONF_MODEL: "Foo", DEVICE_FIELDS: ["temperature_C"]}},
@@ -489,11 +493,11 @@ async def test_reconfigure_preserves_devices_map(hass, hub_entry_builder):
     assert entry.data[CONF_DEVICES][device_key][CONF_MODEL] == "Foo"
 
 
-async def test_reconfigure_cannot_connect_shows_error(hass, hub_entry_builder):
+async def test_reconfigure_cannot_connect_shows_error(hass, receiver_entry_builder):
     """cannot_connect on reconfigure shows the form with base error."""
     from custom_components.rtl_433.coordinator import CannotConnect
 
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     with patch(VALIDATE, side_effect=CannotConnect("fail")):
@@ -511,11 +515,11 @@ async def test_reconfigure_cannot_connect_shows_error(hass, hub_entry_builder):
     assert result["errors"] == {"base": "cannot_connect"}
 
 
-async def test_reconfigure_cannot_connect_data_unchanged(hass, hub_entry_builder):
+async def test_reconfigure_cannot_connect_data_unchanged(hass, receiver_entry_builder):
     """cannot_connect on reconfigure leaves entry.data completely unchanged."""
     from custom_components.rtl_433.coordinator import CannotConnect
 
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     original_host = entry.data[CONF_HOST]
     original_port = entry.data[CONF_PORT]
@@ -536,10 +540,12 @@ async def test_reconfigure_cannot_connect_data_unchanged(hass, hub_entry_builder
     assert entry.unique_id == original_uid
 
 
-async def test_reconfigure_collision_aborts_already_configured(hass, hub_entry_builder):
-    """Reconfiguring one hub to collide with another returns already_configured."""
-    entry_a = hub_entry_builder(host="a.local", port=8433, path="/ws")
-    entry_b = hub_entry_builder(host="b.local", port=9000, path="/ws")
+async def test_reconfigure_collision_aborts_already_configured(
+    hass, receiver_entry_builder
+):
+    """Reconfiguring one receiver to collide with another returns already_configured."""
+    entry_a = receiver_entry_builder(host="a.local", port=8433, path="/ws")
+    entry_b = receiver_entry_builder(host="b.local", port=9000, path="/ws")
     entry_a.add_to_hass(hass)
     entry_b.add_to_hass(hass)
 
@@ -559,10 +565,10 @@ async def test_reconfigure_collision_aborts_already_configured(hass, hub_entry_b
 
 
 async def test_reconfigure_same_host_port_does_not_collide_with_self(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
-    """Reconfiguring a hub to the SAME host:port is not treated as a collision."""
-    entry = hub_entry_builder(host="same.local", port=8433, path="/ws")
+    """Reconfiguring a receiver to the SAME host:port is not treated as a collision."""
+    entry = receiver_entry_builder(host="same.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     with (
@@ -588,7 +594,9 @@ async def test_reconfigure_same_host_port_does_not_collide_with_self(
 # ---------------------------------------------------------------------------
 
 
-async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_builder):
+async def test_options_init_shows_menu_with_receiver_and_device(
+    hass, receiver_entry_builder
+):
     """Options init offers the approval pair first, then the settings steps.
 
     The order is part of the contract: adding a heard device is the only way one
@@ -596,7 +604,7 @@ async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_build
     place a user looks for a device that stopped being offered; 'replace' stays
     last as the rarest and most consequential action.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
@@ -604,7 +612,7 @@ async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_build
     assert result["menu_options"] == [
         "add_devices",
         "ignored_devices",
-        "hub",
+        "receiver",
         "device",
         "mappings",
         "replace",
@@ -612,29 +620,29 @@ async def test_options_init_shows_menu_with_hub_and_device(hass, hub_entry_build
 
 
 # ---------------------------------------------------------------------------
-# Options flow — hub step
+# Options flow — receiver step
 # ---------------------------------------------------------------------------
 
 
-async def test_hub_step_shows_form(hass, hub_entry_builder):
-    """Hub options step shows a FORM at step_id='hub'."""
-    entry = hub_entry_builder()
+async def test_receiver_step_shows_form(hass, receiver_entry_builder):
+    """Receiver options step shows a FORM at step_id='receiver'."""
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
+        result["flow_id"], {"next_step_id": "receiver"}
     )
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "hub"
+    assert result["step_id"] == "receiver"
 
 
-async def test_hub_step_persists_exact_timeout(hass, hub_entry_builder):
-    """Hub step writes CONF_AVAILABILITY_TIMEOUT exactly as submitted."""
-    entry = hub_entry_builder()
+async def test_receiver_step_persists_exact_timeout(hass, receiver_entry_builder):
+    """Receiver step writes CONF_AVAILABILITY_TIMEOUT exactly as submitted."""
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
+        result["flow_id"], {"next_step_id": "receiver"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -647,13 +655,13 @@ async def test_hub_step_persists_exact_timeout(hass, hub_entry_builder):
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == 999
 
 
-async def test_hub_step_persists_manage_settings(hass, hub_entry_builder):
-    """Hub step writes CONF_MANAGE_SETTINGS exactly as submitted."""
-    entry = hub_entry_builder()
+async def test_receiver_step_persists_manage_settings(hass, receiver_entry_builder):
+    """Receiver step writes CONF_MANAGE_SETTINGS exactly as submitted."""
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
+        result["flow_id"], {"next_step_id": "receiver"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -666,13 +674,13 @@ async def test_hub_step_persists_manage_settings(hass, hub_entry_builder):
     assert entry.options[CONF_MANAGE_SETTINGS] is False
 
 
-async def test_hub_step_entry_title_is_empty(hass, hub_entry_builder):
-    """Hub step finishes with empty title (only updates options, not title)."""
-    entry = hub_entry_builder()
+async def test_receiver_step_entry_title_is_empty(hass, receiver_entry_builder):
+    """Receiver step finishes with empty title (only updates options, not title)."""
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
+        result["flow_id"], {"next_step_id": "receiver"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -685,24 +693,26 @@ async def test_hub_step_entry_title_is_empty(hass, hub_entry_builder):
     assert result["title"] == ""
 
 
-async def test_hub_step_default_timeout_from_options(hass, hub_entry_builder):
-    """Hub step pre-fills timeout from entry.options when available."""
-    entry = hub_entry_builder(options={CONF_AVAILABILITY_TIMEOUT: 123})
+async def test_receiver_step_default_timeout_from_options(hass, receiver_entry_builder):
+    """Receiver step pre-fills timeout from entry.options when available."""
+    entry = receiver_entry_builder(options={CONF_AVAILABILITY_TIMEOUT: 123})
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
+        result["flow_id"], {"next_step_id": "receiver"}
     )
     assert _schema_default(result, CONF_AVAILABILITY_TIMEOUT) == 123
 
 
-async def test_hub_step_default_timeout_falls_back_to_constant(hass, hub_entry_builder):
-    """Hub step default timeout falls back to DEFAULT_AVAILABILITY_TIMEOUT when absent."""
-    entry = hub_entry_builder()  # no availability_timeout in data or options
+async def test_receiver_step_default_timeout_falls_back_to_constant(
+    hass, receiver_entry_builder
+):
+    """Receiver step default timeout falls back to DEFAULT_AVAILABILITY_TIMEOUT when absent."""
+    entry = receiver_entry_builder()  # no availability_timeout in data or options
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
+        result["flow_id"], {"next_step_id": "receiver"}
     )
     assert (
         _schema_default(result, CONF_AVAILABILITY_TIMEOUT)
@@ -710,18 +720,18 @@ async def test_hub_step_default_timeout_falls_back_to_constant(hass, hub_entry_b
     )
 
 
-async def test_hub_step_default_manage_settings_from_data_fallback(
-    hass, hub_entry_builder
+async def test_receiver_step_default_manage_settings_from_data_fallback(
+    hass, receiver_entry_builder
 ):
-    """Hub step falls back to DEFAULT_MANAGE_SETTINGS when manage_settings absent from both."""
-    entry = hub_entry_builder()
+    """Receiver step falls back to DEFAULT_MANAGE_SETTINGS when manage_settings absent from both."""
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     # Remove manage_settings from data if present
     new_data = {k: v for k, v in entry.data.items() if k != CONF_MANAGE_SETTINGS}
     hass.config_entries.async_update_entry(entry, data=new_data)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
+        result["flow_id"], {"next_step_id": "receiver"}
     )
     assert _schema_default(result, CONF_MANAGE_SETTINGS) == DEFAULT_MANAGE_SETTINGS
 
@@ -731,9 +741,9 @@ async def test_hub_step_default_manage_settings_from_data_fallback(
 # ---------------------------------------------------------------------------
 
 
-async def test_device_step_aborts_no_devices(hass, hub_entry_builder):
+async def test_device_step_aborts_no_devices(hass, receiver_entry_builder):
     """Device step aborts with reason='no_devices' when entry has no devices."""
-    entry = hub_entry_builder()  # no devices
+    entry = receiver_entry_builder()  # no devices
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
@@ -748,10 +758,10 @@ async def test_device_step_aborts_no_devices(hass, hub_entry_builder):
 # ---------------------------------------------------------------------------
 
 
-async def test_device_step_sets_timeout_override(hass, hub_entry_builder):
+async def test_device_step_sets_timeout_override(hass, receiver_entry_builder):
     """Device step persists a timeout override into entry.data[devices]."""
     device_key = "Acurite-606TX-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
         }
@@ -771,10 +781,10 @@ async def test_device_step_sets_timeout_override(hass, hub_entry_builder):
     assert entry.data[CONF_DEVICES][device_key][DEVICE_TIMEOUT_OVERRIDE] == 77
 
 
-async def test_device_step_clears_timeout_override(hass, hub_entry_builder):
+async def test_device_step_clears_timeout_override(hass, receiver_entry_builder):
     """Device step clears timeout override when not submitted."""
     device_key = "Acurite-606TX-2"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "Acurite-606TX",
@@ -799,11 +809,13 @@ async def test_device_step_clears_timeout_override(hass, hub_entry_builder):
     assert DEVICE_TIMEOUT_OVERRIDE not in entry.data[CONF_DEVICES][device_key]
 
 
-async def test_device_step_does_not_affect_other_devices_data(hass, hub_entry_builder):
+async def test_device_step_does_not_affect_other_devices_data(
+    hass, receiver_entry_builder
+):
     """Setting override on one device does not change other devices' records."""
     device_a = "Dev-A-1"
     device_b = "Dev-B-2"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_a: {CONF_MODEL: "Dev-A", DEVICE_FIELDS: ["temperature_C"]},
             device_b: {CONF_MODEL: "Dev-B", DEVICE_FIELDS: ["temperature_C"]},
@@ -825,10 +837,12 @@ async def test_device_step_does_not_affect_other_devices_data(hass, hub_entry_bu
     assert DEVICE_TIMEOUT_OVERRIDE not in entry.data[CONF_DEVICES][device_b]
 
 
-async def test_device_step_timeout_override_not_in_options(hass, hub_entry_builder):
+async def test_device_step_timeout_override_not_in_options(
+    hass, receiver_entry_builder
+):
     """Timeout override lives in entry.data, not in entry.options."""
     device_key = "Dev-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "Dev", DEVICE_FIELDS: ["temperature_C"]}}
     )
     entry.add_to_hass(hass)
@@ -852,11 +866,11 @@ async def test_device_step_timeout_override_not_in_options(hass, hub_entry_build
 
 
 async def test_device_step_none_commodity_clears_existing_calibration(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Submitting commodity=none removes any existing calibration from the record."""
     device_key = "Cal-Dev-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "Cal-Dev",
@@ -884,10 +898,10 @@ async def test_device_step_none_commodity_clears_existing_calibration(
     assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][device_key]
 
 
-async def test_device_step_none_commodity_result_type(hass, hub_entry_builder):
+async def test_device_step_none_commodity_result_type(hass, receiver_entry_builder):
     """Commodity=none goes directly to CREATE_ENTRY without a calibration step."""
     device_key = "NoCalib-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "NoCalib", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -910,11 +924,11 @@ async def test_device_step_none_commodity_result_type(hass, hub_entry_builder):
 
 
 async def test_device_step_energy_commodity_advances_to_calibration(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Picking energy on the device step advances to the calibration form."""
     device_key = "Energy-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "EnergyDev", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -933,11 +947,11 @@ async def test_device_step_energy_commodity_advances_to_calibration(
 
 
 async def test_device_step_gas_commodity_advances_to_calibration(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Picking gas on the device step advances to the calibration form."""
     device_key = "Gas-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "GasDev", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -958,11 +972,11 @@ async def test_device_step_gas_commodity_advances_to_calibration(
 
 
 async def test_device_step_water_commodity_advances_to_calibration(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Picking water on the device step advances to the calibration form."""
     device_key = "Water-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "WaterDev", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -987,10 +1001,10 @@ async def test_device_step_water_commodity_advances_to_calibration(
 # ---------------------------------------------------------------------------
 
 
-async def test_calibration_form_step_id(hass, hub_entry_builder):
+async def test_calibration_form_step_id(hass, receiver_entry_builder):
     """Calibration form has step_id='calibration'."""
     device_key = "Cal-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "CalDev", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -1008,11 +1022,11 @@ async def test_calibration_form_step_id(hass, hub_entry_builder):
 
 
 async def test_calibration_form_description_placeholder_commodity(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Calibration form description_placeholders contains {'commodity': chosen_commodity}."""
     device_key = "Cal-2"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "CalDev2", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -1029,10 +1043,10 @@ async def test_calibration_form_description_placeholder_commodity(
     assert result["description_placeholders"] == {"commodity": COMMODITY_WATER}
 
 
-async def test_calibration_gas_placeholder_is_gas(hass, hub_entry_builder):
+async def test_calibration_gas_placeholder_is_gas(hass, receiver_entry_builder):
     """Calibration form description_placeholder for gas is 'gas'."""
     device_key = "Cal-gas"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "GasDev", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -1051,10 +1065,10 @@ async def test_calibration_gas_placeholder_is_gas(hass, hub_entry_builder):
     assert result["description_placeholders"]["commodity"] == COMMODITY_GAS
 
 
-async def test_calibration_energy_write_exact_record(hass, hub_entry_builder):
+async def test_calibration_energy_write_exact_record(hass, receiver_entry_builder):
     """Calibration for energy writes exact {commodity, unit, scale} triple."""
     device_key = "Energy-cal-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "EnergyDev", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -1079,10 +1093,10 @@ async def test_calibration_energy_write_exact_record(hass, hub_entry_builder):
     assert cal[CALIBRATION_SCALE] == pytest.approx(0.001)
 
 
-async def test_calibration_water_write_exact_record(hass, hub_entry_builder):
+async def test_calibration_water_write_exact_record(hass, receiver_entry_builder):
     """Calibration for water writes exact {commodity, unit, scale} triple."""
     device_key = "Water-cal-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "WaterDev", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -1109,10 +1123,10 @@ async def test_calibration_water_write_exact_record(hass, hub_entry_builder):
     assert cal[CALIBRATION_SCALE] == pytest.approx(10.0)
 
 
-async def test_calibration_gas_write_exact_record(hass, hub_entry_builder):
+async def test_calibration_gas_write_exact_record(hass, receiver_entry_builder):
     """Calibration for gas writes exact {commodity, unit, scale} triple."""
     device_key = "Gas-cal-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "GasDev", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -1139,10 +1153,10 @@ async def test_calibration_gas_write_exact_record(hass, hub_entry_builder):
     assert cal[CALIBRATION_SCALE] == pytest.approx(1.0)
 
 
-async def test_calibration_also_sets_timeout_override(hass, hub_entry_builder):
+async def test_calibration_also_sets_timeout_override(hass, receiver_entry_builder):
     """When device step also had a timeout, calibration step persists both."""
     device_key = "Cal-timeout-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "CalToDev", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -1168,11 +1182,11 @@ async def test_calibration_also_sets_timeout_override(hass, hub_entry_builder):
 
 
 async def test_calibration_prefill_from_existing_same_commodity(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Calibration step pre-fills unit from existing calibration when commodity matches."""
     device_key = "Cal-prefill-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "CalPre",
@@ -1205,13 +1219,13 @@ async def test_calibration_prefill_from_existing_same_commodity(
 
 
 async def test_calibration_prefill_unit_falls_back_when_commodity_differs(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Calibration unit pre-fill uses default_unit when commodity differs from stored."""
     from custom_components.rtl_433.calibration import default_unit
 
     device_key = "Cal-prefill-2"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "CalPre2",
@@ -1242,11 +1256,11 @@ async def test_calibration_prefill_unit_falls_back_when_commodity_differs(
 
 
 async def test_calibration_prefill_scale_is_one_when_no_existing(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Calibration scale defaults to 1.0 when no existing calibration is present."""
     device_key = "Cal-noprefill-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "NoPre", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -1263,10 +1277,12 @@ async def test_calibration_prefill_scale_is_one_when_no_existing(
     assert _schema_default(result, CALIBRATION_SCALE) == pytest.approx(1.0)
 
 
-async def test_calibration_prefill_unit_default_for_energy(hass, hub_entry_builder):
+async def test_calibration_prefill_unit_default_for_energy(
+    hass, receiver_entry_builder
+):
     """Calibration unit default for energy is first in COMMODITY_UNITS[energy]."""
     device_key = "Cal-energy-def"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "EnergyDev", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -1284,10 +1300,12 @@ async def test_calibration_prefill_unit_default_for_energy(hass, hub_entry_build
     assert _schema_default(result, CALIBRATION_UNIT) == expected_unit
 
 
-async def test_calibration_overwrites_existing_calibration(hass, hub_entry_builder):
+async def test_calibration_overwrites_existing_calibration(
+    hass, receiver_entry_builder
+):
     """Submitting new calibration overwrites the existing calibration record."""
     device_key = "Cal-overwrite-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "OWDev",
@@ -1328,11 +1346,11 @@ async def test_calibration_overwrites_existing_calibration(hass, hub_entry_build
 
 
 async def test_device_step_no_motion_bearing_no_clear_delay_field(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Without any motion-bearing device, the clear-delay field is absent."""
     device_key = "Temp-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "TempSensor", DEVICE_FIELDS: ["temperature_C"]}
         }
@@ -1348,14 +1366,14 @@ async def test_device_step_no_motion_bearing_no_clear_delay_field(
 
 
 async def test_device_step_motion_bearing_shows_clear_delay_field(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
-    """When a motion-bearing device is in the hub, clear-delay field appears."""
+    """When a motion-bearing device is in the receiver, clear-delay field appears."""
     from pyrtl_433.library import FieldDescriptor, Registry
 
     device_key = "Motion-1"
     field_key = "motion"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "MotionDev", DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -1383,7 +1401,7 @@ async def test_device_step_motion_bearing_shows_clear_delay_field(
 
 
 async def test_device_step_clear_delay_default_is_constant_multi_device(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """With several devices, a device storing no override still gets the DEFAULT.
 
@@ -1395,7 +1413,7 @@ async def test_device_step_clear_delay_default_is_constant_multi_device(
     field_key = "motion"
     dev_a = "Motion-A"
     dev_b = "Motion-B"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             dev_a: {CONF_MODEL: "MotionDev", DEVICE_FIELDS: [field_key]},
             dev_b: {
@@ -1430,7 +1448,7 @@ async def test_device_step_clear_delay_default_is_constant_multi_device(
 
 
 async def test_device_step_clear_delay_prefill_from_single_device_record(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """With one motion-bearing device, clear-delay is pre-filled from the device record."""
     from pyrtl_433.library import FieldDescriptor, Registry
@@ -1438,7 +1456,7 @@ async def test_device_step_clear_delay_prefill_from_single_device_record(
     field_key = "motion"
     device_key = "Motion-Solo"
     stored_delay = 45
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "SoloDev",
@@ -1470,14 +1488,14 @@ async def test_device_step_clear_delay_prefill_from_single_device_record(
 
 
 async def test_device_step_clear_delay_prefill_default_when_no_stored(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """With one motion-bearing device and no stored delay, prefill uses DEFAULT."""
     from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Motion-Solo2"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "SoloDev2",
@@ -1514,13 +1532,15 @@ async def test_device_step_clear_delay_prefill_default_when_no_stored(
 # ---------------------------------------------------------------------------
 
 
-async def test_write_device_record_motion_delay_set_in_options(hass, hub_entry_builder):
+async def test_write_device_record_motion_delay_set_in_options(
+    hass, receiver_entry_builder
+):
     """motion_clear_delay is stored in entry.options[CONF_DEVICES][device_key]."""
     from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Motion-opt-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "MotionDev", DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -1550,14 +1570,14 @@ async def test_write_device_record_motion_delay_set_in_options(hass, hub_entry_b
 
 
 async def test_write_device_record_motion_delay_not_in_entry_data(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """motion_clear_delay submission does NOT appear in entry.data[devices]."""
     from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Motion-data-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "MotionDev", DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -1587,11 +1607,11 @@ async def test_write_device_record_motion_delay_not_in_entry_data(
 
 
 async def test_write_device_record_motion_delay_cleared_removes_opt_record(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Clearing motion_clear_delay (submitting None) removes device from opt_devices."""
     device_key = "Motion-clear-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "MotionDev", DEVICE_FIELDS: ["temperature_C"]}
         },
@@ -1620,13 +1640,15 @@ async def test_write_device_record_motion_delay_cleared_removes_opt_record(
     )
 
 
-async def test_write_device_record_options_devices_key_written(hass, hub_entry_builder):
+async def test_write_device_record_options_devices_key_written(
+    hass, receiver_entry_builder
+):
     """options[CONF_DEVICES] is written (not left absent) when motion delay set."""
     from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Motion-opts-key"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "MotionDev", DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -1661,14 +1683,14 @@ async def test_write_device_record_options_devices_key_written(hass, hub_entry_b
 
 
 async def test_calibration_step_motion_delay_carried_and_written(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """motion_clear_delay from the device step is carried through calibration."""
     from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     device_key = "Cal-motion-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "CalMotion",
@@ -1719,12 +1741,12 @@ async def test_calibration_step_motion_delay_carried_and_written(
 
 
 async def test_write_device_record_preserves_other_devices_in_data(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Updating one device's record leaves other devices' records intact in data."""
     dev_a = "DevA-1"
     dev_b = "DevB-2"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             dev_a: {
                 CONF_MODEL: "DevA",
@@ -1759,11 +1781,11 @@ async def test_write_device_record_preserves_other_devices_in_data(
 
 
 async def test_write_device_record_no_motion_delay_no_conf_devices_key(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """When no motion_clear_delay is set and none was previously set, CONF_DEVICES not in options."""
     device_key = "Plain-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "Plain", DEVICE_FIELDS: ["temperature_C"]}}
     )
     entry.add_to_hass(hass)
@@ -1791,19 +1813,19 @@ async def test_write_device_record_no_motion_delay_no_conf_devices_key(
 
 
 async def test_device_step_commodity_default_is_none_for_multi_device(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
-    """On a multi-device hub the commodity still pre-fills from the picked device.
+    """On a multi-device receiver the commodity still pre-fills from the picked device.
 
-    The pre-fill used to be skipped entirely unless the hub had exactly one
+    The pre-fill used to be skipped entirely unless the receiver had exactly one
     device; now the picker is its own step, so ``dev_b``'s gas hint is honoured
-    even though the hub has two devices.
+    even though the receiver has two devices.
     """
     from types import SimpleNamespace
 
     dev_a = "Dev-Multi-A"
     dev_b = "Dev-Multi-B"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             dev_a: {CONF_MODEL: "DevA", DEVICE_FIELDS: ["temperature_C"]},
             dev_b: {CONF_MODEL: "DevB", DEVICE_FIELDS: ["consumption_data"]},
@@ -1829,11 +1851,11 @@ async def test_device_step_commodity_default_is_none_for_multi_device(
 
 
 async def test_device_step_commodity_prefill_single_device_from_coordinator(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """With one device and a coordinator gas hint, commodity pre-fills to gas."""
     device_key = "Single-Gas"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "GasMeter", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -1854,11 +1876,11 @@ async def test_device_step_commodity_prefill_single_device_from_coordinator(
 
 
 async def test_device_step_commodity_prefill_water_from_ert_type(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """With one device and ert_type water hint, commodity pre-fills to water."""
     device_key = "Single-Water"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "WaterMeter", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -1880,11 +1902,11 @@ async def test_device_step_commodity_prefill_water_from_ert_type(
 
 
 async def test_device_step_commodity_prefill_energy_from_electric_meter_type(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """MeterType='Electric' pre-fills commodity to energy."""
     device_key = "Single-Elec"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "ElecMeter", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -1907,14 +1929,14 @@ async def test_device_step_commodity_prefill_energy_from_electric_meter_type(
 # ---------------------------------------------------------------------------
 
 
-async def test_is_motion_bearing_model_scoped_descriptor(hass, hub_entry_builder):
+async def test_is_motion_bearing_model_scoped_descriptor(hass, receiver_entry_builder):
     """_is_motion_bearing uses model-scoped lookup and finds clear_delay."""
     from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "motion"
     model = "MotionModel"
     device_key = "MotionScoped-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: model, DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -1942,14 +1964,14 @@ async def test_is_motion_bearing_model_scoped_descriptor(hass, hub_entry_builder
 
 
 async def test_is_motion_bearing_false_when_descriptor_no_clear_delay(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """_is_motion_bearing returns False when descriptor has no clear_delay."""
     from pyrtl_433.library import FieldDescriptor, Registry
 
     field_key = "temperature_C"
     device_key = "NonMotion-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "TempDev", DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -1977,14 +1999,14 @@ async def test_is_motion_bearing_false_when_descriptor_no_clear_delay(
 # ---------------------------------------------------------------------------
 
 
-async def test_async_get_options_flow_is_callable(hass, hub_entry_builder):
+async def test_async_get_options_flow_is_callable(hass, receiver_entry_builder):
     """async_get_options_flow returns an OptionsFlow-compatible object."""
     from custom_components.rtl_433.config_flow import (
         Rtl433ConfigFlow,
         Rtl433OptionsFlow,
     )
 
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     flow = Rtl433ConfigFlow.async_get_options_flow(entry)
     assert isinstance(flow, Rtl433OptionsFlow)
@@ -2057,10 +2079,10 @@ def test_step_user_schema_manage_settings_default():
 # ---------------------------------------------------------------------------
 
 
-async def test_device_step_form_has_device_selector(hass, hub_entry_builder):
+async def test_device_step_form_has_device_selector(hass, receiver_entry_builder):
     """Device step form has a CONF_DEVICE selector field."""
     device_key = "Dev-form-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "FormDev", DEVICE_FIELDS: ["temperature_C"]}}
     )
     entry.add_to_hass(hass)
@@ -2079,10 +2101,10 @@ async def test_device_step_form_has_device_selector(hass, hub_entry_builder):
 # ---------------------------------------------------------------------------
 
 
-async def test_calibration_step_result_title_is_empty(hass, hub_entry_builder):
+async def test_calibration_step_result_title_is_empty(hass, receiver_entry_builder):
     """Calibration step finishes with empty title."""
     device_key = "Cal-title-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "CalTitleDev", DEVICE_FIELDS: ["consumption"]}
         }
@@ -2111,10 +2133,12 @@ async def test_calibration_step_result_title_is_empty(hass, hub_entry_builder):
 # ---------------------------------------------------------------------------
 
 
-async def test_registry_returns_none_when_not_in_hass_data(hass, hub_entry_builder):
+async def test_registry_returns_none_when_not_in_hass_data(
+    hass, receiver_entry_builder
+):
     """When DATA_LIBRARY is absent, the device step still shows without clear-delay."""
     device_key = "NoLib-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "NoLib", DEVICE_FIELDS: ["temperature_C"]}}
     )
     entry.add_to_hass(hass)
@@ -2156,9 +2180,9 @@ async def test_user_step_validates_correct_params(hass):
     )
 
 
-async def test_reconfigure_validates_correct_params(hass, hub_entry_builder):
+async def test_reconfigure_validates_correct_params(hass, receiver_entry_builder):
     """validate_connection is called with the submitted host/port/path/secure on reconfigure."""
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     result = await entry.start_reconfigure_flow(hass)
     with (
@@ -2227,7 +2251,7 @@ def _pr34_seed_entry_library(hass, entry, *, flat=None, models=None, skip_keys=N
 # _registry: returns element [0] (Registry), not [1] (skip_keys).             #
 # --------------------------------------------------------------------------- #
 async def test_pr34_registry_returns_registry_makes_field_appear(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """With the per-entry cache holding the motion Registry, the knob appears.
 
@@ -2237,7 +2261,7 @@ async def test_pr34_registry_returns_registry_makes_field_appear(
     """
     field_key = "motion"
     device_key = "PR34-Reg0"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "RegDev", DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -2255,20 +2279,20 @@ async def test_pr34_registry_returns_registry_makes_field_appear(
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
 
 
-async def test_pr34_registry_keyed_by_entry_id(hass, hub_entry_builder):
+async def test_pr34_registry_keyed_by_entry_id(hass, receiver_entry_builder):
     """The cache is keyed by THIS entry's id; the wrong key yields no field.
 
-    Two hubs: only the active entry has its motion Registry cached under its own
+    Two receivers: only the active entry has its motion Registry cached under its own
     id. Kills _registry__mutmut_1 (``.get(None, ...)``) and __mutmut_5
     (``.get(None, {})`` for DATA_ENTRY_LIBRARY) and __mutmut_9
     (``hass.data.get(None, {})``) -- each makes the lookup miss the cache and
     drop the field.
     """
     field_key = "motion"
-    other = hub_entry_builder(host="other.local", port=1)
+    other = receiver_entry_builder(host="other.local", port=1)
     other.add_to_hass(hass)
     device_key = "PR34-Keyed"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "KeyedDev", DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -2291,7 +2315,7 @@ async def test_pr34_registry_keyed_by_entry_id(hass, hub_entry_builder):
 # _is_motion_bearing: model arg, registry arg, field-set, record defaults.     #
 # --------------------------------------------------------------------------- #
 async def test_pr34_motion_bearing_model_scoped_via_entry_cache(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The descriptor lives only in the model-scoped table; model must be passed.
 
@@ -2302,7 +2326,7 @@ async def test_pr34_motion_bearing_model_scoped_via_entry_cache(
     field_key = "motion"
     model = "PR34ScopedOnly"
     device_key = "PR34-Scoped"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: model, DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -2320,10 +2344,12 @@ async def test_pr34_motion_bearing_model_scoped_via_entry_cache(
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
 
 
-async def test_pr34_motion_bearing_uses_entry_registry_arg(hass, hub_entry_builder):
+async def test_pr34_motion_bearing_uses_entry_registry_arg(
+    hass, receiver_entry_builder
+):
     """lookup must receive the entry-cached registry (3rd positional arg).
 
-    The field ``pr34_custom_motion`` exists ONLY in this hub's cached registry,
+    The field ``pr34_custom_motion`` exists ONLY in this receiver's cached registry,
     never in the shipped library. Kills __mutmut_12 (``registry = None``),
     __mutmut_17 (``lookup(field_key, model, None)``), __mutmut_19 (drops the
     registry arg) and __mutmut_20 (trailing-comma drop of the registry arg):
@@ -2331,7 +2357,7 @@ async def test_pr34_motion_bearing_uses_entry_registry_arg(hass, hub_entry_build
     """
     field_key = "pr34_custom_motion"
     device_key = "PR34-CustomReg"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "CustomDev", DEVICE_FIELDS: [field_key]}}
     )
     entry.add_to_hass(hass)
@@ -2349,7 +2375,9 @@ async def test_pr34_motion_bearing_uses_entry_registry_arg(hass, hub_entry_build
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
 
 
-async def test_pr34_motion_bearing_only_inspects_listed_fields(hass, hub_entry_builder):
+async def test_pr34_motion_bearing_only_inspects_listed_fields(
+    hass, receiver_entry_builder
+):
     """Only DEVICE_FIELDS entries are inspected; an unlisted motion field is ignored.
 
     The registry knows a motion descriptor for ``motion`` but the device lists
@@ -2359,7 +2387,7 @@ async def test_pr34_motion_bearing_only_inspects_listed_fields(hass, hub_entry_b
     rather than the listed fields.
     """
     device_key = "PR34-NoMotionField"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "MixedDev", DEVICE_FIELDS: ["temperature_C"]}}
     )
     entry.add_to_hass(hass)
@@ -2379,7 +2407,9 @@ async def test_pr34_motion_bearing_only_inspects_listed_fields(hass, hub_entry_b
     assert DEVICE_MOTION_CLEAR_DELAY not in _schema_keys(result)
 
 
-async def test_pr34_motion_bearing_reads_named_device_record(hass, hub_entry_builder):
+async def test_pr34_motion_bearing_reads_named_device_record(
+    hass, receiver_entry_builder
+):
     """_is_motion_bearing reads the SELECTED device's record (model + fields).
 
     Two devices: a motion one and a plain one. The knob appears for the motion
@@ -2391,7 +2421,7 @@ async def test_pr34_motion_bearing_reads_named_device_record(hass, hub_entry_bui
     """
     motion_key = "PR34-Mover"
     plain_key = "PR34-Still"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             motion_key: {CONF_MODEL: "Mover", DEVICE_FIELDS: ["motion"]},
             plain_key: {CONF_MODEL: "Still", DEVICE_FIELDS: ["temperature_C"]},
@@ -2417,7 +2447,7 @@ async def test_pr34_motion_bearing_reads_named_device_record(hass, hub_entry_bui
     # The selected device is motion-bearing, so the knob is offered.
     assert DEVICE_MOTION_CLEAR_DELAY in _schema_keys(result)
 
-    # ... and it is not offered for the plain device on the same hub.
+    # ... and it is not offered for the plain device on the same receiver.
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "device"}
@@ -2432,7 +2462,7 @@ async def test_pr34_motion_bearing_reads_named_device_record(hass, hub_entry_bui
 # async_step_device: clear-delay default branches (single vs multi device).    #
 # --------------------------------------------------------------------------- #
 async def test_pr34_clear_delay_default_constant_when_multi_motion(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Two motion devices, each storing a different override -> the picked one wins.
 
@@ -2442,7 +2472,7 @@ async def test_pr34_clear_delay_default_constant_when_multi_motion(
     field_key = "motion"
     dev_a = "PR34-Multi-A"
     dev_b = "PR34-Multi-B"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             dev_a: {
                 CONF_MODEL: "MA",
@@ -2471,11 +2501,13 @@ async def test_pr34_clear_delay_default_constant_when_multi_motion(
     assert _schema_default(result, DEVICE_MOTION_CLEAR_DELAY) == 11
 
 
-async def test_pr34_clear_delay_default_single_reads_stored(hass, hub_entry_builder):
+async def test_pr34_clear_delay_default_single_reads_stored(
+    hass, receiver_entry_builder
+):
     """One motion device with a stored clear-delay pre-fills that exact value."""
     field_key = "motion"
     device_key = "PR34-SingleStored"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "MS",
@@ -2499,10 +2531,10 @@ async def test_pr34_clear_delay_default_single_reads_stored(hass, hub_entry_buil
     assert _schema_default(result, DEVICE_MOTION_CLEAR_DELAY) == 73
 
 
-async def test_pr34_device_picker_label_is_model_and_key(hass, hub_entry_builder):
+async def test_pr34_device_picker_label_is_model_and_key(hass, receiver_entry_builder):
     """The picker option label is exactly '{model} ({device_key})'."""
     device_key = "PR34-Label-7"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "LabelModel", DEVICE_FIELDS: ["temp"]}}
     )
     entry.add_to_hass(hass)
@@ -2524,7 +2556,9 @@ async def test_pr34_device_picker_label_is_model_and_key(hass, hub_entry_builder
 # --------------------------------------------------------------------------- #
 # _write_device_record: record starts from existing record; opt records keyed. #
 # --------------------------------------------------------------------------- #
-async def test_pr34_write_record_merges_into_existing_record(hass, hub_entry_builder):
+async def test_pr34_write_record_merges_into_existing_record(
+    hass, receiver_entry_builder
+):
     """A new override merges into the device's existing record (model preserved).
 
     ``record = dict(new_devices.get(device_key, {}))`` must seed from the current
@@ -2534,7 +2568,7 @@ async def test_pr34_write_record_merges_into_existing_record(hass, hub_entry_bui
     __mutmut_8 (drops CONF_DEVICES default).
     """
     device_key = "PR34-Merge"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "MergeModel", DEVICE_FIELDS: ["temperature_C"]}
         }
@@ -2557,7 +2591,9 @@ async def test_pr34_write_record_merges_into_existing_record(hass, hub_entry_bui
     assert record[DEVICE_FIELDS] == ["temperature_C"]
 
 
-async def test_pr34_write_record_opt_record_keyed_per_device(hass, hub_entry_builder):
+async def test_pr34_write_record_opt_record_keyed_per_device(
+    hass, receiver_entry_builder
+):
     """Blanking one device's motion delay leaves OTHER devices' opt records.
 
     ``opt_record = dict(opt_devices.get(device_key, {}))`` and
@@ -2567,7 +2603,7 @@ async def test_pr34_write_record_opt_record_keyed_per_device(hass, hub_entry_bui
     """
     edited = "PR34-Opt-Edit"
     other = "PR34-Opt-Keep"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             edited: {CONF_MODEL: "E", DEVICE_FIELDS: ["temperature_C"]},
             other: {CONF_MODEL: "K", DEVICE_FIELDS: ["temperature_C"]},
@@ -2598,7 +2634,9 @@ async def test_pr34_write_record_opt_record_keyed_per_device(hass, hub_entry_bui
 # --------------------------------------------------------------------------- #
 # async_step_calibration: pre-fill reads the SELECTED device's record.         #
 # --------------------------------------------------------------------------- #
-async def test_pr34_calibration_prefill_reads_selected_device(hass, hub_entry_builder):
+async def test_pr34_calibration_prefill_reads_selected_device(
+    hass, receiver_entry_builder
+):
     """Calibration unit/scale pre-fill reads the SELECTED device's calibration.
 
     Two devices, each with a different stored water calibration; selecting one
@@ -2609,7 +2647,7 @@ async def test_pr34_calibration_prefill_reads_selected_device(hass, hub_entry_bu
     """
     target = "PR34-Cal-Target"
     decoy = "PR34-Cal-Decoy"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             target: {
                 CONF_MODEL: "T",
@@ -2650,13 +2688,15 @@ async def test_pr34_calibration_prefill_reads_selected_device(hass, hub_entry_bu
 # --------------------------------------------------------------------------- #
 # async_step_mappings: normalize on store, problem-join, prefill default.      #
 # --------------------------------------------------------------------------- #
-async def test_pr34_mappings_valid_stores_submitted_object(hass, hub_entry_builder):
+async def test_pr34_mappings_valid_stores_submitted_object(
+    hass, receiver_entry_builder
+):
     """A valid non-empty mapping is normalized and stored (not blanked to {}).
 
     Kills the mutant ``normalize_overrides(None)`` (which would store ``{}``);
     we assert the stored object carries the submitted override exactly.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     with patch.object(hass.config_entries, "async_schedule_reload"):
         result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -2683,14 +2723,16 @@ async def test_pr34_mappings_valid_stores_submitted_object(hass, hub_entry_build
     assert stored["humidity"]["name"] == "Humidity"
 
 
-async def test_pr34_mappings_invalid_joins_problem_strings(hass, hub_entry_builder):
+async def test_pr34_mappings_invalid_joins_problem_strings(
+    hass, receiver_entry_builder
+):
     """Invalid mappings re-show the form with a non-empty joined problems string.
 
     The ``"; ".join(problems)`` placeholder must be a non-empty string naming the
     offending field. Kills the mutant joining ``None`` (would raise) and the one
     blanking the placeholder.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
@@ -2710,8 +2752,8 @@ async def test_pr34_mappings_invalid_joins_problem_strings(hass, hub_entry_build
     assert "bad" in problems
 
 
-async def test_pr34_mappings_form_prefilled_with_current(hass, hub_entry_builder):
-    """The mappings editor default equals the hub's current user_mappings.
+async def test_pr34_mappings_form_prefilled_with_current(hass, receiver_entry_builder):
+    """The mappings editor default equals the receiver's current user_mappings.
 
     Kills mutants changing the schema default away from ``current`` (the stored
     mapping) -- e.g. defaulting to ``None`` or ``{}``.
@@ -2723,7 +2765,7 @@ async def test_pr34_mappings_form_prefilled_with_current(hass, hub_entry_builder
             "object_suffix": "t",
         }
     }
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_USER_MAPPINGS: current}
@@ -2737,19 +2779,19 @@ async def test_pr34_mappings_form_prefilled_with_current(hass, hub_entry_builder
 
 
 # ---------------------------------------------------------------------------
-# async_rebind_hub: additive-only property — nested ids are byte-identical.
+# async_rebind_receiver: additive-only property — nested ids are byte-identical.
 # ---------------------------------------------------------------------------
 
 
 async def test_rebind_preserves_nested_device_and_entity_unique_ids(hass):
-    """Rebinding a hub's radio unique_id must not touch any nested id.
+    """Rebinding a receiver's radio unique_id must not touch any nested id.
 
     The additive-only guarantee: device/entity unique_ids and device_keys are
-    scoped by the hub ``entry_id`` (never the radio id), so re-pointing the entry
+    scoped by the receiver ``entry_id`` (never the radio id), so re-pointing the entry
     at a new radio unique_id leaves the registry byte-identical. This asserts the
     full snapshot of nested-device identifiers and entity unique_ids is unchanged.
     """
-    entry_id = "rebindhubentry01"
+    entry_id = "rebindreceiverentry01"
     device_key = "Acurite-606TX-42"
     entry = MockConfigEntry(
         domain=DOMAIN,
@@ -2796,7 +2838,7 @@ async def test_rebind_preserves_nested_device_and_entity_unique_ids(hass):
 
     # Re-point the entry at a brand-new radio unique_id (the rebind under test).
     with patch.object(hass.config_entries, "async_reload"):
-        status = await async_rebind_hub(
+        status = await async_rebind_receiver(
             hass,
             entry,
             "radio-new",
@@ -2824,7 +2866,7 @@ async def test_rebind_preserves_nested_device_and_entity_unique_ids(hass):
     assert device_key in entry.data[CONF_DEVICES]
 
 
-async def test_rebind_hub_sets_title_only_when_provided(hass):
+async def test_rebind_receiver_sets_title_only_when_provided(hass):
     """``title`` is applied when given and left untouched when ``None``.
 
     Two mutants live on the ``if title is not None`` guard and its body: flipping
@@ -2848,7 +2890,7 @@ async def test_rebind_hub_sets_title_only_when_provided(hass):
 
     # No title -> the existing title is preserved (guard must skip the body).
     with patch.object(hass.config_entries, "async_reload"):
-        status = await async_rebind_hub(
+        status = await async_rebind_receiver(
             hass, entry, "radio-mid", {CONF_HOST: "mid.local"}
         )
         await hass.async_block_till_done()
@@ -2857,7 +2899,7 @@ async def test_rebind_hub_sets_title_only_when_provided(hass):
 
     # Explicit title -> applied verbatim (body must run with the real value).
     with patch.object(hass.config_entries, "async_reload"):
-        await async_rebind_hub(
+        await async_rebind_receiver(
             hass, entry, "radio-new", {CONF_HOST: "new.local"}, title="brand-new-title"
         )
         await hass.async_block_till_done()

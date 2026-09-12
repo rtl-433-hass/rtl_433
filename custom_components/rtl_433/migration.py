@@ -5,11 +5,11 @@ shape to the current one — it is deliberately separate from the steady-state
 lifecycle in ``__init__.py``:
 
 * :func:`async_migrate_entry` — the config-entry ``VERSION`` 1 → 2 migration (the
-  0.1.0 per-device-entry model → the hub model) plus the minor-version bumps that
+  0.1.0 per-device-entry model → the receiver model) plus the minor-version bumps that
   seed user mappings, disable legacy "Last seen" sensors, drop the legacy global
   availability timeout, and strip the retired discovery toggle.
-* :func:`_migrate_hub_entry` / :func:`_rehome_device_objects` — fold legacy child
-  device entries into the hub and re-home their registry objects first.
+* :func:`_migrate_receiver_entry` / :func:`_rehome_device_objects` — fold legacy child
+  device entries into the receiver and re-home their registry objects first.
 * :func:`_cleanup_phantom_unknown_device` /
   :func:`_migrate_motion_event_to_binary_sensor` — idempotent cleanups driven from
   ``async_setup_entry`` on every startup (a pre-fix phantom ``unknown`` device and
@@ -39,8 +39,8 @@ from .const import (
     CONF_DEVICE_KEY,
     CONF_DEVICES,
     CONF_ENTRY_TYPE,
-    CONF_HUB_ENTRY_ID,
     CONF_MODEL,
+    CONF_RECEIVER_ENTRY_ID,
     CONF_USER_MAPPINGS,
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
@@ -55,7 +55,7 @@ from .library import _async_load_library, _merge_entry_library
 
 # The 0.1.0 per-device config entries stored the set of observed mapped field
 # keys under this literal options key. It is intentionally *not* exported from
-# const.py (the v2 model uses ``DEVICE_FIELDS`` inside the hub devices map); it
+# const.py (the v2 model uses ``DEVICE_FIELDS`` inside the receiver devices map); it
 # lives here because it is only ever read by the migration.
 LEGACY_CONF_OBSERVED_FIELDS = "observed_fields"
 
@@ -71,7 +71,7 @@ PHANTOM_DEVICE_KEY = "unknown"
 # matching ``DEVICE_EVENT_TYPES`` slot so the event platform never recreates it.
 _MOTION_OBJECT_SUFFIX = "motion"
 
-# The retired per-hub discovery toggle. Adoption is explicit now, so the key
+# The retired per-receiver discovery toggle. Adoption is explicit now, so the key
 # gates nothing and is stripped from existing entries by the minor-7 → 8 step.
 # It is a literal (not a ``const.py`` export) because the constant no longer
 # exists: only entries written by older versions still carry the string.
@@ -100,7 +100,7 @@ def _cleanup_phantom_unknown_device(
 
     Idempotent: drops the ``unknown`` key from ``entry.data[CONF_DEVICES]`` (only
     persisting when it changed) and removes the stale registry device
-    ``(DOMAIN, f"{entry_id}:unknown")`` if present. Never touches the hub device
+    ``(DOMAIN, f"{entry_id}:unknown")`` if present. Never touches the receiver device
     or real nested devices. Safe to run on every setup.
     """
     devices = entry.data.get(CONF_DEVICES, {})
@@ -123,9 +123,9 @@ def _migrate_motion_event_to_binary_sensor(
     """Remove the orphaned ``event.*_motion`` entity and announce the move.
 
     Pre-fix versions exposed motion as an ``event.*_motion`` entity; it is now a
-    ``binary_sensor.*_motion``. This sweep finds this hub's ``event``-domain
+    ``binary_sensor.*_motion``. This sweep finds this receiver's ``event``-domain
     registry entries whose unique-id tail is ``:motion`` (unique-id shape
-    ``f"{hub_entry_id}:{device_key}:{object_suffix}"``), removes them, and drops
+    ``f"{receiver_entry_id}:{device_key}:{object_suffix}"``), removes them, and drops
     the ``motion`` slot from any persisted ``DEVICE_EVENT_TYPES`` so the event
     platform never recreates them. Only when at least one orphaned entity was
     removed is a single, integration-wide repairs issue raised announcing the
@@ -133,7 +133,7 @@ def _migrate_motion_event_to_binary_sensor(
 
     Idempotent and safe on every startup: re-removing an already-removed entity
     finds nothing, the devices-map write only persists when it changes, and the
-    issue id is stable so it is never duplicated across hubs or restarts.
+    issue id is stable so it is never duplicated across receivers or restarts.
     """
     removed_any = False
     removed_device_keys: set[str] = set()
@@ -142,7 +142,7 @@ def _migrate_motion_event_to_binary_sensor(
             f":{_MOTION_OBJECT_SUFFIX}"
         ):
             continue
-        # unique_id is ``{hub_entry_id}:{device_key}:motion``; the middle part is
+        # unique_id is ``{receiver_entry_id}:{device_key}:motion``; the middle part is
         # the device_key (device_keys may themselves contain ``:``).
         parts = ent.unique_id.split(":")
         if len(parts) >= 3:
@@ -245,9 +245,9 @@ def _disable_existing_last_seen_sensors(
     The "Last seen" sensor now ships disabled-by-default, but
     ``entity_registry_enabled_default`` only takes effect when an entity is first
     *created*, so existing installs keep their already-enabled instances. This
-    one-time sweep finds this hub's ``sensor``-domain registry entries whose
+    one-time sweep finds this receiver's ``sensor``-domain registry entries whose
     unique-id tail is ``:last_seen`` (unique-id shape
-    ``f"{hub_entry_id}:{device_key}:{object_suffix}"``) and disables any the user
+    ``f"{receiver_entry_id}:{device_key}:{object_suffix}"``) and disables any the user
     has not already disabled, marking them ``RegistryEntryDisabler.INTEGRATION``.
 
     Driven once from :func:`async_migrate_entry` behind the minor-version 3 bump
@@ -279,7 +279,7 @@ async def _enable_last_seen_for_event_driven_devices(
     library classifies event-driven. Sensors a user disabled
     (``disabled_by != INTEGRATION``) are left untouched.
 
-    Resolves the event-driven field keys from this hub's merged library (shipped
+    Resolves the event-driven field keys from this receiver's merged library (shipped
     descriptors plus user mappings) and matches each device's adopted
     ``DEVICE_FIELDS`` against them — the same classification setup uses, but
     without a coordinator (migration runs first).
@@ -309,7 +309,7 @@ async def _enable_last_seen_for_event_driven_devices(
 def _read_legacy_overrides(path: str) -> dict:
     """Read + normalize the legacy ``rtl_433_mappings.yaml`` file (sync, executor).
 
-    Used only by the one-time minor-version migration to seed each hub's
+    Used only by the one-time minor-version migration to seed each receiver's
     ``entry.data[CONF_USER_MAPPINGS]`` from any pre-existing file. Returns an
     empty dict (never raises) when the file is missing, unreadable, malformed,
     empty, or not a mapping, so a bad/absent file simply migrates to ``{}``. The
@@ -334,24 +334,24 @@ def _read_legacy_overrides(path: str) -> dict:
 
 
 def _rehome_device_objects(
-    hass: HomeAssistant, device_entry: ConfigEntry, hub_entry_id: str
+    hass: HomeAssistant, device_entry: ConfigEntry, receiver_entry_id: str
 ) -> None:
-    """Re-home a legacy device entry's registry objects onto the hub entry.
+    """Re-home a legacy device entry's registry objects onto the receiver entry.
 
     The 0.1.0 registry devices and entities are owned by a per-device config
     entry. Before that entry can be removed, its device-registry device and all
-    of its entities must be re-associated with the hub config entry, otherwise
+    of its entities must be re-associated with the receiver config entry, otherwise
     removing the legacy entry would delete them (and their history). The device
     identifiers and the entity unique_ids/entity_ids are never touched — only
     *which config entry owns them* changes — so history is preserved.
 
-    Each device-registry device linked to the legacy entry is moved onto the hub
+    Each device-registry device linked to the legacy entry is moved onto the receiver
     entry in a single ``new_config_entry_id`` update, so the device is never
     momentarily orphaned. Then every entity belonging to the legacy entry has its
-    ``config_entry_id`` repointed to the hub. The function is idempotent: if a
+    ``config_entry_id`` repointed to the receiver. The function is idempotent: if a
     device/entity has already been re-homed it simply finds nothing left to move.
     """
-    if hub_entry_id == device_entry.entry_id:
+    if receiver_entry_id == device_entry.entry_id:
         return
 
     dev_reg = dr.async_get(hass)
@@ -362,22 +362,24 @@ def _rehome_device_objects(
     for device in list(
         dr.async_entries_for_config_entry(dev_reg, device_entry.entry_id)
     ):
-        dev_reg.async_update_device(device.id, new_config_entry_id=hub_entry_id)
+        dev_reg.async_update_device(device.id, new_config_entry_id=receiver_entry_id)
 
     for entity in er.async_entries_for_config_entry(ent_reg, device_entry.entry_id):
-        ent_reg.async_update_entity(entity.entity_id, config_entry_id=hub_entry_id)
+        ent_reg.async_update_entity(entity.entity_id, config_entry_id=receiver_entry_id)
 
 
-async def _migrate_hub_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> None:
-    """Consolidate every legacy child device entry into the hub entry.
+async def _migrate_receiver_entry(
+    hass: HomeAssistant, receiver_entry: ConfigEntry
+) -> None:
+    """Consolidate every legacy child device entry into the receiver entry.
 
-    The hub entry is the migration anchor. All legacy per-device config entries
-    that recorded this hub as their parent (``CONF_HUB_ENTRY_ID``) are folded
-    into the hub's ``entry.data[CONF_DEVICES]`` map, their registry objects are
-    re-homed onto the hub **before** removal, and the now-obsolete device config
-    entries are removed. The end state: only the hub entry remains, its devices
+    The receiver entry is the migration anchor. All legacy per-device config entries
+    that recorded this receiver as their parent (``CONF_RECEIVER_ENTRY_ID``) are folded
+    into the receiver's ``entry.data[CONF_DEVICES]`` map, their registry objects are
+    re-homed onto the receiver **before** removal, and the now-obsolete device config
+    entries are removed. The end state: only the receiver entry remains, its devices
     map carries every device's model/fields/optional timeout override, and the
-    re-homed registry devices/entities are owned by the hub.
+    re-homed registry devices/entities are owned by the receiver.
 
     Idempotent: re-running finds no remaining children (they were removed) and
     leaves the already-folded map untouched.
@@ -385,11 +387,11 @@ async def _migrate_hub_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> Non
     children = [
         e
         for e in hass.config_entries.async_entries(DOMAIN)
-        if e.data.get(CONF_HUB_ENTRY_ID) == hub_entry.entry_id
-        and e.entry_id != hub_entry.entry_id
+        if e.data.get(CONF_RECEIVER_ENTRY_ID) == receiver_entry.entry_id
+        and e.entry_id != receiver_entry.entry_id
     ]
 
-    devices = dict(hub_entry.data.get(CONF_DEVICES, {}))
+    devices = dict(receiver_entry.data.get(CONF_DEVICES, {}))
     for child in children:
         device_key = child.data[CONF_DEVICE_KEY]
         model = child.data.get(CONF_MODEL, "")
@@ -404,10 +406,10 @@ async def _migrate_hub_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> Non
         devices[device_key] = record
 
         # Re-home registry objects BEFORE the child entry is removed.
-        _rehome_device_objects(hass, child, hub_entry.entry_id)
+        _rehome_device_objects(hass, child, receiver_entry.entry_id)
 
     hass.config_entries.async_update_entry(
-        hub_entry, data={**hub_entry.data, CONF_DEVICES: devices}
+        receiver_entry, data={**receiver_entry.data, CONF_DEVICES: devices}
     )
 
     for child in children:
@@ -415,36 +417,36 @@ async def _migrate_hub_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> Non
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate a config entry from the 0.1.0 per-device model to the hub model.
+    """Migrate a config entry from the 0.1.0 per-device model to the receiver model.
 
     Version 1 (0.1.0) stored each RF device as its own config entry carrying a
-    ``CONF_HUB_ENTRY_ID`` back-reference. Version 2 nests all devices under the
-    hub entry's ``entry.data[CONF_DEVICES]`` map. This migration consolidates the
+    ``CONF_RECEIVER_ENTRY_ID`` back-reference. Version 2 nests all devices under the
+    receiver entry's ``entry.data[CONF_DEVICES]`` map. This migration consolidates the
     legacy entries in place with entity_ids and history preserved.
 
-    The hub entry is the authoritative anchor: when it migrates it folds every
+    The receiver entry is the authoritative anchor: when it migrates it folds every
     legacy child into its devices map, re-homes the children's registry objects
     onto itself, and removes the children. A legacy *device* entry that Home
     Assistant happens to migrate first only re-homes its own registry objects to
-    its parent hub (so they survive an early removal) and bumps its version; the
-    hub later folds + removes it. Either ordering converges on the same
+    its parent receiver (so they survive an early removal) and bumps its version; the
+    receiver later folds + removes it. Either ordering converges on the same
     invariant, and re-running is safe.
 
-    Version 2 minor 2 additionally seeds the hub's
+    Version 2 minor 2 additionally seeds the receiver's
     ``entry.data[CONF_USER_MAPPINGS]`` from any pre-existing
     ``<config>/rtl_433_mappings.yaml`` (read once, in the executor, never
     modified or deleted). Version 2 minor 3 disables any already-created
     "Last seen" sensors, which now ship disabled-by-default. Version 2 minor 4
-    drops a hub availability timeout still pinned to the legacy global default
+    drops a receiver availability timeout still pinned to the legacy global default
     (600s) so the new device-class defaults apply. Version 2 minor 5 rewrites any
     already-persisted doorbell ``event_types`` from the raw ``"0"``/``"1"`` strings
     to the standardized ``"ring"``/``"secret_knock"`` types. Entries created at the
-    current minor version skip these steps; new hubs added after the upgrade start
+    current minor version skip these steps; new receivers added after the upgrade start
     with no mappings and their "Last seen" sensors already disabled. Version 2
     minor 6 re-enables the "Last seen" sensor for event-driven devices (which now
     never expire, making it their only freshness signal) — only instances the
     integration disabled, not ones the user disabled. Version 2 minor 7 repeats the
-    minor-4 cleanup: it drops a hub availability timeout still pinned to the legacy
+    minor-4 cleanup: it drops a receiver availability timeout still pinned to the legacy
     global default (600s) that the options flow re-persisted on save, which masked
     the device-class defaults again (expiring event-driven devices); the options
     flow no longer writes that sentinel, so this heal is final. Version 2 minor 8
@@ -459,22 +461,22 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         is_device = entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_DEVICE
         if is_device:
             # A legacy device entry processed on its own: protect its registry
-            # objects by re-homing them to the parent hub before anything can
-            # remove this entry. The hub migration remains responsible for
+            # objects by re-homing them to the parent receiver before anything can
+            # remove this entry. The receiver migration remains responsible for
             # folding the field/override state and removing this entry.
-            hub_id = entry.data.get(CONF_HUB_ENTRY_ID)
-            if hub_id:
-                _rehome_device_objects(hass, entry, hub_id)
+            receiver_id = entry.data.get(CONF_RECEIVER_ENTRY_ID)
+            if receiver_id:
+                _rehome_device_objects(hass, entry, receiver_id)
             hass.config_entries.async_update_entry(entry, version=2, minor_version=2)
             return True
 
-        # Hub entry: consolidate all children into the devices map.
-        await _migrate_hub_entry(hass, entry)
+        # Receiver entry: consolidate all children into the devices map.
+        await _migrate_receiver_entry(hass, entry)
 
     if entry.version < 2 or (entry.minor_version or 1) < 2:
-        # Seed this hub's stored user mappings from the legacy file (read only
+        # Seed this receiver's stored user mappings from the legacy file (read only
         # during migration). Each entry migrates independently, so every
-        # existing hub gets its own copy of the file contents.
+        # existing receiver gets its own copy of the file contents.
         overrides = await hass.async_add_executor_job(
             _read_legacy_overrides, hass.config.path(USER_OVERRIDE_FILENAME)
         )
@@ -496,8 +498,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # The availability timeout grew device-class-aware defaults (never-expire
         # for event-driven door/motion/button sensors, the periodic default for
         # the rest). Entries that persisted the old global default (600s) as an
-        # explicit hub option would mask those per-class defaults, so drop that
-        # exact value and let the class default apply. A hub timeout the user
+        # explicit receiver option would mask those per-class defaults, so drop that
+        # exact value and let the class default apply. A receiver timeout the user
         # deliberately set to anything else is preserved.
         new_options = dict(entry.options)
         if (
@@ -506,7 +508,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ):
             del new_options[CONF_AVAILABILITY_TIMEOUT]
             LOGGER.info(
-                "Removed the old %ss availability timeout from hub %s; "
+                "Removed the old %ss availability timeout from receiver %s; "
                 "per-device-type defaults now apply",
                 LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
                 entry.title,
@@ -541,7 +543,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # (doorbells/motion/contacts) wrongly expired at the periodic timeout
         # again, taking their battery/RSSI/SNR/noise sensors unavailable. Re-strip
         # that exact sentinel (identical to the minor-4 cleanup) so the class
-        # defaults apply again; a hub timeout the user deliberately set to anything
+        # defaults apply again; a receiver timeout the user deliberately set to anything
         # else is preserved. The options flow no longer writes the sentinel, so the
         # entry cannot re-acquire it after this one-time heal.
         new_options = dict(entry.options)
@@ -552,7 +554,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             del new_options[CONF_AVAILABILITY_TIMEOUT]
             LOGGER.info(
                 "Removed the default %ss availability timeout re-saved into the "
-                "options of hub %s; per-device-type defaults now apply",
+                "options of receiver %s; per-device-type defaults now apply",
                 LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
                 entry.title,
             )
@@ -562,7 +564,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if (entry.minor_version or 1) < 8:
         # Discovery stopped being a toggle: every heard device waits in the
-        # coordinator's pending list until the user adopts it, so the per-hub
+        # coordinator's pending list until the user adopts it, so the per-receiver
         # ``discovery_enabled`` flag gates nothing. Strip it from both data and
         # options so no stale value survives into diagnostics or a config-entry
         # export. Adopted devices and their settings are untouched.
@@ -577,7 +579,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # entries reaching this step never carried it (it was optional, and
         # every entry gets the bump), and rewriting mappings that did not change
         # fires the update listener with a fresh ``entry.data`` for nothing --
-        # which on a loaded hub is a chance to reload for nothing.
+        # which on a loaded receiver is a chance to reload for nothing.
         changes: dict[str, Any] = {}
         if _RETIRED_DISCOVERY_KEY in entry.data:
             changes["data"] = {

@@ -1,6 +1,6 @@
-"""Options flow for the rtl_433 integration's hub config entry.
+"""Options flow for the rtl_433 integration's receiver config entry.
 
-A small menu offering an *add devices* step, an *ignored devices* step, a *hub*
+A small menu offering an *add devices* step, an *ignored devices* step, a *receiver*
 step, a *device* step, a *mappings* step, and a *replace* step:
 
 - **add_devices** renders the coordinator's in-memory pending list -- every
@@ -16,15 +16,15 @@ Neither approval step implements adopting or ignoring itself: both call
 API, so a device added from a form and one added from the panel are the same
 device. What lives here is the *presentation* -- what the picker labels look
 like, when a step aborts, and how the dialog closes.
-- **hub** persists the default availability timeout and the manage-settings
+- **receiver** persists the default availability timeout and the manage-settings
   toggle to ``entry.options``.
-- **device** picks a known device from the hub's ``entry.data["devices"]`` map,
+- **device** picks a known device from the receiver's ``entry.data["devices"]`` map,
   then **device_settings** sets/clears that device's availability-timeout
   override, an optional utility-meter calibration (advancing to the *calibration*
   step for a real commodity), and a per-device motion clear-delay. The picker is
   its own step so every default on the settings form can be derived from the
   selected device.
-- **mappings** edits this hub's device-library overrides as YAML.
+- **mappings** edits this receiver's device-library overrides as YAML.
 
 The sentinel rules behind those forms -- which submitted values mean "clear
 this", which mean "use the default and store nothing", and which of
@@ -39,7 +39,7 @@ eventually be two rules.
   battery-swapped sensor is by definition one the user has not added yet.
   It is last on the menu: the rarest action, and the most consequential.
 
-Split out of ``config_flow.py`` (which keeps the hub add/reconfigure/discovery
+Split out of ``config_flow.py`` (which keeps the receiver add/reconfigure/discovery
 flow); ``Rtl433ConfigFlow.async_get_options_flow`` returns this class.
 """
 
@@ -84,16 +84,16 @@ from .const import (
     DOMAIN,
 )
 from .device_replace import DeviceReplaceError, async_replace_device
-from .hub_settings import _hub_ignored_devices
+from .receiver_settings import _receiver_ignored_devices
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,
     build_device_options,
-    build_hub_options,
     build_mappings_data,
+    build_receiver_options,
     device_defaults,
     device_label,
-    hub_defaults,
+    receiver_defaults,
 )
 
 if TYPE_CHECKING:
@@ -156,11 +156,11 @@ def _pending_label(record: PendingDevice, now: datetime) -> str:
 
 
 class Rtl433OptionsFlow(OptionsFlow):
-    """Hub options: the approval steps, a hub-settings step and a device pair.
+    """Receiver options: the approval steps, a receiver-settings step and a device pair.
 
     The add-devices step is where a heard device becomes a Home Assistant device
     (or is ignored for good), and the ignored-devices step reverses the latter.
-    The hub step persists the default availability timeout and the
+    The receiver step persists the default availability timeout and the
     manage-settings toggle to ``entry.options``. The device picker chooses one device and the
     device-settings step writes that device's availability-timeout override and
     an optional utility-meter calibration into ``entry.data["devices"]``.
@@ -196,7 +196,7 @@ class Rtl433OptionsFlow(OptionsFlow):
             menu_options=[
                 "add_devices",
                 "ignored_devices",
-                "hub",
+                "receiver",
                 "device",
                 "mappings",
                 "replace",
@@ -204,9 +204,9 @@ class Rtl433OptionsFlow(OptionsFlow):
         )
 
     def _coordinator(self) -> Rtl433Coordinator | None:
-        """Return this hub's running coordinator, or ``None`` when unloaded.
+        """Return this receiver's running coordinator, or ``None`` when unloaded.
 
-        The options flow can be opened while the entry is not loaded (a hub whose
+        The options flow can be opened while the entry is not loaded (a receiver whose
         server is unreachable, or one the user disabled), and the pending list
         lives only in the coordinator's memory -- so the steps that need it have
         to be able to say so rather than raise.
@@ -235,7 +235,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         """
         coordinator = self._coordinator()
         if coordinator is None:
-            return self.async_abort(reason="hub_not_loaded")
+            return self.async_abort(reason="receiver_not_loaded")
         if not coordinator.pending:
             return self.async_abort(reason="no_pending_devices")
 
@@ -323,10 +323,10 @@ class Rtl433OptionsFlow(OptionsFlow):
         """
         coordinator = self._coordinator()
         if coordinator is None:
-            return self.async_abort(reason="hub_not_loaded")
+            return self.async_abort(reason="receiver_not_loaded")
 
         entry = self.config_entry
-        ignored = _hub_ignored_devices(entry)
+        ignored = _receiver_ignored_devices(entry)
         if not ignored:
             return self.async_abort(reason="no_ignored_devices")
 
@@ -368,10 +368,10 @@ class Rtl433OptionsFlow(OptionsFlow):
             ),
         )
 
-    async def async_step_hub(
+    async def async_step_receiver(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show and persist the hub-level options (writes ``entry.options``).
+        """Show and persist the receiver-level options (writes ``entry.options``).
 
         The availability-timeout field is ``vol.Required`` and pre-filled with a
         number, so the form echoes a value back on every save even when the user
@@ -379,7 +379,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         sentinel: a submitted value equal to the plain
         :data:`DEFAULT_AVAILABILITY_TIMEOUT` is read as "use the per-device-type
         defaults" and passed on as ``None``, which is what
-        :func:`build_hub_options` drops. Persisting it instead would mask the
+        :func:`build_receiver_options` drops. Persisting it instead would mask the
         device-class defaults — most importantly it would expire event-driven
         devices (doorbells, motion, contacts) that must never go unavailable on
         silence. Any other value (including ``0`` = never-expire) is persisted
@@ -387,7 +387,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         sentinel from older entries and stops the entry from re-acquiring it on
         every options save.
 
-        The sentinel is this form's, not the storage rule: the panel's own hub
+        The sentinel is this form's, not the storage rule: the panel's own receiver
         page asks "defaults / never / a number" outright, so it says ``None``
         when it means it and can store 600 seconds like any other value.
         """
@@ -395,16 +395,16 @@ class Rtl433OptionsFlow(OptionsFlow):
             submitted = user_input[CONF_AVAILABILITY_TIMEOUT]
             return self.async_create_entry(
                 title="",
-                data=build_hub_options(
+                data=build_receiver_options(
                     self.config_entry,
                     None if submitted == DEFAULT_AVAILABILITY_TIMEOUT else submitted,
                     user_input[CONF_MANAGE_SETTINGS],
                 ),
             )
 
-        defaults = hub_defaults(self.config_entry)
-        # `hub_defaults` reports the explicit timeout, and this field needs a
-        # number: an unset hub pre-fills with the same default the submit path
+        defaults = receiver_defaults(self.config_entry)
+        # `receiver_defaults` reports the explicit timeout, and this field needs a
+        # number: an unset receiver pre-fills with the same default the submit path
         # reads back as "unset", so an untouched save is a no-op either way.
         timeout_default = defaults[CONF_AVAILABILITY_TIMEOUT]
         if timeout_default is None:
@@ -419,19 +419,19 @@ class Rtl433OptionsFlow(OptionsFlow):
                 vol.Required(CONF_MANAGE_SETTINGS, default=manage_default): bool,
             }
         )
-        return self.async_show_form(step_id="hub", data_schema=schema)
+        return self.async_show_form(step_id="receiver", data_schema=schema)
 
     async def async_step_mappings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Edit this hub's device-library mapping overrides as YAML.
+        """Edit this receiver's device-library mapping overrides as YAML.
 
         Renders Home Assistant's native YAML editor (:class:`ObjectSelector`)
-        pre-filled with the hub's current ``entry.data[CONF_USER_MAPPINGS]``. On
+        pre-filled with the receiver's current ``entry.data[CONF_USER_MAPPINGS]``. On
         submit the parsed object is validated by :func:`validate_user_mappings`;
         any problems re-show the form (storing nothing) with the offending fields
         surfaced. A valid object is normalized and written into ``entry.data``
-        (which fires the update listener and reloads the hub); ``entry.options``
+        (which fires the update listener and reloads the receiver); ``entry.options``
         is passed back unchanged so the dialog closes without clobbering options.
         """
         errors: dict[str, str] = {}
@@ -475,11 +475,11 @@ class Rtl433OptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Persist a device's timeout override + calibration; finish the flow.
 
-        Writes the timeout override + calibration into the hub's
+        Writes the timeout override + calibration into the receiver's
         ``entry.data["devices"]`` map (the single source of truth read by the
         coordinator and the entity build). ``calibration is None`` clears any
         prior calibration. The resulting ``async_update_entry`` fires
-        ``_async_update_listener``, which reloads the hub iff the calibration map
+        ``_async_update_listener``, which reloads the receiver iff the calibration map
         actually changed.
 
         The per-device motion clear-delay is persisted into ``entry.options``
@@ -505,7 +505,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         # ``async_create_entry`` *is* the options write for a flow, so the
         # options half goes through it rather than through a second
         # ``async_update_entry`` -- which would fire the update listener again
-        # and reload the hub twice for one save.
+        # and reload the receiver twice for one save.
         return self.async_create_entry(
             title="",
             data=build_device_options(
@@ -823,7 +823,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         way -- the options flow can be opened while the entry is not loaded, and
         then the devices map alone is the candidate set. Same-model candidates
         sort first across the whole combined set, since a battery swap keeps the
-        model, and an empty candidate set (a single-device hub) aborts rather
+        model, and an empty candidate set (a single-device receiver) aborts rather
         than showing a dead-end dropdown.
 
         Adopting a pending key needs no eviction here:
@@ -860,8 +860,8 @@ class Rtl433OptionsFlow(OptionsFlow):
         pending: dict[str, Any] = getattr(coordinator, "pending", None) or {}
         # One mapping for model resolution: a coordinator ``NormalizedEvent`` and
         # a ``PendingDevice`` both carry ``.model``, so the adopted and pending
-        # halves of "what the hub has heard" resolve through the same lookup.
-        # ``getattr`` with a default keeps a not-yet-loaded hub (and a stub
+        # halves of "what the receiver has heard" resolve through the same lookup.
+        # ``getattr`` with a default keeps a not-yet-loaded receiver (and a stub
         # coordinator) from breaking the render.
         heard: dict[str, Any] = {
             **(getattr(coordinator, "devices", None) or {}),

@@ -53,7 +53,7 @@ COMPOSE_FILE = REPO_ROOT / "tests" / "integration" / "docker-compose.yml"
 OUTPUT_DIR = REPO_ROOT / "tests" / "fixtures" / "generated"
 
 # Metadata flags. `-M level` adds mod/freq/rssi/snr/noise, matching what the
-# containerized harness runs and what a real hub with level reporting sends, so
+# containerized harness runs and what a real receiver with level reporting sends, so
 # the fixtures exercise the signal-diagnostic descriptors too.
 #
 # Deliberately NOT `-M time:iso`: that stamps wall-clock time, which would make

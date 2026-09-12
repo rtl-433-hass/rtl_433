@@ -1,6 +1,6 @@
 """The one implementation of adopting, ignoring, and un-ignoring a device.
 
-Two surfaces put the same three questions to the user — the hub's options flow
+Two surfaces put the same three questions to the user — the receiver's options flow
 (``options_flow.py``, universally available) and the discovery panel's WebSocket
 API (``websocket_api.py``, admin-only and dependent on a JS module loading).
 Both must create exactly the same device: if the panel and the options form
@@ -33,7 +33,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_IGNORED_DEVICES
 from .entity import async_upsert_device
-from .hub_settings import _hub_ignored_devices
+from .receiver_settings import _receiver_ignored_devices
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -146,7 +146,7 @@ async def async_ignore_devices(
     if not keys:
         return result
 
-    ignored = _hub_ignored_devices(entry)
+    ignored = _receiver_ignored_devices(entry)
     for device_key in keys:
         if device_key in coordinator.adopted:
             result.skipped.append(device_key)
@@ -198,7 +198,7 @@ async def async_unignore_devices(
     if not keys:
         return result
 
-    ignored = _hub_ignored_devices(entry)
+    ignored = _receiver_ignored_devices(entry)
     selected = set(keys)
     for device_key in keys:
         coordinator.ignored.discard(device_key)

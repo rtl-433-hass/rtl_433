@@ -9,11 +9,11 @@
 // home hero), 02 (device page), 11 (doorbell event entity), 07 (Receiver
 // settings dialog), 05 (Device mappings editor), 08 (Device settings dialog),
 // 10 (device page with the signal-diagnostic sensors enabled and populated),
-// 14 (the hub device's Diagnostic card with the receiver-noise sensors),
+// 14 (the receiver device's Diagnostic card with the radio-noise sensors),
 // 04 (unavailable). The doorbell / energy meter / door / leak devices come from
 // ws-bridge replaying tests/fixtures.
 //
-// **Everything but the config flow is now driven through the panel.** The hub
+// **Everything but the config flow is now driven through the panel.** The receiver
 // entry registers it with `config_panel_domain`, so Configure on the entry opens
 // `/rtl_433` and there is no options dialog to drive: adding, ignoring,
 // un-ignoring, receiver settings, device settings and device mappings are all
@@ -23,7 +23,7 @@
 // harness exists to catch.
 //
 // Stages (STAGE env var):
-//   add      - log in, add the rtl_433 hub via the config flow (host=wsbridge).
+//   add      - log in, add the rtl_433 receiver via the config flow (host=wsbridge).
 //              Nothing is added to Home Assistant automatically: the heard
 //              devices sit on the coordinator's in-memory pending list until
 //              somebody clicks Add, so the run captures the panel, ignores the
@@ -37,14 +37,14 @@
 //   approve  - re-capture only the approval / ignored-devices shots against an
 //              already-running harness; for iterating.
 //   panel    - re-capture only the panel itself against an already-running
-//              harness (hub added, devices still pending); for iterating.
+//              harness (receiver added, devices still pending); for iterating.
 //   unavail  - (after run-harness.sh stops the rtl433 replay and waits past the
 //              timeout) capture the device page with all entities Unavailable.
 //   device   - re-capture only the Device settings dialog against an
-//              already-running harness (hub already added); for iterating.
-//   hub      - re-capture only the Receiver settings and Device mappings
+//              already-running harness (receiver already added); for iterating.
+//   receiver      - re-capture only the Receiver settings and Device mappings
 //              dialogs against an already-running harness; for iterating.
-//   hubnoise - re-capture only the hub Diagnostic card (receiver-noise sensors)
+//   receivernoise - re-capture only the receiver Diagnostic card (radio-noise sensors)
 //              against an already-running harness; for iterating.
 //   full     - add, then unavail (the orchestrator stops replay in between).
 //
@@ -110,8 +110,8 @@ async function login(page) {
   await page.waitForTimeout(4000);
 }
 
-async function addHubAndCapture(page) {
-  // --- Add the hub via the config flow -------------------------------------
+async function addReceiverAndCapture(page) {
+  // --- Add the receiver via the config flow -------------------------------------
   await page.goto(`${BASE}/config/integrations/dashboard/add?domain=rtl_433`, {
     waitUntil: "domcontentloaded",
   });
@@ -152,7 +152,7 @@ async function addHubAndCapture(page) {
   // Nothing is added automatically: every device the server decodes lands on the
   // coordinator's in-memory pending list and reaches Home Assistant only when a
   // person adds it. This drives the cards, captures the ignored-devices section,
-  // and leaves the hub holding the devices the later shots need.
+  // and leaves the receiver holding the devices the later shots need.
   await approveDevices(page);
 
   // --- Integration overview (docs home-page hero) --------------------------
@@ -166,7 +166,7 @@ async function addHubAndCapture(page) {
   }
   // Give the adopted fixture devices (doorbell / energy meter / door / leak) a
   // moment to finish registering too, so the integration overview used as the
-  // docs home-page hero shows the full hub.
+  // docs home-page hero shows the full receiver.
   await page.waitForTimeout(6000);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2000);
@@ -198,11 +198,11 @@ async function addHubAndCapture(page) {
   // now: the config entry's Configure control opens the panel, so there is no
   // options form to drive. Lowering the timeout here is also what makes the
   // later unavailable stage fast.
-  await captureHubSettings(page);
+  await captureReceiverSettings(page);
 
   // --- Device mappings editor ----------------------------------------------
   // Pre-fill the editor with an example override and capture it. NOT saved --
-  // storing overrides reloads the hub, and the screenshot only needs the editor
+  // storing overrides reloads the receiver, and the screenshot only needs the editor
   // showing real content.
   await captureMappings(page);
 
@@ -210,10 +210,10 @@ async function addHubAndCapture(page) {
   await captureDeviceSettings(page);
 
   // --- Per-device signal diagnostics ---------------------------------------
-  // Run last: it enables disabled-by-default entities and reloads the hub.
+  // Run last: it enables disabled-by-default entities and reloads the receiver.
   await enableAndCaptureDiagnostics(page);
-  // The hub's receiver-noise capture is a separate step (STAGE=hubnoise): it
-  // needs the orchestrator to restart the decoder first — see captureHubNoise.
+  // The receiver's radio-noise capture is a separate step (STAGE=receivernoise): it
+  // needs the orchestrator to restart the decoder first — see captureReceiverNoise.
 }
 
 // Run `fn` with the panel element as its argument, inside the page.
@@ -276,7 +276,7 @@ async function openPanel(page, { cards = 1, tries = 30, path = "" } = {}) {
 // These are subviews now rather than dialogs, so what is waited for is the
 // settings view being on screen *with a form in it*: the row navigates
 // immediately, but the form cannot be drawn until `rtl_433/settings/get` has
-// answered, and after a save that reloaded the hub that can take a couple of
+// answered, and after a save that reloaded the receiver that can take a couple of
 // seconds. A row that never produces a form is the signal that the settings
 // forms have lost their entry point, which is the failure mode this page
 // exists to avoid -- so it is said loudly rather than captured blank.
@@ -467,19 +467,19 @@ async function capturePanel(page) {
       JSON.stringify({ before, after }),
   );
 
-  // Dump what the commands themselves return, from the same live hub, so the
+  // Dump what the commands themselves return, from the same live receiver, so the
   // payloads quoted in docs/websocket-api.md are transcribed from a real
   // response rather than composed by hand. `callWS` goes over the frontend's
   // own authenticated connection -- the same one the panel uses.
   const api = await page.evaluate(async () => {
     const hass = document.querySelector("home-assistant")?.hass;
     if (!hass) return { error: "no hass on page" };
-    const hubs = await hass.callWS({ type: "rtl_433/hubs" });
-    const entryId = hubs.hubs?.[0]?.entry_id;
+    const receivers = await hass.callWS({ type: "rtl_433/hubs" });
+    const entryId = receivers.hubs?.[0]?.entry_id;
     const pending = entryId
       ? await hass.callWS({ type: "rtl_433/devices/pending", entry_id: entryId })
       : null;
-    return { hubs, pending };
+    return { receivers, pending };
   });
   console.log("screenshot: api -> " + JSON.stringify(api));
 
@@ -519,7 +519,7 @@ async function capturePanel(page) {
 // coordinator records every device it hears into an in-memory pending list, and
 // a person clicking Add is the only route out of it. The stage ignores the leak
 // detector first so the ignored section has something real to show, captures it,
-// then un-ignores and adds it -- the documented round trip -- leaving the hub
+// then un-ignores and adds it -- the documented round trip -- leaving the receiver
 // holding every replayed device.
 //
 // Driven through the cards rather than a form because that is now the only
@@ -552,7 +552,7 @@ async function approveDevices(page) {
   );
   console.log("screenshot: ignored toggle -> " + JSON.stringify(revealed));
   await page.waitForTimeout(1500);
-  // The ignored section sits below every remaining candidate, so on a hub with
+  // The ignored section sits below every remaining candidate, so on a receiver with
   // five of them it is off-screen and the capture would show the top of the
   // page instead of the thing it is named after.
   await inPanel(
@@ -599,10 +599,10 @@ async function approveDevices(page) {
   await page.waitForTimeout(4000);
 }
 
-async function captureHubNoise(page) {
+async function captureReceiverNoise(page) {
   await page.goto(`${BASE}/config/integrations/integration/rtl_433`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2000);
-  const hub = await page.evaluate(async () => {
+  const receiver = await page.evaluate(async () => {
     const hass = document.querySelector("home-assistant")?.hass;
     if (!hass) return { error: "no hass on page" };
     const devices = await hass.callWS({ type: "config/device_registry/list" });
@@ -613,9 +613,9 @@ async function captureHubNoise(page) {
       .map((e) => e.entity_id);
     return { deviceId: device?.id, noise };
   });
-  console.log("screenshot: hub device -> " + JSON.stringify(hub));
-  if (!hub?.deviceId) {
-    console.log("screenshot: hub device not found; skipping 14-hub-noise.png");
+  console.log("screenshot: receiver device -> " + JSON.stringify(receiver));
+  if (!receiver?.deviceId) {
+    console.log("screenshot: receiver device not found; skipping 14-receiver-noise.png");
     return;
   }
   // The periodic report is every 10s and a reconnect re-arms it; poll ~60s.
@@ -627,18 +627,18 @@ async function captureHubNoise(page) {
         const st = hass.states[id];
         return st && st.state !== "unknown" && st.state !== "unavailable";
       });
-    }, hub.noise || []);
+    }, receiver.noise || []);
     if (ready) break;
     await page.waitForTimeout(2000);
   }
   const states = await page.evaluate((ids) => {
     const hass = document.querySelector("home-assistant")?.hass;
     return ids.map((id) => `${id}=${hass?.states[id]?.state}`);
-  }, hub.noise || []);
-  console.log("screenshot: hub noise states -> " + JSON.stringify(states));
-  await page.goto(`${BASE}/config/devices/device/${hub.deviceId}`, { waitUntil: "domcontentloaded" });
+  }, receiver.noise || []);
+  console.log("screenshot: receiver noise states -> " + JSON.stringify(states));
+  await page.goto(`${BASE}/config/devices/device/${receiver.deviceId}`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(3000);
-  // Capture the Diagnostic card itself rather than the whole page: the hub's
+  // Capture the Diagnostic card itself rather than the whole page: the receiver's
   // sensors sit below the fold, and HA's device page scrolls an inner container
   // that ignores scripted scrollIntoView. An element screenshot also keeps the
   // shot readable at docs width. `has:` matches through shadow DOM.
@@ -648,18 +648,18 @@ async function captureHubNoise(page) {
     .first();
   if (!(await card.count())) {
     console.log("screenshot: Diagnostic card not found; capturing full page instead");
-    await shot(page, "14-hub-noise.png");
+    await shot(page, "14-receiver-noise.png");
     return;
   }
-  await card.screenshot({ path: resolve(SHOTS, "14-hub-noise.png") });
-  console.log(`screenshot: ${resolve(SHOTS, "14-hub-noise.png")}`);
+  await card.screenshot({ path: resolve(SHOTS, "14-receiver-noise.png") });
+  console.log(`screenshot: ${resolve(SHOTS, "14-receiver-noise.png")}`);
 }
 
 // The per-device signal-diagnostic sensors (frequency / RSSI / SNR / noise) are
 // disabled by default, so the plain device page only shows "+N disabled
 // entities". For docs/diagnostics.md we enable them via the authenticated
 // frontend's WebSocket API (config/entity_registry/update -> disabled_by: null),
-// reload the hub so the platform re-adds them, wait for a fresh Acurite event to
+// reload the receiver so the platform re-adds them, wait for a fresh Acurite event to
 // populate real values, then capture the device page. The Acurite capture
 // carries freq/rssi/snr/noise (decoded with -M level), so the values are real.
 async function enableAndCaptureDiagnostics(page) {
@@ -670,7 +670,7 @@ async function enableAndCaptureDiagnostics(page) {
     if (!hass) return { error: "no hass on page" };
     const ents = await hass.callWS({ type: "config/entity_registry/list" });
     // Scope to the Acurite RF device's disabled signal sensors only — never the
-    // hub's SDR center-frequency sensor.
+    // receiver's SDR center-frequency sensor.
     const targets = ents.filter(
       (e) =>
         e.platform === "rtl_433" &&
@@ -724,19 +724,19 @@ async function enableAndCaptureDiagnostics(page) {
 
 // Capture the receiver-settings dialog and lower the availability timeout.
 //
-//   07-hub-settings.png  the receiver's own settings: default availability
+//   07-receiver-settings.png  the receiver's own settings: default availability
 //                        timeout and the managed-settings toggle
 //
 // The timeout is lowered to SHORT_TIMEOUT as a side effect, which is what makes
 // the later unavailable stage finish in under a minute instead of ten.
-async function captureHubSettings(page) {
+async function captureReceiverSettings(page) {
   await openPanel(page, { cards: 0 });
-  if (!(await openPanelSettings(page, ".open-hub-settings"))) {
+  if (!(await openPanelSettings(page, ".open-receiver-settings"))) {
     return;
   }
-  await shot(page, "07-hub-settings.png");
+  await shot(page, "07-receiver-settings.png");
   console.log(
-    "screenshot: hub settings -> " +
+    "screenshot: receiver settings -> " +
       JSON.stringify(
         await inPanel(
           page,
@@ -759,7 +759,7 @@ async function captureHubSettings(page) {
         ),
       ),
   );
-  // Saving the hub form does not reload the entry (the timeout applies live), but
+  // Saving the receiver form does not reload the entry (the timeout applies live), but
   // the panel re-subscribes regardless; give it a moment to settle.
   await page.waitForTimeout(4000);
 }
@@ -800,7 +800,7 @@ async function captureDeviceSettings(page) {
   await page.waitForTimeout(1000);
   await shot(page, "08-device-settings.png");
   // Not saved: the shot only needs the form, and storing a calibration would
-  // reload the hub and change the device page shots that follow.
+  // reload the receiver and change the device page shots that follow.
   await closePanelSettings(page);
 }
 
@@ -811,7 +811,7 @@ async function captureDeviceSettings(page) {
 // The document is pushed into the panel's form state rather than typed, so the
 // editor cannot auto-indent it into something that no longer parses -- typing
 // YAML into CodeMirror character by character is exactly what used to need a
-// clipboard paste to avoid. NOT saved: storing overrides reloads the hub.
+// clipboard paste to avoid. NOT saved: storing overrides reloads the receiver.
 async function captureMappings(page) {
   await openPanel(page, { cards: 0 });
   if (!(await openPanelSettings(page, ".open-mappings"))) {
@@ -849,36 +849,36 @@ async function run() {
       await captureUnavailable(page);
     } else if (STAGE === "device") {
       // Iterate the Device-settings + calibration captures against an already
-      // running harness (hub already added). Not part of the full pipeline.
+      // running harness (receiver already added). Not part of the full pipeline.
       await captureDeviceSettings(page);
-    } else if (STAGE === "hubnoise") {
-      // Iterate only the hub device page / receiver-noise capture against an
-      // already running harness (hub already added).
-      await captureHubNoise(page);
+    } else if (STAGE === "receivernoise") {
+      // Iterate only the receiver device page / radio-noise capture against an
+      // already running harness (receiver already added).
+      await captureReceiverNoise(page);
     } else if (STAGE === "panel") {
       // Iterate only the discovery-panel capture against an already running
-      // harness (hub added, devices still pending). Not part of the full
+      // harness (receiver added, devices still pending). Not part of the full
       // pipeline.
       await capturePanel(page);
     } else if (STAGE === "approve") {
       // Iterate only the approval + ignored-devices captures against an already
-      // running harness (hub already added, devices still pending). Not part of
+      // running harness (receiver already added, devices still pending). Not part of
       // the full pipeline.
       await approveDevices(page);
-    } else if (STAGE === "hub") {
+    } else if (STAGE === "receiver") {
       // Iterate only the receiver-settings and device-mappings dialogs against
       // an already running harness. Not part of the full pipeline.
-      await captureHubSettings(page);
+      await captureReceiverSettings(page);
       await captureMappings(page);
     } else if (STAGE === "diagnostics") {
       // Iterate only the enable-and-capture diagnostics step against an already
-      // running harness (hub already added).
+      // running harness (receiver already added).
       await enableAndCaptureDiagnostics(page);
     } else if (STAGE === "add") {
-      await addHubAndCapture(page);
+      await addReceiverAndCapture(page);
     } else {
       // full: add stage only; run-harness.sh stops replay then re-invokes unavail.
-      await addHubAndCapture(page);
+      await addReceiverAndCapture(page);
     }
   } finally {
     await browser.close();

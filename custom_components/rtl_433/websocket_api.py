@@ -1,27 +1,27 @@
 """WebSocket API for the rtl_433 discovery panel.
 
 Admin-gated commands that expose the pending-device list, the three things a
-user can do with it, and the hub's settings. They are the panel's data source, but they are not
+user can do with it, and the receiver's settings. They are the panel's data source, but they are not
 *only* that: the same commands are the scriptable, UI-free way to see what a
 receiver is hearing and to approve it, and they are testable without loading any
 JavaScript at all.
 
-- ``rtl_433/hubs`` — the configured hubs, so a caller can address one.
-- ``rtl_433/devices/pending`` — one hub's candidates, plus its ignore list.
+- ``rtl_433/hubs`` — the configured receivers, so a caller can address one.
+- ``rtl_433/devices/pending`` — one receiver's candidates, plus its ignore list.
 - ``rtl_433/devices/add`` / ``.../ignore`` / ``.../unignore`` — the three
   actions, each delegating to :mod:`.adoption` so they do exactly what the
   options flow does.
 - ``rtl_433/devices/subscribe`` — the same payload as ``.../pending``, pushed
   when it changes.
-- ``rtl_433/settings/get`` and ``.../hub`` / ``.../device`` / ``.../mappings`` —
-  the hub's own settings, one device's settings, and the device-library
+- ``rtl_433/settings/get`` and ``.../receiver`` / ``.../device`` / ``.../mappings`` —
+  the receiver's own settings, one device's settings, and the device-library
   overrides. These are the panel's half of the same forms the options flow
   renders; both sides build their dicts with :mod:`.settings`, so what a form
   stores does not depend on which form was used.
 
-Every command names a hub by ``entry_id`` and resolves it through
+Every command names a receiver by ``entry_id`` and resolves it through
 :func:`_async_get_coordinator`, which answers a bad id with a WebSocket error
-rather than an exception. A panel left open across a hub reload will send
+rather than an exception. A panel left open across a receiver reload will send
 commands for an entry that is momentarily not loaded, and that is a normal
 condition to report, not a crash to log.
 
@@ -102,16 +102,16 @@ from .const import (
 from .coordinator import Rtl433Coordinator
 from .device_replace import DeviceReplaceError, async_replace_device
 from .entity import resolve_event_type
-from .hub_settings import _hub_ignored_devices
+from .receiver_settings import _receiver_ignored_devices
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,
     build_device_options,
-    build_hub_options,
     build_mappings_data,
+    build_receiver_options,
     device_defaults,
     entry_registry,
-    hub_defaults,
+    receiver_defaults,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -123,15 +123,15 @@ _LOGGER = logging.getLogger(__name__)
 # changes do not wait for this -- they push at once.
 _REFRESH_INTERVAL: Final = timedelta(seconds=5)
 
-# Error code for a hub whose entry exists but is not set up. Distinct from
-# ``ERR_NOT_FOUND`` (no such entry) so the caller can tell a hub that is
+# Error code for a receiver whose entry exists but is not set up. Distinct from
+# ``ERR_NOT_FOUND`` (no such entry) so the caller can tell a receiver that is
 # temporarily unavailable from an entry id that does not exist.
 ERR_NOT_LOADED: Final = "not_loaded"
 # A replace the user asked for that the helper refused: an unknown survivor, or
 # the same key on both sides. Its own code rather than ``not_loaded`` so a script
-# can tell "your hub is mid-reload, retry" from "that request cannot work".
+# can tell "your receiver is mid-reload, retry" from "that request cannot work".
 ERR_REPLACE_FAILED: Final = "replace_failed"
-# Mapping overrides the user submitted that this hub will not store: YAML that
+# Mapping overrides the user submitted that this receiver will not store: YAML that
 # does not parse, or a document that parses but breaks the override schema. Its own code so
 # the caller can render the problems in the editor rather than as a generic
 # failure, and the message carries them joined for a client that cannot.
@@ -142,15 +142,15 @@ ERR_INVALID_MAPPINGS: Final = "invalid_mappings"
 def async_register_commands(hass: HomeAssistant) -> None:
     """Register the discovery commands.
 
-    Called from every hub's ``async_setup_entry`` because this integration is
+    Called from every receiver's ``async_setup_entry`` because this integration is
     entry-only. Command names are global and registration is really per Home
     Assistant *run*, but it needs no guard of its own:
     ``async_register_command`` is a dict assignment keyed by command name, so a
-    second hub -- or the same hub reloading -- rewrites the same entries with the
+    second receiver -- or the same receiver reloading -- rewrites the same entries with the
     same handlers. Registering is idempotent, so the simplest thing that works is
     to just register.
     """
-    websocket_api.async_register_command(hass, ws_hubs)
+    websocket_api.async_register_command(hass, ws_receivers)
     websocket_api.async_register_command(hass, ws_pending_devices)
     websocket_api.async_register_command(hass, ws_add_devices)
     websocket_api.async_register_command(hass, ws_ignore_devices)
@@ -159,7 +159,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_clear_devices)
     websocket_api.async_register_command(hass, ws_subscribe_devices)
     websocket_api.async_register_command(hass, ws_get_settings)
-    websocket_api.async_register_command(hass, ws_set_hub_settings)
+    websocket_api.async_register_command(hass, ws_set_receiver_settings)
     websocket_api.async_register_command(hass, ws_set_device_settings)
     websocket_api.async_register_command(hass, ws_set_mappings)
 
@@ -170,13 +170,13 @@ def _async_get_coordinator(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> tuple[ConfigEntry, Rtl433Coordinator] | None:
-    """Resolve ``msg["entry_id"]`` to a hub, or answer with an error.
+    """Resolve ``msg["entry_id"]`` to a receiver, or answer with an error.
 
     Returns ``None`` after sending the error, so every handler's first line can
     be a bail-out and a bad ``entry_id`` never escapes as an exception. Two
     distinct failures are worth distinguishing to the caller: an id that names no
     entry of this integration at all (a stale panel bookmark, or a typo in a
-    script) and one whose entry exists but is not set up (a hub mid-reload, or one
+    script) and one whose entry exists but is not set up (a receiver mid-reload, or one
     whose server is unreachable). The pending list lives only in the
     coordinator's memory, so the second case has nothing to answer with either --
     but it is a wait, not a mistake.
@@ -187,7 +187,7 @@ def _async_get_coordinator(
         connection.send_error(
             msg["id"],
             websocket_api.const.ERR_NOT_FOUND,
-            f"Unknown rtl_433 hub {entry_id}",
+            f"Unknown rtl_433 receiver {entry_id}",
         )
         return None
 
@@ -196,7 +196,7 @@ def _async_get_coordinator(
         connection.send_error(
             msg["id"],
             ERR_NOT_LOADED,
-            f"rtl_433 hub {entry.title} is not loaded",
+            f"rtl_433 receiver {entry.title} is not loaded",
         )
         return None
 
@@ -213,12 +213,12 @@ async def async_preload_entity_metadata(hass: HomeAssistant) -> None:
     them is what lets this payload promise "these are the entities you are
     about to get" rather than an approximation of them.
 
-    Loaded once during hub setup because both accessors do file I/O on first
+    Loaded once during receiver setup because both accessors do file I/O on first
     use, and cached so ``_pending_payload`` -- a sync ``@callback`` -- can
     resolve without awaiting. Failure is not fatal: the preview degrades to
-    un-iconed, un-translated rows rather than failing a hub's setup.
+    un-iconed, un-translated rows rather than failing a receiver's setup.
 
-    The strings are fetched for the language configured *now*. A hub reload
+    The strings are fetched for the language configured *now*. A receiver reload
     picks up a language change; nothing else does.
     """
     domain_data = hass.data.setdefault(DOMAIN, {})
@@ -340,7 +340,7 @@ def _reading_name(descriptor: FieldDescriptor, meta: _EntityMeta) -> str:
 
     That derivation is a *lookup*, not a spelling rule -- core's table says
     ``pm25`` is "PM2.5" and ``aqi`` is "Air quality index", which no amount of
-    underscore-replacing produces -- and it is translated, so a German hub
+    underscore-replacing produces -- and it is translated, so a German receiver
     previews the same word its device page will show.
 
     A field with neither a name nor a device class core knows is titled after
@@ -464,7 +464,7 @@ def _readings(
 def _pending_payload(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: Rtl433Coordinator
 ) -> dict[str, Any]:
-    """Render one hub's approval state: the candidates and the ignore list.
+    """Render one receiver's approval state: the candidates and the ignore list.
 
     One payload rather than two commands so the panel has a single renderer and a
     single source of truth for a screen that shows both -- and so an un-ignore,
@@ -492,8 +492,8 @@ def _pending_payload(
     registry = entry_registry(hass, entry)
     meta: _EntityMeta = hass.data.get(DOMAIN, {}).get(DATA_ENTITY_META, _EMPTY_META)
     return {
-        # Whether the hub's socket to the rtl_433 server is up -- the same fact
-        # the hub's Connectivity binary sensor reports. The panel cannot work
+        # Whether the receiver's socket to the rtl_433 server is up -- the same fact
+        # the receiver's Connectivity binary sensor reports. The panel cannot work
         # this out for itself: its own subscription stays healthy while the
         # receiver's connection is down, so a page that inferred it from "am I
         # receiving payloads?" would say Online through an outage.
@@ -516,9 +516,9 @@ def _pending_payload(
                 "model": stored.get(device_key, {}).get(CONF_MODEL)
                 or coordinator.ignored_models.get(device_key, ""),
             }
-            for device_key in sorted(_hub_ignored_devices(entry))
+            for device_key in sorted(_receiver_ignored_devices(entry))
         ],
-        # The devices this hub already has, offered as the thing a candidate can
+        # The devices this receiver already has, offered as the thing a candidate can
         # replace. Sent with the candidates rather than fetched when the
         # dialog opens, so the candidate and the devices it could replace always
         # come from the same snapshot and cannot disagree.
@@ -548,7 +548,7 @@ async def _async_run_action(
         Awaitable[AdoptionResult],
     ],
 ) -> None:
-    """Resolve the hub, run one :mod:`.adoption` verb, and reply with the result.
+    """Resolve the receiver, run one :mod:`.adoption` verb, and reply with the result.
 
     The three action commands differ only in which verb they call: each resolves
     the same ``entry_id``, hands the same ``device_keys`` to its function, and
@@ -573,15 +573,15 @@ async def _async_run_action(
 @websocket_api.websocket_command({vol.Required("type"): "rtl_433/hubs"})
 @websocket_api.require_admin
 @callback
-def ws_hubs(
+def ws_receivers(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """List this integration's hubs so a caller can pick one to address.
+    """List this integration's receivers so a caller can pick one to address.
 
     Every other command needs an ``entry_id``, and a panel opened from the
-    sidebar has no way to know one. Hubs that are not loaded are listed too,
+    sidebar has no way to know one. Receivers that are not loaded are listed too,
     flagged rather than hidden: a user with an unreachable receiver should see it
     named and explained, not silently absent while they wonder where it went.
     """
@@ -613,7 +613,7 @@ def ws_pending_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Return one hub's pending candidates and its ignore list.
+    """Return one receiver's pending candidates and its ignore list.
 
     The one-shot form of what ``rtl_433/devices/subscribe`` pushes, for a caller
     that wants an answer rather than a stream -- a script, a diagnostic, or a
@@ -783,7 +783,7 @@ def ws_subscribe_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Push one hub's approval state whenever it changes.
+    """Push one receiver's approval state whenever it changes.
 
     The pending list changes continuously by design -- that is what makes a
     config-flow form the wrong shape for it -- so the panel subscribes rather
@@ -794,7 +794,7 @@ def ws_subscribe_devices(
     signal fires only on a *membership* change and pushes at once. The
     :data:`_REFRESH_INTERVAL` timer covers what fires no signal -- a repeat
     sighting ageing a row's count and last-seen -- and sends only when the
-    rendered payload differs from the last one sent, so an idle hub costs nothing
+    rendered payload differs from the last one sent, so an idle receiver costs nothing
     and a busy one costs at most one message per interval.
 
     The comparison against ``last_sent`` guards the immediate path too. It is
@@ -807,16 +807,16 @@ def ws_subscribe_devices(
     timer down with the listener and never leaves an orphaned interval firing
     against a dead connection.
 
-    The **coordinator is re-resolved on every render**, never captured. A hub
+    The **coordinator is re-resolved on every render**, never captured. A receiver
     reload replaces the object in ``hass.data`` while the subscription lives on
     (the config entry, and so the dispatcher signal, survive the reload), so a
     captured coordinator would be a stopped one whose pending map never changes
     again -- the panel would sit on a frozen list for the rest of the session
     without ever reporting an error. Re-reading it means the first render after
-    the new coordinator lands shows what the running hub is actually hearing.
+    the new coordinator lands shows what the running receiver is actually hearing.
     While the entry is mid-reload there is briefly no coordinator at all; that is
     a gap of milliseconds with nothing truthful to say, so the render is skipped
-    and the last payload stands until the hub is back.
+    and the last payload stands until the receiver is back.
     """
     resolved = _async_get_coordinator(hass, connection, msg)
     if resolved is None:
@@ -871,7 +871,7 @@ def ws_subscribe_devices(
 # --------------------------------------------------------------------------- #
 # Settings.                                                                    #
 #                                                                              #
-# The hub's own options, one device's overrides, and the device-library         #
+# The receiver's own options, one device's overrides, and the device-library         #
 # mapping overrides -- the three forms that used to be reachable only through   #
 # the options flow, and are now the panel's dialogs as well. Every rule about   #
 # what a submitted value *means* lives in ``settings.py``; these commands are   #
@@ -881,7 +881,7 @@ def ws_subscribe_devices(
 
 
 def _mappings_yaml(entry: ConfigEntry) -> str:
-    """Render this hub's mapping overrides as the YAML a user would type.
+    """Render this receiver's mapping overrides as the YAML a user would type.
 
     The overrides are stored as a plain nested mapping, and YAML is how the
     documentation writes them and how the options flow's editor showed them --
@@ -889,7 +889,7 @@ def _mappings_yaml(entry: ConfigEntry) -> str:
     would have to translate in their head.
 
     An empty override set renders as the empty string rather than ``{}``, so a
-    hub that has never overridden anything opens an empty editor instead of one
+    receiver that has never overridden anything opens an empty editor instead of one
     holding a token the user has to delete before typing.
 
     ``allow_unicode=True`` matters more here than it looks. Units are exactly
@@ -937,7 +937,7 @@ def ws_get_settings(
         return
     entry, _coordinator = resolved
 
-    hub = hub_defaults(entry)
+    receiver = receiver_defaults(entry)
     devices = [
         device_defaults(hass, entry, device_key)
         for device_key in sorted(entry.data.get(CONF_DEVICES, {}))
@@ -945,7 +945,7 @@ def ws_get_settings(
     connection.send_result(
         msg["id"],
         {
-            "hub": hub,
+            "hub": receiver,
             "defaults": {
                 CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
                 DEVICE_MOTION_CLEAR_DELAY: DEFAULT_MOTION_CLEAR_DELAY,
@@ -967,7 +967,7 @@ def ws_get_settings(
         vol.Required("entry_id"): str,
         # `None` is "use the per-device-type defaults", which is a choice the
         # panel offers outright rather than encoding as a magic number -- see
-        # `build_hub_options`.
+        # `build_receiver_options`.
         vol.Required(CONF_AVAILABILITY_TIMEOUT): vol.Any(
             None, vol.All(int, vol.Range(min=0))
         ),
@@ -976,16 +976,16 @@ def ws_get_settings(
 )
 @websocket_api.require_admin
 @callback
-def ws_set_hub_settings(
+def ws_set_receiver_settings(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Persist the hub-level options.
+    """Persist the receiver-level options.
 
     ``async_update_entry`` is the whole write: it fires the update listener,
     which pushes a changed timeout into the running coordinator live and reloads
-    the hub only if the manage-settings toggle moved. Nothing is reloaded here
+    the receiver only if the manage-settings toggle moved. Nothing is reloaded here
     for the same reason the config flow does not -- one writer, one listener, one
     reload.
     """
@@ -995,11 +995,11 @@ def ws_set_hub_settings(
     entry, _coordinator = resolved
     hass.config_entries.async_update_entry(
         entry,
-        options=build_hub_options(
+        options=build_receiver_options(
             entry, msg[CONF_AVAILABILITY_TIMEOUT], msg[CONF_MANAGE_SETTINGS]
         ),
     )
-    connection.send_result(msg["id"], hub_defaults(entry))
+    connection.send_result(msg["id"], receiver_defaults(entry))
 
 
 @websocket_api.websocket_command(
@@ -1100,7 +1100,7 @@ def ws_set_mappings(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Validate and store this hub's device-library mapping overrides.
+    """Validate and store this receiver's device-library mapping overrides.
 
     The document arrives as text and is parsed here rather than in the panel,
     which has no YAML parser and should not grow one. ``yaml.safe_load`` and not

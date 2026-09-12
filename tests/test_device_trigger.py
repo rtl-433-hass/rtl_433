@@ -1,7 +1,7 @@
 """Tests for the device-automation triggers exposed for event entities.
 
 These exercise ``custom_components/rtl_433/device_trigger.py`` end-to-end against
-a live hub: a seeded ``button`` event device is resolved in the device registry,
+a live receiver: a seeded ``button`` event device is resolved in the device registry,
 ``async_get_triggers`` is asserted to enumerate the per-entity base trigger plus
 the persisted ``A``/``B`` subtypes, and the firing behaviour is checked by
 attaching real triggers and feeding transmissions through the coordinator.
@@ -45,20 +45,20 @@ from homeassistant.helpers.trigger import async_initialize_triggers
 from homeassistant.util import dt as dt_util
 
 # Module-local helpers from the lifecycle suite (not injectable fixtures): a
-# single hub set up through ``async_setup_entry`` with the WebSocket stubbed,
+# single receiver set up through ``async_setup_entry`` with the WebSocket stubbed,
 # plus a frame-injection helper that drives the live coordinator.
-from tests.test_lifecycle import _coordinator, _feed, _setup_hub
+from tests.test_lifecycle import _coordinator, _feed, _setup_receiver
 
 DEVICE_KEY = "Acurite-606TX-42"
 MODEL = "Acurite-606TX"
 DEVICE_ID = 42
 
 
-async def _setup_button_hub(hass, hub_entry_builder):
-    """Set up a hub seeded with a single ``button`` event device (types A/B)."""
-    hub = await _setup_hub(
+async def _setup_button_receiver(hass, receiver_entry_builder):
+    """Set up a receiver seeded with a single ``button`` event device (types A/B)."""
+    receiver = await _setup_receiver(
         hass,
-        hub_entry_builder,
+        receiver_entry_builder,
         devices={
             DEVICE_KEY: {
                 CONF_MODEL: MODEL,
@@ -67,13 +67,13 @@ async def _setup_button_hub(hass, hub_entry_builder):
             }
         },
     )
-    return hub
+    return receiver
 
 
-def _resolve_device_id(hass: HomeAssistant, hub_entry_id: str) -> str:
+def _resolve_device_id(hass: HomeAssistant, receiver_entry_id: str) -> str:
     """Resolve the nested RF device's HA ``device_id`` from its identifiers."""
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{hub_entry_id}:{DEVICE_KEY}"), hub_entry_id
+        (DOMAIN, f"{receiver_entry_id}:{DEVICE_KEY}"), receiver_entry_id
     )
     assert device is not None
     return device.id
@@ -127,15 +127,17 @@ async def _attach(hass: HomeAssistant, trigger: dict) -> tuple[list, callable]:
 # --------------------------------------------------------------------------- #
 # Enumeration.                                                                 #
 # --------------------------------------------------------------------------- #
-async def test_async_get_triggers_enumerates_base_and_subtypes(hass, hub_entry_builder):
+async def test_async_get_triggers_enumerates_base_and_subtypes(
+    hass, receiver_entry_builder
+):
     """A seeded button device yields its base trigger + the A/B subtypes."""
-    hub = await _setup_button_hub(hass, hub_entry_builder)
-    device_id = _resolve_device_id(hass, hub.entry_id)
+    receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+    device_id = _resolve_device_id(hass, receiver.entry_id)
 
     ent_reg = er.async_get(hass)
     button_entry = ent_reg.async_get(
         ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
     )
     assert button_entry is not None
@@ -165,11 +167,13 @@ async def test_async_get_triggers_enumerates_base_and_subtypes(hass, hub_entry_b
 # --------------------------------------------------------------------------- #
 # Base trigger fires on every transmission, including a same-value repeat.     #
 # --------------------------------------------------------------------------- #
-async def test_base_trigger_fires_per_transmission_incl_repeat(hass, hub_entry_builder):
+async def test_base_trigger_fires_per_transmission_incl_repeat(
+    hass, receiver_entry_builder
+):
     """The base trigger fires once per transmission — A then A => two fires."""
-    hub = await _setup_button_hub(hass, hub_entry_builder)
-    device_id = _resolve_device_id(hass, hub.entry_id)
-    coordinator = _coordinator(hass, hub)
+    receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+    device_id = _resolve_device_id(hass, receiver.entry_id)
+    coordinator = _coordinator(hass, receiver)
 
     triggers = await async_get_triggers(hass, device_id)
     base = next(t for t in triggers if t[CONF_TYPE] == TRIGGER_TYPE_TRIGGERED)
@@ -186,12 +190,12 @@ async def test_base_trigger_fires_per_transmission_incl_repeat(hass, hub_entry_b
 # repeat (the behaviour the custom listener exists to provide).                #
 # --------------------------------------------------------------------------- #
 async def test_subtype_trigger_fires_on_every_matching_press_incl_repeat(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The A-subtyped trigger fires on each matching press — A,A => two fires."""
-    hub = await _setup_button_hub(hass, hub_entry_builder)
-    device_id = _resolve_device_id(hass, hub.entry_id)
-    coordinator = _coordinator(hass, hub)
+    receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+    device_id = _resolve_device_id(hass, receiver.entry_id)
+    coordinator = _coordinator(hass, receiver)
 
     triggers = await async_get_triggers(hass, device_id)
     subtype_a = next(
@@ -210,7 +214,7 @@ async def test_subtype_trigger_fires_on_every_matching_press_incl_repeat(
 # --------------------------------------------------------------------------- #
 # Neither trigger re-fires on the entity's restore at HA restart.              #
 # --------------------------------------------------------------------------- #
-async def test_triggers_do_not_fire_on_restore_at_startup(hass, hub_entry_builder):
+async def test_triggers_do_not_fire_on_restore_at_startup(hass, receiver_entry_builder):
     """The restored last event (``old_state is None``) must not re-fire triggers.
 
     Across a restart HA's ``EventEntity`` restores its last ``event_type`` +
@@ -220,13 +224,13 @@ async def test_triggers_do_not_fire_on_restore_at_startup(hass, hub_entry_builde
     days ago) on every HA restart. Both the base and the subtyped trigger must
     ignore it — yet a genuine press afterwards still fires.
     """
-    hub = await _setup_button_hub(hass, hub_entry_builder)
-    device_id = _resolve_device_id(hass, hub.entry_id)
-    coordinator = _coordinator(hass, hub)
+    receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+    device_id = _resolve_device_id(hass, receiver.entry_id)
+    coordinator = _coordinator(hass, receiver)
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+        "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
     )
 
     triggers = await async_get_triggers(hass, device_id)
@@ -266,7 +270,9 @@ async def test_triggers_do_not_fire_on_restore_at_startup(hass, hub_entry_builde
 # --------------------------------------------------------------------------- #
 # Neither trigger re-fires on a config-entry reload (the phantom-ring bug).     #
 # --------------------------------------------------------------------------- #
-async def test_triggers_do_not_fire_on_config_entry_reload(hass, hub_entry_builder):
+async def test_triggers_do_not_fire_on_config_entry_reload(
+    hass, receiver_entry_builder
+):
     """A reload must not re-fire the last event (the phantom doorbell "ring").
 
     Reproduces the reported bug: with an automation already listening, a
@@ -278,13 +284,13 @@ async def test_triggers_do_not_fire_on_config_entry_reload(hass, hub_entry_build
     both triggers re-fired a stale press. Neither must fire on the reload, yet a
     genuine press afterwards still does.
     """
-    hub = await _setup_button_hub(hass, hub_entry_builder)
-    device_id = _resolve_device_id(hass, hub.entry_id)
-    coordinator = _coordinator(hass, hub)
+    receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+    device_id = _resolve_device_id(hass, receiver.entry_id)
+    coordinator = _coordinator(hass, receiver)
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+        "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
     )
 
     # A real press so the entity has a last fired event HA restores on reload.
@@ -312,7 +318,7 @@ async def test_triggers_do_not_fire_on_config_entry_reload(hass, hub_entry_build
 
     unsub_spy = async_track_state_change_event(hass, [entity_id], _spy)
 
-    assert await hass.config_entries.async_reload(hub.entry_id)
+    assert await hass.config_entries.async_reload(receiver.entry_id)
     await hass.async_block_till_done()
     unsub_spy()
 
@@ -323,7 +329,7 @@ async def test_triggers_do_not_fire_on_config_entry_reload(hass, hub_entry_build
     assert sub_calls == []
 
     # A genuine press after the reload still fires both (the guard is not blanket).
-    coordinator = _coordinator(hass, hub)  # reload rebuilt the coordinator
+    coordinator = _coordinator(hass, receiver)  # reload rebuilt the coordinator
     await _feed_presses(hass, coordinator, ["A"])
     assert len(base_calls) == 1
     assert len(sub_calls) == 1
@@ -333,12 +339,12 @@ async def test_triggers_do_not_fire_on_config_entry_reload(hass, hub_entry_build
 
 
 # --------------------------------------------------------------------------- #
-# Neither trigger re-fires when the hub reconnects after an outage.            #
+# Neither trigger re-fires when the receiver reconnects after an outage.            #
 # --------------------------------------------------------------------------- #
-async def test_triggers_do_not_fire_on_hub_reconnect(hass, hub_entry_builder):
-    """A hub outage + reconnect must not re-fire the last press.
+async def test_triggers_do_not_fire_on_receiver_reconnect(hass, receiver_entry_builder):
+    """A receiver outage + reconnect must not re-fire the last press.
 
-    Event entities are gated on the hub connection like every other device
+    Event entities are gated on the receiver connection like every other device
     entity, so an outage drives the same ``<event> -> unavailable -> restored
     <event>`` round trip a config-entry reload does — now on every socket drop,
     not just a reload. Two independent guards have to hold:
@@ -351,13 +357,13 @@ async def test_triggers_do_not_fire_on_hub_reconnect(hass, hub_entry_builder):
 
     A genuine live press after the reconnect must still fire both.
     """
-    hub = await _setup_button_hub(hass, hub_entry_builder)
-    device_id = _resolve_device_id(hass, hub.entry_id)
-    coordinator = _coordinator(hass, hub)
+    receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+    device_id = _resolve_device_id(hass, receiver.entry_id)
+    coordinator = _coordinator(hass, receiver)
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+        "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
     )
 
     await _feed_presses(hass, coordinator, ["A"])
@@ -384,16 +390,16 @@ async def test_triggers_do_not_fire_on_hub_reconnect(hass, hub_entry_builder):
 
     unsub_spy = async_track_state_change_event(hass, [entity_id], _spy)
 
-    # Drop the socket: the event entity goes unavailable with the rest of the hub.
+    # Drop the socket: the event entity goes unavailable with the rest of the receiver.
     coordinator._client.connected = False
-    coordinator._emit_hub_update()
+    coordinator._emit_receiver_update()
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == "unavailable"
 
     # Reconnect, then let the server replay its recent buffer (an old ``time``
     # classifies the frame as a replay) exactly as it does on every connection.
     coordinator._client.connected = True
-    coordinator._emit_hub_update()
+    coordinator._emit_receiver_update()
     await hass.async_block_till_done()
     _feed(
         coordinator,
@@ -426,11 +432,13 @@ async def test_triggers_do_not_fire_on_hub_reconnect(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 # Subtyped trigger stays silent for a non-matching event_type.                 #
 # --------------------------------------------------------------------------- #
-async def test_subtype_trigger_silent_for_non_matching_type(hass, hub_entry_builder):
+async def test_subtype_trigger_silent_for_non_matching_type(
+    hass, receiver_entry_builder
+):
     """The A-subtyped trigger does not fire when a B press arrives."""
-    hub = await _setup_button_hub(hass, hub_entry_builder)
-    device_id = _resolve_device_id(hass, hub.entry_id)
-    coordinator = _coordinator(hass, hub)
+    receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+    device_id = _resolve_device_id(hass, receiver.entry_id)
+    coordinator = _coordinator(hass, receiver)
 
     triggers = await async_get_triggers(hass, device_id)
     subtype_a = next(

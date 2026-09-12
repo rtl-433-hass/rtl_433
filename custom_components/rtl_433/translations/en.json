@@ -24,12 +24,12 @@
           "path": "WebSocket endpoint path on the server (default /ws).",
           "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy).",
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
-          "initial_frequency": "Set the receiver's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
+          "initial_frequency": "Set the radio's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
         }
       },
       "reconfigure": {
-        "title": "Reconfigure rtl_433 hub",
-        "description": "Update this hub's connection target, or re-point it at a replacement radio. Nested devices and their history are preserved.",
+        "title": "Reconfigure rtl_433 receiver",
+        "description": "Update this receiver's connection target, or re-point it at a replacement radio. Nested devices and their history are preserved.",
         "data": {
           "radio_id": "New radio ID (unique_id)",
           "host": "Host",
@@ -47,12 +47,12 @@
       },
       "hassio_replace": {
         "title": "Replace a radio?",
-        "description": "A new radio published by the {addon} add-on at `{host}:{port}` was discovered. If it replaces a radio on an existing hub, choose that hub to keep its devices and history. Otherwise add it as a new radio.",
+        "description": "A new radio published by the {addon} add-on at `{host}:{port}` was discovered. If it replaces a radio on an existing receiver, choose that receiver to keep its devices and history. Otherwise add it as a new radio.",
         "data": {
           "replaces": "This radio replaces"
         },
         "data_description": {
-          "replaces": "Pick the existing hub whose radio you swapped, or \"It's a new radio\" to add it separately."
+          "replaces": "Pick the existing receiver whose radio you swapped, or \"It's a new radio\" to add it separately."
         }
       },
       "hassio_confirm": {
@@ -64,7 +64,7 @@
         },
         "data_description": {
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
-          "initial_frequency": "Set the receiver's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
+          "initial_frequency": "Set the radio's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
         }
       }
     },
@@ -76,7 +76,7 @@
     },
     "error": {
       "cannot_connect": "Failed to connect. Check the host, port, and path, and that the rtl_433 server is reachable.",
-      "id_in_use": "That radio ID is already used by another configured hub."
+      "id_in_use": "That radio ID is already used by another configured receiver."
     }
   },
   "options": {
@@ -87,7 +87,7 @@
         "menu_options": {
           "add_devices": "Add discovered devices",
           "ignored_devices": "Ignored devices",
-          "hub": "Hub settings",
+          "receiver": "Receiver settings",
           "device": "Device settings",
           "mappings": "Device mappings",
           "replace": "Replace device"
@@ -115,8 +115,8 @@
           "unignore": "The devices to offer again the next time they transmit."
         }
       },
-      "hub": {
-        "title": "Hub settings",
+      "receiver": {
+        "title": "Receiver settings",
         "description": "Configure the default availability timeout for this rtl_433 server. rtl_433 connection settings are in the three-dot overflow menu under \"reconfigure\".",
         "data": {
           "availability_timeout": "Availability timeout (seconds)",
@@ -139,7 +139,7 @@
       },
       "device_settings": {
         "title": "Device settings",
-        "description": "Settings for {device}. Leave the timeout blank to clear the override and use the hub default. For a utility meter, choose a commodity to calibrate its consumption sensor for the Energy dashboard.",
+        "description": "Settings for {device}. Leave the timeout blank to clear the override and use the receiver default. For a utility meter, choose a commodity to calibrate its consumption sensor for the Energy dashboard.",
         "data": {
           "timeout_override": "Availability timeout override (seconds)",
           "commodity": "Meter commodity",
@@ -153,7 +153,7 @@
       },
       "mappings": {
         "title": "Device mappings",
-        "description": "Add or correct this hub's device-library mappings as YAML, using the same schema as the shipped library. See [how to write mappings]({docs_url}) for the format, examples, and how to scope an override to one device model. {problems}",
+        "description": "Add or correct this receiver's device-library mappings as YAML, using the same schema as the shipped library. See [how to write mappings]({docs_url}) for the format, examples, and how to scope an override to one device model. {problems}",
         "data": {
           "user_mappings": "Mappings (YAML)"
         }
@@ -192,7 +192,7 @@
       }
     },
     "abort": {
-      "hub_not_loaded": "This hub is not running, so its discovered devices are not available. Start or reload the hub, then try again.",
+      "receiver_not_loaded": "This receiver is not running, so its discovered devices are not available. Start or reload the receiver, then try again.",
       "no_pending_devices": "No new devices are waiting to be added. Devices appear here as they transmit, and the list starts empty after every restart, so a sensor that reports infrequently can take a while to show up.",
       "no_ignored_devices": "No devices are ignored.",
       "no_devices": "No devices have been discovered yet.",
@@ -225,7 +225,7 @@
         "step": {
           "confirm": {
             "title": "rtl_433 server unreachable",
-            "description": "Home Assistant cannot reach the configured rtl_433 server. If you replaced the radio, enter the replacement's ID (its unique_id from the add-on log/status) and connection details below to re-point this hub — your devices and history are preserved. If the server is just temporarily down, leave the fields unchanged and submit to retry; the card also clears automatically once the connection is restored.",
+            "description": "Home Assistant cannot reach the configured rtl_433 server. If you replaced the radio, enter the replacement's ID (its unique_id from the add-on log/status) and connection details below to re-point this receiver — your devices and history are preserved. If the server is just temporarily down, leave the fields unchanged and submit to retry; the card also clears automatically once the connection is restored.",
             "data": {
               "radio_id": "New radio ID (unique_id)",
               "host": "Host",
@@ -250,7 +250,7 @@
         "step": {
           "init": {
             "title": "Sample rate may be too low",
-            "description": "The receiver on {title} is tuned to a high-band frequency but is still sampling at the bare default rate. rtl_433 does not widen the sample rate automatically when it is retuned, so devices in the upper ISM bands may decode poorly.\n\n- **Increase the sample rate** sets the **Sample rate** to {suggested} Hz — the 1.024 MS/s rate rtl_433 itself uses by default.\n- **Keep the current rate** leaves the rate unchanged and stops this advisory from appearing again for this hub. Many devices still decode fine at the lower rate, so this is a valid choice.",
+            "description": "The radio on {title} is tuned to a high-band frequency but is still sampling at the bare default rate. rtl_433 does not widen the sample rate automatically when it is retuned, so devices in the upper ISM bands may decode poorly.\n\n- **Increase the sample rate** sets the **Sample rate** to {suggested} Hz — the 1.024 MS/s rate rtl_433 itself uses by default.\n- **Keep the current rate** leaves the rate unchanged and stops this advisory from appearing again for this receiver. Many devices still decode fine at the lower rate, so this is a valid choice.",
             "menu_options": {
               "apply": "Increase the sample rate",
               "ignore": "Keep the current rate (don't warn again)"
@@ -265,7 +265,7 @@
         "step": {
           "confirm": {
             "title": "Event timestamps cannot be read",
-            "description": "Events from {title} carry no timestamp this integration can read, so it cannot tell a freshly received transmission from one the server is re-sending.\n\nrtl_433 re-broadcasts a short buffer of recent events every time Home Assistant reconnects. Without usable timestamps those are treated as new traffic: devices that have actually gone silent are marked available again, and their event entities and device triggers fire a second time — which can re-run automations.\n\nTo fix it, add `report_meta time:iso:usec:tz` to the rtl_433 configuration (or start it with `-M time:iso:usec:tz`) and restart the server. This card clears itself once timestamps start arriving.\n\nSubmit to acknowledge this and stop the warning for this hub — choose this if you deliberately run without timestamps."
+            "description": "Events from {title} carry no timestamp this integration can read, so it cannot tell a freshly received transmission from one the server is re-sending.\n\nrtl_433 re-broadcasts a short buffer of recent events every time Home Assistant reconnects. Without usable timestamps those are treated as new traffic: devices that have actually gone silent are marked available again, and their event entities and device triggers fire a second time — which can re-run automations.\n\nTo fix it, add `report_meta time:iso:usec:tz` to the rtl_433 configuration (or start it with `-M time:iso:usec:tz`) and restart the server. This card clears itself once timestamps start arriving.\n\nSubmit to acknowledge this and stop the warning for this receiver — choose this if you deliberately run without timestamps."
           }
         }
       }
@@ -275,7 +275,7 @@
     "title": "rtl_433",
     "view": {
       "discovered": "Discovered devices",
-      "hub_settings": "Receiver settings",
+      "receiver_settings": "Receiver settings",
       "device_settings": "Device settings",
       "mappings": "Device mappings"
     },
@@ -288,7 +288,7 @@
       "unknown_error": "Unknown error"
     },
     "status": {
-      "no_hubs": "No rtl_433 hubs are configured.",
+      "no_receivers": "No rtl_433 receivers are configured.",
       "waiting_for_reload": "Waiting for the receiver to reload…",
       "online": "Online",
       "connecting": "Connecting…",
@@ -307,7 +307,7 @@
         "other": "{count} entities"
       },
       "add_device": "Add or replace device",
-      "hub_settings_description": "Availability timeout and whether Home Assistant manages the receiver",
+      "receiver_settings_description": "Availability timeout and whether Home Assistant manages the receiver",
       "device_settings_description": "Per-device timeout overrides and utility-meter calibration",
       "mappings_description": "YAML overrides for how fields become entities"
     },
@@ -357,7 +357,7 @@
     },
     "settings": {
       "saved": "Settings saved.",
-      "hub_intro": "Settings for this receiver as a whole. Individual devices can override the timeout.",
+      "receiver_intro": "Settings for this receiver as a whole. Individual devices can override the timeout.",
       "device_intro": "Overrides for one device. Blank means “use the receiver's setting”.",
       "device_empty": "No devices have been added yet. Add one from this page first, and its settings will appear here.",
       "mappings_intro": "YAML overrides for how this receiver's fields become entities. Clearing the editor removes them all.",
