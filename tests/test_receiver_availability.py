@@ -440,10 +440,10 @@ async def test_offline_receiver_takes_every_device_entity_unavailable(
     await hass.async_block_till_done()
     ent_reg = er.async_get(hass)
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
     )
     button_eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:button"
+        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:button"
     )
     assert temp_eid is not None
     assert button_eid is not None
@@ -491,7 +491,7 @@ async def test_removal_unsubscribes_from_both_signals(hass, receiver_entry_build
     )
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
     )
     entity = hass.data["entity_components"]["sensor"].get_entity(watts_eid)
     assert entity is not None
@@ -669,7 +669,7 @@ async def test_offline_receiver_takes_the_last_seen_sensor_unavailable(
     )
     ent_reg = er.async_get(hass)
     last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:last_seen"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
     )
     assert last_seen_eid is not None
     await _enable_entity(hass, receiver, last_seen_eid)

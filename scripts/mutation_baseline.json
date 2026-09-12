@@ -10,6 +10,11 @@
       "score": 0.828571,
       "total": 70
     },
+    "custom_components/rtl_433/aggregator.py": {
+      "killed": 43,
+      "score": 0.934783,
+      "total": 46
+    },
     "custom_components/rtl_433/binary_sensor.py": {
       "killed": 86,
       "score": 0.914894,
@@ -75,11 +80,6 @@
       "score": 0.913043,
       "total": 69
     },
-    "custom_components/rtl_433/receiver_settings.py": {
-      "killed": 47,
-      "score": 0.94,
-      "total": 50
-    },
     "custom_components/rtl_433/library.py": {
       "killed": 37,
       "score": 1.0,
@@ -99,6 +99,11 @@
       "killed": 544,
       "score": 0.854003,
       "total": 637
+    },
+    "custom_components/rtl_433/receiver_settings.py": {
+      "killed": 47,
+      "score": 0.94,
+      "total": 50
     },
     "custom_components/rtl_433/repairs.py": {
       "killed": 224,

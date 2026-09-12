@@ -174,13 +174,13 @@ def _hear(coordinator, frame: dict[str, Any]) -> None:
 def _registry_device(hass, entry, device_key):
     """Return the registry device for a device key, or ``None``."""
     return dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{receiver_id(entry)}:{device_key}"), entry.entry_id
+        (DOMAIN, f"{entry.entry_id}:{device_key}"), entry.entry_id
     )
 
 
 def _device_entity_unique_ids(hass, entry, device_key) -> set[str]:
     """Return the unique_ids of every registry entity belonging to a device."""
-    prefix = f"{receiver_id(entry)}:{device_key}:"
+    prefix = f"{entry.entry_id}:{device_key}:"
     return {
         registry_entry.unique_id
         for registry_entry in er.async_get(hass).entities.values()
@@ -1161,16 +1161,17 @@ def _adopted_snapshot(hass, entry, device_key) -> dict[str, Any]:
     """
     device = _registry_device(hass, entry, device_key)
     assert device is not None
-    # Identity is scoped by the receiver that heard the device, so the prefix
-    # stripped here is the receiver id -- otherwise two locations' snapshots
-    # would differ only by the id this helper exists to normalise away.
-    prefix = f"{receiver_id(entry)}:"
+    # Identity is scoped by the location, not by whichever receiver heard the
+    # device, so the prefix stripped here is the location entry id -- otherwise
+    # two locations' snapshots would differ only by the id this helper exists to
+    # normalise away.
+    prefix = f"{entry.entry_id}:"
     return {
         "model": device.model,
         "manufacturer": device.manufacturer,
         "name": device.name,
         "entry_type": device.entry_type,
-        "linked_to_its_receiver": device.via_device_id is not None,
+        "linked_to_its_location": device.via_device_id is not None,
         "entities": {
             (
                 registry_entry.domain,

@@ -504,9 +504,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 002: Location entry + per-receiver config subentries, single-step `async_step_user` creating the location and its first receiver together (Clarification #19), entry-`unique_id` re-homing, and the subentry-ownership rule at every `async_add_entities` call site (Clarification #17) (depends on: 001)
 
-### Phase 3: Identity + entity union
+### ✅ Phase 3: Identity + entity union
 **Parallel Tasks:**
-- Task 003: Location-scoped device identity and `via_device_id` relink (sub-step A, the former Level 1), then the location aggregator, entity union and skew-tolerant debounce dedup with the `rssi`/`snr`/`last_seen` exclusion set (sub-step B) — one task, two ordered sub-steps per Clarification #24 (depends on: 002)
+- ✔️ Task 003: Location-scoped device identity and `via_device_id` relink (sub-step A, the former Level 1), then the location aggregator, entity union and skew-tolerant debounce dedup with the `rssi`/`snr`/`last_seen` exclusion set (sub-step B) — one task, two ordered sub-steps per Clarification #24 (depends on: 002)
 
 ### Phase 4: Availability + adoption
 **Parallel Tasks:**
