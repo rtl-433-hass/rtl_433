@@ -3072,3 +3072,36 @@ async def test_removing_a_receiver_stops_its_coordinator(hass):
     assert doomed not in hass.data[DOMAIN]
     assert [s.subentry_id for s in receiver_subentries(location)] == [survivor]
     assert hass.data[DOMAIN][survivor].host == "attic.local"
+
+
+async def test_removing_the_last_receiver_removes_its_location(hass):
+    """A location cannot outlive its last receiver.
+
+    ``async_setup_entry`` refuses a receiver-less entry, and Home Assistant
+    offers no hook to refuse the subentry removal itself (``async_remove_subentry``
+    is a plain callback with no veto), so the location follows the receiver out
+    rather than lingering as a shell that can never load again.
+    """
+    location = await _setup_two_receivers(hass)
+    first, second = list(location.subentries)
+
+    hass.config_entries.async_remove_subentry(location, first)
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_get_entry(location.entry_id) is not None
+
+    hass.config_entries.async_remove_subentry(location, second)
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_get_entry(location.entry_id) is None
+
+
+async def test_removing_one_of_two_receivers_keeps_the_location(hass):
+    """Removing a non-final receiver leaves the location and its other receiver."""
+    location = await _setup_two_receivers(hass)
+    first, second = list(location.subentries)
+
+    hass.config_entries.async_remove_subentry(location, first)
+    await hass.async_block_till_done()
+
+    kept = hass.config_entries.async_get_entry(location.entry_id)
+    assert kept is not None
+    assert set(kept.subentries) == {second}
