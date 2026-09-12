@@ -78,7 +78,12 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
-from tests.conftest import build_receiver_entry, receiver_id, receiver_scope
+from tests.conftest import (
+    build_receiver_entry,
+    link_unique_id,
+    receiver_id,
+    receiver_scope,
+)
 
 LEGACY_OBSERVED_FIELDS = "observed_fields"
 
@@ -1048,7 +1053,7 @@ async def test_last_seen_created_for_every_device(hass, receiver_entry_builder):
 
     def last_seen_ids(key: str) -> list[str]:
         """All sensor-platform entity entries whose unique_id ends in :last_seen."""
-        suffix = f"{receiver.entry_id}:{key}:last_seen"
+        suffix = link_unique_id(receiver, key, "last_seen")
         return [
             e.entity_id
             for e in ent_reg.entities.values()
@@ -1099,7 +1104,7 @@ async def test_last_seen_updates_and_stays_available(hass, receiver_entry_builde
     )
     ent_reg = er.async_get(hass)
     last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+        "sensor", DOMAIN, link_unique_id(receiver, device_key, "last_seen")
     )
     watts_eid = ent_reg.async_get_entity_id(
         "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
@@ -1145,7 +1150,7 @@ async def test_last_seen_restores_prior_not_baseline(hass, receiver_entry_builde
     Then a real event overwrites it with the fresh ``coordinator.last_seen``.
     """
     device_key = "Acurite-606TX-42"
-    restore_eid = "sensor.acurite_606tx_42_last_seen"
+    restore_eid = "sensor.acurite_606tx_42_last_seen_rtl_433_rtl433_local"
     prior = "2026-05-20T08:30:00+00:00"
     mock_restore_cache(hass, (State(restore_eid, prior),))
 
@@ -1158,7 +1163,7 @@ async def test_last_seen_restores_prior_not_baseline(hass, receiver_entry_builde
     )
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+        "sensor", DOMAIN, link_unique_id(receiver, device_key, "last_seen")
     )
     assert eid is not None
     # The hardcoded restore entity_id must match the registry-assigned one, or
@@ -1197,14 +1202,14 @@ async def test_no_last_seen_on_binary_sensor(hass, receiver_entry_builder):
     ent_reg = er.async_get(hass)
     assert (
         ent_reg.async_get_entity_id(
-            "binary_sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+            "binary_sensor", DOMAIN, link_unique_id(receiver, device_key, "last_seen")
         )
         is None
     )
     # But the sensor-platform Last-seen still exists for the device.
     assert (
         ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+            "sensor", DOMAIN, link_unique_id(receiver, device_key, "last_seen")
         )
         is not None
     )
@@ -2151,7 +2156,13 @@ async def test_adopted_device_matches_a_seeded_device(
                 continue
             state = hass.states.get(entry.entity_id)
             attrs = {} if state is None else state.attributes
-            result[(entry.domain, entry.unique_id.removeprefix(prefix))] = (
+            # A link entity's id also carries its receiver's subentry id, which
+            # is different for each of the two receivers by construction; strip
+            # it so the two are compared on the part that is meant to match.
+            suffix = entry.unique_id.removeprefix(prefix).removeprefix(
+                f"{receiver_id(receiver)}:"
+            )
+            result[(entry.domain, suffix)] = (
                 entry.disabled_by is not None,
                 attrs.get("device_class"),
                 attrs.get("unit_of_measurement"),
@@ -2917,12 +2928,17 @@ async def test_rf_device_entities_are_owned_by_the_location_not_a_receiver(hass)
     ]
     assert len(merged) == 1
     assert merged[0].config_entries_subentries[location.entry_id] == {None}
-    # And exactly one entity per mapped field, not one per receiver.
+    # And exactly one entity per mapped *unioned* field, not one per receiver.
+    # The link fields are excluded from the union, so Last-seen is one per
+    # receiver -- still on the one merged device, and still owned by no subentry.
     assert len(device_entities) == len({entity.unique_id for entity in device_entities})
-    assert sorted(entity.unique_id for entity in device_entities) == [
-        f"{location.entry_id}:{device_key}:T",
-        f"{location.entry_id}:{device_key}:last_seen",
-    ]
+    assert sorted(entity.unique_id for entity in device_entities) == sorted(
+        [
+            f"{location.entry_id}:{device_key}:T",
+            link_unique_id(location, device_key, "last_seen", 0),
+            link_unique_id(location, device_key, "last_seen", 1),
+        ]
+    )
 
 
 async def test_adding_a_receiver_reloads_the_location(hass, receiver_entry_builder):

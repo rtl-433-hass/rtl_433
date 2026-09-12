@@ -28,6 +28,11 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     device-update signal keyed by `device_key`. It also owns the union's
     **exclusion set**: `rssi` / `snr` / `last_seen` measure the link between one
     receiver and the sensor, so they are partitioned out and stay per receiver.
+    It additionally owns **merged availability** (`receiver_vouches` /
+    `device_available`, see [Merged availability](#merged-availability-across-a-locations-receivers))
+    and the **coverage map** (`ReceiverCoverage` / `coverage`), which records the
+    link half of every frame per `(device_key, receiver)` so the panel can show
+    "heard by Attic (−62 dB) / Garage (−89 dB)" with no entity enabled.
   - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`,
     `diagnostics.py`, `repairs.py`, `sensor.py`, `binary_sensor.py`,
     `event.py`, `translations/en.json`. There is no local `mapping/` package or
@@ -446,7 +451,8 @@ The per-device **Last seen** sensor (`Rtl433LastSeenSensor`, `sensor.py`) is
 must survive any refactor of `async_setup_receiver_platform` (`entity.py`) and of the
 base `async_added_to_hass` baseline:
 
-- **Created unconditionally, once per device, on the `sensor` platform only.**
+- **Created unconditionally, once per (device × receiver), on the `sensor`
+  platform only.**
   It is built from a small synthetic `FieldDescriptor` (`LAST_SEEN_DESCRIPTOR`:
   sentinel `field_key="__last_seen__"` that no rtl_433 event can carry,
   `object_suffix="last_seen"`, `device_class=timestamp`, diagnostic,
@@ -458,10 +464,13 @@ base `async_added_to_hass` baseline:
   since those never expire and the timestamp is their only freshness signal; a
   one-time minor-6 migration re-enables already-created instances the integration
   disabled. The `binary_sensor` platform
-  passes **no** factory, so it creates none. The factory runs exactly once per
-  `device_key` across both the initial devices-map build and the new-device
-  handler (`_build_extra` / `extra_created`), and is passed as a callable so
-  `entity.py` never imports the platform modules.
+  passes **no** factory, so it creates none. `last_seen` is a **link** field, so
+  each of the location's receivers contributes one — all of them on the one
+  merged device, named for their receiver ("Last seen Attic"). The factory runs
+  once per distinct `unique_id` across both the initial devices-map build and the
+  new-device handler (`_build_extra` dedupes on the built entity's own id against
+  the shared `created` set), and is passed as a callable so `entity.py` never
+  imports the platform modules.
 - **Holds its OWN `native_value`, never the base startup baseline.** The
   sentinel `field_key` is never in `event.fields`, so `_apply_value` is a no-op
   and the field-driven path never fires. The value is sourced from
@@ -749,6 +758,61 @@ because these are the contracts the integration relies on:
   registry device `(DOMAIN, f"{entry_id}:unknown")`. Safe on every setup; the
   classifier above prevents recreation.
 
+## Merged availability across a location's receivers
+
+Durable contract for how the two gates combine once a location has more than one
+receiver (`aggregator.py`, `entity.py`).
+
+- **A receiver *vouches* for a device when it is connected AND heard the device
+  within the device's effective timeout.** The merged device is available when
+  **at least one** receiver vouches (`Rtl433LocationAggregator.device_available`,
+  OR-ing `receiver_vouches` over `receiver_coordinators`).
+- **Do not OR the two gates independently.** "Some receiver is connected" AND
+  "some `last_seen` is fresh" is *not* the same statement and is wrong in a real
+  case: receiver A connected but deaf to the sensor, receiver B offline but
+  holding a minute-old timestamp satisfies both halves while nothing can actually
+  hear the device. Evaluate the pair per receiver; OR the **result**.
+- **The timeout resolution is the coordinator's, unchanged.** `receiver_vouches`
+  calls `coordinator._effective_timeout`, so the device-class ladder and the
+  never-expire (`AVAILABILITY_TIMEOUT_NEVER`) exemption are the watchdog's own —
+  not a second copy that can drift. The per-receiver watchdogs keep running per
+  receiver; the aggregator only unions what they conclude.
+- **Link entities are single-source.** `RSSI Attic` reads Attic alone: another
+  receiver still hearing the sensor says nothing about whether *this* receiver's
+  signal reading is current.
+- **With no aggregator running** (mid-setup, or an entity built outside a
+  location) `Rtl433Entity.available` falls back to the receiver that built it —
+  the honest single-receiver answer, never a hardcoded `True`.
+
+## Per-receiver signal entities and receiver removal
+
+- **`rssi` / `snr` / `last_seen` are one entity per (sensor × receiver)** on the
+  **merged** device, built from the *existing* library mappings plus a receiver
+  segment (`entity.py`'s `field_unique_id`:
+  `{location_entry_id}:{device_key}:{receiver_subentry_id}:{object_suffix}`) —
+  **not** a parallel diagnostic-entity class.
+- **The receiver label lives in `_attr_name`** ("RSSI Attic"), not only in the
+  unique_id. With `_attr_has_entity_name = True`, two entities named "RSSI" on
+  one device make Home Assistant mint `sensor.<device>_rssi_2` — the issue #132
+  failure mode. A descriptor that nulls its name out falls back to the object
+  suffix; it must never derive a name from `device_class`.
+- **They are added with NO `config_subentry_id`.** They are *about* a receiver but
+  *hang off the merged device*; adding them under their receiver's subentry would
+  give one device entities from two subentries, which silently moves the device
+  today and **raises in HA Core 2027.8**. Receiver association travels via the
+  name and the unique_id, never via the subentry.
+- **They keep `enabled_by_default: false`.** The A-vs-B comparison is served from
+  the aggregator's coverage map instead, so a location does not pay
+  *sensors × receivers × 2* entities for a detail most users only glance at.
+- **Deleting a receiver subentry** lets Home Assistant's subentry sweep take the
+  receiver device and everything owned by it (radio controls, noise sensors,
+  connectivity). `_async_purge_removed_receiver_entities` (`__init__.py`,
+  from the update listener, before the reload) additionally removes that
+  receiver's signal entities on every merged device — the sweep cannot see them,
+  precisely because they carry no subentry id. Merged devices and their history
+  **survive**; a device only the removed receiver ever heard goes **unavailable,
+  not deleted** (removing it stays an explicit user action).
+
 ## Receiver-connection availability gate
 
 Durable contract for the second availability gate (`coordinator/_watchdog.py`,
@@ -776,10 +840,11 @@ all?". End-user docs live in
   not collapse it by moving the delay onto the entities.
 - **`_disconnected_since` is reporting only.** It feeds the reconnect log line's
   outage duration and the diagnostics dump. Nothing about availability reads it.
-- **Every device entity reads it.** `Rtl433Entity.available` short-circuits on it
-  *before* the silence check, and `Rtl433LastSeenSensor` routes through it too.
-  **Never-expire devices are not exempt** — that exemption is from *silence*, not
-  from the transport being gone.
+- **Every device entity reads it.** It is checked *before* the silence check —
+  per receiver, via `aggregator.receiver_vouches` (see
+  [Merged availability](#merged-availability-across-a-locations-receivers)) — and
+  `Rtl433LastSeenSensor` routes through it too. **Never-expire devices are not
+  exempt** — that exemption is from *silence*, not from the transport being gone.
 - **`Rtl433Event` is not an exception** — it does **not** override `available`, so
   event entities go unavailable with everything else. zigbee2mqtt does the same
   (its `event` discovery payload carries the `bridge/state` topic plus the
@@ -812,7 +877,11 @@ all?". End-user docs live in
   Assistant restart while the server is down expires the restored states at once
   instead of leaving them available forever.
 - **Lazy gate, edge-driven repaint.** Entities evaluate `receiver_available` on every
-  state read, so it is always correct; the coordinator only *repaints*. The
+  state read, so it is always correct; the coordinator only *repaints*. A merged
+  (unioned) entity subscribes to `SIGNAL_RECEIVER_AVAILABILITY` for **every**
+  receiver in its location, not only the one that built it: its answer is the OR
+  over all of them, so any receiver's edge can flip it. A link entity subscribes
+  to its own receiver alone. The
   disconnect edge and the connect edge each call it, and each watchdog tick
   re-checks as a cheap backstop in case an edge is ever missed. All
   three funnel into `_async_sync_receiver_availability`, which dispatches

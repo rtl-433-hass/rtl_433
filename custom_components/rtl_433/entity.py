@@ -19,10 +19,15 @@ four concerns the platforms would otherwise duplicate:
   does *this* receiver hear it" is not a property of the sensor. Both carry a
   :class:`~pyrtl_433.normalizer.NormalizedEvent` and both unsubscribe in
   ``async_will_remove_from_hass``.
-* **Availability** — computed from the coordinator's ``last_seen`` timestamp
-  versus the effective per-device timeout. On startup the entity baselines a
-  missing ``last_seen`` to "now" so a restored state shows until the timeout
-  elapses ("restore then time out") rather than immediately reading unavailable.
+* **Availability** — merged across the location's receivers. A receiver
+  *vouches* for a device when it is connected **and** heard the device within the
+  effective per-device timeout; a unioned field is available when at least one
+  receiver vouches, and a link field asks only its own receiver. The two gates
+  are evaluated per receiver and only the result is OR-ed, because unioning them
+  independently would keep a device alive on an offline receiver's stale
+  timestamp. On startup the entity baselines a missing ``last_seen`` to "now" so
+  a restored state shows until the timeout elapses ("restore then time out")
+  rather than immediately reading unavailable.
 * **State restoration** — via :class:`RestoreEntity`; the field-specific
   subclasses pull the last state in their own ``async_added_to_hass``.
 
@@ -52,13 +57,21 @@ and adding entities from two subentries that share a device silently moves it
 today and raises in HA Core 2027.8. Only receiver-owned entities — the radio
 controls here, plus the noise and connectivity sensors in the platform modules —
 pass their receiver's subentry id.
+
+The **per-receiver link entities** (``RSSI Attic``) are the one genuinely
+counter-intuitive case of that rule, and they follow it too: they are *about* one
+receiver but they hang off the *merged* device, so adding them under their
+receiver's subentry would be exactly the "entities from several subentries share
+a device" the rule forbids. They carry their receiver in ``_attr_name`` and in the
+unique_id instead — and the name half is load-bearing, because two entities both
+called "RSSI" on one device is how Home Assistant comes to mint
+``sensor.<device>_rssi_2`` (issue #132).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 import dataclasses
-from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from pyrtl_433.library import FieldDescriptor, Registry, lookup
@@ -74,10 +87,9 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
-from .aggregator import is_link_field
+from .aggregator import is_link_field, location_aggregator, receiver_vouches
 from .calibration import COMMODITY_DEVICE_CLASS, normalize_calibration
 from .const import (
-    AVAILABILITY_TIMEOUT_NEVER,
     CALIBRATION_COMMODITY,
     CALIBRATION_SCALE,
     CALIBRATION_UNIT,
@@ -118,6 +130,74 @@ def _resolve_entity_category(value: str | None) -> EntityCategory | None:
         return EntityCategory(value)
     except ValueError:
         return None
+
+
+def receiver_label(coordinator: Rtl433Coordinator) -> str:
+    """Return the human name of one receiver, for use inside an entity name.
+
+    The receiver subentry's title -- what the user called that server ("Attic") --
+    falling back to its id only if a subentry somehow carries no title, because a
+    nameless label would put two receivers' entities back on the same name.
+    """
+    return coordinator.subentry.title or coordinator.receiver_id
+
+
+def field_unique_id(
+    location_id: str, device_key: str, receiver_id: str, descriptor: FieldDescriptor
+) -> str:
+    """Return the ``unique_id`` for one device field, unioned or per receiver.
+
+    A unioned sensor field is receiver-agnostic -- one entity per mapped field
+    however many receivers decode it -- so its id is the three-segment
+    ``{location_entry_id}:{device_key}:{object_suffix}``.
+
+    A **link** field (``rssi`` / ``snr`` / ``last_seen``) is deliberately *not*
+    unioned: "how well does this receiver hear it" is a different measurement per
+    receiver, so it gains a fourth segment, the receiver's subentry id, yielding
+    one entity per (sensor x receiver) on the merged device. The receiver segment
+    sits before the object suffix so both parsers keep recognising the tail
+    (``device_trigger.py``), and ``device_replace.py``'s
+    ``{entry_id}:{device_key}:`` prefix swap still carries them through a re-key.
+
+    The single definition of the template, called by the entity itself and by the
+    platform helper's dedup bookkeeping so the two cannot disagree about whether
+    a field is one entity or several.
+    """
+    if is_link_field(descriptor.field_key):
+        return f"{location_id}:{device_key}:{receiver_id}:{descriptor.object_suffix}"
+    return f"{location_id}:{device_key}:{descriptor.object_suffix}"
+
+
+def _combine(unsubs: list[Callable[[], None]]) -> Callable[[], None]:
+    """Fold several dispatcher unsubscribes into one callable.
+
+    Lets an entity hold a single ``_unsub_*`` handle whether it subscribed to one
+    receiver or to all of them, so the teardown path stays "call it, then clear
+    it" rather than growing a list to iterate and a `None`-vs-empty distinction
+    to get wrong.
+    """
+
+    def _unsubscribe() -> None:
+        for unsub in unsubs:
+            unsub()
+
+    return _unsubscribe
+
+
+def _link_field_base_name(descriptor: FieldDescriptor) -> str:
+    """Return the receiver-less half of a link field's name ("RSSI", "Last seen").
+
+    Every shipped link descriptor names itself, so this is the descriptor's own
+    name virtually always. A user mapping may null the name out to let Home
+    Assistant derive one from ``device_class`` -- which a link field cannot do,
+    because both receivers' entities would then derive the *same* name and
+    collide on the merged device. The object suffix is the fallback: it is the
+    one part of a descriptor that is always present and always distinct per
+    field.
+    """
+    if descriptor.name is not None:
+        return descriptor.name
+    return descriptor.object_suffix.replace("_", " ").capitalize()
 
 
 def _apply_calibration(
@@ -179,13 +259,16 @@ class Rtl433Entity(RestoreEntity):
         # excluded from the union, so they listen to their own receiver
         # (see :meth:`async_added_to_hass`).
         self._is_link_field = is_link_field(descriptor.field_key)
+        label = receiver_label(coordinator)
 
         # Location-scoped unique_id: receiver-agnostic on purpose, so one
         # physical sensor yields one entity per mapped field however many of the
         # location's receivers decode it. Two *locations* that happen to hear the
-        # same model+id still cannot collide -- their entry ids differ.
-        self._attr_unique_id = (
-            f"{self._location_id}:{device_key}:{descriptor.object_suffix}"
+        # same model+id still cannot collide -- their entry ids differ. A link
+        # field is the deliberate exception and carries a receiver segment (see
+        # :func:`field_unique_id`).
+        self._attr_unique_id = field_unique_id(
+            self._location_id, device_key, receiver_id, descriptor
         )
 
         # Per-field entity metadata common to both platforms. ``_attr_name`` is a
@@ -193,7 +276,17 @@ class Rtl433Entity(RestoreEntity):
         # descriptor with no name is left UNSET (not None) so HA derives the
         # name from ``device_class`` — setting ``_attr_name = None`` explicitly
         # would instead produce a nameless entity.
-        if descriptor.name is not None:
+        #
+        # A link field MUST name its receiver ("RSSI Attic"), and cannot take
+        # either of those defaults. One merged device carries one such entity per
+        # receiver, so two entities named "RSSI" (or two deriving the same name
+        # from ``signal_strength``) would land on one device and Home Assistant
+        # would mint ``..._rssi_2`` for the second -- the ``_2`` failure mode of
+        # issue #132. The receiver association travels in the name and the
+        # unique_id, never in a ``config_subentry_id``.
+        if self._is_link_field:
+            self._attr_name = f"{_link_field_base_name(descriptor)} {label}"
+        elif descriptor.name is not None:
             self._attr_name = descriptor.name
         self._attr_entity_category = _resolve_entity_category(
             descriptor.entity_category
@@ -231,37 +324,43 @@ class Rtl433Entity(RestoreEntity):
     # ------------------------------------------------------------------ #
     @property
     def available(self) -> bool:
-        """Return whether the receiver is connected and the device seen within its timeout.
+        """Return whether some receiver still vouches for this device.
 
-        Two gates, both owned by the coordinator (see ``coordinator/_watchdog.py``):
+        A receiver **vouches** when both of its gates hold *together*
+        (``aggregator.receiver_vouches``): its WebSocket is up — ``False`` the
+        moment it drops, no grace window, and it overrides even a never-expire
+        device, whose exemption is from *silence*, not from the transport being
+        gone — **and** it heard this device within the device's effective
+        timeout, resolved by the coordinator's own ``_effective_timeout`` so the
+        device-class ladder and never-expire semantics are the watchdog's, not a
+        second copy.
 
-        * **Receiver connection.** ``receiver_available`` is ``False`` the moment the
-          receiver's WebSocket drops — no grace window. The integration is then
-          hearing nothing at all, so no device's cached state means anything and
-          every entity behind the receiver reads unavailable — including never-expire
-          devices, whose exemption is from *silence*, not from the transport
-          being gone.
-        * **Per-device silence.** Mirrors the coordinator's watchdog logic but
-          evaluated lazily so the value is correct between watchdog ticks too. On
-          startup the entity baselines ``last_seen`` to "now" (see
-          :meth:`async_added_to_hass`), so a restored entity reads available until
-          the timeout elapses. A timeout of ``0`` is never-expire: once the device
-          has been seen at least once it stays available indefinitely (still
-          unavailable when never seen).
+        A **unioned** field is available when *at least one* of the location's
+        receivers vouches. The pair is evaluated per receiver and only the result
+        is OR-ed, because the two gates cannot be unioned independently: a
+        connected receiver that is deaf to the sensor plus an offline one that
+        heard it a minute ago satisfies "some receiver connected" and "some
+        last_seen fresh" while no receiver can actually hear the device, and the
+        answer has to be unavailable. The union is asked of the location
+        aggregator, which is the thing that knows every receiver; with none
+        running (mid-setup, or an entity built outside a location) this falls back
+        to the receiver that built the entity, the honest single-receiver answer.
 
-        Routes through the coordinator's ``_effective_timeout`` so the
-        device-class-aware resolution (and never-expire) is identical to the
-        watchdog's.
+        A **link** field (``RSSI Attic``) reads its own receiver alone. It
+        measures that receiver's link to the sensor, so another receiver still
+        hearing the device says nothing about whether this reading is current.
+
+        Evaluated lazily, so it is correct between watchdog ticks too. On startup
+        the entity baselines ``last_seen`` to "now" (see
+        :meth:`async_added_to_hass`), so a restored entity reads available until
+        the timeout elapses rather than flicking to unavailable at once.
         """
-        if not self._coordinator.receiver_available:
-            return False
-        last_seen = self._coordinator.last_seen.get(self._device_key)
-        if last_seen is None:
-            return False
-        timeout = self._coordinator._effective_timeout(self._device_key)
-        if timeout == AVAILABILITY_TIMEOUT_NEVER:
-            return True
-        return (dt_util.utcnow() - last_seen) <= timedelta(seconds=timeout)
+        if self._is_link_field:
+            return receiver_vouches(self._coordinator, self._device_key)
+        aggregator = location_aggregator(self._coordinator.hass, self._location_id)
+        if aggregator is None:
+            return receiver_vouches(self._coordinator, self._device_key)
+        return aggregator.device_available(self._device_key)
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                          #
@@ -297,11 +396,35 @@ class Rtl433Entity(RestoreEntity):
         # to any device's event stream, so it gets its own receiver-wide signal. It
         # fires only on a connection edge, so this subscription costs one state
         # write per entity per outage.
-        self._unsub_receiver_availability = async_dispatcher_connect(
-            self.hass,
-            signal_receiver_availability(self._receiver_id),
-            self._handle_receiver_availability,
+        #
+        # A unioned field subscribes to **every** receiver in the location, not
+        # only the one that built it: its availability is the OR over all of
+        # them, so any receiver's connection edge can flip it. A link field takes
+        # its own receiver's edge alone, which is the only one that changes its
+        # answer.
+        self._unsub_receiver_availability = _combine(
+            [
+                async_dispatcher_connect(
+                    self.hass,
+                    signal_receiver_availability(receiver_id),
+                    self._handle_receiver_availability,
+                )
+                for receiver_id in self._availability_receiver_ids()
+            ]
         )
+
+    def _availability_receiver_ids(self) -> list[str]:
+        """Return the receivers whose connection edges can flip this entity.
+
+        Every receiver of the location for a unioned field; only this entity's own
+        receiver for a link field. Falls back to this entity's receiver if the
+        location has no running coordinators to enumerate, so an entity built
+        outside a live location still repaints on its own receiver's edge.
+        """
+        if self._is_link_field:
+            return [self._receiver_id]
+        others = list(receiver_coordinators(self.hass, self._coordinator.entry))
+        return others or [self._receiver_id]
 
     async def async_will_remove_from_hass(self) -> None:
         """Tear down the dispatcher subscriptions."""
@@ -638,12 +761,15 @@ async def async_setup_receiver_platform(
     device's field builds that entity and every later receiver finds it already
     built. That is the entity half of the union, and it is also what stops the
     second receiver minting a duplicate ``unique_id`` Home Assistant would reject.
+    A link field's id carries a receiver segment (:func:`field_unique_id`), so the
+    very same set admits one ``rssi`` / ``snr`` / ``last_seen`` entity per
+    receiver onto the merged device -- which is the point of excluding them from
+    the union.
     """
-    # Created ``unique_id``s per ``device_key``, and the ``device_key``s whose
-    # optional ``per_device_factory`` extra entity exists -- both shared across
-    # the location's receivers (see above).
+    # Created ``unique_id``s per ``device_key`` -- field entities and the optional
+    # ``per_device_factory`` extra alike -- shared across the location's
+    # receivers (see above).
     created: dict[str, set[str]] = {}
-    extra_created: set[str] = set()
     for coordinator in receiver_coordinators(hass, entry).values():
         _setup_receiver_platform(
             hass,
@@ -654,7 +780,6 @@ async def async_setup_receiver_platform(
             entity_cls,
             per_device_factory,
             created,
-            extra_created,
         )
     # The initial devices-map build persists any coordinator-known fields that
     # are not stored yet; done after every receiver has registered its listeners
@@ -689,13 +814,12 @@ def _setup_receiver_platform(
     per_device_factory: Callable[[Rtl433Coordinator, str, str, str], Rtl433Entity]
     | None,
     created: dict[str, set[str]],
-    extra_created: set[str],
 ) -> None:
     """Run :func:`async_setup_receiver_platform`'s body for one receiver.
 
-    ``created`` / ``extra_created`` are the caller's location-wide bookkeeping,
-    passed in rather than owned here so every receiver's pass sees what the
-    others already built (see :func:`async_setup_receiver_platform`).
+    ``created`` is the caller's location-wide ``unique_id`` bookkeeping, passed in
+    rather than owned here so every receiver's pass sees what the others already
+    built (see :func:`async_setup_receiver_platform`).
     """
     receiver_id = coordinator.receiver_id
 
@@ -751,7 +875,9 @@ def _setup_receiver_platform(
             # known consumption field(s), overriding the library descriptor.
             if calibration is not None and field_key in CONSUMPTION_FIELD_KEYS:
                 descriptor = _apply_calibration(descriptor, calibration)
-            unique_id = f"{entry.entry_id}:{device_key}:{descriptor.object_suffix}"
+            unique_id = field_unique_id(
+                entry.entry_id, device_key, receiver_id, descriptor
+            )
             if unique_id in seen:
                 continue
             seen.add(unique_id)
@@ -761,16 +887,26 @@ def _setup_receiver_platform(
         return new_entities
 
     def _build_extra(device_key: str, model: str) -> list[Rtl433Entity]:
-        """Build the optional once-per-device extra entity (e.g. Last-seen).
+        """Build the optional extra, non-field-driven entity (e.g. Last-seen).
 
-        Returns the single extra entity the first time it is asked for a given
-        ``device_key`` (and only when a factory was supplied), then ``[]`` on any
-        later call so both creation paths can append it unconditionally.
+        Deduped on the built entity's own ``unique_id`` against the same shared
+        set :func:`_build` uses, rather than on ``device_key``: "how many of
+        these exist per device" is the factory's decision, not this helper's.
+        Last-seen is a *link* field, so it is one entity per (device x receiver)
+        and every receiver's pass contributes one; a receiver-agnostic extra
+        would mint the same id twice and the second call returns ``[]``, exactly
+        as before. Returns a list so both creation paths can append it
+        unconditionally.
         """
-        if per_device_factory is None or device_key in extra_created:
+        if per_device_factory is None:
             return []
-        extra_created.add(device_key)
-        return [per_device_factory(coordinator, receiver_id, device_key, model)]
+        entity = per_device_factory(coordinator, receiver_id, device_key, model)
+        seen = created.setdefault(device_key, set())
+        unique_id = entity.unique_id
+        if unique_id is None or unique_id in seen:
+            return []
+        seen.add(unique_id)
+        return [entity]
 
     def _register_field_listener(device_key: str, model: str) -> None:
         """Register a per-device listener that adds entities for new fields.
@@ -818,7 +954,6 @@ def _setup_receiver_platform(
         being skipped as "already created".
         """
         created.pop(device_key, None)
-        extra_created.discard(device_key)
         unsub = field_unsubs.pop(device_key, None)
         if unsub is not None:
             unsub()
