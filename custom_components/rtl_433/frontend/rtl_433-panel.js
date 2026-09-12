@@ -80,23 +80,292 @@ const RELOAD_RETRY_LIMIT = 10;
 const DOMAIN = "rtl_433";
 
 /**
+ * Where this panel's own strings live in Home Assistant's translation tree.
+ *
+ * `config_panel` is the section Home Assistant reserves in an integration's
+ * `translations/<language>.json` for exactly this -- the words on the config
+ * panel the integration registers, which is this file. It is the only section
+ * with a free shape (`hassfest` validates it as arbitrarily nested keys over
+ * translated values, where every other section has a fixed schema), so the
+ * strings below can be grouped the way the page is rather than flattened to
+ * suit a validator. They travel the same road as this integration's
+ * config-flow strings: served per language, merged over English, and
+ * translated wherever the rest of the integration is.
+ *
+ * Two things it does *not* get, both because that file is validated as Python
+ * format strings rather than as ICU messages: a placeholder has to be a bare
+ * identifier, and there is no `{n, plural, …}`. Hence `_plural` below.
+ *
+ * Every key is addressed by the part after the prefix, so a call site reads
+ * `this._t("card.add")` rather than repeating the component path.
+ */
+const TRANSLATION_CATEGORY = "config_panel";
+const TRANSLATION_PREFIX = `component.${DOMAIN}.${TRANSLATION_CATEGORY}.`;
+
+/**
+ * The same strings, in English, for a frontend that cannot hand us any.
+ *
+ * `translations/en.json` is the source of truth -- `panel-strings.test.mjs`
+ * asserts this table matches its `config_panel` section key for key, so there
+ * is no second copy to drift -- but there does have to be *a* copy here, and it
+ * has to be English rather than nothing.
+ *
+ * `hass.localize` answers with an empty string for a key it has no resource
+ * for, and most of this page is written once, while the tree is built: the
+ * toolbar, the list actions, the dialog's buttons and every card heading are
+ * assigned a label and thereafter only reconciled. A frontend that has moved
+ * `loadBackendTranslation`, or a request that fails, would therefore leave a
+ * page of blank controls -- an inert box, which is exactly the outcome this
+ * file's whole posture is written against.
+ *
+ * Flat keys, dotted the way Home Assistant flattens the JSON, so one lookup
+ * serves both paths.
+ *
+ * Exported so a test can hold it against `en.json` directly; nothing else reads
+ * it from outside this file.
+ */
+export const STRINGS = {
+  title: "rtl_433",
+  "view.discovered": "Discovered devices",
+  "view.hub_settings": "Receiver settings",
+  "view.device_settings": "Device settings",
+  "view.mappings": "Device mappings",
+  "common.back": "Back",
+  "common.cancel": "Cancel",
+  "common.save": "Save",
+  "common.loading": "Loading…",
+  "common.unknown_model": "Unknown model",
+  "common.unknown_error": "Unknown error",
+  "status.no_hubs": "No rtl_433 hubs are configured.",
+  "status.waiting_for_reload": "Waiting for the receiver to reload…",
+  "status.online": "Online",
+  "status.connecting": "Connecting…",
+  "status.problem": "Problem",
+  "overview.network": "My network",
+  "overview.devices": "Devices",
+  "overview.entities": "Entities",
+  "overview.device_count.one": "{count} device",
+  "overview.device_count.other": "{count} devices",
+  "overview.entity_count.one": "{count} entity",
+  "overview.entity_count.other": "{count} entities",
+  "overview.add_device": "Add or replace device",
+  "overview.hub_settings_description":
+    "Availability timeout and whether Home Assistant manages the receiver",
+  "overview.device_settings_description":
+    "Per-device timeout overrides and utility-meter calibration",
+  "overview.mappings_description":
+    "YAML overrides for how fields become entities",
+  "discovered.searching": "Searching for rtl_433 devices…",
+  "discovered.hint": "Devices will show up here once discovered.",
+  "discovered.show_ignored": "Show ignored devices ({count})",
+  "discovered.hide_ignored": "Hide ignored devices ({count})",
+  "discovered.clear": "Clear discovered devices",
+  "discovered.cleared.one":
+    "Cleared {count} discovered device. They reappear as they transmit.",
+  "discovered.cleared.other":
+    "Cleared {count} discovered devices. They reappear as they transmit.",
+  "card.sightings": "Sightings",
+  "card.signal": "Signal",
+  "card.signal_value": "{value} dB",
+  "card.last_seen": "Last seen",
+  "card.seen_tooltip": "First seen {first}\nLast seen {last}",
+  "card.open_device": "Open device",
+  "card.area": "Area",
+  "card.add": "Add",
+  "card.ignore": "Ignore",
+  "card.replace": "Replace",
+  "card.unignore": "Un-ignore",
+  "age.seconds": "{count}s ago",
+  "age.minutes": "{count}m ago",
+  "age.hours": "{count}h ago",
+  "age.days": "{count}d ago",
+  "action.already_added":
+    "{device} is no longer pending — it may already have been added.",
+  "action.already_ignored": "{device} was already ignored.",
+  "action.not_ignored": "{device} was not on the ignore list.",
+  "action.area_failed":
+    "{device} was added, but its area could not be set: {error}",
+  "action.replaced":
+    "{device} now uses the transmitter id {key}. Its history and settings came with it.",
+  "replace.title": "Replace a device",
+  "replace.list_label": "Device to replace",
+  "replace.this_device": "This device",
+  "replace.confirm": "Replace",
+  "replace.intro":
+    "{device} ({key}) is new to Home Assistant. If it is a device you already have — the same sensor after a battery change, say — pick it below. Its history, settings and entity ids move across to the new transmitter id, and the candidate is merged into it.",
+  "settings.saved": "Settings saved.",
+  "settings.hub_intro":
+    "Settings for this receiver as a whole. Individual devices can override the timeout.",
+  "settings.device_intro":
+    "Overrides for one device. Blank means “use the receiver's setting”.",
+  "settings.device_empty":
+    "No devices have been added yet. Add one from this page first, and its settings will appear here.",
+  "settings.mappings_intro":
+    "YAML overrides for how this receiver's fields become entities. Clearing the editor removes them all.",
+  "settings.documentation": "Documentation",
+  "settings.seconds": "seconds",
+  "settings.label_with_unit": "{label} ({unit})",
+  "settings.timeout_mode.defaults": "Per-device-type defaults",
+  "settings.timeout_mode.never": "Never expire",
+  "settings.timeout_mode.custom": "A fixed timeout",
+  "settings.data.availability_mode": "Availability timeout",
+  "settings.data.availability_timeout": "Timeout",
+  "settings.data.manage_settings": "Manage the receiver's own settings",
+  "settings.data.device_key": "Device",
+  "settings.data.timeout_override": "Availability timeout override",
+  "settings.data.motion_clear_delay": "Motion clear delay",
+  "settings.data.commodity": "Utility meter commodity",
+  "settings.data.unit": "Base unit",
+  "settings.data.scale": "Scale",
+  "settings.data.mappings": "Overrides",
+  "settings.data_description.availability_mode":
+    "How long a device may go unheard before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
+  "settings.data_description.availability_timeout":
+    "Applies to every device without an override of its own.",
+  "settings.data_description.manage_settings":
+    "Adds frequency, gain and sample-rate entities to this receiver's device page.",
+  "settings.data_description.timeout_override":
+    "Blank uses the receiver's timeout. 0 means never expire.",
+  "settings.data_description.motion_clear_delay":
+    "How long after a detection this device is reported clear. Blank uses {seconds} seconds.",
+  "settings.data_description.commodity":
+    "Setting a commodity turns this device's counter into an Energy-dashboard sensor. “none” leaves it as the library describes it.",
+  "settings.data_description.unit": "One unit of what the counter counts.",
+  "settings.data_description.scale":
+    "Multiplier on the raw counter, to reach one base unit.",
+};
+
+/**
+ * Format one of the built-in English strings.
+ *
+ * Substitution only. Home Assistant formats a real translation with full ICU
+ * MessageFormat, which is a parser this file is not going to carry -- and does
+ * not need to, because the strings it formats are these, and a translation file
+ * Home Assistant validates cannot hold anything richer than `{name}` anyway
+ * (`hassfest` parses every value as a Python format string, which rejects both
+ * an ICU plural and a placeholder that is not a bare identifier).
+ *
+ * Anything that is not a string -- a missing key, or a key that finds something
+ * on `Object.prototype` such as `constructor` -- formats as the empty string,
+ * which is also what `hass.localize` answers with for a key it does not know.
+ *
+ * Exported so the rule can be tested directly: a fallback nobody exercises is a
+ * fallback that is broken by the time it is needed.
+ */
+export function formatFallback(template, args = {}) {
+  if (typeof template !== "string") {
+    return "";
+  }
+  return template.replace(/\{(\w+)\}/g, (whole, name) => {
+    const value = args[name];
+    // A placeholder nobody supplied leaves a gap rather than the word
+    // "undefined" or the literal braces in front of someone reading an error.
+    // Zero is a value, so only null and undefined count as absent.
+    return value === undefined || value === null ? "" : String(value);
+  });
+}
+
+/**
+ * `Intl.PluralRules` per language, built once each.
+ *
+ * `_setRowCount` runs on every render, and constructing one of these is not
+ * free -- the same reason `EXACT_TIME_FORMAT` further down is built at module
+ * scope rather than per call.
+ */
+const PLURAL_RULES = new Map();
+
+/**
+ * Which plural form `count` takes in `language`: "one", "other", "few"…
+ *
+ * The counted strings are stored as one key per category rather than as an ICU
+ * plural, because the file they are stored in cannot hold an ICU plural. That
+ * puts the choice here -- and it has to be a real one: English has two forms,
+ * and plenty of the languages Home Assistant ships have three or more, so
+ * `count === 1` would be wrong in most of them.
+ *
+ * An unusable language tag falls back to English rather than throwing: the
+ * wrong plural form is a blemish, and an exception out of a render is a blank
+ * page.
+ */
+export function pluralCategory(language, count) {
+  const tag = language || "en";
+  let rules = PLURAL_RULES.get(tag);
+  if (!rules) {
+    try {
+      rules = new Intl.PluralRules(tag);
+    } catch (error) {
+      rules = new Intl.PluralRules("en");
+    }
+    PLURAL_RULES.set(tag, rules);
+  }
+  return Number.isFinite(count) ? rules.select(count) : "other";
+}
+
+/**
+ * One string: the first localizer that knows `key`, else the English above.
+ *
+ * `localizers` is tried in order and each is asked for the fully-qualified key.
+ * Home Assistant's answer for a key it has no resource for is the empty string
+ * -- not `undefined`, not the key itself -- so "has no answer" and "answered
+ * with nothing" are the same thing here, and both fall through.
+ *
+ * Pure, and exported, because this chain is the part of the panel's
+ * translations that cannot be seen on screen: a page that has quietly stopped
+ * asking Home Assistant anything looks exactly like a page in English.
+ */
+export function translate(localizers, key, args) {
+  const full = `${TRANSLATION_PREFIX}${key}`;
+  for (const localize of localizers) {
+    if (typeof localize !== "function") {
+      continue;
+    }
+    const text = args ? localize(full, args) : localize(full);
+    if (text) {
+      return text;
+    }
+  }
+  return formatFallback(STRINGS[key], args);
+}
+
+/**
+ * One counted string: "1 device", "12 devices".
+ *
+ * `key` names a group of strings rather than one, with a member per plural
+ * form, and `count` picks between them. A form with no string of its own -- a
+ * translator who filled in "one" and "other" and not "few" -- falls back to
+ * "other", which is the form English calls the plural and every language
+ * defines.
+ */
+export function translateCount(localizers, key, language, count) {
+  const form = pluralCategory(language, count);
+  const args = { count };
+  return (
+    translate(localizers, `${key}.${form}`, args) ||
+    translate(localizers, `${key}.other`, args)
+  );
+}
+
+/**
  * The panel's views, keyed by the path segment that addresses each one.
  *
  * Real paths rather than in-page state, because these are pages: the browser's
  * back button, a bookmark and a reload all have to land where the user left
  * off, which is what Home Assistant's own Zigbee and Z-Wave subpages do. The
  * empty key is the overview.
+ *
+ * `title` is a translation key rather than a title: the toolbar is the one
+ * place these are rendered, and it looks them up when it draws them.
  */
 const VIEWS = {
-  "": { view: "overview", title: "rtl_433" },
-  discovered: { view: "discovered", title: "Discovered devices" },
-  options: { view: "settings", title: "Receiver settings", form: "hub" },
+  "": { view: "overview", title: "title" },
+  discovered: { view: "discovered", title: "view.discovered" },
+  options: { view: "settings", title: "view.hub_settings", form: "hub" },
   "device-settings": {
     view: "settings",
-    title: "Device settings",
+    title: "view.device_settings",
     form: "device",
   },
-  mappings: { view: "settings", title: "Device mappings", form: "mappings" },
+  mappings: { view: "settings", title: "view.mappings", form: "mappings" },
 };
 
 /**
@@ -164,12 +433,12 @@ const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
  * field can only spell the first two as magic values -- and it did, which made
  * the plain default unstorable and turned a typed 600 into "defaults" without
  * saying so. Naming them means the number field means exactly what it says.
+ *
+ * The names are the stored vocabulary and the tail of a translation key
+ * (`settings.timeout_mode.<mode>`); the words the dropdown shows are looked up
+ * when the schema is built, so they follow the user's language.
  */
-const TIMEOUT_MODES = [
-  { value: "defaults", label: "Per-device-type defaults" },
-  { value: "never", label: "Never expire" },
-  { value: "custom", label: "A fixed timeout" },
-];
+const TIMEOUT_MODES = ["defaults", "never", "custom"];
 
 /**
  * Which of `TIMEOUT_MODES` a stored hub timeout is in.
@@ -243,31 +512,48 @@ export function backAction(segment, pushed, historyLength) {
 /** mdiArrowLeft, for the toolbar's back control and its native fallback. */
 const BACK_ARROW_PATH = "M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2z";
 
-/** Format a signal level for a card, or an em dash when there is none. */
-function formatSignal(value) {
+/**
+ * Format a signal level for a card, or an em dash when there is none.
+ *
+ * The number and its unit are joined by a translated template rather than here,
+ * because where a unit goes relative to its number is a fact about a language.
+ */
+function formatSignal(t, value) {
   if (value === null || value === undefined) {
     return "—";
   }
-  return `${value.toFixed(1)} dB`;
+  return t("card.signal_value", { value: value.toFixed(1) });
 }
 
-/** Format an ISO timestamp as a coarse age relative to `now` (epoch ms). */
-function formatAge(iso, now) {
+/**
+ * Format an ISO timestamp as a coarse age relative to `now` (epoch ms).
+ *
+ * Deliberately not `Intl.RelativeTimeFormat`: this is a stat in a card beside
+ * two others, and the narrowest that API will go in English is "12 sec. ago",
+ * which is wider than the column. So the four units are four translated
+ * templates instead -- which also leaves a translator free to put the number
+ * and the unit wherever their language puts them, and `formatAge` choosing only
+ * *which* unit.
+ *
+ * Exported so that choice can be tested without a browser: the thresholds are
+ * the part with an off-by-one in it.
+ */
+export function formatAge(t, iso, now) {
   const then = Date.parse(iso);
   if (Number.isNaN(then)) {
     return "—";
   }
   const seconds = Math.max(0, Math.round((now - then) / 1000));
   if (seconds < 60) {
-    return `${seconds}s ago`;
+    return t("age.seconds", { count: seconds });
   }
   if (seconds < 3600) {
-    return `${Math.floor(seconds / 60)}m ago`;
+    return t("age.minutes", { count: Math.floor(seconds / 60) });
   }
   if (seconds < 86400) {
-    return `${Math.floor(seconds / 3600)}h ago`;
+    return t("age.hours", { count: Math.floor(seconds / 3600) });
   }
-  return `${Math.floor(seconds / 86400)}d ago`;
+  return t("age.days", { count: Math.floor(seconds / 86400) });
 }
 
 /**
@@ -315,9 +601,9 @@ function formatReadingValue(reading) {
  * reject with anything at all. A button that fails silently is the worst
  * outcome on this page, so every shape has to end up as *some* sentence.
  */
-function describeError(error) {
+function describeError(t, error) {
   if (!error) {
-    return "Unknown error";
+    return t("common.unknown_error");
   }
   if (typeof error === "string") {
     return error;
@@ -406,6 +692,12 @@ class Rtl433Panel extends HTMLElement {
     // Guards one-time start-up. `hass` arrives repeatedly (see the setter), so
     // "have we begun?" has to be tracked separately from "do we have a hass?".
     this._started = false;
+    // The localize `loadBackendTranslation` handed back, which covers the gap
+    // between that load resolving and the next `hass` this panel is given.
+    this._localize = null;
+    // Bound once, as an own property over the prototype's method, so it can be
+    // handed to the module-scope formatters without allocating per call.
+    this._t = this._t.bind(this);
 
     this._hubs = [];
     this._entryId = null;
@@ -708,12 +1000,95 @@ class Rtl433Panel extends HTMLElement {
       return;
     }
     this._started = true;
+    // Fired rather than awaited: both callers -- the `hass` setter and
+    // `connectedCallback` -- are synchronous and have nowhere to put a promise.
+    this._begin();
+  }
+
+  /**
+   * Load this panel's strings, then build the page out of them.
+   *
+   * The strings come first because most of this page is written exactly once,
+   * while the tree is built: the toolbar, the two list actions, the dialog's
+   * buttons and every card heading are given a label and thereafter only
+   * reconciled, so a translation that arrived afterwards would have nothing to
+   * update. What that costs is one WebSocket round trip on the first visit of a
+   * session -- the frontend caches a category it has already loaded, so every
+   * later visit resolves without touching the network.
+   */
+  async _begin() {
+    await this._loadStrings();
     this._buildDom();
-    this._status = "Loading…";
+    this._status = this._t("common.loading");
     this._render();
     this._startClock();
     this._loadHubs();
     this._loadBrandLogo();
+  }
+
+  /**
+   * Ask the frontend for this integration's `config_panel` strings.
+   *
+   * `loadBackendTranslation` is how Home Assistant's own pages pull an
+   * integration's translations in, and it resolves to a localize that has them.
+   * Anything that goes wrong -- a frontend that has renamed it, a request that
+   * fails -- leaves `_localize` null and the page falls back to the English in
+   * `STRINGS`, which is the same posture as every other borrowed thing here.
+   */
+  async _loadStrings() {
+    const hass = this._hass;
+    if (!hass || typeof hass.loadBackendTranslation !== "function") {
+      return;
+    }
+    try {
+      const localize = await hass.loadBackendTranslation(
+        TRANSLATION_CATEGORY,
+        DOMAIN
+      );
+      if (typeof localize === "function") {
+        this._localize = localize;
+      }
+    } catch (error) {
+      // Nothing to report: a page in English is a working page.
+    }
+  }
+
+  /**
+   * Who to ask for a string, in the order they are worth asking.
+   *
+   * `hass.localize` first because it is the one that keeps up: the frontend
+   * replaces it whenever the resources change, a change of language included,
+   * whereas the function `loadBackendTranslation` handed back is a snapshot.
+   * That snapshot is still worth keeping behind it -- it covers the window
+   * between the load resolving and the next `hass` this panel is handed.
+   */
+  _localizers() {
+    return [this._hass && this._hass.localize, this._localize];
+  }
+
+  /** One of this panel's own strings, in the user's language. */
+  _t(key, args) {
+    return translate(this._localizers(), key, args);
+  }
+
+  /** One of this panel's counted strings: "1 device", "12 devices". */
+  _plural(key, count) {
+    return translateCount(this._localizers(), key, this._language(), count);
+  }
+
+  /**
+   * The language the user is reading this page in.
+   *
+   * `hass.locale` is where the frontend keeps the user's own choice, and
+   * `hass.language` is the instance's -- the first is the one to prefer and the
+   * second is what older frontends carry.
+   */
+  _language() {
+    const hass = this._hass;
+    if (!hass) {
+      return "en";
+    }
+    return (hass.locale && hass.locale.language) || hass.language || "en";
   }
 
   _startClock() {
@@ -750,12 +1125,12 @@ class Rtl433Panel extends HTMLElement {
       result = await this._call({ type: "rtl_433/hubs" });
     } catch (error) {
       this._status = "";
-      this._setBanner(describeError(error), "error");
+      this._setBanner(describeError(this._t, error), "error");
       return;
     }
     this._hubs = result.hubs || [];
     if (!this._hubs.length) {
-      this._status = "No rtl_433 hubs are configured.";
+      this._status = this._t("status.no_hubs");
       this._render();
       return;
     }
@@ -802,7 +1177,7 @@ class Rtl433Panel extends HTMLElement {
     // receiver's devices under this receiver's name.
     this._settings = null;
     this._settingsDevice = "";
-    this._status = "Loading…";
+    this._status = this._t("common.loading");
     this._render();
     await this._openSubscription();
   }
@@ -843,7 +1218,7 @@ class Rtl433Panel extends HTMLElement {
       // most confusing, since the save actually worked.
       if (error && error.code === "not_loaded" && this._retries < RELOAD_RETRY_LIMIT) {
         this._retries += 1;
-        this._status = "Waiting for the receiver to reload…";
+        this._status = this._t("status.waiting_for_reload");
         this._render();
         this._retry = window.setTimeout(() => {
           this._retry = null;
@@ -854,7 +1229,7 @@ class Rtl433Panel extends HTMLElement {
         return;
       }
       this._status = "";
-      this._setBanner(describeError(error), "error");
+      this._setBanner(describeError(this._t, error), "error");
       return;
     }
 
@@ -928,9 +1303,10 @@ class Rtl433Panel extends HTMLElement {
         area_id: areaId,
       }).catch((error) => {
         this._setBanner(
-          `${key} was added, but its area could not be set: ${describeError(
-            error
-          )}`,
+          this._t("action.area_failed", {
+            device: key,
+            error: describeError(this._t, error),
+          }),
           "notice"
         );
       });
@@ -967,7 +1343,7 @@ class Rtl433Panel extends HTMLElement {
         onApplied();
       }
     } catch (error) {
-      this._setBanner(describeError(error), "error");
+      this._setBanner(describeError(this._t, error), "error");
     } finally {
       this._busy.delete(deviceKey);
       this._render();
@@ -985,7 +1361,7 @@ class Rtl433Panel extends HTMLElement {
     this._act(
       "rtl_433/devices/add",
       row.key,
-      `${row.key} is no longer pending — it may already have been added.`,
+      this._t("action.already_added", { device: row.key }),
       () => {
         // Snapshot the row: it is about to leave the pending list, and this is
         // the only copy of what the card should keep showing.
@@ -1073,14 +1449,14 @@ class Rtl433Panel extends HTMLElement {
     const list = document.createElement("div");
     list.className = "replace-list";
     list.setAttribute("role", "radiogroup");
-    list.setAttribute("aria-label", "Device to replace");
+    list.setAttribute("aria-label", this._t("replace.list_label"));
     const actions = document.createElement("div");
     actions.className = "replace-actions";
 
     if (dialog.localName === "ha-dialog") {
       dialog.hass = this._hass;
       // The heading is the element's own, so no <h2> of ours.
-      dialog.headerTitle = "Replace a device";
+      dialog.headerTitle = this._t("replace.title");
       actions.slot = "footer";
       dialog.append(intro, list, actions);
     } else {
@@ -1090,7 +1466,7 @@ class Rtl433Panel extends HTMLElement {
       form.className = "replace-form";
       const heading = document.createElement("h2");
       heading.className = "replace-title";
-      heading.textContent = "Replace a device";
+      heading.textContent = this._t("replace.title");
       form.append(heading, intro, list, actions);
       dialog.append(form);
     }
@@ -1136,11 +1512,12 @@ class Rtl433Panel extends HTMLElement {
         '"/></svg>';
       return native;
     });
+    const label = this._t("common.back");
     button.className = "icon-button back";
-    button.setAttribute("aria-label", "Back");
+    button.setAttribute("aria-label", label);
     if (button.localName === "ha-icon-button") {
       button.path = BACK_ARROW_PATH;
-      button.label = "Back";
+      button.label = label;
     }
     slot.append(button);
     return button;
@@ -1367,14 +1744,14 @@ class Rtl433Panel extends HTMLElement {
     made.rowDevices = this._navRow({
       className: "nav-devices",
       icon: ICON_DEVICES,
-      headline: "Devices",
+      headline: this._t("overview.devices"),
       supporting: "",
       onClick: () => this._openConfigPage("devices"),
     });
     made.rowEntities = this._navRow({
       className: "nav-entities",
       icon: ICON_ENTITIES,
-      headline: "Entities",
+      headline: this._t("overview.entities"),
       supporting: "",
       onClick: () => this._openConfigPage("entities"),
     });
@@ -1382,10 +1759,10 @@ class Rtl433Panel extends HTMLElement {
       root.querySelector(".network-slot"),
       "network-card",
       [made.rowDevices, made.rowEntities],
-      "My network"
+      this._t("overview.network")
     );
     made.fab = this._buildFab(root.querySelector(".fab-slot"), {
-      label: "Add or replace device",
+      label: this._t("overview.add_device"),
       icon: ICON_PLUS,
       onClick: () => this._navigate("discovered"),
     });
@@ -1416,24 +1793,22 @@ class Rtl433Panel extends HTMLElement {
         {
           className: "open-hub-settings",
           icon: ICON_RECEIVER,
-          headline: "Receiver settings",
-          supporting:
-            "Availability timeout and whether Home Assistant manages the receiver",
+          headline: this._t("view.hub_settings"),
+          supporting: this._t("overview.hub_settings_description"),
           segment: "options",
         },
         {
           className: "open-device-settings",
           icon: ICON_DEVICE_SETTINGS,
-          headline: "Device settings",
-          supporting:
-            "Per-device timeout overrides and utility-meter calibration",
+          headline: this._t("view.device_settings"),
+          supporting: this._t("overview.device_settings_description"),
           segment: "device-settings",
         },
         {
           className: "open-mappings",
           icon: ICON_MAPPINGS,
-          headline: "Device mappings",
-          supporting: "YAML overrides for how fields become entities",
+          headline: this._t("view.mappings"),
+          supporting: this._t("overview.mappings_description"),
           segment: "mappings",
         },
       ].map((row) =>
@@ -1518,6 +1893,7 @@ class Rtl433Panel extends HTMLElement {
       status: root.querySelector(".status"),
       grid: root.querySelector(".grid"),
       searching: root.querySelector(".searching"),
+      searchingTitle: root.querySelector(".searching-title"),
       searchingHint: root.querySelector(".searching-hint"),
       searchingSpinner: root.querySelector(".searching-spinner"),
       back: this._buildBack(root.querySelector(".back-slot")),
@@ -1541,6 +1917,11 @@ class Rtl433Panel extends HTMLElement {
     };
     Object.assign(this._el, this._buildOverview(root));
     this._el.root = root;
+    // The skeleton is a fixed shape, so the two lines of copy in it are written
+    // here rather than baked into the markup -- markup has nowhere to look a
+    // string up from.
+    this._el.searchingTitle.textContent = this._t("discovered.searching");
+    this._el.searchingHint.textContent = this._t("discovered.hint");
     this._el.searchingSpinner.append(
       haControl("ha-spinner", () => {
         // No spinner element: the heading already says what is happening, so
@@ -1559,7 +1940,11 @@ class Rtl433Panel extends HTMLElement {
     // and carries no icon. A Cancel beside it would be a second control for
     // what the toolbar's back arrow already does.
     this._el.settingsActions = root.querySelector(".settings-actions");
-    this._el.settingsSave = haButton("Save", "primary settings-save", "filled");
+    this._el.settingsSave = haButton(
+      this._t("common.save"),
+      "primary settings-save",
+      "filled"
+    );
     this._el.settingsActions.append(this._el.settingsSave);
 
     // The two list actions are built rather than templated so they can be Home
@@ -1569,7 +1954,7 @@ class Rtl433Panel extends HTMLElement {
     this._el.ignoredToggle = haButton("", "ghost ignored-toggle");
     this._el.ignoredToggle.hidden = true;
     this._el.clear = haButton(
-      "Clear discovered devices",
+      this._t("discovered.clear"),
       "ghost clear-devices"
     );
     this._el.clear.hidden = true;
@@ -1581,9 +1966,13 @@ class Rtl433Panel extends HTMLElement {
     // Cancel is `plain` and Replace `accent`: that is the weighting core gives a
     // dialog's dismiss-versus-commit pair, and Replace starts disabled because
     // the dialog opens with nothing chosen.
-    this._el.dialogCancel = haButton("Cancel", "ghost replace-cancel", "plain");
+    this._el.dialogCancel = haButton(
+      this._t("common.cancel"),
+      "ghost replace-cancel",
+      "plain"
+    );
     this._el.dialogConfirm = haButton(
-      "Replace",
+      this._t("replace.confirm"),
       "primary replace-confirm",
       "accent"
     );
@@ -1597,6 +1986,10 @@ class Rtl433Panel extends HTMLElement {
 
     this._el.back.addEventListener("click", () => this._goBack());
     this._el.clear.addEventListener("click", () => this._clearDevices());
+    // Save carried its own handler while it was built by `_buildFab`, which
+    // takes an `onClick`; a plain `haButton` does not, so the commit is wired
+    // here beside the page's other buttons.
+    this._el.settingsSave.addEventListener("click", () => this._saveSettings());
     this._el.dialogCancel.addEventListener("click", () => this._closeReplace());
     this._el.dialogConfirm.addEventListener("click", () => this._confirmReplace());
     // Esc and the backdrop both close a native dialog on their own; this keeps
@@ -1629,7 +2022,7 @@ class Rtl433Panel extends HTMLElement {
     this._el.viewOverview.hidden = view.view !== "overview";
     this._el.viewDiscovered.hidden = view.view !== "discovered";
     this._el.viewSettings.hidden = view.view !== "settings";
-    this._el.title.textContent = view.title;
+    this._el.title.textContent = this._t(view.title);
 
     if (view.form) {
       this._showSettingsHub();
@@ -1714,9 +2107,12 @@ class Rtl433Panel extends HTMLElement {
 
     const ignored = this._data && this._data.ignored ? this._data.ignored : [];
     this._el.ignoredToggle.hidden = !loaded || ignored.length === 0;
-    this._el.ignoredToggle.textContent = `${
-      this._showIgnored ? "Hide" : "Show"
-    } ignored devices (${ignored.length})`;
+    // Two whole sentences rather than a "Hide"/"Show" swapped into one: which
+    // word a language puts where is not this file's to assume.
+    this._el.ignoredToggle.textContent = this._t(
+      this._showIgnored ? "discovered.hide_ignored" : "discovered.show_ignored",
+      { count: ignored.length }
+    );
     this._el.ignoredGrid.hidden = !this._showIgnored || ignored.length === 0;
 
     this._reconcile(
@@ -1786,15 +2182,15 @@ class Rtl433Panel extends HTMLElement {
       <div class="device-body">
         <div class="stats">
           <div class="stat">
-            <span class="stat-label">Sightings</span>
+            <span class="stat-label stat-label-count"></span>
             <span class="stat-value stat-count"></span>
           </div>
           <div class="stat">
-            <span class="stat-label">Signal</span>
+            <span class="stat-label stat-label-signal"></span>
             <span class="stat-value stat-signal"></span>
           </div>
           <div class="stat">
-            <span class="stat-label">Last seen</span>
+            <span class="stat-label stat-label-age"></span>
             <span class="stat-value stat-age"></span>
           </div>
         </div>
@@ -1802,14 +2198,24 @@ class Rtl433Panel extends HTMLElement {
         <div class="area"></div>
       </div>
       <div class="device-actions">
-        <a class="device-link" hidden>Open device</a>
+        <a class="device-link" hidden></a>
       </div>`;
+    // The three stat captions and the link are written here for the same reason
+    // the searching block's are: markup has nowhere to look a string up from.
+    element.querySelector(".stat-label-count").textContent =
+      this._t("card.sightings");
+    element.querySelector(".stat-label-signal").textContent =
+      this._t("card.signal");
+    element.querySelector(".stat-label-age").textContent =
+      this._t("card.last_seen");
+    element.querySelector(".device-link").textContent =
+      this._t("card.open_device");
     element
       .querySelector(".device-actions")
       .append(
-        haButton("Replace", "ghost replace"),
-        haButton("Ignore", "ghost ignore"),
-        haButton("Add", "primary add", "accent")
+        haButton(this._t("card.replace"), "ghost replace"),
+        haButton(this._t("card.ignore"), "ghost ignore"),
+        haButton(this._t("card.add"), "primary add", "accent")
       );
 
     const parts = {
@@ -1845,7 +2251,7 @@ class Rtl433Panel extends HTMLElement {
       this._act(
         "rtl_433/devices/ignore",
         element.card.key,
-        `${element.card.key} was already ignored.`
+        this._t("action.already_ignored", { device: element.card.key })
       )
     );
     return element;
@@ -1861,18 +2267,19 @@ class Rtl433Panel extends HTMLElement {
     // joins, so these two strings are everything we know about a candidate --
     // and they are what the user compares against the label on the sensor
     // itself.
-    this._text(parts.model, row.model || "Unknown model");
+    this._text(parts.model, row.model || this._t("common.unknown_model"));
     this._text(parts.key, row.key);
     element.classList.toggle("added", card.added);
 
     this._text(parts.count, String(row.count));
-    this._text(parts.signal, formatSignal(row.signal));
-    this._text(parts.age, formatAge(row.last_seen, now));
+    this._text(parts.signal, formatSignal(this._t, row.signal));
+    this._text(parts.age, formatAge(this._t, row.last_seen, now));
     this._title(
       parts.age,
-      `First seen ${formatExact(row.first_seen)}\nLast seen ${formatExact(
-        row.last_seen
-      )}`
+      this._t("card.seen_tooltip", {
+        first: formatExact(row.first_seen),
+        last: formatExact(row.last_seen),
+      })
     );
 
     this._renderReadings(parts, row.readings || []);
@@ -1999,7 +2406,7 @@ class Rtl433Panel extends HTMLElement {
   _buildAreaControl(parts) {
     const picker = document.createElement("ha-area-picker");
     picker.hass = this._hass;
-    picker.label = "Area";
+    picker.label = this._t("card.area");
     parts.area.append(picker);
     parts.areaControl = picker;
   }
@@ -2067,31 +2474,38 @@ class Rtl433Panel extends HTMLElement {
       status.glyph.path = connected ? ICON_ONLINE : ICON_OFFLINE;
     }
     status.badge.classList.toggle("offline", !connected);
-    status.headline.textContent = connected
-      ? "Online"
-      : this._data === null
-        ? "Connecting…"
-        : "Problem";
+    status.headline.textContent = this._t(
+      connected
+        ? "status.online"
+        : this._data === null
+          ? "status.connecting"
+          : "status.problem"
+    );
     status.supporting.textContent =
-      devices === null ? "" : `${devices} ${devices === 1 ? "device" : "devices"}`;
+      devices === null ? "" : this._plural("overview.device_count", devices);
 
-    this._setRowCount(this._el.rowDevices, devices, "device", "devices");
+    this._setRowCount(this._el.rowDevices, devices, "overview.device_count");
     this._setRowCount(
       this._el.rowEntities,
       this._entryEntityCount(deviceIds),
-      "entity",
-      "entities"
+      "overview.entity_count"
     );
   }
 
-  /** Put "N things" on a row's supporting line, or nothing when unknown. */
-  _setRowCount(row, count, one, many) {
+  /**
+   * Put "N things" on a row's supporting line, or nothing when unknown.
+   *
+   * The count and its noun are one translated string rather than a number with
+   * a noun concatenated onto it: which of the two English writes depends on the
+   * number, and in most languages so does the shape of the number's own
+   * ending. `_plural` picks the form.
+   */
+  _setRowCount(row, count, key) {
     const line = row.querySelector(".row-supporting");
     if (!line) {
       return;
     }
-    line.textContent =
-      count === null ? "" : `${count} ${count === 1 ? one : many}`;
+    line.textContent = count === null ? "" : this._plural(key, count);
     line.hidden = count === null;
   }
 
@@ -2188,13 +2602,11 @@ class Rtl433Panel extends HTMLElement {
       // clear had half worked.
       this._added.clear();
       this._setBanner(
-        `Cleared ${result.cleared} discovered ${
-          result.cleared === 1 ? "device" : "devices"
-        }. They reappear as they transmit.`,
+        this._plural("discovered.cleared", result.cleared),
         "notice"
       );
     } catch (error) {
-      this._setBanner(describeError(error), "error");
+      this._setBanner(describeError(this._t, error), "error");
     } finally {
       this._el.clear.disabled = false;
       this._render();
@@ -2245,7 +2657,7 @@ class Rtl433Panel extends HTMLElement {
       // The form cannot be drawn until the payload lands, and the view is
       // already on screen by now -- so the body says so rather than sitting
       // blank, and Save is withheld until there is something to save.
-      this._el.settingsBody.textContent = "Loading…";
+      this._el.settingsBody.textContent = this._t("common.loading");
       this._el.settingsSave.disabled = true;
       try {
         this._settings = await this._call({
@@ -2255,7 +2667,7 @@ class Rtl433Panel extends HTMLElement {
         this._settingsFor = entryId;
       } catch (error) {
         this._el.settingsBody.textContent = "";
-        this._el.settingsProblem.textContent = describeError(error);
+        this._el.settingsProblem.textContent = describeError(this._t, error);
         this._el.settingsProblem.hidden = false;
         return;
       } finally {
@@ -2374,14 +2786,26 @@ class Rtl433Panel extends HTMLElement {
       const schema = [
         {
           name: "availability_mode",
-          selector: { select: { mode: "dropdown", options: TIMEOUT_MODES } },
+          selector: {
+            select: {
+              mode: "dropdown",
+              options: TIMEOUT_MODES.map((value) => ({
+                value,
+                label: this._t(`settings.timeout_mode.${value}`),
+              })),
+            },
+          },
         },
       ];
       if (this._settingsData.availability_mode === "custom") {
         schema.push({
           name: "availability_timeout",
           selector: {
-            number: { min: 0, mode: "box", unit_of_measurement: "seconds" },
+            number: {
+              min: 0,
+              mode: "box",
+              unit_of_measurement: this._t("settings.seconds"),
+            },
           },
         });
       }
@@ -2413,7 +2837,11 @@ class Rtl433Panel extends HTMLElement {
       {
         name: "timeout_override",
         selector: {
-          number: { min: 0, mode: "box", unit_of_measurement: "seconds" },
+          number: {
+            min: 0,
+            mode: "box",
+            unit_of_measurement: this._t("settings.seconds"),
+          },
         },
       },
     ];
@@ -2426,7 +2854,11 @@ class Rtl433Panel extends HTMLElement {
       schema.push({
         name: "motion_clear_delay",
         selector: {
-          number: { min: 1, mode: "box", unit_of_measurement: "seconds" },
+          number: {
+            min: 1,
+            mode: "box",
+            unit_of_measurement: this._t("settings.seconds"),
+          },
         },
       });
     }
@@ -2467,48 +2899,27 @@ class Rtl433Panel extends HTMLElement {
     return schema;
   }
 
-  /** The label and hint for one field name. */
+  /**
+   * The label and hint for one field name.
+   *
+   * `data` and `data_description` are the two sections Home Assistant already
+   * puts a form's labels and helper text in, so these read the same way a
+   * config flow's do -- and a field with nothing worth explaining simply has no
+   * `data_description` entry, which `_t` answers for with the empty string.
+   *
+   * The label falls back to the raw field name rather than to blank: a schema
+   * that grew a field nobody wrote copy for should say which one, not leave an
+   * anonymous control on the page.
+   */
   _settingsCopy(name) {
-    const defaults = this._settings.defaults;
-    const copy = {
-      availability_mode: [
-        "Availability timeout",
-        "How long a device may go unheard before it is marked unavailable. " +
-          "The defaults never expire doorbells, motion and contacts.",
-      ],
-      availability_timeout: [
-        "Timeout",
-        "Applies to every device without an override of its own.",
-      ],
-      manage_settings: [
-        "Manage the receiver's own settings",
-        "Adds frequency, gain and sample-rate entities to this receiver's " +
-          "device page.",
-      ],
-      device_key: ["Device", ""],
-      timeout_override: [
-        "Availability timeout override",
-        "Blank uses the receiver's timeout. 0 means never expire.",
-      ],
-      motion_clear_delay: [
-        "Motion clear delay",
-        "How long after a detection this device is reported clear. Blank uses " +
-          `${defaults.motion_clear_delay} seconds.`,
-      ],
-      commodity: [
-        "Utility meter commodity",
-        "Setting a commodity turns this device's counter into an " +
-          "Energy-dashboard sensor. “none” leaves it as the library " +
-          "describes it.",
-      ],
-      unit: ["Base unit", "One unit of what the counter counts."],
-      scale: [
-        "Scale",
-        "Multiplier on the raw counter, to reach one base unit.",
-      ],
-      mappings: ["Overrides", ""],
-    };
-    return copy[name] || [name, ""];
+    return [
+      this._t(`settings.data.${name}`) || name,
+      this._t(`settings.data_description.${name}`, {
+        // Only `motion_clear_delay` names it, and an argument the message does
+        // not mention costs nothing.
+        seconds: this._settings.defaults.motion_clear_delay,
+      }),
+    ];
   }
 
   /** The values the open form starts from. */
@@ -2576,28 +2987,26 @@ class Rtl433Panel extends HTMLElement {
     this._settingsForm = kind;
 
     if (kind === "hub") {
-      this._el.settingsIntro.textContent =
-        "Settings for this receiver as a whole. Individual devices can override the timeout.";
+      this._el.settingsIntro.textContent = this._t("settings.hub_intro");
     } else if (kind === "device") {
       if (!this._settings.devices.length) {
-        this._el.settingsIntro.textContent =
-          "No devices have been added yet. Add one from this page first, and its settings will appear here.";
+        this._el.settingsIntro.textContent = this._t("settings.device_empty");
         this._showSettingsSave(false);
         this._settingsData = {};
         return;
       }
-      this._el.settingsIntro.textContent =
-        "Overrides for one device. Blank means “use the receiver's setting”.";
+      this._el.settingsIntro.textContent = this._t("settings.device_intro");
     } else {
       // The one intro that needs a link, so it is built rather than assigned.
-      this._el.settingsIntro.textContent =
-        "YAML overrides for how this receiver's fields become entities. Clearing the editor removes them all. ";
+      this._el.settingsIntro.textContent = this._t("settings.mappings_intro");
       const link = document.createElement("a");
       link.href = this._settings.mappings_docs_url;
       link.target = "_blank";
       link.rel = "noreferrer noopener";
-      link.textContent = "Documentation";
-      this._el.settingsIntro.append(link);
+      link.textContent = this._t("settings.documentation");
+      // The space is the panel's, not the sentence's: a translation is stored
+      // trimmed, so a trailing space in the string would not survive the trip.
+      this._el.settingsIntro.append(" ", link);
     }
 
     this._settingsData = this._settingsDefaults(kind);
@@ -2665,7 +3074,9 @@ class Rtl433Panel extends HTMLElement {
     // a bare `<input type="number">` has nowhere to put one, so the label says
     // it instead. Either way the unit is written once, on the schema.
     const unit = selector.number && selector.number.unit_of_measurement;
-    const label = unit ? `${name} (${unit})` : name;
+    const label = unit
+      ? this._t("settings.label_with_unit", { label: name, unit })
+      : name;
     let control;
     if (selector.boolean) {
       control = document.createElement("input");
@@ -2844,7 +3255,7 @@ class Rtl433Panel extends HTMLElement {
     try {
       await this._call(message);
     } catch (error) {
-      this._el.settingsProblem.textContent = describeError(error);
+      this._el.settingsProblem.textContent = describeError(this._t, error);
       this._el.settingsProblem.hidden = false;
       return;
     } finally {
@@ -2859,7 +3270,7 @@ class Rtl433Panel extends HTMLElement {
     // `_subscribe` also clears the banner on its way past, so a "saved" set
     // first is wiped before anyone reads it.
     this._subscribe();
-    this._setBanner("Settings saved.", "notice");
+    this._setBanner(this._t("settings.saved"), "notice");
   }
 
   // -- Replace ---------------------------------------------------------------
@@ -2906,10 +3317,10 @@ class Rtl433Panel extends HTMLElement {
 
     this._text(
       this._el.dialogIntro,
-      `${row.model || "This device"} (${row.key}) is new to Home Assistant. ` +
-        "If it is a device you already have — the same sensor after a battery " +
-        "change, say — pick it below. Its history, settings and entity ids move " +
-        "across to the new transmitter id, and the candidate is merged into it."
+      this._t("replace.intro", {
+        device: row.model || this._t("replace.this_device"),
+        key: row.key,
+      })
     );
 
     this._el.dialogList.textContent = "";
@@ -2918,7 +3329,7 @@ class Rtl433Panel extends HTMLElement {
       text.className = "replace-option-text";
       const name = document.createElement("span");
       name.className = "replace-option-name";
-      name.textContent = target.model || "Unknown model";
+      name.textContent = target.model || this._t("common.unknown_model");
       const key = document.createElement("span");
       key.className = "replace-option-key mono";
       key.textContent = target.key;
@@ -2978,11 +3389,11 @@ class Rtl433Panel extends HTMLElement {
         replaces: target,
       });
       this._setBanner(
-        `${target} now uses the transmitter id ${row.key}. Its history and settings came with it.`,
+        this._t("action.replaced", { device: target, key: row.key }),
         "notice"
       );
     } catch (error) {
-      this._setBanner(describeError(error), "error");
+      this._setBanner(describeError(this._t, error), "error");
     } finally {
       this._busy.delete(row.key);
       this._render();
@@ -3000,7 +3411,7 @@ class Rtl433Panel extends HTMLElement {
       <div class="device-actions"></div>`;
     element
       .querySelector(".device-actions")
-      .append(haButton("Un-ignore", "ghost unignore"));
+      .append(haButton(this._t("card.unignore"), "ghost unignore"));
     const parts = {
       model: element.querySelector(".device-model"),
       key: element.querySelector(".device-key"),
@@ -3011,7 +3422,7 @@ class Rtl433Panel extends HTMLElement {
       this._act(
         "rtl_433/devices/unignore",
         row.key,
-        `${row.key} was not on the ignore list.`
+        this._t("action.not_ignored", { device: row.key })
       )
     );
     return element;
@@ -3021,7 +3432,7 @@ class Rtl433Panel extends HTMLElement {
     const parts = element.parts;
     // A device is usually ignored while still pending, long before anything is
     // stored about it, so its model is often simply not known yet.
-    this._text(parts.model, row.model || "Unknown model");
+    this._text(parts.model, row.model || this._t("common.unknown_model"));
     this._text(parts.key, row.key);
     parts.unignore.disabled = this._busy.has(row.key);
   }
@@ -3047,10 +3458,8 @@ const SKELETON = `
   <div class="view view-discovered" hidden>
     <div class="searching">
       <div class="searching-spinner"></div>
-      <h2 class="searching-title">Searching for rtl_433 devices&hellip;</h2>
-      <div class="searching-hint">
-        Devices will show up here once discovered.
-      </div>
+      <h2 class="searching-title"></h2>
+      <div class="searching-hint"></div>
     </div>
 
     <div class="grid" hidden></div>

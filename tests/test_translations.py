@@ -23,6 +23,8 @@ import ast
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
+import re
+from string import Formatter
 
 import pytest
 
@@ -169,6 +171,86 @@ def test_the_approval_steps_carry_their_form_field_labels(translations):
     steps = translations["options"]["step"]
     assert set(steps["add_devices"]["data"]) == {"add", "ignore"}
     assert set(steps["ignored_devices"]["data"]) == {"unignore"}
+
+
+def test_the_config_panel_strings_are_shaped_the_way_hassfest_wants(translations):
+    """The panel's strings obey the rules hassfest enforces on a translation.
+
+    ``config_panel`` is the one section an integration may shape freely, so the
+    panel's strings live there -- but "freely" is only the *keys*. Every leaf is
+    still put through hassfest's translation-value validator, and the two rules
+    it applies that are easy to trip over are invisible until CI runs:
+
+    * a value is stored trimmed, so a string written with a trailing space (to
+      sit before a link, say) loses it; and
+    * a value is parsed as a Python format string, so ``{name}`` is the only
+      placeholder syntax there is. ICU's ``{n, plural, ...}`` is not merely
+      unsupported, it raises -- which is why the counted strings are one key per
+      plural form and the panel picks between them.
+
+    Checked here so a string that breaks either rule fails in pytest, next to
+    the person who wrote it, rather than in the hassfest job with a message
+    about voluptuous.
+    """
+    key_pattern = re.compile(r"^(?!.+__)(?!_)[\da-z_]+(?<!_)$")
+    html = re.compile(r"<[a-z].*?>", re.IGNORECASE)
+    formatter = Formatter()
+    problems: list[str] = []
+
+    def walk(node: dict, path: str = "") -> None:
+        for key, value in node.items():
+            here = f"{path}{key}"
+            if not key_pattern.match(key):
+                problems.append(f"{here}: key is not a translation key")
+            if isinstance(value, dict):
+                walk(value, f"{here}.")
+                continue
+            if not isinstance(value, str):
+                problems.append(f"{here}: not a string")
+                continue
+            if value != value.strip():
+                problems.append(f"{here}: leading or trailing whitespace")
+            if html.search(value):
+                problems.append(f"{here}: contains HTML")
+            try:
+                fields = [name for _, name, _, _ in formatter.parse(value) if name]
+            except ValueError as err:
+                problems.append(f"{here}: not a valid format string ({err})")
+                continue
+            for name in fields:
+                if not name.isidentifier():
+                    problems.append(
+                        f"{here}: placeholder {name!r} is not an identifier"
+                    )
+
+    section = translations.get("config_panel")
+    # Without it every assertion here is vacuous, and the panel falls back to
+    # its built-in English in every language at once.
+    assert section, "translations/en.json has no config_panel section"
+    walk(section)
+    assert problems == []
+
+
+def test_the_counted_panel_strings_have_a_string_per_plural_form(translations):
+    """Each counted string on the panel is a group, not a sentence.
+
+    Home Assistant's translation files cannot carry an ICU plural (see above),
+    so the panel stores one string per plural form and chooses with
+    ``Intl.PluralRules``. ``other`` is the form it falls back to, so it is the
+    one that may never be missing.
+    """
+    panel = translations["config_panel"]
+    groups = {
+        "overview.device_count": panel["overview"]["device_count"],
+        "overview.entity_count": panel["overview"]["entity_count"],
+        "discovered.cleared": panel["discovered"]["cleared"],
+    }
+    for name, group in groups.items():
+        assert "other" in group, f"{name} has no fallback plural form"
+        # English needs exactly these two; a translation may add its own.
+        assert {"one", "other"} <= set(group), name
+        for form, value in group.items():
+            assert "{count}" in value, f"{name}.{form} never shows the count"
 
 
 def test_the_ignore_vocabulary_never_says_reject(translations):

@@ -270,5 +270,127 @@
         }
       }
     }
+  },
+  "config_panel": {
+    "title": "rtl_433",
+    "view": {
+      "discovered": "Discovered devices",
+      "hub_settings": "Receiver settings",
+      "device_settings": "Device settings",
+      "mappings": "Device mappings"
+    },
+    "common": {
+      "back": "Back",
+      "cancel": "Cancel",
+      "save": "Save",
+      "loading": "Loading…",
+      "unknown_model": "Unknown model",
+      "unknown_error": "Unknown error"
+    },
+    "status": {
+      "no_hubs": "No rtl_433 hubs are configured.",
+      "waiting_for_reload": "Waiting for the receiver to reload…",
+      "online": "Online",
+      "connecting": "Connecting…",
+      "problem": "Problem"
+    },
+    "overview": {
+      "network": "My network",
+      "devices": "Devices",
+      "entities": "Entities",
+      "device_count": {
+        "one": "{count} device",
+        "other": "{count} devices"
+      },
+      "entity_count": {
+        "one": "{count} entity",
+        "other": "{count} entities"
+      },
+      "add_device": "Add or replace device",
+      "hub_settings_description": "Availability timeout and whether Home Assistant manages the receiver",
+      "device_settings_description": "Per-device timeout overrides and utility-meter calibration",
+      "mappings_description": "YAML overrides for how fields become entities"
+    },
+    "discovered": {
+      "searching": "Searching for rtl_433 devices…",
+      "hint": "Devices will show up here once discovered.",
+      "show_ignored": "Show ignored devices ({count})",
+      "hide_ignored": "Hide ignored devices ({count})",
+      "clear": "Clear discovered devices",
+      "cleared": {
+        "one": "Cleared {count} discovered device. They reappear as they transmit.",
+        "other": "Cleared {count} discovered devices. They reappear as they transmit."
+      }
+    },
+    "card": {
+      "sightings": "Sightings",
+      "signal": "Signal",
+      "signal_value": "{value} dB",
+      "last_seen": "Last seen",
+      "seen_tooltip": "First seen {first}\nLast seen {last}",
+      "open_device": "Open device",
+      "area": "Area",
+      "add": "Add",
+      "ignore": "Ignore",
+      "replace": "Replace",
+      "unignore": "Un-ignore"
+    },
+    "age": {
+      "seconds": "{count}s ago",
+      "minutes": "{count}m ago",
+      "hours": "{count}h ago",
+      "days": "{count}d ago"
+    },
+    "action": {
+      "already_added": "{device} is no longer pending — it may already have been added.",
+      "already_ignored": "{device} was already ignored.",
+      "not_ignored": "{device} was not on the ignore list.",
+      "area_failed": "{device} was added, but its area could not be set: {error}",
+      "replaced": "{device} now uses the transmitter id {key}. Its history and settings came with it."
+    },
+    "replace": {
+      "title": "Replace a device",
+      "list_label": "Device to replace",
+      "this_device": "This device",
+      "confirm": "Replace",
+      "intro": "{device} ({key}) is new to Home Assistant. If it is a device you already have — the same sensor after a battery change, say — pick it below. Its history, settings and entity ids move across to the new transmitter id, and the candidate is merged into it."
+    },
+    "settings": {
+      "saved": "Settings saved.",
+      "hub_intro": "Settings for this receiver as a whole. Individual devices can override the timeout.",
+      "device_intro": "Overrides for one device. Blank means “use the receiver's setting”.",
+      "device_empty": "No devices have been added yet. Add one from this page first, and its settings will appear here.",
+      "mappings_intro": "YAML overrides for how this receiver's fields become entities. Clearing the editor removes them all.",
+      "documentation": "Documentation",
+      "seconds": "seconds",
+      "label_with_unit": "{label} ({unit})",
+      "timeout_mode": {
+        "defaults": "Per-device-type defaults",
+        "never": "Never expire",
+        "custom": "A fixed timeout"
+      },
+      "data": {
+        "availability_mode": "Availability timeout",
+        "availability_timeout": "Timeout",
+        "manage_settings": "Manage the receiver's own settings",
+        "device_key": "Device",
+        "timeout_override": "Availability timeout override",
+        "motion_clear_delay": "Motion clear delay",
+        "commodity": "Utility meter commodity",
+        "unit": "Base unit",
+        "scale": "Scale",
+        "mappings": "Overrides"
+      },
+      "data_description": {
+        "availability_mode": "How long a device may go unheard before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
+        "availability_timeout": "Applies to every device without an override of its own.",
+        "manage_settings": "Adds frequency, gain and sample-rate entities to this receiver's device page.",
+        "timeout_override": "Blank uses the receiver's timeout. 0 means never expire.",
+        "motion_clear_delay": "How long after a detection this device is reported clear. Blank uses {seconds} seconds.",
+        "commodity": "Setting a commodity turns this device's counter into an Energy-dashboard sensor. “none” leaves it as the library describes it.",
+        "unit": "One unit of what the counter counts.",
+        "scale": "Multiplier on the raw counter, to reach one base unit."
+      }
+    }
   }
 }
