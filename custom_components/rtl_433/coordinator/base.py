@@ -126,15 +126,22 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         ``effective_clear_delay_resolver``: ``Callable[[str], int] | None``.
 
     Observation vs adoption (a device is only ever created in Home Assistant
-    once the user approves it from the options flow):
+    once the user approves it, and the approval is the **location's**, not this
+    receiver's — see :mod:`~custom_components.rtl_433.adoption`):
         ``adopted``: ``set[str]`` device keys the user has approved. Seeded from
-            ``entry.data[CONF_DEVICES]`` at construction and extended by
-            :meth:`adopt_device`. Only these keys reach the runtime state below.
+            the location's ``entry.data[CONF_DEVICES]`` at construction and
+            extended by :meth:`adopt_device` / :meth:`mark_adopted`. Only these
+            keys reach the runtime state below.
         ``ignored``: ``set[str]`` device keys the user never wants to see.
-            Seeded from ``entry.data[CONF_IGNORED_DEVICES]``.
-        ``pending``: ``dict[str, PendingDevice]`` devices heard this session that
-            are neither adopted nor ignored. In-memory only, so it is empty again
-            after a restart or reload.
+            Seeded from the location's ``entry.data[CONF_IGNORED_DEVICES]``.
+        ``pending``: ``dict[str, PendingDevice]`` devices *this receiver* has
+            heard this session that are neither adopted nor ignored. In-memory
+            only, so it is empty again after a restart or reload. The location's
+            candidate list is the merge of every receiver's map
+            (``aggregator.merged_candidates``).
+        ``pending_listeners``: ``list[Callable[[], None]]`` run before each
+            announcement that this receiver's candidate list changed membership
+            (the location aggregator registers its merged-cap enforcement here).
 
     Runtime state, describing adopted devices only (read by ``diagnostics.py``):
         ``devices``: ``dict[str, NormalizedEvent]`` last event per device key.
@@ -270,20 +277,43 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.device_removers: list[Callable[[str], None]] = []
 
         # --- Observation vs adoption -----------------------------------------
-        # ``adopted`` is the in-memory mirror of ``entry.data[CONF_DEVICES]``,
-        # the restart-safe record of every device the user has approved. It is
-        # the gate on the event path: only an adopted key reaches the runtime
-        # state below, so nothing the user has not asked for ever becomes a Home
-        # Assistant device. ``ignored`` mirrors ``entry.data[CONF_IGNORED_DEVICES]``
-        # and drops a key outright. ``pending`` is everything else heard since
-        # this coordinator started — deliberately *not* persisted, so an unwanted
-        # device never outlives the session that heard it.
+        # All three sets are **location-scoped decisions held per receiver**. A
+        # user approves a *sensor*, not a sensor-at-a-receiver, so what is
+        # adopted and what is ignored belongs to the location entry; each
+        # coordinator keeps a mirror of it because the gate has to be applied on
+        # this receiver's own event path, frame by frame, with no lookup.
+        #
+        # ``adopted`` mirrors ``entry.data[CONF_DEVICES]`` — the restart-safe
+        # record of every device the user has approved — and is the gate itself:
+        # only an adopted key reaches the runtime state below, so nothing the
+        # user has not asked for ever becomes a Home Assistant device.
+        # ``ignored`` mirrors ``entry.data[CONF_IGNORED_DEVICES]`` and drops a
+        # key outright. Both are written across *every* receiver of the location
+        # by :mod:`~custom_components.rtl_433.adoption`, which is what makes one
+        # click apply to all of them.
+        #
+        # ``pending`` is everything else this receiver has heard since it
+        # started — deliberately *not* persisted, so an unwanted device never
+        # outlives the session that heard it. It stays per receiver because it
+        # is an ingestion buffer, not a decision: the replay / backlog gate that
+        # fills it is a statement about *this* receiver's connection. The list
+        # the user is actually offered is the merge of every receiver's map
+        # (``aggregator.merged_candidates``), which is also where the cap is
+        # enforced.
         self.adopted: set[str] = set(adopted_keys or ())
         self.ignored: set[str] = set(ignored_keys or ())
         # Least-recently-heard first, so the cap in ``_events`` can drop from
         # the cold end. An ``OrderedDict`` is a ``dict``, so readers are
         # unaffected.
         self.pending: OrderedDict[str, PendingDevice] = OrderedDict()
+        # Callbacks run *before* each announcement that this receiver's
+        # candidate list changed membership. The location aggregator registers
+        # one (its merged-cap enforcement) the same way the entity platforms
+        # register ``device_removers``, so the coordinator never has to import
+        # the location layer that sits above it -- and so the list announced is
+        # the merged list as it now stands rather than one entry longer than it
+        # will ever be.
+        self.pending_listeners: list[Callable[[], None]] = []
         # The last model decoded for each ignored key, so an approval surface can
         # name the thing it is offering to un-ignore. The persisted ignore list
         # is bare keys -- it has always been, because ignoring is a decision
@@ -576,6 +606,29 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         return record
 
     @callback
+    def mark_adopted(self, device_key: str) -> None:
+        """Adopt a key this receiver has never heard, because the location has.
+
+        Adoption is a decision about a *sensor*, so it applies to every receiver
+        in the location -- including the ones out of range of it, which have no
+        candidate to promote. Without this, a receiver that was deaf to the
+        sensor at approval time would treat its first frame as a brand-new
+        sighting and re-queue the device the user has already added.
+
+        Deliberately seeds **no** runtime state and fires no registration: this
+        receiver genuinely has not heard the device, and writing another
+        receiver's ``last_seen`` here would let it vouch for a sensor it cannot
+        hear (see :func:`~custom_components.rtl_433.aggregator.receiver_vouches`).
+        It fills its own maps on its first real frame, exactly as it does for a
+        device adopted in an earlier session and restored from ``entry.data``.
+
+        The candidate map needs no clearing here: this is only ever reached
+        after :meth:`adopt_device` answered ``None``, which is exactly the case
+        of a receiver with nothing pending for the key.
+        """
+        self.adopted.add(device_key)
+
+    @callback
     def ignore_device(self, device_key: str) -> None:
         """Drop a pending device and stop recording it as a candidate.
 
@@ -735,49 +788,23 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         open socket so one count could tick up. Keeping the freshening of those
         counts in the websocket layer (a slow, change-detecting re-send) leaves
         this class a pure state holder that never learns a UI exists.
+
+        The signal is **location-scoped**: a sensor both receivers hear is one
+        candidate row, so there is one list to announce however many receivers
+        decoded the transmission. ``pending_listeners`` run first, because the
+        location's merged-cap enforcement is registered there and the announced
+        list has to be the one a subscriber will actually render.
         """
-        async_dispatcher_send(self.hass, signal_pending_update(self.receiver_id))
+        for listener in list(self.pending_listeners):
+            listener()
+        async_dispatcher_send(self.hass, signal_pending_update(self.entry.entry_id))
 
-    @callback
-    def pending_candidates(self) -> list[PendingDevice]:
-        """Return the pending candidates, most recently *discovered* first.
-
-        The order a user is offered candidates in is one decision, so it is made
-        here rather than separately by each surface: the options form's picker
-        and the WebSocket payload both render this list, and a long list worked
-        from the top has to put the same device first in both.
-
-        Ordering by ``first_seen`` rather than ``last_seen`` puts the device the
-        user just triggered at the top -- it has only just been discovered -- and,
-        unlike ``last_seen``, it does not move afterwards. The panel draws a card
-        per candidate and refreshes them every few seconds, so a most-recently-
-        *heard* order would have cards swapping places under the cursor as
-        devices transmitted. The key breaks a tie, so two devices first heard in
-        the same instant keep a stable order too.
-        """
-        return sorted(
-            self.pending.values(),
-            key=lambda r: (r.first_seen, r.key),
-            reverse=True,
-        )
-
-    @callback
-    def clear_pending(self) -> int:
-        """Forget every pending candidate, and return how many there were.
-
-        A candidate is only ever a working set: the pending map is memory-only
-        and rebuilt from live traffic, so clearing it discards nothing the user
-        decided. Adopting and ignoring are the decisions, and they have their own
-        methods.
-
-        Lives here with the other verbs that write ``pending`` so the map has one
-        owner. Clearing does announce -- an emptied list is a membership change
-        every open panel needs at once.
-        """
-        cleared = len(self.pending)
-        self.pending.clear()
-        self.emit_pending_update()
-        return cleared
+    # Rendering the candidate list and clearing it are **location** verbs, and
+    # live in ``aggregator.py`` (``merged_candidates`` / ``clear_pending``): a
+    # sensor several receivers hear is one row to offer and one row to clear, so
+    # answering from a single receiver's map would show the same device twice
+    # and clear only half of it. This class keeps only the state and the
+    # per-receiver writes.
 
     def _dispatch(
         self,

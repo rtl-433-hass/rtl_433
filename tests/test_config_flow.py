@@ -944,9 +944,14 @@ def _seen_models(hass, entry, models):
     ``_replacement_model`` falls back to the coordinator's last event when a key
     has no stored record (or one with a blank model), so the replace picker can
     still name a device the devices map does not describe.
+
+    ``pending`` is empty rather than absent: the picker's candidate set is the
+    location's *merged* pending list, so every receiver this stands in for has to
+    answer the question "what are you offering?" -- with nothing, here.
     """
     hass.data.setdefault(DOMAIN, {})[receiver_id(entry)] = SimpleNamespace(
-        devices={key: SimpleNamespace(model=model) for key, model in models.items()}
+        devices={key: SimpleNamespace(model=model) for key, model in models.items()},
+        pending={},
     )
 
 

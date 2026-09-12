@@ -508,10 +508,10 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 003: Location-scoped device identity and `via_device_id` relink (sub-step A, the former Level 1), then the location aggregator, entity union and skew-tolerant debounce dedup with the `rssi`/`snr`/`last_seen` exclusion set (sub-step B) — one task, two ordered sub-steps per Clarification #24 (depends on: 002)
 
-### Phase 4: Availability + adoption
+### ✅ Phase 4: Availability + adoption
 **Parallel Tasks:**
-- Task 004: Merged two-gate availability, per-receiver signal fields (excluded from the union, receiver-named, added with no subentry id), and receiver-removal semantics (Clarification #20) (depends on: 003)
-- Task 005: Location-scoped adoption + union candidate list (depends on: 003)
+- ✔️ Task 004: Merged two-gate availability, per-receiver signal fields (excluded from the union, receiver-named, added with no subentry id), and receiver-removal semantics (Clarification #20) (depends on: 003)
+- ✔️ Task 005: Location-scoped adoption + union candidate list (depends on: 003)
 
 ### Phase 5: Surfaces
 **Parallel Tasks:**

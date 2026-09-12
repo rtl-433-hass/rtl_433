@@ -45,3 +45,28 @@ The regression net for every invariant the plan introduces.
 
 ## Implementation Notes
 File-disjoint from task 011, so the two run in parallel.
+
+## Mutation-floor debt this task MUST clear (measured in CI, not predicted)
+
+The `Mutation floor` gate is **failing** on the branch. CI run 34715141112
+(shards 1 and 3) reports three per-file regressions, all introduced by tasks
+002–003 rather than by the task that found them:
+
+| File | Now | Baseline | Band | Killed |
+|---|---|---|---|---|
+| `custom_components/rtl_433/entity.py` | 0.812 | 0.873 | 0.020 | 358/441 |
+| `custom_components/rtl_433/config_flow.py` | 0.905 | 0.938 | 0.020 | 632/698 |
+| `custom_components/rtl_433/diagnostics.py` | 0.938 | 1.000 | 0.021 | 137/146 |
+
+`entity.py` grew from 363 mutants at baseline to 483, so the new surface is
+under-tested rather than the old surface having rotted. Task 004 measured the
+survivor distribution: `async_setup_receiver_platform` 26, `_setup_receiver_platform`
+21, `_known_fields` 16, `async_upsert_*` 18 — i.e. the platform fan-out and
+field bookkeeping added by tasks 002/003.
+
+**Do not fix this by rewriting the baseline.** Raising a baseline to meet a
+lowered score defeats the ratchet. Write the missing tests. Use
+`uv run mutmut run "custom_components.rtl_433.<module>.*"` then
+`uv run mutmut show` to list survivors and target them specifically.
+
+`aggregator.py` is fine (0.969 vs 0.935 floor) and needs no work.
