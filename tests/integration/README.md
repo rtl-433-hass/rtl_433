@@ -87,6 +87,14 @@ npx playwright install chromium         # browser binary only
 sudo npx playwright install-deps chromium   # system libs (see note below)
 ```
 
+> **Both packages are `devDependencies`.** This harness is never shipped, so
+> `dependencies` would have been a lie -- and Renovate's `config:recommended`
+> maps that dep type to a `fix(deps)` commit, which release-please would turn
+> into a patch release and a user-facing "Bug Fixes" changelog entry for a
+> change that touches no shipped code. Run a plain `npm ci`: `--omit=dev` (or
+> `NODE_ENV=production`) installs nothing, and the `wsbridge` service in
+> docker-compose.yml mounts `./node_modules` read-only to get `ws`.
+
 > **Playwright system libs on Debian 13 / trixie:** `--with-deps` may fail
 > because a couple of font packages (`ttf-unifont`, `ttf-ubuntu-font-family`)
 > have no candidate. Install the real dependencies directly instead:
