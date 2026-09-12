@@ -311,6 +311,32 @@ test("the keys the panel builds rather than writes are translated too", () => {
   }
 });
 
+test("the keys chosen inside a lookup are translated too", () => {
+  // Four pairs are picked by a conditional *inside* the `_t(...)` call -- a
+  // receiver's connection state and a merged device's availability -- so the
+  // source sweep above cannot see them: it matches a literal immediately after
+  // `_t(`, and these have an expression there. Both halves of each pair have to
+  // exist, and the failure if one does not is a blank word mid-sentence.
+  for (const key of [
+    "overview.receiver_connected",
+    "overview.receiver_disconnected",
+    "coverage.available",
+    "coverage.unavailable",
+  ]) {
+    assert.ok(defines(key), key);
+  }
+});
+
+test("every view the panel can show has a title, and each is distinct", () => {
+  // The toolbar is the only thing naming the page, so two views sharing a title
+  // is two screens a user cannot tell apart -- which is exactly what "Receiver
+  // settings" was before the location and receiver forms were split.
+  const titles = Object.values(VIEWS).map((view) => view.title);
+  assert.equal(new Set(titles).size, titles.length, titles.join(", "));
+  const rendered = titles.map((title) => STRINGS[title]);
+  assert.equal(new Set(rendered).size, rendered.length, rendered.join(", "));
+});
+
 // -- The fallback formatter ---------------------------------------------------
 
 test("a string with nothing in it comes back unchanged", () => {
