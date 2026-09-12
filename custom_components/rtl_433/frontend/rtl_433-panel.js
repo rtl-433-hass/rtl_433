@@ -156,10 +156,6 @@ const ICON_MAPPINGS =
 /** mdiPlus, for the floating action button. */
 const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
 
-/** mdiContentSave, for the settings pages' save button. */
-const ICON_SAVE =
-  "M15 9H5V5h10m-3 14a3 3 0 0 1-3-3 3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3m5-16H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4Z";
-
 /**
  * How the hub's availability timeout is chosen, as three named choices.
  *
@@ -1212,12 +1208,11 @@ class Rtl433Panel extends HTMLElement {
   /**
    * A floating action button: the one thing you came to this page to do.
    *
-   * Zigbee and Z-Wave both put that in a floating button rather than a row --
-   * adopting a device on the overview, and committing the form on a settings
-   * page, which is core's own editor pattern. Floating rather than sitting at
-   * the end of the page because a two-field form leaves the button stranded
-   * halfway up a phone screen, and a long one pushes it off the bottom; fixed,
-   * it is in the same place either way.
+   * Core reserves this shape for *adding* something -- add automation, add
+   * zone, add helper, and the Zigbee and Z-Wave dashboards' own add buttons --
+   * so the overview's "Add or replace device" is the only thing here wearing
+   * it. A form's Save is not an add, and commits from the foot of its card
+   * instead (see the settings page's `card-actions`).
    *
    * `ha-fab` is not registered in this frontend -- checked, not assumed -- so
    * this is built from `ha-button`, which is, using the pill shape and accent
@@ -1541,6 +1536,7 @@ class Rtl433Panel extends HTMLElement {
       settingsHub: root.querySelector(".settings-hub"),
       settingsProblem: root.querySelector(".settings-problem"),
       settingsBody: root.querySelector(".settings-body"),
+      settingsActions: null,
       settingsSave: null,
     };
     Object.assign(this._el, this._buildOverview(root));
@@ -1554,18 +1550,17 @@ class Rtl433Panel extends HTMLElement {
         return nothing;
       })
     );
-    // Save alone, and floating: these stopped being dialogs when they became
-    // pages, and a page is dismissed by the toolbar's back arrow. A Cancel
-    // beside it was a second control for what the arrow already does -- core's
-    // own settings subpages ship the commit and nothing else.
-    this._el.settingsSave = this._buildFab(
-      root.querySelector(".settings-fab-slot"),
-      { label: "Save", icon: ICON_SAVE, onClick: () => this._saveSettings() }
-    );
-    // There are two floating buttons in this shadow root now, so the one that
-    // commits a form keeps a name of its own: the screenshot harness clicks it
-    // by class, and ".panel-fab" would find the overview's as readily.
-    this._el.settingsSave.classList.add("settings-save");
+    // Save alone, and in the card's own action row: a settings form commits
+    // from a plain button in `card-actions` at the foot of its card, which is
+    // what core's own settings sections (`ha-config-section-general`, the
+    // network and add-on config forms) do. A floating action button is core's
+    // *create* affordance -- "add automation", "add zone", the overview's own
+    // "Add or replace device" -- not a form's commit, so Save does not float
+    // and carries no icon. A Cancel beside it would be a second control for
+    // what the toolbar's back arrow already does.
+    this._el.settingsActions = root.querySelector(".settings-actions");
+    this._el.settingsSave = haButton("Save", "primary settings-save", "filled");
+    this._el.settingsActions.append(this._el.settingsSave);
 
     // The two list actions are built rather than templated so they can be Home
     // Assistant's buttons. They are appended in the order they read on the page,
@@ -2562,11 +2557,22 @@ class Rtl433Panel extends HTMLElement {
     };
   }
 
+  /**
+   * Show or hide Save, and with it the action row it sits in.
+   *
+   * The row carries the card's dividing line, so hiding the button alone would
+   * leave a rule under a form with nothing beneath it.
+   */
+  _showSettingsSave(show) {
+    this._el.settingsSave.hidden = !show;
+    this._el.settingsActions.hidden = !show;
+  }
+
   _buildSettingsForm(kind) {
     const body = this._el.settingsBody;
     body.textContent = "";
     this._el.settingsIntro.textContent = "";
-    this._el.settingsSave.hidden = false;
+    this._showSettingsSave(true);
     this._settingsForm = kind;
 
     if (kind === "hub") {
@@ -2576,7 +2582,7 @@ class Rtl433Panel extends HTMLElement {
       if (!this._settings.devices.length) {
         this._el.settingsIntro.textContent =
           "No devices have been added yet. Add one from this page first, and its settings will appear here.";
-        this._el.settingsSave.hidden = true;
+        this._showSettingsSave(false);
         this._settingsData = {};
         return;
       }
@@ -3057,11 +3063,13 @@ const SKELETON = `
   <div class="view view-settings" hidden>
     <p class="settings-intro"></p>
     <div class="settings-card-slot">
-      <h2 class="settings-hub" hidden></h2>
-      <div class="settings-problem" hidden></div>
-      <div class="settings-body"></div>
+      <div class="card-content">
+        <h2 class="settings-hub" hidden></h2>
+        <div class="settings-problem" hidden></div>
+        <div class="settings-body"></div>
+      </div>
+      <div class="card-actions settings-actions"></div>
     </div>
-    <div class="settings-fab-slot"></div>
   </div>
 
   <div class="replace-slot"></div>
@@ -3413,18 +3421,27 @@ const STYLES = `
    * to collect a trailing margin. Setting it to display:contents generates no
    * box for it at all, leaving the fixed button exactly where it was.
    */
-  .fab-slot, .settings-fab-slot { display: contents; }
-  /*
-   * Room under a settings form for the floating Save to sit over: without it
-   * the button covers the last field of a long one (the mappings editor).
-   */
-  .view-settings { padding-bottom: 88px; }
+  .fab-slot { display: contents; }
   .settings-card-slot {
-    padding: 16px;
     border-radius: var(--ha-card-border-radius, 12px);
     background: var(--card-background-color, #ffffff);
     border: 1px solid var(--divider-color, #e0e0e0);
   }
+  /*
+   * The card's content and action rows, with core's own measurements: ha-card
+   * pads its content by 16px and its action row by 8px, and the action row is
+   * separated by a dividing line that has to run the full width of the card --
+   * which is why the padding lives on these rows and not on the card itself.
+   */
+  .card-content { padding: 16px; }
+  .card-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    padding: 8px;
+    border-top: 1px solid var(--divider-color, #e0e0e0);
+  }
+  .card-actions[hidden] { display: none; }
   .settings-intro {
     margin: 0 0 16px;
     max-width: 68ch;
@@ -3567,13 +3584,6 @@ const STYLES = `
     z-index: 1;
   }
   ha-button.panel-fab { --ha-button-height: 56px; }
-  /*
-   * ha-fab and ha-button both set their own display, which beats the user
-   * agent's [hidden] rule -- so the settings Save, which hides itself on a form
-   * with nothing to save, needs this to actually disappear. (No backticks in
-   * here: this comment is inside a template literal, and one would end it.)
-   */
-  .panel-fab[hidden] { display: none; }
   button.fab-button {
     display: inline-flex;
     align-items: center;
@@ -3714,7 +3724,7 @@ const STYLES = `
    */
   @media (max-width: 600px) {
     :host { padding: 8px; }
-    .settings-card-slot { padding: 12px; }
+    .card-content { padding: 12px; }
   }
 
 `;
