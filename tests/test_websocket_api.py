@@ -32,7 +32,7 @@ Two conventions make the socket assertions deterministic without timeouts:
   signal synchronously, before ``send_result``, so the event genuinely precedes
   the reply on the wire and a naive ``receive_json`` would read the wrong one.
 * Proving that *nothing* was pushed is done with the same helper against a cheap
-  sentinel command (``rtl_433/hubs``): the socket preserves order, so an empty
+  sentinel command (``rtl_433/receivers``): the socket preserves order, so an empty
   event list before the sentinel's reply means nothing was queued behind it.
   That is an exact claim, where waiting on a timeout would only be a guess.
 """
@@ -120,13 +120,15 @@ _ENTRY_COMMANDS = [
     "rtl_433/devices/ignore",
     "rtl_433/devices/unignore",
     "rtl_433/devices/clear",
+    "rtl_433/devices/coverage",
     "rtl_433/devices/subscribe",
     "rtl_433/settings/get",
-    "rtl_433/settings/hub",
+    "rtl_433/settings/location",
+    "rtl_433/settings/receiver",
     "rtl_433/settings/device",
     "rtl_433/settings/mappings",
 ]
-_ALL_COMMANDS = ["rtl_433/hubs", *_ENTRY_COMMANDS]
+_ALL_COMMANDS = ["rtl_433/receivers", *_ENTRY_COMMANDS]
 
 
 def _message(command: str, entry_id: str) -> dict[str, Any]:
@@ -134,17 +136,21 @@ def _message(command: str, entry_id: str) -> dict[str, Any]:
 
     The parametrised gating and bad-id sweeps need one well-formed message per
     command; building them here keeps those tests about the *answer* rather than
-    about each command's schema. ``rtl_433/hubs`` takes no entry at all, and the
-    three action commands additionally require ``device_keys``.
+    about each command's schema. ``rtl_433/receivers`` takes no entry at all, the
+    three action commands additionally require ``device_keys``, and the one
+    receiver-scoped command requires a ``receiver_id`` -- a placeholder here,
+    because the location is resolved first and these sweeps never get past it.
     """
-    if command == "rtl_433/hubs":
+    if command == "rtl_433/receivers":
         return {"type": command}
     message: dict[str, Any] = {"type": command, "entry_id": entry_id}
     verb = command.rsplit("/", 1)[-1]
     if verb in ("add", "ignore", "unignore"):
         message["device_keys"] = [_NEW_KEY]
-    elif command == "rtl_433/settings/hub":
+    elif command == "rtl_433/settings/location":
         message[CONF_AVAILABILITY_TIMEOUT] = 900
+    elif command == "rtl_433/settings/receiver":
+        message["receiver_id"] = "no-such-receiver-id"
         message[CONF_MANAGE_SETTINGS] = True
     elif command == "rtl_433/settings/device":
         message["device_key"] = _NEW_KEY
@@ -349,7 +355,17 @@ async def test_pending_merges_a_device_two_receivers_heard(
     assert reply["success"]
     rows = reply["result"]["pending"]
     assert [row["key"] for row in rows] == [_NEW_KEY]
-    assert rows[0]["receivers"] == [receiver_id(entry, 0), receiver_id(entry, 1)]
+    # Each receiver that heard it, in receiver order, with the signal detail the
+    # add-device page shows before anything is adopted -- the frame carries both
+    # levels, and they are kept per receiver rather than unioned away.
+    assert [row["receiver_id"] for row in rows[0]["receivers"]] == [
+        receiver_id(entry, 0),
+        receiver_id(entry, 1),
+    ]
+    assert rows[0]["receivers"][0]["rssi"] == -3.0
+    assert rows[0]["receivers"][0]["snr"] == 11.5
+    assert rows[0]["receivers"][1]["connected"] is True
+    assert rows[0]["receivers"][1]["last_seen"] is not None
     # The location heard it twice, and the row shows the last frame to arrive.
     assert rows[0]["count"] == 2
     readings = {reading["key"]: reading for reading in rows[0]["readings"]}
@@ -925,28 +941,140 @@ async def test_clear_empties_the_list_without_undoing_any_decision(
     assert reply["result"] == {"cleared": 0}
 
 
-async def test_receivers_lists_every_configured_receiver_loaded_or_not(
+async def test_coverage_reports_each_receivers_signal_with_no_entity_enabled(
+    hass, receiver_entry_builder, hass_ws_client, no_socket
+):
+    """ "Heard by Attic (-62 dB) / Garage (-89 dB)", served from aggregator state.
+
+    The union publishes one temperature for a sensor two receivers both decode,
+    which is the point -- but *which* receiver hears it and how strongly is the
+    question a second receiver was bought to answer. ``rssi`` and ``snr`` are
+    mapped ``enabled_by_default: false`` and stay that way, so a page that waited
+    for entities would show nothing on a default install. This command reads the
+    aggregator's per-receiver coverage instead, and the assertion that no entity
+    was enabled is the whole claim.
+    """
+    device_key = "Acurite-606TX-42"
+    entry = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        devices={device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["rssi"]}},
+        receivers=[
+            build_receiver_subentry(host="attic.local"),
+            build_receiver_subentry(host="garage.local"),
+        ],
+    )
+    attic = hass.data[DOMAIN][receiver_id(entry, 0)]
+    garage = hass.data[DOMAIN][receiver_id(entry, 1)]
+    frame = {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.4}
+    _hear(attic, {**frame, "rssi": -62.0, "snr": 11.5})
+    _hear(garage, {**frame, "rssi": -89.0, "snr": 3.0})
+    await hass.async_block_till_done()
+
+    client = await hass_ws_client(hass)
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/coverage", "entry_id": entry.entry_id}
+    )
+
+    assert reply["success"]
+    (row,) = reply["result"]["devices"]
+    assert row["key"] == device_key
+    # One receiver vouching is enough for the merged device to be available.
+    assert row["available"] is True
+    by_receiver = {
+        entry_row["receiver_id"]: entry_row for entry_row in row["receivers"]
+    }
+    assert set(by_receiver) == {receiver_id(entry, 0), receiver_id(entry, 1)}
+    assert by_receiver[receiver_id(entry, 0)]["rssi"] == -62.0
+    assert by_receiver[receiver_id(entry, 0)]["snr"] == 11.5
+    assert by_receiver[receiver_id(entry, 1)]["rssi"] == -89.0
+    assert by_receiver[receiver_id(entry, 1)]["last_seen"] is not None
+    assert all(entry_row["vouches"] for entry_row in by_receiver.values())
+
+    # Nothing had to be enabled for any of that: every signal entity is still
+    # disabled by the integration, exactly as it ships.
+    signal_entities = [
+        registry_entry
+        for registry_entry in er.async_get(hass).entities.values()
+        if registry_entry.unique_id.endswith((":rssi", ":snr"))
+    ]
+    assert signal_entities
+    assert all(
+        registry_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+        for registry_entry in signal_entities
+    )
+
+
+async def test_coverage_answers_for_a_key_nothing_has_heard(
+    hass, receiver, hass_ws_client
+):
+    """An unknown key is answered, not refused: every receiver, all values null.
+
+    A panel racing an adoption -- or one asking about a device that has not
+    transmitted since the restart -- wants "nothing has heard that" rather than
+    an error it has to render in a banner.
+    """
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/devices/coverage",
+            "entry_id": receiver.entry_id,
+            "device_keys": ["Nothing-Like-This-1"],
+        },
+    )
+
+    assert reply["success"]
+    (row,) = reply["result"]["devices"]
+    assert row["available"] is False
+    (coverage,) = row["receivers"]
+    assert coverage["receiver_id"] == receiver_id(receiver)
+    assert coverage["connected"] is True
+    assert coverage["vouches"] is False
+    assert coverage["last_seen"] is None
+    assert coverage["rssi"] is None
+
+
+async def test_receivers_lists_every_location_with_the_receivers_inside_it(
     hass, receiver, receiver_entry_builder, hass_ws_client
 ):
-    """A panel opened from the sidebar has to be able to name a receiver to address.
+    """A panel opened from the sidebar has to be able to name what it addresses.
 
-    Every other command needs an ``entry_id`` the panel cannot invent, so this is
-    the entry point. An unloaded receiver is listed and flagged rather than hidden: a
-    user with an unreachable receiver should see it named and explained instead of
-    silently absent while they wonder where it went.
+    Every other command needs an ``entry_id`` the panel cannot invent, and the
+    receiver-scoped one needs a ``receiver_id`` as well, so this is the entry
+    point for both. They travel together because they are one question -- what is
+    configured? -- and because a flat list of receivers would hide the grouping
+    that *is* the model: two receivers of one location union their devices.
+
+    An unloaded location is listed and flagged rather than hidden, and still
+    names its receivers from the stored subentries: a user with an unreachable
+    server should see it named and explained instead of silently absent while
+    they wonder where it went.
     """
     unloaded = receiver_entry_builder(host="unreachable.local")
     unloaded.add_to_hass(hass)  # deliberately never set up
 
     client = await hass_ws_client(hass)
-    reply, _ = await _call(client, {"type": "rtl_433/hubs"})
+    reply, _ = await _call(client, {"type": "rtl_433/receivers"})
 
     assert reply["success"]
-    by_id = {entry["entry_id"]: entry for entry in reply["result"]["hubs"]}
+    by_id = {entry["entry_id"]: entry for entry in reply["result"]["locations"]}
     assert set(by_id) == {receiver.entry_id, unloaded.entry_id}
     assert by_id[receiver.entry_id]["loaded"] is True
     assert by_id[receiver.entry_id]["title"] == receiver.title
     assert by_id[unloaded.entry_id]["loaded"] is False
+
+    # Each location carries its receivers, addressable by subentry id.
+    (row,) = by_id[receiver.entry_id]["receivers"]
+    assert row["receiver_id"] == receiver_id(receiver)
+    assert row["title"] == receiver_subentry(receiver).title
+    assert row["connected"] is True
+    # An unloaded location has no coordinator, so its receiver is not connected
+    # -- the honest answer rather than a missing one.
+    (offline,) = by_id[unloaded.entry_id]["receivers"]
+    assert offline["receiver_id"] == receiver_id(unloaded)
+    assert offline["connected"] is False
 
 
 # --------------------------------------------------------------------------- #
@@ -1114,7 +1242,7 @@ async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribe
             async_fire_time_changed(hass, dt_util.utcnow())
             await hass.async_block_till_done()
 
-    reply, events = await _call(client, {"type": "rtl_433/hubs"})
+    reply, events = await _call(client, {"type": "rtl_433/receivers"})
     assert reply["success"]
     assert events == [], "an unsubscribed client must never be pushed to again"
 
@@ -1164,7 +1292,7 @@ async def test_repeat_sightings_are_coalesced_instead_of_one_push_per_frame(
             async_fire_time_changed(hass, dt_util.utcnow())
             await hass.async_block_till_done()
 
-    reply, events = await _call(client, {"type": "rtl_433/hubs"})
+    reply, events = await _call(client, {"type": "rtl_433/receivers"})
     assert reply["success"]
 
     # Every frame landed on the candidate...
@@ -1185,7 +1313,7 @@ async def test_repeat_sightings_are_coalesced_instead_of_one_push_per_frame(
             async_fire_time_changed(hass, dt_util.utcnow())
             await hass.async_block_till_done()
 
-    reply, idle = await _call(client, {"type": "rtl_433/hubs"})
+    reply, idle = await _call(client, {"type": "rtl_433/receivers"})
     assert reply["success"]
     assert len(idle) <= 1, "an idle receiver must not be repainted every interval"
     latest = {row["key"]: row for row in (events + idle)[-1]["event"]["pending"]}
@@ -1377,9 +1505,10 @@ async def test_the_panel_registers_once_and_serves_its_module(
 
 
 # --------------------------------------------------------------------------- #
-# Settings: the receiver's options, one device's overrides, the mapping document.   #
+# Settings: the location's options, one receiver's radio settings, one device's #
+# overrides, and the mapping document.                                         #
 #                                                                             #
-# These are the panel's half of the three forms the options flow also renders. #
+# These are the panel's half of the forms the options flow also renders.       #
 # What is worth protecting is not the transport but the *rules underneath* --  #
 # which submitted value means "clear this", which means "use the default and   #
 # store nothing" -- because those are exactly what a second surface tends to   #
@@ -1408,7 +1537,7 @@ async def settings_receiver(hass, receiver_entry_builder, no_socket):
 async def test_settings_get_answers_with_what_the_three_forms_render(
     hass, settings_receiver, hass_ws_client
 ):
-    """One call fills all three dialogs: receiver values, device rows, and the tables.
+    """One call fills every dialog: location and receiver values, devices, tables.
 
     The commodity tables travel in the payload rather than living in the panel
     because which units Home Assistant will convert for a gas meter is a fact
@@ -1425,10 +1554,18 @@ async def test_settings_get_answers_with_what_the_three_forms_render(
 
     assert reply["success"] is True
     result = reply["result"]
-    # The receiver's effective values, not the raw entry: 600 is what the fixture set.
-    assert result["hub"][CONF_AVAILABILITY_TIMEOUT] == 600
-    assert result["hub"][CONF_MANAGE_SETTINGS] is True
+    # The location's effective values, not the raw entry: 600 is what the fixture
+    # set. The manage-radio toggle is not here -- it belongs to a receiver, and
+    # rides its row.
+    assert result["location"][CONF_AVAILABILITY_TIMEOUT] == 600
+    assert CONF_MANAGE_SETTINGS not in result["location"]
     assert result["defaults"][CONF_AVAILABILITY_TIMEOUT] == DEFAULT_AVAILABILITY_TIMEOUT
+
+    # One row per receiver, each addressable by the id its own settings command
+    # takes, so a page can render a card per receiver from this one call.
+    (row,) = result["receivers"]
+    assert row["receiver_id"] == receiver_id(settings_receiver)
+    assert row[CONF_MANAGE_SETTINGS] is True
 
     # One row per adopted device, carrying everything its form needs.
     (device,) = result["devices"]
@@ -1446,7 +1583,7 @@ async def test_settings_get_answers_with_what_the_three_forms_render(
     assert result["mappings_docs_url"].startswith("https://")
 
 
-async def test_the_receiver_timeout_is_dropped_only_when_the_panel_says_none(
+async def test_the_location_timeout_is_dropped_only_when_the_panel_says_none(
     hass, settings_receiver, hass_ws_client
 ):
     """``None`` stores no timeout; every number is kept, the plain default too.
@@ -1469,24 +1606,21 @@ async def test_the_receiver_timeout_is_dropped_only_when_the_panel_says_none(
     reply, _ = await _call(
         client,
         {
-            "type": "rtl_433/settings/hub",
+            "type": "rtl_433/settings/location",
             "entry_id": settings_receiver.entry_id,
             CONF_AVAILABILITY_TIMEOUT: None,
-            CONF_MANAGE_SETTINGS: True,
         },
     )
     await hass.async_block_till_done()
     assert reply["success"] is True
     assert CONF_AVAILABILITY_TIMEOUT not in settings_receiver.options
-    assert settings_receiver.options[CONF_MANAGE_SETTINGS] is True
 
     reply, _ = await _call(
         client,
         {
-            "type": "rtl_433/settings/hub",
+            "type": "rtl_433/settings/location",
             "entry_id": settings_receiver.entry_id,
             CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
-            CONF_MANAGE_SETTINGS: True,
         },
     )
     await hass.async_block_till_done()
@@ -1499,22 +1633,129 @@ async def test_the_receiver_timeout_is_dropped_only_when_the_panel_says_none(
     reply, _ = await _call(
         client, {"type": "rtl_433/settings/get", "entry_id": settings_receiver.entry_id}
     )
-    assert reply["result"]["hub"][CONF_AVAILABILITY_TIMEOUT] == (
+    assert reply["result"]["location"][CONF_AVAILABILITY_TIMEOUT] == (
         DEFAULT_AVAILABILITY_TIMEOUT
     )
 
     reply, _ = await _call(
         client,
         {
-            "type": "rtl_433/settings/hub",
+            "type": "rtl_433/settings/location",
             "entry_id": settings_receiver.entry_id,
             CONF_AVAILABILITY_TIMEOUT: 0,
-            CONF_MANAGE_SETTINGS: True,
         },
     )
     await hass.async_block_till_done()
     assert reply["success"] is True
     assert settings_receiver.options[CONF_AVAILABILITY_TIMEOUT] == 0
+
+
+async def test_the_manage_radio_toggle_is_stored_on_the_named_receiver(
+    hass, receiver_entry_builder, hass_ws_client, no_socket
+):
+    """One radio's toggle, stored on its own subentry, leaving the other alone.
+
+    The toggle decides whether *that* radio's frequency, gain and sample rate are
+    adopted and enforced, so a location with an attic receiver of her own and a
+    garage receiver shared with a neighbour has to be able to say so. One value
+    for the pair could not.
+    """
+    entry = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        receivers=[
+            build_receiver_subentry(host="attic.local", manage_settings=True),
+            build_receiver_subentry(host="garage.local", manage_settings=True),
+        ],
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/settings/receiver",
+            "entry_id": entry.entry_id,
+            "receiver_id": receiver_id(entry, 1),
+            CONF_MANAGE_SETTINGS: False,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    assert reply["result"]["receiver_id"] == receiver_id(entry, 1)
+    assert reply["result"][CONF_MANAGE_SETTINGS] is False
+    assert receiver_subentry(entry, 1).data[CONF_MANAGE_SETTINGS] is False
+    # The other receiver's radio is untouched.
+    assert receiver_subentry(entry, 0).data[CONF_MANAGE_SETTINGS] is True
+
+
+async def test_a_receiver_setting_retires_the_location_wide_override(
+    hass, receiver_entry_builder, hass_ws_client, no_socket
+):
+    """The legacy location-wide toggle is dropped, and written down first.
+
+    Older entries carry a single ``manage_settings`` in ``entry.options`` that
+    shadows every receiver's own value, and the options flow still writes it.
+    Leaving it in place would make this command store a value nothing ever reads,
+    so it is retired -- but not before any receiver that had no answer of its own
+    inherits the one that was in force, which is what keeps the *other* receiver's
+    behaviour exactly as it was a moment ago.
+    """
+    entry = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        receivers=[
+            build_receiver_subentry(host="attic.local"),
+            build_receiver_subentry(host="garage.local"),
+        ],
+        options={CONF_MANAGE_SETTINGS: False},
+    )
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/settings/receiver",
+            "entry_id": entry.entry_id,
+            "receiver_id": receiver_id(entry, 0),
+            CONF_MANAGE_SETTINGS: True,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert reply["success"] is True
+    # The shadow is gone, so the stored per-receiver values are what is read.
+    assert CONF_MANAGE_SETTINGS not in entry.options
+    assert receiver_subentry(entry, 0).data[CONF_MANAGE_SETTINGS] is True
+    # The untouched receiver kept the value that was in force, rather than
+    # silently reverting to the shipped default when the shadow lifted.
+    assert receiver_subentry(entry, 1).data[CONF_MANAGE_SETTINGS] is False
+
+
+async def test_a_receiver_setting_for_an_unknown_receiver_is_refused(
+    hass, settings_receiver, hass_ws_client
+):
+    """A receiver id this location does not own is ``not_found``.
+
+    A receiver is only ever addressed through the location that owns it, which is
+    what stops one location's command from reaching into another's radio: an id
+    copied from the wrong location is a plain miss, not a cross-location write.
+    """
+    client = await hass_ws_client(hass)
+
+    reply, _ = await _call(
+        client,
+        {
+            "type": "rtl_433/settings/receiver",
+            "entry_id": settings_receiver.entry_id,
+            "receiver_id": "not-a-receiver-of-this-location",
+            CONF_MANAGE_SETTINGS: False,
+        },
+    )
+
+    assert reply["success"] is False
+    assert reply["error"]["code"] == "not_found"
+    assert CONF_MANAGE_SETTINGS not in receiver_subentry(settings_receiver).data
 
 
 async def test_a_device_calibration_round_trips_and_then_clears(
