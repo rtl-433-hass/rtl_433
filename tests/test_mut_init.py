@@ -485,7 +485,7 @@ async def test_migrate_motion_removes_event_entities(hass, receiver_entry_builde
     ent_reg = er.async_get(hass)
 
     device_key = "MySensor-42"
-    motion_uid = f"{receiver_id(receiver)}:{device_key}:motion"
+    motion_uid = f"{receiver.entry_id}:{device_key}:motion"
     ent_reg.async_get_or_create(
         "event",
         DOMAIN,
@@ -1102,9 +1102,7 @@ async def test_reserved_marker_check_is_exact_not_a_prefix(
     )
     await hass.async_block_till_done()
 
-    fake = SimpleNamespace(
-        identifiers={(DOMAIN, f"{receiver_id(receiver)}:{device_key}")}
-    )
+    fake = SimpleNamespace(identifiers={(DOMAIN, f"{receiver.entry_id}:{device_key}")})
     assert await async_remove_config_entry_device(hass, receiver, fake) is True
     assert device_key not in receiver.data.get(CONF_DEVICES, {})
 
@@ -1221,7 +1219,7 @@ async def test_remove_nested_device_returns_true(hass, receiver_entry_builder, e
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{device_key}"
+    prefix = f"{receiver.entry_id}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1247,7 +1245,7 @@ async def test_remove_nested_device_drops_from_devices_map(
     assert device_key in receiver.data.get(CONF_DEVICES, {})
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{device_key}"
+    prefix = f"{receiver.entry_id}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1270,7 +1268,7 @@ async def test_remove_nested_device_calls_forget_device(
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{device_key}"
+    prefix = f"{receiver.entry_id}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1301,7 +1299,7 @@ async def test_remove_nested_device_calls_device_removers(
     coordinator.device_removers.append(removed_keys.append)
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{device_key}"
+    prefix = f"{receiver.entry_id}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1330,7 +1328,7 @@ async def test_remove_device_coordinator_none_branch(
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{device_key}"
+    prefix = f"{receiver.entry_id}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1992,7 +1990,7 @@ async def test_motion_migration_during_setup(hass, receiver_entry_builder):
     ent_reg = er.async_get(hass)
 
     # Pre-seed an orphaned event.motion entity
-    orphan_uid = f"{receiver_id(receiver)}:{device_key}:motion"
+    orphan_uid = f"{receiver.entry_id}:{device_key}:motion"
     ent_reg.async_get_or_create("event", DOMAIN, orphan_uid, config_entry=receiver)
 
     assert await hass.config_entries.async_setup(receiver.entry_id)
