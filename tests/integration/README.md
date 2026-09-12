@@ -24,12 +24,14 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | File | Shows |
 | --- | --- |
 | `02-device-page.png` | The device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
-| `17-discovery-panel.png` | The **discovered devices** page (`/rtl_433/discovered`): one card per heard device with its sighting count, signal level, latest readings and per-card Replace / Ignore / Add buttons |
+| `17-discovery-panel.png` | The **discovered devices** page (`/rtl_433/discovered`): the location's union of candidates, one card per heard device — however many receivers heard it — with its sighting count, signal level, the receivers that heard it, latest readings and per-card Replace / Ignore / Add buttons |
 | `16-ignored-devices.png` | The same page with the ignored section revealed, showing the ignored leak detector and its Un-ignore button |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
 | `05-mapping-overrides.png` | The **Device mappings** page: the YAML editor pre-filled with an example per-receiver override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
-| `07-receiver-settings.png` | The **Receiver settings** page (the availability-timeout choice, managed settings) |
+| `07-location-settings.png` | The **Location settings** page: the availability-timeout choice every device at the location starts from |
+| `07-receiver-settings.png` | One receiver's **Receiver settings** page: the manage-radio toggle, headed by the receiver it belongs to |
+| `18-coverage.png` | The **Signal coverage** page: one card per merged device, one row per receiver, with the level and age each one last heard it at |
 | `08-device-settings.png` | The **Device settings** page for the SCMplus meter: the picker, the timeout override, the commodity pre-filled to `gas`, and the base unit + scale it reveals |
 | `09-home-hero.png` | The integration overview: one receiver with its nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |

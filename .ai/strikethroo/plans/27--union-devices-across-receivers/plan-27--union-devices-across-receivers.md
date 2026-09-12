@@ -513,10 +513,10 @@ graph TD
 - ✔️ Task 004: Merged two-gate availability, per-receiver signal fields (excluded from the union, receiver-named, added with no subentry id), and receiver-removal semantics (Clarification #20) (depends on: 003)
 - ✔️ Task 005: Location-scoped adoption + union candidate list (depends on: 003)
 
-### Phase 5: Surfaces
+### ✅ Phase 5: Surfaces
 **Parallel Tasks:**
-- Task 006: WebSocket API rename and location re-scoping (depends on: 005)
-- Task 007: Panel rework — location view, receiver cards, union add-device page, per-receiver signal display from aggregator state (depends on: 006)
+- ✔️ Task 006: WebSocket API rename and location re-scoping (depends on: 005)
+- ✔️ Task 007: Panel rework — location view, receiver cards, union add-device page, per-receiver signal display from aggregator state (depends on: 006)
 
 ### Phase 6: Migration + contract
 **Parallel Tasks:**
