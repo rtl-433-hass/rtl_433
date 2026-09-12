@@ -9,9 +9,10 @@ The Home Assistant pin is the one that matters. It tracks the ``homeassistant``
 key in ``hacs.json``: the oldest release the integration claims to support, and
 therefore the one worth running against, because on a newer image the harness
 would pass while the integration was quietly broken for everyone sitting on the
-minimum. Nothing moves it but a hand, and a hand that bumps ``hacs.json`` and
-forgets the compose file leaves the two disagreeing with no symptom until
-someone regenerates screenshots months later.
+minimum. Renovate is deliberately not allowed to bump it (see ``renovate.json``),
+so nothing moves it but a hand — and a hand that bumps ``hacs.json`` and forgets
+the compose file leaves the two disagreeing with no symptom until someone
+regenerates screenshots months later.
 
 That is not hypothetical. The pin sat on 2026.5.4 while ``hacs.json`` declared
 2026.9.0, below a floor the integration genuinely needs
@@ -19,6 +20,11 @@ That is not hypothetical. The pin sat on 2026.5.4 while ``hacs.json`` declared
 harness had stopped working entirely: the config entry raised ``AttributeError``
 on setup, every panel capture hit its "no cards" guard and logged a skip, and
 the run still exited 0.
+
+The shape of the pins is checked too, because a second thing depends on it:
+``scripts/regen_capture_fixtures.py`` parses the rtl_433 image straight out of
+the compose file, and ``tag@sha256:digest`` is the form both it and Renovate
+expect.
 """
 
 from __future__ import annotations
@@ -76,4 +82,27 @@ def test_home_assistant_pin_matches_the_hacs_floor() -> None:
         f"declares {floor!r}. The harness must run the minimum supported "
         "release, so bump tests/integration/docker-compose.yml (tag *and* "
         "digest) whenever the hacs.json floor moves."
+    )
+
+
+@pytest.mark.parametrize(
+    "repo",
+    [
+        "hertzg/rtl_433",
+        "node",
+        "ghcr.io/home-assistant/home-assistant",
+    ],
+)
+def test_images_are_pinned_by_tag_and_digest(repo: str) -> None:
+    """Both halves are load-bearing: the digest pins, the tag is trackable."""
+    image = _images().get(repo)
+    assert image is not None, f"no image: line for {repo} in {_COMPOSE}"
+    assert image.group("digest") is not None, (
+        f"{repo} is not pinned by digest; without one the harness silently "
+        "follows a moving tag."
+    )
+    assert image.group("tag") is not None, (
+        f"{repo} carries no tag. Renovate's docker-compose manager has nothing "
+        "to resolve a bare @sha256: against, so the dependency goes unmanaged "
+        "-- which is how these pins drifted in the first place."
     )

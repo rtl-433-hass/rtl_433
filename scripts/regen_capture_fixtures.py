@@ -112,11 +112,18 @@ def rtl433_image() -> str:
     Read rather than duplicated so there is exactly one place the pin lives; a
     bump to ``docker-compose.yml`` regenerates against the new image with no
     matching edit here.
+
+    The tag between the repository and the digest is optional because the pins
+    carry one -- ``repo:tag@sha256:...`` -- so Renovate has a version to compare
+    against; Docker resolves such a reference by digest and ignores the tag, and
+    so does this. A bare ``repo@sha256:...`` still parses, so an un-tagged pin is
+    not a failure here.
     """
     if not COMPOSE_FILE.is_file():
         raise SystemExit(f"compose file not found: {COMPOSE_FILE}")
     match = re.search(
-        r"hertzg/rtl_433@sha256:[0-9a-f]{64}", COMPOSE_FILE.read_text(encoding="utf-8")
+        r"hertzg/rtl_433(?::[\w][\w.-]*)?@sha256:[0-9a-f]{64}",
+        COMPOSE_FILE.read_text(encoding="utf-8"),
     )
     if match is None:
         raise SystemExit(

@@ -2,6 +2,17 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
   "internalChecksFilter": "strict",
+  "description": [
+    "ignorePaths: config:recommended pulls in :ignoreModulesAndTests, whose ignorePaths cover **/test/** and **/tests/** -- which silently put the whole tests/ tree out of Renovate's reach. The screenshot harness lives there and carries two real manifests, tests/integration/docker-compose.yml and tests/integration/package.json, so both went unmanaged: the Home Assistant image sat on 2026.5.4 until it fell below the 2026.9.0 floor hacs.json declares and the harness stopped working, and playwright sat on 1.49.1",
+    "This is the upstream list with the two test globs dropped and everything else kept. Nothing else under tests/ is a manifest Renovate reads -- the Python tests carry no pins and the rtl_433_tests gitlink is handled by the git-submodules manager, which is disabled by default"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__fixtures__/**"
+  ],
   "minimumReleaseAgeBehaviour": "timestamp-required",
   "customManagers": [
     {
@@ -32,9 +43,15 @@
   },
   "packageRules": [
     {
-      "matchDepNames": ["homeassistant"],
+      "matchDepNames": [
+        "homeassistant",
+        "ghcr.io/home-assistant/home-assistant"
+      ],
       "enabled": false,
-      "description": "Home Assistant version should match the homeassistant key in hacs.json"
+      "description": [
+        "Home Assistant version should match the homeassistant key in hacs.json, so it is not Renovate's to move -- it follows the floor we declare, and the floor is a deliberate support decision rather than a dependency bump",
+        "That covers the screenshot harness image as well as the Python pin. The harness must run the *oldest* release we claim to support: on a newer one it would pass while the integration was quietly broken for everyone sitting on the minimum, which is the opposite of what pinning it is for. tests/test_harness_pins.py fails if the image and hacs.json drift apart"
+      ]
     },
     {
       "matchDepNames": ["python"],
@@ -94,6 +111,17 @@
       "matchUpdateTypes": ["digest", "pinDigest", "pin"],
       "automerge": false,
       "dependencyDashboardApproval": true
+    },
+    {
+      "description": [
+        "Nothing in CI runs the screenshot harness -- it is a maintainer tool driven by hand from tests/integration/run-harness.sh -- so a green test suite says nothing about whether a new Home Assistant, rtl_433 or Playwright still drives it. The repository automerges by default, which would land those bumps entirely unverified",
+        "Bumps here also invalidate committed artifacts rather than just code: the docs/images screenshots are captured through this harness, and Home Assistant's own chrome moves between releases, so a version bump means someone has to re-run the harness and recommit the images",
+        "So: open the PR, because knowing a new Home Assistant is out is the point, but never merge it unattended",
+        "The Home Assistant image is not in this group's scope: the rule above disables it outright, because it tracks the hacs.json floor rather than the newest release. What is left here is rtl_433, node, playwright and ws"
+      ],
+      "matchFileNames": ["tests/integration/**"],
+      "groupName": "screenshot harness",
+      "automerge": false
     },
     {
       "description": [
