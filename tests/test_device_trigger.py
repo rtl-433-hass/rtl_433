@@ -43,6 +43,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.trigger import async_initialize_triggers
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_id
 
 # Module-local helpers from the lifecycle suite (not injectable fixtures): a
 # single receiver set up through ``async_setup_entry`` with the WebSocket stubbed,
@@ -70,10 +71,15 @@ async def _setup_button_receiver(hass, receiver_entry_builder):
     return receiver
 
 
-def _resolve_device_id(hass: HomeAssistant, receiver_entry_id: str) -> str:
-    """Resolve the nested RF device's HA ``device_id`` from its identifiers."""
+def _resolve_device_id(hass: HomeAssistant, receiver) -> str:
+    """Resolve the nested RF device's HA ``device_id`` from its identifiers.
+
+    The device's identity is scoped by the *receiver* that heard it, while the
+    registry lookup is scoped by the location entry that owns it -- two different
+    ids, which is why both are passed.
+    """
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{receiver_entry_id}:{DEVICE_KEY}"), receiver_entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}"), receiver.entry_id
     )
     assert device is not None
     return device.id
@@ -132,12 +138,12 @@ async def test_async_get_triggers_enumerates_base_and_subtypes(
 ):
     """A seeded button device yields its base trigger + the A/B subtypes."""
     receiver = await _setup_button_receiver(hass, receiver_entry_builder)
-    device_id = _resolve_device_id(hass, receiver.entry_id)
+    device_id = _resolve_device_id(hass, receiver)
 
     ent_reg = er.async_get(hass)
     button_entry = ent_reg.async_get(
         ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
         )
     )
     assert button_entry is not None
@@ -172,7 +178,7 @@ async def test_base_trigger_fires_per_transmission_incl_repeat(
 ):
     """The base trigger fires once per transmission — A then A => two fires."""
     receiver = await _setup_button_receiver(hass, receiver_entry_builder)
-    device_id = _resolve_device_id(hass, receiver.entry_id)
+    device_id = _resolve_device_id(hass, receiver)
     coordinator = _coordinator(hass, receiver)
 
     triggers = await async_get_triggers(hass, device_id)
@@ -194,7 +200,7 @@ async def test_subtype_trigger_fires_on_every_matching_press_incl_repeat(
 ):
     """The A-subtyped trigger fires on each matching press — A,A => two fires."""
     receiver = await _setup_button_receiver(hass, receiver_entry_builder)
-    device_id = _resolve_device_id(hass, receiver.entry_id)
+    device_id = _resolve_device_id(hass, receiver)
     coordinator = _coordinator(hass, receiver)
 
     triggers = await async_get_triggers(hass, device_id)
@@ -225,12 +231,12 @@ async def test_triggers_do_not_fire_on_restore_at_startup(hass, receiver_entry_b
     ignore it — yet a genuine press afterwards still fires.
     """
     receiver = await _setup_button_receiver(hass, receiver_entry_builder)
-    device_id = _resolve_device_id(hass, receiver.entry_id)
+    device_id = _resolve_device_id(hass, receiver)
     coordinator = _coordinator(hass, receiver)
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
     )
 
     triggers = await async_get_triggers(hass, device_id)
@@ -285,12 +291,12 @@ async def test_triggers_do_not_fire_on_config_entry_reload(
     genuine press afterwards still does.
     """
     receiver = await _setup_button_receiver(hass, receiver_entry_builder)
-    device_id = _resolve_device_id(hass, receiver.entry_id)
+    device_id = _resolve_device_id(hass, receiver)
     coordinator = _coordinator(hass, receiver)
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
     )
 
     # A real press so the entity has a last fired event HA restores on reload.
@@ -358,12 +364,12 @@ async def test_triggers_do_not_fire_on_receiver_reconnect(hass, receiver_entry_b
     A genuine live press after the reconnect must still fire both.
     """
     receiver = await _setup_button_receiver(hass, receiver_entry_builder)
-    device_id = _resolve_device_id(hass, receiver.entry_id)
+    device_id = _resolve_device_id(hass, receiver)
     coordinator = _coordinator(hass, receiver)
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
     )
 
     await _feed_presses(hass, coordinator, ["A"])
@@ -437,7 +443,7 @@ async def test_subtype_trigger_silent_for_non_matching_type(
 ):
     """The A-subtyped trigger does not fire when a B press arrives."""
     receiver = await _setup_button_receiver(hass, receiver_entry_builder)
-    device_id = _resolve_device_id(hass, receiver.entry_id)
+    device_id = _resolve_device_id(hass, receiver)
     coordinator = _coordinator(hass, receiver)
 
     triggers = await async_get_triggers(hass, device_id)

@@ -39,3 +39,30 @@ A seamless, loss-free upgrade and a deterministic consolidation path.
 
 ## Implementation Notes
 The upgrade never triggers a forced merge — existing separate entries each become their own location. See plan Component 8 and Clarifications #2, #5, #13.
+
+## Findings carried forward from earlier tasks
+
+**From task 002 — `_rehome_device_objects` deletes the entities it is meant to move.**
+Moving a device with `new_config_entry_id` makes HA delete the entities still
+pointing at the old entry, so the entity re-home loop that runs afterwards finds
+nothing left to move. At `main` this was invisible: a successful setup
+immediately recreated the rows under the same unique_ids, so history appeared to
+survive by luck rather than by the re-home working. Task 002 made it visible by
+refusing setup for an unmigrated entry. **Fix by re-homing entities BEFORE
+devices**, and add a regression test that asserts the re-homed entity registry
+rows are the *same* rows (same registry id and `entity_id`), not recreated ones.
+
+**From task 002 — device-field unique_ids currently sit at subentry scope.**
+Task 002 keyed them `f"{receiver_id}:{device_key}:{suffix}"` (receiver_id = the
+subentry id) and task 003 moves them to `f"{location_entry_id}:{device_key}:{suffix}"`.
+Because each existing v2 entry becomes its own location and KEEPS its entry id,
+the post-task-003 device-field template is byte-identical to the v2 one — so the
+migration should need to rewrite **only** the receiver-control unique_ids
+(`:hub:` → `:receiver:{subentry_id}:`), not the device fields. Verify this holds
+before writing the migration; if it does, assert it with a test rather than
+rewriting rows unnecessarily.
+
+**From task 002 — existing v2 entries do not load.**
+An entry with no receiver subentry raises `ConfigEntryError`. This task must make
+them load again by converting each one into a location with a single receiver
+subentry. Until this task lands, the branch cannot set up a pre-existing install.

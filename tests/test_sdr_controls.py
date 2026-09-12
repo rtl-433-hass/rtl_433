@@ -53,6 +53,7 @@ from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
+from tests.conftest import receiver_id, receiver_scope, receiver_subentry
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
 _CMD_URL = "http://rtl433.local:8433/cmd"
@@ -121,6 +122,7 @@ async def coordinator(hass, receiver_entry_builder, aioclient_mock):
     return Rtl433Coordinator(
         hass,
         entry,
+        receiver_subentry(entry),
         host="rtl433.local",
         manage_settings=True,
         skip_keys={"model", "id", "channel", "subtype", "time", "mic"},
@@ -251,6 +253,7 @@ async def test_initial_frequency_seeds_over_adoption_on_first_connect(
     coordinator = Rtl433Coordinator(
         hass,
         entry,
+        receiver_subentry(entry),
         host="rtl433.local",
         manage_settings=True,
         initial_center_frequency=915.0,
@@ -272,7 +275,7 @@ async def test_initial_frequency_seeds_over_adoption_on_first_connect(
         None,
     )
     # The seed was persisted (incl. the one-time flag), so a reload won't re-seed.
-    assert sdr_store_key(entry.entry_id) in hass_storage
+    assert sdr_store_key(receiver_id(entry)) in hass_storage
     assert coordinator._initial_freq_seeded is True
 
 
@@ -290,6 +293,7 @@ async def test_initial_frequency_wins_when_desired_already_populated(
     coordinator = Rtl433Coordinator(
         hass,
         entry,
+        receiver_subentry(entry),
         host="rtl433.local",
         manage_settings=True,
         initial_center_frequency=915.0,
@@ -317,6 +321,7 @@ async def test_initial_frequency_seeded_once_preserves_user_change(
     coordinator = Rtl433Coordinator(
         hass,
         entry,
+        receiver_subentry(entry),
         host="rtl433.local",
         manage_settings=True,
         initial_center_frequency=915.0,
@@ -461,17 +466,21 @@ async def test_store_persistence_across_recreate(
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
 
-    first = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    first = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
+    )
     first._desired = {"center_frequency": 868.0, KEY_GAIN_AUTO: True}
     first._managed = {"center_frequency", KEY_GAIN_AUTO}
     await first._persist_desired()
 
     # The payload landed in the per-receiver Store key.
-    assert sdr_store_key(entry.entry_id) in hass_storage
+    assert sdr_store_key(receiver_id(entry)) in hass_storage
 
     # A brand-new coordinator (as a reload would build) loads from the Store —
     # NOT by re-adopting (its meta is empty, so adoption would yield nothing).
-    second = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    second = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
+    )
     assert second.get_desired("center_frequency") is None  # not loaded yet
     await second.async_load_desired_state()
     assert second.get_desired("center_frequency") == 868.0
@@ -487,22 +496,34 @@ async def test_store_wiped_when_management_off(
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
 
-    managed = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    managed = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
+    )
     managed._desired = {"center_frequency": 868.0}
     managed._managed = {"center_frequency"}
     await managed._persist_desired()
-    assert sdr_store_key(entry.entry_id) in hass_storage
+    assert sdr_store_key(receiver_id(entry)) in hass_storage
 
-    off = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=False)
+    off = Rtl433Coordinator(
+        hass,
+        entry,
+        receiver_subentry(entry),
+        host="rtl433.local",
+        manage_settings=False,
+    )
     await off.async_load_desired_state()
     assert off.get_desired("center_frequency") is None
     assert off._managed == set()
-    assert sdr_store_key(entry.entry_id) not in hass_storage
+    assert sdr_store_key(receiver_id(entry)) not in hass_storage
 
 
-def _seed_store(hass_storage, entry_id, *, version, values, managed):
-    """Pre-seed the per-receiver SDR Store with an on-disk payload at ``version``."""
-    hass_storage[sdr_store_key(entry_id)] = {
+def _seed_store(hass_storage, scope_id, *, version, values, managed):
+    """Pre-seed one receiver's SDR Store with an on-disk payload at ``version``.
+
+    ``scope_id`` is the receiver's subentry id: the desired state is per receiver,
+    so two radios in one location keep separate stores.
+    """
+    hass_storage[sdr_store_key(scope_id)] = {
         "version": version,
         "data": {"values": values, "managed": managed},
     }
@@ -514,14 +535,14 @@ async def test_store_migration_v1_hz_to_mhz(hass, receiver_entry_builder, hass_s
     entry.add_to_hass(hass)
     _seed_store(
         hass_storage,
-        entry.entry_id,
+        receiver_id(entry),
         version=1,
         values={"center_frequency": 433920000},
         managed=["center_frequency"],
     )
 
     coordinator = Rtl433Coordinator(
-        hass, entry, host="rtl433.local", manage_settings=True
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
     )
     await coordinator.async_load_desired_state()
 
@@ -537,14 +558,14 @@ async def test_store_migration_v2_value_unchanged(
     entry.add_to_hass(hass)
     _seed_store(
         hass_storage,
-        entry.entry_id,
+        receiver_id(entry),
         version=2,
         values={"center_frequency": 433.92},
         managed=["center_frequency"],
     )
 
     coordinator = Rtl433Coordinator(
-        hass, entry, host="rtl433.local", manage_settings=True
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
     )
     await coordinator.async_load_desired_state()
 
@@ -559,14 +580,14 @@ async def test_store_migration_v1_without_center_frequency(
     entry.add_to_hass(hass)
     _seed_store(
         hass_storage,
-        entry.entry_id,
+        receiver_id(entry),
         version=1,
         values={KEY_SAMPLE_RATE: 250000, KEY_GAIN_AUTO: True},
         managed=[KEY_SAMPLE_RATE, KEY_GAIN_AUTO],
     )
 
     coordinator = Rtl433Coordinator(
-        hass, entry, host="rtl433.local", manage_settings=True
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
     )
     await coordinator.async_load_desired_state()
 
@@ -635,7 +656,7 @@ async def test_controls_present_and_config_category_when_managed(
 
     for suffix, platform in _CONTROLS:
         eid = ent_reg.async_get_entity_id(
-            platform, DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
+            platform, DOMAIN, f"{receiver_scope(receiver)}:{suffix}"
         )
         assert eid is not None, (platform, suffix)
         assert ent_reg.async_get(eid).entity_category is EntityCategory.CONFIG
@@ -651,26 +672,26 @@ async def test_center_and_hop_availability_track_frequencies(
     single center frequency would break hopping, so that control is hidden.
     """
     receiver = await _setup_receiver(hass, receiver_entry_builder)  # managed by default
-    coordinator = hass.data[DOMAIN][receiver.entry_id]
+    coordinator = hass.data[DOMAIN][receiver_id(receiver)]
     ent_reg = er.async_get(hass)
 
     def num_state(suffix):
         eid = ent_reg.async_get_entity_id(
-            "number", DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
+            "number", DOMAIN, f"{receiver_scope(receiver)}:{suffix}"
         )
         assert eid is not None, suffix
         return hass.states.get(eid).state
 
     # Single frequency -> center frequency available, hop interval hidden.
     coordinator._client.meta = dict(_META_SINGLE)
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
     assert num_state("center_frequency") != STATE_UNAVAILABLE
     assert num_state("hop_interval") == STATE_UNAVAILABLE
 
     # Hopping -> hop interval available, center frequency hidden.
     coordinator._client.meta = dict(_META_HOPPING)
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
     assert num_state("hop_interval") != STATE_UNAVAILABLE
     assert num_state("center_frequency") == STATE_UNAVAILABLE
@@ -688,12 +709,12 @@ async def test_select_entity_writes_convert_int_command(
     """
     _mock_setters(aioclient_mock)
     receiver = await _setup_receiver(hass, receiver_entry_builder)  # managed by default
-    coordinator = hass.data[DOMAIN][receiver.entry_id]
+    coordinator = hass.data[DOMAIN][receiver_id(receiver)]
     coordinator._client.connected = True
     coordinator._was_connected = True  # already past the connect edge
 
     eid = er.async_get(hass).async_get_entity_id(
-        "select", DOMAIN, f"{receiver.entry_id}:hub:conversion_mode"
+        "select", DOMAIN, f"{receiver_scope(receiver)}:conversion_mode"
     )
     assert eid is not None
 
@@ -724,7 +745,7 @@ async def test_no_controls_and_no_cmd_when_unmanaged(
     for suffix, platform in _CONTROLS:
         assert (
             ent_reg.async_get_entity_id(
-                platform, DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
+                platform, DOMAIN, f"{receiver_scope(receiver)}:{suffix}"
             )
             is None
         ), (platform, suffix)
@@ -755,7 +776,7 @@ async def test_toggle_manage_settings_triggers_reload(hass, receiver_entry_build
 async def test_timeout_change_applied_live_no_reload(hass, receiver_entry_builder):
     """A timeout-only options change applies live without reloading the entry."""
     receiver = await _setup_receiver(hass, receiver_entry_builder)
-    coordinator = hass.data[DOMAIN][receiver.entry_id]
+    coordinator = hass.data[DOMAIN][receiver_id(receiver)]
 
     with patch.object(hass.config_entries, "async_reload") as reload:
         hass.config_entries.async_update_entry(

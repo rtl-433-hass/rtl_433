@@ -500,9 +500,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 001: hub→receiver (server) and receiver→radio (SDR) rename across code, signals, translations, panel strings and docs; harden the two segment-based identity parsers (`device_trigger.py`, `__init__.py`) for the 4-segment templates and enforce `receiver` as a reserved token (Clarification #18)
 
-### Phase 2: Topology foundation
+### ✅ Phase 2: Topology foundation
 **Parallel Tasks:**
-- Task 002: Location entry + per-receiver config subentries, single-step `async_step_user` creating the location and its first receiver together (Clarification #19), entry-`unique_id` re-homing, and the subentry-ownership rule at every `async_add_entities` call site (Clarification #17) (depends on: 001)
+- ✔️ Task 002: Location entry + per-receiver config subentries, single-step `async_step_user` creating the location and its first receiver together (Clarification #19), entry-`unique_id` re-homing, and the subentry-ownership rule at every `async_add_entities` call site (Clarification #17) (depends on: 001)
 
 ### Phase 3: Identity + entity union
 **Parallel Tasks:**

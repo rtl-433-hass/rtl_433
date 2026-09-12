@@ -44,6 +44,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_id, receiver_scope
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -62,7 +63,7 @@ def _no_socket():
 
 
 def _coordinator(hass, receiver_entry: MockConfigEntry) -> Rtl433Coordinator:
-    return hass.data[DOMAIN][receiver_entry.entry_id]
+    return hass.data[DOMAIN][receiver_id(receiver_entry)]
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
@@ -285,7 +286,7 @@ async def test_entity_unique_id_format(hass, receiver_entry_builder):
     )
     ent_reg = er.async_get(hass)
     # The unique_id format is exactly receiver_entry_id:device_key:object_suffix
-    uid = f"{receiver.entry_id}:{device_key}:watts"
+    uid = f"{receiver_id(receiver)}:{device_key}:watts"
     eid = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
     assert eid is not None, f"Entity with unique_id {uid} not found"
 
@@ -313,7 +314,7 @@ async def test_entity_unique_id_two_receivers_no_collision(
     # The unique_id format is receiver_entry_id:device_key:object_suffix.
     # Two different receiver_entry_ids (always different MockConfigEntry.entry_id
     # values) guarantee no collision — verify the format property holds.
-    uid_a = f"{receiver_a.entry_id}:{device_key}:watts"
+    uid_a = f"{receiver_id(receiver_a)}:{device_key}:watts"
     ent_reg = er.async_get(hass)
     eid_a = ent_reg.async_get_entity_id("sensor", DOMAIN, uid_a)
     assert eid_a is not None
@@ -341,7 +342,7 @@ async def test_entity_name_from_descriptor(hass, receiver_entry_builder):
         },
     )
     ent_reg = er.async_get(hass)
-    uid = f"{receiver.entry_id}:{device_key}:mV"
+    uid = f"{receiver_id(receiver)}:{device_key}:mV"
     entry = ent_reg.async_get(ent_reg.async_get_entity_id("sensor", DOMAIN, uid))
     assert entry is not None
     # "Battery mV" is the explicit name for battery_mV in the library
@@ -367,7 +368,7 @@ async def test_entity_name_none_derives_from_device_class(hass, receiver_entry_b
         },
     )
     ent_reg = er.async_get(hass)
-    uid = f"{receiver.entry_id}:{device_key}:watts"
+    uid = f"{receiver_id(receiver)}:{device_key}:watts"
     entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
     entry = ent_reg.async_get(entity_id)
     assert entry is not None
@@ -389,7 +390,7 @@ async def test_entity_has_entity_name_true(hass, receiver_entry_builder):
         },
     )
     ent_reg = er.async_get(hass)
-    uid = f"{receiver.entry_id}:{device_key}:T"
+    uid = f"{receiver_id(receiver)}:{device_key}:T"
     entry = ent_reg.async_get(ent_reg.async_get_entity_id("sensor", DOMAIN, uid))
     assert entry is not None
     # has_entity_name = True means name is stored but entity_id uses device name
@@ -412,7 +413,7 @@ async def test_device_info_identifiers(hass, receiver_entry_builder):
     dev_reg = dr.async_get(hass)
     # The nested device is registered with the correct identifier
     device_entry = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{device_key}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{device_key}"), receiver.entry_id
     )
     assert device_entry is not None
 
@@ -432,7 +433,7 @@ async def test_device_info_manufacturer(hass, receiver_entry_builder):
     )
     dev_reg = dr.async_get(hass)
     device_entry = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{device_key}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{device_key}"), receiver.entry_id
     )
     assert device_entry is not None
     assert device_entry.manufacturer == "rtl_433"
@@ -504,7 +505,7 @@ async def test_device_name_with_model(hass, receiver_entry_builder):
     )
     dev_reg = dr.async_get(hass)
     device_entry = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{device_key}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{device_key}"), receiver.entry_id
     )
     assert device_entry is not None
     # Only the distinguishing id suffix follows the model, not the whole key.
@@ -527,7 +528,7 @@ async def test_device_name_without_model_is_device_key(hass, receiver_entry_buil
     )
     dev_reg = dr.async_get(hass)
     device_entry = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{device_key}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{device_key}"), receiver.entry_id
     )
     # The name is device_key when model is falsy
     assert device_entry.name == device_key
@@ -549,7 +550,7 @@ async def test_device_name_model_only_has_no_suffix(hass, receiver_entry_builder
     )
     dev_reg = dr.async_get(hass)
     device_entry = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{device_key}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{device_key}"), receiver.entry_id
     )
     assert device_entry is not None
     # No redundant "Foo (Foo)" and no trailing space — just the model.
@@ -572,7 +573,7 @@ async def test_device_model_set_when_model_present(hass, receiver_entry_builder)
     )
     dev_reg = dr.async_get(hass)
     device_entry = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{device_key}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{device_key}"), receiver.entry_id
     )
     assert device_entry.model == model
 
@@ -592,10 +593,10 @@ async def test_device_via_device_links_to_receiver(hass, receiver_entry_builder)
     )
     dev_reg = dr.async_get(hass)
     nested = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{device_key}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{device_key}"), receiver.entry_id
     )
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     assert nested is not None
     assert receiver_device is not None
@@ -618,7 +619,7 @@ async def test_entity_category_none_by_default(hass, receiver_entry_builder):
         },
     )
     ent_reg = er.async_get(hass)
-    uid = f"{receiver.entry_id}:{device_key}:watts"
+    uid = f"{receiver_id(receiver)}:{device_key}:watts"
     entry = ent_reg.async_get(ent_reg.async_get_entity_id("sensor", DOMAIN, uid))
     assert entry is not None
     # power_W is a measurement, not diagnostic -> no entity_category
@@ -639,7 +640,7 @@ async def test_entity_category_diagnostic_for_battery(hass, receiver_entry_build
         },
     )
     ent_reg = er.async_get(hass)
-    uid = f"{receiver.entry_id}:{device_key}:B"
+    uid = f"{receiver_id(receiver)}:{device_key}:B"
     entry = ent_reg.async_get(ent_reg.async_get_entity_id("sensor", DOMAIN, uid))
     assert entry is not None
     assert entry.entity_category == EntityCategory.DIAGNOSTIC
@@ -666,7 +667,7 @@ async def test_available_within_timeout(hass, receiver_entry_builder):
     )
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
-    uid = f"{receiver.entry_id}:{device_key}:watts"
+    uid = f"{receiver_id(receiver)}:{device_key}:watts"
     watts_eid = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
     assert watts_eid is not None
 
@@ -698,7 +699,7 @@ async def test_available_at_exact_timeout_boundary(hass, receiver_entry_builder)
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     start = dt_util.utcnow()
@@ -731,7 +732,7 @@ async def test_unavailable_one_second_past_timeout(hass, receiver_entry_builder)
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     start = dt_util.utcnow()
@@ -769,7 +770,7 @@ async def test_unavailable_without_last_seen(hass, receiver_entry_builder):
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     start = dt_util.utcnow()
@@ -815,7 +816,7 @@ async def test_available_baseline_on_startup_before_event(hass, receiver_entry_b
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
     )
     # Without any live event, the entity should start available (baseline)
     state = hass.states.get(temp_eid)
@@ -895,7 +896,7 @@ async def test_effective_timeout_falls_back_to_receiver_default(
 
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     start = dt_util.utcnow()
@@ -938,7 +939,7 @@ async def test_effective_timeout_uses_resolver_result(hass, receiver_entry_build
 
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     start = dt_util.utcnow()
@@ -980,7 +981,7 @@ async def test_effective_timeout_resolver_exception_falls_back(
 
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     start = dt_util.utcnow()
@@ -1027,7 +1028,7 @@ async def test_handle_dispatch_applies_value_when_field_present(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     start = dt_util.utcnow()
@@ -1058,7 +1059,7 @@ async def test_handle_dispatch_writes_state_even_when_field_absent(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     start = dt_util.utcnow()
@@ -1095,7 +1096,7 @@ async def test_handle_dispatch_value_does_not_apply_when_field_missing(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     with freeze_time(dt_util.utcnow()):
@@ -1138,7 +1139,7 @@ async def test_subscription_registered_on_add(hass, receiver_entry_builder):
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     # If the subscription is registered, a direct dispatcher send updates state
@@ -1169,7 +1170,7 @@ async def test_unsubscribe_on_removal_stops_updates(hass, receiver_entry_builder
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     # Set a value first
@@ -1516,18 +1517,18 @@ async def test_receiver_entity_subscribes_to_receiver_update(
 
     # Find the connectivity binary_sensor (a Rtl433ReceiverEntity subclass)
     connectivity_eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver.entry_id}:hub:connectivity"
+        "binary_sensor", DOMAIN, f"{receiver_scope(receiver)}:connectivity"
     )
     assert connectivity_eid is not None
 
     # Change coordinator.connected and fire receiver_update signal
     coordinator._client.connected = True
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
     assert hass.states.get(connectivity_eid).state == "on"
 
     coordinator._client.connected = False
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
     assert hass.states.get(connectivity_eid).state == "off"
 
@@ -1544,7 +1545,7 @@ async def test_receiver_entity_reload_rewires_subscription(
     _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     connectivity_eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver.entry_id}:hub:connectivity"
+        "binary_sensor", DOMAIN, f"{receiver_scope(receiver)}:connectivity"
     )
     assert connectivity_eid is not None
 
@@ -1555,7 +1556,7 @@ async def test_receiver_entity_reload_rewires_subscription(
     coordinator2 = _coordinator(hass, receiver)
     # After reload, the receiver_update signal must still work
     coordinator2._client.connected = True
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
 
     state = hass.states.get(connectivity_eid)
@@ -1570,12 +1571,12 @@ async def test_receiver_entity_device_info_identifiers(hass, receiver_entry_buil
     ent_reg = er.async_get(hass)
 
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     assert receiver_device is not None
 
     connectivity_eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver.entry_id}:hub:connectivity"
+        "binary_sensor", DOMAIN, f"{receiver_scope(receiver)}:connectivity"
     )
     assert connectivity_eid is not None
     conn_entry = ent_reg.async_get(connectivity_eid)
@@ -1593,7 +1594,7 @@ async def test_receiver_control_unique_id_format(hass, receiver_entry_builder):
     ent_reg = er.async_get(hass)
 
     # The connectivity binary_sensor unique_id follows the hub:hub:suffix pattern
-    uid = f"{receiver.entry_id}:hub:connectivity"
+    uid = f"{receiver_scope(receiver)}:connectivity"
     eid = ent_reg.async_get_entity_id("binary_sensor", DOMAIN, uid)
     assert eid is not None
 
@@ -1605,7 +1606,7 @@ async def test_receiver_control_entity_category_config(hass, receiver_entry_buil
 
     # The gain number control is a Rtl433ReceiverControl subclass
     gain_eid = ent_reg.async_get_entity_id(
-        "number", DOMAIN, f"{receiver.entry_id}:hub:gain"
+        "number", DOMAIN, f"{receiver_scope(receiver)}:gain"
     )
     if gain_eid is not None:
         entry = ent_reg.async_get(gain_eid)
@@ -1631,7 +1632,7 @@ async def test_setup_no_duplicate_entities_on_reload(hass, receiver_entry_builde
         },
     )
     ent_reg = er.async_get(hass)
-    uid = f"{receiver.entry_id}:{device_key}:watts"
+    uid = f"{receiver_id(receiver)}:{device_key}:watts"
 
     # Count entities with this unique_id before reload
     before = [e for e in ent_reg.entities.values() if e.unique_id == uid]
@@ -1661,7 +1662,7 @@ async def test_teardown_clears_field_listeners(hass, receiver_entry_builder):
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     # Unload -> device removers run and field listeners are cleared
@@ -1722,7 +1723,7 @@ async def test_calibration_applied_to_consumption_sensor(hass, receiver_entry_bu
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     consumption_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:consumption"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:consumption"
     )
     assert consumption_eid is not None
 
@@ -1766,7 +1767,7 @@ async def test_calibration_applied_to_scmplus_consumption_sensor(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     consumption_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:consumption"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:consumption"
     )
     assert consumption_eid is not None
 
@@ -1799,7 +1800,7 @@ async def test_uncalibrated_scmplus_consumption_is_a_unitless_counter(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     consumption_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:consumption"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:consumption"
     )
     assert consumption_eid is not None
 
@@ -1836,7 +1837,7 @@ async def test_calibration_not_applied_to_non_consumption_field(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
     assert watts_eid is not None
 
@@ -1870,7 +1871,7 @@ async def test_entity_should_poll_false(hass, receiver_entry_builder):
         },
     )
     ent_reg = er.async_get(hass)
-    uid = f"{receiver.entry_id}:{device_key}:watts"
+    uid = f"{receiver_id(receiver)}:{device_key}:watts"
     eid = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
     # The state is current without polling
     assert eid is not None
@@ -1896,7 +1897,7 @@ async def test_entity_enabled_by_default(hass, receiver_entry_builder):
         },
     )
     ent_reg = er.async_get(hass)
-    uid = f"{receiver.entry_id}:{device_key}:watts"
+    uid = f"{receiver_id(receiver)}:{device_key}:watts"
     entry = ent_reg.async_get(ent_reg.async_get_entity_id("sensor", DOMAIN, uid))
     assert entry is not None
     # enabled_by_default=True means the entity is not hidden/disabled by default
@@ -1923,7 +1924,7 @@ async def test_multiple_fields_create_separate_entities(hass, receiver_entry_bui
     )
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
 
     watts_eid = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts")
     kwh_eid = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:kwh")
@@ -1956,7 +1957,7 @@ async def test_late_field_entity_created_on_new_event(hass, receiver_entry_build
     )
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
 
     # Initially no battery entity
     assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:B") is None
