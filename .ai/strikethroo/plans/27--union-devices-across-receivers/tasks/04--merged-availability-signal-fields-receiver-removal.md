@@ -40,3 +40,14 @@ Merged availability, per-receiver signal entities, and receiver-removal semantic
 
 ## Implementation Notes
 See plan Component 4 and Clarifications #14, #17, #20, #22, #23.
+
+## Follow-up decided after this task ran (Clarification #25)
+
+Deleting a location's **last** receiver subentry must be **blocked** — the user
+deletes the location entry instead. Task 002 left a receiver-less entry that
+`async_setup_entry` refuses with `ConfigEntryError`; blocking makes that state
+unreachable rather than merely recoverable. Removing a *non-final* receiver is
+unchanged (drop its own entities and its link entities, keep merged devices).
+
+Implement in the subentry removal flow, with a test asserting the last receiver
+cannot be removed and that removing one of two still works.
