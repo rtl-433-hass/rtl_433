@@ -72,31 +72,25 @@ MAPPINGS_DOCS_URL = (
 )
 
 
-def receiver_defaults(entry: ConfigEntry) -> dict[str, Any]:
-    """Return the receiver-level form's current values.
+def location_defaults(entry: ConfigEntry) -> dict[str, Any]:
+    """Return the location-level form's current values.
 
-    These come straight from the resolvers :mod:`.receiver_settings` uses at runtime,
-    rather than from a second copy of the options-then-data-then-default rule --
-    including the int/bool coercion, so a value stored as a string still reaches
-    a form as a number.
-
-    The timeout reported is the *explicit* one, so ``None`` when the receiver has none
-    and the per-device-type defaults apply. A form that was handed the resolved
-    value instead could not tell "unset" from a receiver timeout that happens to equal
+    One key today -- the availability default -- because that is the only
+    setting that is about the location's *sensors* rather than about one radio
+    or one device. It is reported *explicitly*, so ``None`` when the location has
+    none and the per-device-type defaults apply. A form handed the resolved value
+    instead could not tell "unset" from a default that happens to equal
     :data:`~.const.DEFAULT_AVAILABILITY_TIMEOUT`, and the two behave differently:
     the first leaves a doorbell never expiring, the second expires it after ten
     minutes. A form wanting a number to pre-fill applies that default itself.
     """
-    return {
-        CONF_AVAILABILITY_TIMEOUT: _explicit_receiver_timeout(entry),
-        CONF_MANAGE_SETTINGS: _receiver_manage_settings(entry),
-    }
+    return {CONF_AVAILABILITY_TIMEOUT: _explicit_receiver_timeout(entry)}
 
 
-def build_receiver_options(
-    entry: ConfigEntry, availability_timeout: int | None, manage_settings: bool
+def build_location_options(
+    entry: ConfigEntry, availability_timeout: int | None
 ) -> dict[str, Any]:
-    """Return the options a receiver-settings submission should persist.
+    """Return the options a location-settings submission should persist.
 
     ``None`` means "use the per-device-type defaults", so the key is dropped
     instead of stored; every ``int`` is a value the user chose -- ``0`` (never
@@ -106,19 +100,59 @@ def build_receiver_options(
     Intent, not the value, is what decides: a caller whose form cannot express
     "unset" collapses its own sentinel to ``None`` before calling (the options
     flow does, since a ``vol.Required`` number field echoes its default back on
-    every save). Deciding it here instead is what made a receiver-wide 600 seconds
-    unstorable -- the one value a ten-minute default makes it natural to type.
+    every save). Deciding it here instead is what made a location-wide 600
+    seconds unstorable -- the one value a ten-minute default makes it natural to
+    type.
 
-    Everything else already in ``entry.options`` carries over: the receiver form owns
-    two keys, and the per-device sub-map lives alongside them.
+    Everything else already in ``entry.options`` carries over: this form owns one
+    key, and the per-device sub-map lives alongside it.
     """
     options = dict(entry.options)
-    options[CONF_MANAGE_SETTINGS] = manage_settings
     if availability_timeout is None:
         options.pop(CONF_AVAILABILITY_TIMEOUT, None)
     else:
         options[CONF_AVAILABILITY_TIMEOUT] = availability_timeout
     return options
+
+
+def receiver_defaults(entry: ConfigEntry) -> dict[str, Any]:
+    """Return the combined form's current values, for the options flow.
+
+    The options flow still shows the location's availability default and the
+    manage-radio toggle on one page, addressed by the location alone; the panel
+    has split them (``rtl_433/settings/location`` and ``.../receiver``, the
+    latter naming a receiver) because only one of the two is about a radio. This
+    stays the combined view until that form is re-scoped too, so that surface
+    keeps meaning exactly what it did.
+
+    Both halves come straight from the resolvers :mod:`.receiver_settings` uses
+    at runtime, rather than from a second copy of the options-then-data-then-
+    default rule -- including the int/bool coercion, so a value stored as a
+    string still reaches a form as a number. The toggle reported is therefore the
+    location's first receiver's effective value, which is what a form showing one
+    toggle for the whole location means by it.
+    """
+    return {
+        **location_defaults(entry),
+        CONF_MANAGE_SETTINGS: _receiver_manage_settings(entry),
+    }
+
+
+def build_receiver_options(
+    entry: ConfigEntry, availability_timeout: int | None, manage_settings: bool
+) -> dict[str, Any]:
+    """Return the options the options flow's combined submission should persist.
+
+    The timeout half is :func:`build_location_options`, unchanged. The toggle is
+    written **location-wide**, into ``entry.options``, where it shadows every
+    receiver's own stored value -- which is what a single form control for a
+    whole location has to mean, and why the panel's per-receiver command retires
+    this key when it stores a receiver's own answer instead.
+    """
+    return {
+        **build_location_options(entry, availability_timeout),
+        CONF_MANAGE_SETTINGS: manage_settings,
+    }
 
 
 def entry_registry(hass: HomeAssistant, entry: ConfigEntry) -> Registry | None:

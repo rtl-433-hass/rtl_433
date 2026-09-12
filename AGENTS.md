@@ -381,17 +381,34 @@ second implementation.
   three functions above. A behavioural difference between the form and the panel
   is therefore a duplicated implementation, not a missing feature.
 - **`websocket_api.py`** registers every panel command, all
-  `@websocket_api.require_admin`: `rtl_433/hubs`, `rtl_433/devices/pending`,
-  `.../add`, `.../ignore`, `.../unignore`, `.../replace`, `.../clear`,
-  `.../subscribe`, and `rtl_433/settings/get`, `.../receiver`, `.../device`,
+  `@websocket_api.require_admin`: `rtl_433/receivers`,
+  `rtl_433/devices/pending`, `.../add`, `.../ignore`, `.../unignore`,
+  `.../replace`, `.../clear`, `.../coverage`, `.../subscribe`, and
+  `rtl_433/settings/get`, `.../location`, `.../receiver`, `.../device`,
   `.../mappings`. Registration is per
   Home Assistant *run*, not per entry — the integration has no `async_setup`, so
-  `async_register_commands` is called from every `async_setup_entry` and guarded
-  by the `DATA_WS_REGISTERED` sentinel on `hass.data[DOMAIN]`; registering a
-  command name twice raises, and a second receiver must not lose to that.
-  `_async_get_coordinator` answers an unknown `entry_id` with `ERR_NOT_FOUND`
-  and one whose entry exists but is not set up with `not_loaded`, so a panel
-  left open across a reload reports a condition instead of raising.
+  `async_register_commands` is called from every `async_setup_entry`;
+  `async_register_command` is a keyed dict assignment, so re-registering the
+  same names with the same handlers is idempotent and needs no guard.
+- **Every command is scoped to a LOCATION; one also names a receiver.**
+  `entry_id` is the location entry, and `_async_get_location` answers an unknown
+  one with `ERR_NOT_FOUND` and one whose entry exists but is not set up with
+  `not_loaded`, so a panel left open across a reload reports a condition instead
+  of raising. Adoption, the ignore list, per-device settings, mappings and the
+  availability default are all location-scoped because they are statements about
+  *sensors*. The manage-radio toggle is about one radio, so
+  `rtl_433/settings/receiver` additionally takes a `receiver_id` (the config
+  **subentry** id) resolved through `_async_get_receiver` — always via its
+  owning location, so one location can never write another's radio. There are
+  **no compatibility aliases** for the old `rtl_433/hubs` /
+  `rtl_433/settings/hub` names.
+- **Per-receiver signal detail is served from aggregator state, not entities.**
+  `rtl_433/devices/coverage` returns `aggregator.coverage(device_key)` per
+  adopted device so the panel can render "heard by Attic (−62 dB) / Garage
+  (−89 dB)" with **no** entity enabled; `rssi` / `snr` are
+  `enabled_by_default: false` and stay that way. Keep it a one-shot command —
+  coverage moves on every frame, so folding it into the subscription payload
+  would push on every refresh tick and destroy the two-speed guarantee below.
 - **The subscription is deliberately two-speed; keep it that way.** A
   *membership* change (the dispatcher signal) pushes immediately. A *repeat
   sighting*, which only ages a row's count and last-seen, is picked up by the
