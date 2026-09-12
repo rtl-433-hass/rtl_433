@@ -496,9 +496,9 @@ graph TD
     T7 --> T10
 ```
 
-### Phase 1: Vocabulary
+### ✅ Phase 1: Vocabulary
 **Parallel Tasks:**
-- Task 001: hub→receiver (server) and receiver→radio (SDR) rename across code, signals, translations, panel strings and docs; harden the two segment-based identity parsers (`device_trigger.py`, `__init__.py`) for the 4-segment templates and enforce `receiver` as a reserved token (Clarification #18)
+- ✔️ Task 001: hub→receiver (server) and receiver→radio (SDR) rename across code, signals, translations, panel strings and docs; harden the two segment-based identity parsers (`device_trigger.py`, `__init__.py`) for the 4-segment templates and enforce `receiver` as a reserved token (Clarification #18)
 
 ### Phase 2: Topology foundation
 **Parallel Tasks:**
