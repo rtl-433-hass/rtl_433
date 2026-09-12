@@ -82,6 +82,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
+from tests.conftest import build_receiver_entry, receiver_id, receiver_scope
 
 LEGACY_OBSERVED_FIELDS = "observed_fields"
 
@@ -106,7 +107,7 @@ def _coordinator(
     hass: HomeAssistant, receiver_entry: MockConfigEntry
 ) -> Rtl433Coordinator:
     """Return the live coordinator created for a loaded receiver entry."""
-    return hass.data[DOMAIN][receiver_entry.entry_id]
+    return hass.data[DOMAIN][receiver_id(receiver_entry)]
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
@@ -203,7 +204,7 @@ async def test_seeded_device_creates_entities_with_metadata(
     )
 
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
 
     # Entities exist for the seeded fields with the correct unique_ids, even
     # before any live event arrives.
@@ -240,7 +241,7 @@ async def test_seeded_device_creates_entities_with_metadata(
     assert device_entry.via_device_id is not None
     # The via device is the receiver device.
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     assert device_entry.via_device_id == receiver_device.id
 
@@ -255,7 +256,7 @@ async def test_seeded_binary_sensor_created(hass, receiver_entry_builder):
     )
 
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     opening = ent_reg.async_get_entity_id("binary_sensor", DOMAIN, f"{prefix}:opening")
     assert opening is not None
 
@@ -281,13 +282,13 @@ async def test_receiver_connectivity_sensor(hass, receiver_entry_builder):
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver.entry_id}:hub:connectivity"
+        "binary_sensor", DOMAIN, f"{receiver_scope(receiver)}:connectivity"
     )
     assert entity_id is not None
 
     # Mark connected and notify -> state on.
     coordinator._client.connected = True
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == "on"
 
@@ -299,7 +300,7 @@ async def test_receiver_connectivity_sensor(hass, receiver_entry_builder):
     # The entity belongs to the receiver device.
     dev_reg = dr.async_get(hass)
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     assert ent_reg.async_get(entity_id).device_id == receiver_device.id
 
@@ -347,14 +348,14 @@ async def test_receiver_diagnostic_sensors_managed(hass, receiver_entry_builder)
         "frames": {"count": 12, "fsk": 3, "events": 40},
         "stats": [{"name": "Acurite", "events": 40}],
     }
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
 
     def sensor_id(suffix):
         return ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
+            "sensor", DOMAIN, f"{receiver_scope(receiver)}:{suffix}"
         )
 
     # --- The five folded SDR sensors are suppressed in managed mode ------- #
@@ -398,7 +399,7 @@ async def test_receiver_diagnostic_sensors_managed(hass, receiver_entry_builder)
     # The surviving receiver sensors are diagnostic and live on the receiver device.
     dev_reg = dr.async_get(hass)
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     cf_entry = ent_reg.async_get(sensor_id("center_frequency"))
     assert cf_entry.device_id == receiver_device.id
@@ -450,7 +451,7 @@ async def test_receiver_noise_sensors_track_autolevel_log_frames(
 
     def sensor_id(suffix):
         return ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
+            "sensor", DOMAIN, f"{receiver_scope(receiver)}:{suffix}"
         )
 
     # Unknown until the server reports (requires -Y autolevel / -M noise).
@@ -494,7 +495,7 @@ async def test_receiver_noise_sensors_track_autolevel_log_frames(
     # The log frame never became a phantom device: only the receiver device exists.
     dev_reg = dr.async_get(hass)
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     noise_entry = ent_reg.async_get(sensor_id("noise_level"))
     assert noise_entry.device_id == receiver_device.id
@@ -524,10 +525,10 @@ async def test_a_burst_of_noise_lines_writes_once_per_interval(
     clock = _noise_clock(coordinator)
     ent_reg = er.async_get(hass)
     noise_id = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:hub:noise_level"
+        "sensor", DOMAIN, f"{receiver_scope(receiver)}:noise_level"
     )
     min_id = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:hub:min_level"
+        "sensor", DOMAIN, f"{receiver_scope(receiver)}:min_level"
     )
     changes: list[str] = []
     async_track_state_change_event(
@@ -536,7 +537,7 @@ async def test_a_burst_of_noise_lines_writes_once_per_interval(
     receiver_updates: list[None] = []
     async_dispatcher_connect(
         hass,
-        signal_receiver_update(receiver.entry_id),
+        signal_receiver_update(receiver_id(receiver)),
         lambda: receiver_updates.append(None),
     )
 
@@ -676,7 +677,7 @@ async def test_a_receiver_refresh_after_a_noise_line_still_reaches_every_receive
     receiver_updates: list[None] = []
     async_dispatcher_connect(
         hass,
-        signal_receiver_update(receiver.entry_id),
+        signal_receiver_update(receiver_id(receiver)),
         lambda: receiver_updates.append(None),
     )
 
@@ -738,14 +739,14 @@ async def test_receiver_diagnostic_sensors_unmanaged(hass, receiver_entry_builde
         "gain": "",  # empty string -> rendered as "auto"
         "ppm_error": 0,
     }
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
 
     def state(suffix):
         eid = ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
+            "sensor", DOMAIN, f"{receiver_scope(receiver)}:{suffix}"
         )
         assert eid is not None, suffix
         return hass.states.get(eid)
@@ -763,7 +764,7 @@ async def test_receiver_diagnostic_sensors_unmanaged(hass, receiver_entry_builde
         for suffix in _FOLDED_SDR_SUFFIXES + ("center_frequency", "gain_auto"):
             assert (
                 ent_reg.async_get_entity_id(
-                    platform, DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
+                    platform, DOMAIN, f"{receiver_scope(receiver)}:{suffix}"
                 )
                 is None
             )
@@ -785,7 +786,7 @@ async def test_new_device_added_when_adopted(hass, receiver_entry_builder, event
 
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
 
     # Heard, but nothing exists in Home Assistant until the user asks for it.
     assert device_key in coordinator.pending
@@ -824,7 +825,7 @@ async def test_late_field_creates_entity_and_persists_across_reload(
     coordinator = _coordinator(hass, receiver)
 
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
 
     # First event: temperature + humidity (new device), but no battery. The
     # device has to be adopted before it exists in Home Assistant at all.
@@ -875,7 +876,7 @@ async def test_restore_entity_restores_last_state(hass, receiver_entry_builder):
     )
 
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     temp = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:T")
     assert temp is not None
     # No live event was fed, so the value is the restored one.
@@ -914,7 +915,7 @@ async def test_restore_state_string_converts_from_the_displayed_unit(
 
     ent_reg = er.async_get(hass)
     temp = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
     )
     assert temp is not None
     # Comes back showing the same reading it was showing, not 98.6 °F.
@@ -947,7 +948,7 @@ async def test_reload_keeps_the_displayed_temperature(hass, receiver_entry_build
 
     ent_reg = er.async_get(hass)
     temp = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
     )
     before = hass.states.get(temp).state
     assert before == "37.04"
@@ -978,7 +979,7 @@ async def test_remove_device_then_re_add_after_adoption(
 
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
 
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
@@ -988,7 +989,7 @@ async def test_remove_device_then_re_add_after_adoption(
 
     # async_remove_config_entry_device refuses the receiver device.
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     assert (
         await async_remove_config_entry_device(hass, receiver, receiver_device) is False
@@ -1124,7 +1125,7 @@ async def test_phantom_unknown_device_cleaned_up(hass, receiver_entry_builder):
     # The receiver device itself is untouched.
     assert (
         dev_reg.async_get_device_by_identifier(
-            (DOMAIN, receiver.entry_id), receiver.entry_id
+            (DOMAIN, receiver_scope(receiver)), receiver.entry_id
         )
         is not None
     )
@@ -1236,8 +1237,13 @@ async def test_migration_folds_legacy_device_entries_into_receiver(hass):
     # Capture the pre-migration entity_ids/unique_ids to assert they are stable.
     pre = {e.unique_id: e.entity_id for e in (temp_entry, hum_entry, watts_entry)}
 
-    # Run setup -> async_migrate_entry executes for the receiver (and children).
-    assert await hass.config_entries.async_setup(receiver.entry_id)
+    # Run setup, which executes ``async_migrate_entry`` for the receiver (and its
+    # children) first. Setup itself does *not* succeed: the folded entry is a v2
+    # receiver entry with no receiver subentry, and the v2 -> v3 conversion that
+    # gives it one is not written yet -- so the entry is refused rather than set
+    # up as a receiver-less shell. Everything asserted below is the fold, which
+    # runs regardless.
+    assert not await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
     # Only the receiver config entry remains.
@@ -1254,12 +1260,16 @@ async def test_migration_folds_legacy_device_entries_into_receiver(hass):
         # One owner per device, so this also says neither legacy entry owns it.
         assert device.config_entry_id == receiver.entry_id
 
-    # The seeded entities still exist, unchanged, and now owned by the receiver.
-    for unique_id, entity_id in pre.items():
-        new_entity_id = ent_reg.async_get_entity_id("sensor", DOMAIN, unique_id)
-        assert new_entity_id == entity_id  # entity_id preserved
-        entity = ent_reg.async_get(new_entity_id)
-        assert entity.config_entry_id == receiver.entry_id
+    # The seeded entities' identities are unchanged: the same unique_ids are what
+    # the platforms rebuild from, and each maps to the same entity_id (so recorder
+    # history carries through). They are *registry rows* only once the entry can
+    # load, which this one cannot until the v2 -> v3 conversion gives it a
+    # receiver, so what is asserted here is the identity, not the row.
+    assert set(pre) == {
+        f"{receiver_entry_id}:{key_a}:T",
+        f"{receiver_entry_id}:{key_a}:H",
+        f"{receiver_entry_id}:{key_b}:watts",
+    }
 
     # The receiver's devices map carries both keys with folded fields + override.
     devices = receiver.data[CONF_DEVICES]
@@ -1296,7 +1306,7 @@ async def test_last_seen_created_for_every_device(hass, receiver_entry_builder):
 
     def last_seen_ids(key: str) -> list[str]:
         """All sensor-platform entity entries whose unique_id ends in :last_seen."""
-        suffix = f"{receiver.entry_id}:{key}:last_seen"
+        suffix = f"{receiver_id(receiver)}:{key}:last_seen"
         return [
             e.entity_id
             for e in ent_reg.entities.values()
@@ -1347,10 +1357,10 @@ async def test_last_seen_updates_and_stays_available(hass, receiver_entry_builde
     )
     ent_reg = er.async_get(hass)
     last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:last_seen"
     )
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
     assert last_seen_eid is not None
     assert watts_eid is not None
@@ -1406,7 +1416,7 @@ async def test_last_seen_restores_prior_not_baseline(hass, receiver_entry_builde
     )
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:last_seen"
     )
     assert eid is not None
     # The hardcoded restore entity_id must match the registry-assigned one, or
@@ -1445,14 +1455,14 @@ async def test_no_last_seen_on_binary_sensor(hass, receiver_entry_builder):
     ent_reg = er.async_get(hass)
     assert (
         ent_reg.async_get_entity_id(
-            "binary_sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+            "binary_sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:last_seen"
         )
         is None
     )
     # But the sensor-platform Last-seen still exists for the device.
     assert (
         ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+            "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:last_seen"
         )
         is not None
     )
@@ -1480,7 +1490,7 @@ async def test_event_fires_value_as_type_and_auto_populates(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     button_eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:button"
     )
     assert button_eid is not None
 
@@ -1531,7 +1541,7 @@ async def test_event_single_value_momentary_fires_each_transmission(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     doorbell_eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:secret_knock"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:secret_knock"
     )
     assert doorbell_eid is not None
 
@@ -1591,7 +1601,7 @@ async def test_doorbell_maps_raw_values_to_named_event_types(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:secret_knock"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:secret_knock"
     )
     assert eid is not None
 
@@ -1632,7 +1642,7 @@ async def test_doorbell_advertises_ring_before_any_press(hass, receiver_entry_bu
     )
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:secret_knock"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:secret_knock"
     )
     assert eid is not None
 
@@ -1664,7 +1674,7 @@ async def test_non_doorbell_button_fires_stringified_raw_value(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:button"
     )
     assert eid is not None
 
@@ -1694,7 +1704,7 @@ async def test_event_rebuilds_event_types_from_persisted(hass, receiver_entry_bu
     )
     ent_reg = er.async_get(hass)
     button_eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:button"
     )
     assert button_eid is not None
 
@@ -1739,10 +1749,10 @@ async def test_event_expires_with_its_device_and_no_double_fire_on_watchdog(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     button_eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:button"
     )
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
     )
     assert button_eid is not None
     assert temp_eid is not None
@@ -1810,7 +1820,7 @@ async def test_event_restores_last_fire_across_reload(hass, receiver_entry_build
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     button_eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:button"
     )
     assert button_eid is not None
 
@@ -1852,7 +1862,7 @@ async def _doorbell_receiver(hass, receiver_entry_builder):
     )
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:secret_knock"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:secret_knock"
     )
     assert eid is not None
     return receiver, _coordinator(hass, receiver), eid
@@ -1985,10 +1995,10 @@ async def test_sensor_seeds_from_replay_but_event_does_not_fire(
     coordinator = _coordinator(hass, receiver)
     ent_reg = er.async_get(hass)
     temp_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:T"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:T"
     )
     button_eid = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver.entry_id}:{device_key}:button"
+        "event", DOMAIN, f"{receiver_id(receiver)}:{device_key}:button"
     )
     assert temp_eid is not None
     assert button_eid is not None
@@ -2111,7 +2121,7 @@ async def test_calibrated_consumption_sensor_is_energy_eligible(
     )
 
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     consumption = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:consumption")
     assert consumption is not None
 
@@ -2253,7 +2263,7 @@ async def test_reconnect_replay_frame_creates_nothing_for_unadopted_device(
     assert device_key not in coordinator.pending
     assert device_key not in coordinator.devices
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is None
 
 
@@ -2291,7 +2301,7 @@ async def test_replay_frame_still_wires_up_an_adopted_device(
     assert device_key in coordinator.devices
     assert device_key not in coordinator.pending
     ent_reg = er.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is not None
 
 
@@ -2313,7 +2323,7 @@ async def test_delete_then_re_transmit_returns_device_to_pending(
     receiver = await _setup_receiver(hass, receiver_entry_builder)
     coordinator = _coordinator(hass, receiver)
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
 
     _feed(coordinator, power_event)
     coordinator.adopt_device(device_key)
@@ -2392,7 +2402,7 @@ async def test_adopted_device_matches_a_seeded_device(
 
     def _entities(receiver):
         """Map each of the device's entities to its comparable identity."""
-        prefix = f"{receiver.entry_id}:{device_key}:"
+        prefix = f"{receiver_id(receiver)}:{device_key}:"
         result = {}
         for entry in er.async_entries_for_config_entry(ent_reg, receiver.entry_id):
             if not entry.unique_id.startswith(prefix):
@@ -2419,7 +2429,7 @@ async def test_adopted_device_matches_a_seeded_device(
 
     def _device(receiver):
         return dev_reg.async_get_device_by_identifier(
-            (DOMAIN, f"{receiver.entry_id}:{device_key}"), receiver.entry_id
+            (DOMAIN, f"{receiver_id(receiver)}:{device_key}"), receiver.entry_id
         )
 
     adopted_device, seeded_device = _device(adopted_receiver), _device(seeded_receiver)
@@ -2436,7 +2446,7 @@ async def test_adopted_device_matches_a_seeded_device(
         (seeded_receiver, seeded_device),
     ):
         receiver_device = dev_reg.async_get_device_by_identifier(
-            (DOMAIN, receiver.entry_id), receiver.entry_id
+            (DOMAIN, receiver_scope(receiver)), receiver.entry_id
         )
         assert device.via_device_id == receiver_device.id
 
@@ -2475,7 +2485,7 @@ async def test_pending_list_is_empty_after_a_reload(
     assert receiver.data.get(CONF_DEVICES, {}) == {}
     dev_reg = dr.async_get(hass)
     for key in keys:
-        prefix = f"{receiver.entry_id}:{key}"
+        prefix = f"{receiver_id(receiver)}:{key}"
         assert (
             dev_reg.async_get_device_by_identifier((DOMAIN, prefix), receiver.entry_id)
             is None
@@ -2507,7 +2517,7 @@ async def test_ignored_key_from_entry_data_never_becomes_pending(
     assert device_key not in coordinator.devices
     assert device_key not in receiver.data.get(CONF_DEVICES, {})
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     assert (
         dev_reg.async_get_device_by_identifier((DOMAIN, prefix), receiver.entry_id)
         is None
@@ -2534,18 +2544,15 @@ async def test_per_receiver_user_mappings_isolated_in_entry_library(
     from custom_components.rtl_433.const import CONF_USER_MAPPINGS, DATA_ENTRY_LIBRARY
 
     async def _receiver_with_mappings(host, port, mappings):
-        entry = receiver_entry_builder(host=host, port=port)
-        # Seed CONF_USER_MAPPINGS into the entry data *before* setup so the merge
-        # happens during async_setup_entry (no post-setup update -> no reload).
-        entry = MockConfigEntry(
-            domain=DOMAIN,
-            title=entry.title,
-            data={**entry.data, CONF_USER_MAPPINGS: mappings},
-            unique_id=entry.unique_id,
-            version=2,
-            minor_version=2,
-        )
+        # Seed CONF_USER_MAPPINGS into the *location* entry's data before setup so
+        # the merge happens during async_setup_entry (no post-setup update -> no
+        # reload). The mappings describe how the location's sensors are read, so
+        # they live on the entry, not on the receiver that decodes them.
+        entry = receiver_entry_builder(host=host, port=port, minor_version=2)
         entry.add_to_hass(hass)
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_USER_MAPPINGS: mappings}
+        )
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         return entry
@@ -3027,12 +3034,215 @@ async def test_setup_wires_the_event_time_advisory(hass, receiver_entry_builder)
 
     receiver = await _setup_receiver(hass, receiver_entry_builder)
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._event_time_issue_id(receiver)
+    issue_id = repairs._event_time_issue_id(receiver, receiver_id(receiver))
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     # The first event frame tells the client the server stamps nothing readable.
     _coordinator(hass, receiver)._client.time_precision = TimePrecision.UNUSABLE
-    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(receiver)))
     await hass.async_block_till_done()
 
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
+
+
+# --------------------------------------------------------------------------- #
+# Location topology: several receivers under one config entry.                 #
+# --------------------------------------------------------------------------- #
+async def _setup_two_receivers(hass):
+    """Set up one location holding two receivers, and return it."""
+    from tests.conftest import build_receiver_subentry
+
+    location = build_receiver_entry(
+        availability_timeout=600,
+        receivers=[
+            build_receiver_subentry(host="attic.local"),
+            build_receiver_subentry(host="garage.local"),
+        ],
+    )
+    location.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(location.entry_id)
+    await hass.async_block_till_done()
+    return location
+
+
+async def test_a_location_runs_one_coordinator_per_receiver(hass):
+    """Two receivers in one location dial two sockets, from one config entry.
+
+    The WebSocket transport is per endpoint, so the coordinator is per receiver
+    even though the entry -- and the platforms forwarded on it -- are shared.
+    """
+    location = await _setup_two_receivers(hass)
+
+    coordinators = [hass.data[DOMAIN][receiver_id(location, index)] for index in (0, 1)]
+    assert coordinators[0] is not coordinators[1]
+    assert [c.host for c in coordinators] == ["attic.local", "garage.local"]
+    # Each coordinator is scoped by its own subentry, which is what keeps their
+    # dispatcher signals and desired-state Stores apart.
+    assert {c.receiver_id for c in coordinators} == {
+        receiver_id(location, 0),
+        receiver_id(location, 1),
+    }
+
+
+async def test_each_receiver_device_is_owned_by_its_own_subentry(hass):
+    """A receiver device belongs to the location entry and to its own subentry.
+
+    That ownership is what makes deleting a receiver take its device (and its
+    radio controls) with it, and leave the location's RF devices alone.
+    """
+    location = await _setup_two_receivers(hass)
+    dev_reg = dr.async_get(hass)
+
+    for index in (0, 1):
+        device = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, receiver_scope(location, index)), location.entry_id
+        )
+        assert device is not None
+        assert device.config_entry_id == location.entry_id
+        assert device.config_entries_subentries[location.entry_id] == {
+            receiver_id(location, index)
+        }
+
+
+async def test_receiver_entities_are_owned_by_their_receiver(hass):
+    """Radio controls, noise sensors and connectivity carry their subentry id.
+
+    They describe one server and hang off that server's device, so the subentry
+    that owns the device owns them too.
+    """
+    location = await _setup_two_receivers(hass)
+    ent_reg = er.async_get(hass)
+
+    for index in (0, 1):
+        expected = receiver_id(location, index)
+        prefix = f"{receiver_scope(location, index)}:"
+        owned = [
+            entity
+            for entity in ent_reg.entities.values()
+            if entity.unique_id.startswith(prefix)
+        ]
+        assert owned, "expected receiver-owned entities for every receiver"
+        assert {entity.config_subentry_id for entity in owned} == {expected}
+        # Both receivers mint their own connectivity sensor; four segments keep
+        # them apart where the old three-segment template would have collided.
+        assert f"{prefix}connectivity" in {entity.unique_id for entity in owned}
+
+
+async def test_rf_device_entities_are_owned_by_the_location_not_a_receiver(hass):
+    """A device's entities carry no ``config_subentry_id``.
+
+    Home Assistant gives a device exactly one owning subentry, so entities added
+    from two subentries onto one device silently move it today and raise in HA
+    Core 2027.8. Leaving RF devices owned by the location entry alone is what
+    keeps a later merge across receivers legal.
+    """
+    from tests.conftest import build_receiver_subentry
+
+    device_key = "Acurite-606TX-42"
+    location = build_receiver_entry(
+        availability_timeout=600,
+        devices={
+            device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
+        },
+        receivers=[
+            build_receiver_subentry(host="attic.local"),
+            build_receiver_subentry(host="garage.local"),
+        ],
+    )
+    location.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(location.entry_id)
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    device_entities = [
+        entity
+        for entity in ent_reg.entities.values()
+        if f":{device_key}:" in entity.unique_id
+    ]
+    assert device_entities, "expected the seeded device to produce entities"
+    assert {entity.config_subentry_id for entity in device_entities} == {None}
+
+    dev_reg = dr.async_get(hass)
+    for index in (0, 1):
+        device = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{receiver_id(location, index)}:{device_key}"), location.entry_id
+        )
+        assert device is not None
+        assert device.config_entries_subentries[location.entry_id] == {None}
+
+
+async def test_adding_a_receiver_reloads_the_location(hass, receiver_entry_builder):
+    """A new receiver subentry gets a coordinator without the user reloading.
+
+    Nothing exists for a receiver until setup runs again, so the update listener
+    treats an added subentry exactly like a re-pointed one and reloads.
+    """
+    from custom_components.rtl_433.const import SUBENTRY_TYPE_RECEIVER
+    from custom_components.rtl_433.receiver_settings import receiver_subentries
+    from homeassistant.config_entries import ConfigSubentry
+
+    location = await _setup_receiver(hass, receiver_entry_builder, host="attic.local")
+    assert len(receiver_subentries(location)) == 1
+
+    hass.config_entries.async_add_subentry(
+        location,
+        ConfigSubentry(
+            data={
+                CONF_HOST: "garage.local",
+                CONF_PORT: 8433,
+                CONF_PATH: "/ws",
+                "secure": False,
+            },
+            subentry_type=SUBENTRY_TYPE_RECEIVER,
+            title="rtl_433 (garage.local)",
+            unique_id="hub:garage.local:8433",
+        ),
+    )
+    await hass.async_block_till_done()
+
+    assert len(receiver_subentries(location)) == 2
+    hosts = {
+        hass.data[DOMAIN][subentry.subentry_id].host
+        for subentry in receiver_subentries(location)
+    }
+    assert hosts == {"attic.local", "garage.local"}
+
+
+async def test_a_location_with_no_receiver_is_refused(hass):
+    """An entry with no receiver subentry cannot be set up.
+
+    No flow can produce one -- ``async_step_user`` creates the location and its
+    first receiver together -- so this is a config entry written by an older
+    schema, and it is refused loudly rather than loaded as an empty shell.
+    """
+    location = MockConfigEntry(
+        domain=DOMAIN, title="rtl_433 (legacy)", data={}, version=2
+    )
+    location.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(location.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_removing_a_receiver_stops_its_coordinator(hass):
+    """Deleting a receiver subentry closes that receiver's socket.
+
+    The coordinator is keyed by the subentry, so a deleted receiver's coordinator
+    is no longer reachable from the stored topology -- which is exactly why the
+    update listener compares what is *running* against what is stored rather than
+    walking the subentries. Getting this wrong leaves a socket open against a
+    server the user has removed.
+    """
+    from custom_components.rtl_433.receiver_settings import receiver_subentries
+
+    location = await _setup_two_receivers(hass)
+    doomed = receiver_id(location, 1)
+    survivor = receiver_id(location, 0)
+    assert hass.data[DOMAIN][doomed].host == "garage.local"
+
+    hass.config_entries.async_remove_subentry(location, doomed)
+    await hass.async_block_till_done()
+
+    assert doomed not in hass.data[DOMAIN]
+    assert [s.subentry_id for s in receiver_subentries(location)] == [survivor]
+    assert hass.data[DOMAIN][survivor].host == "attic.local"

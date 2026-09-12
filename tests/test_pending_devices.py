@@ -41,6 +41,7 @@ import pytest
 from custom_components.rtl_433.const import signal_pending_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_subentry
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
 _KEY = "Acurite-606TX-42"
@@ -85,6 +86,7 @@ def make_coordinator(hass, receiver_entry_builder):
         coordinator = Rtl433Coordinator(
             hass,
             entry,
+            receiver_subentry(entry),
             host="rtl433.local",
             availability_timeout=600,
             skip_keys={"model", "id", "channel", "subtype", "time", "mic"},
@@ -193,9 +195,7 @@ async def test_frame_routing_matrix(
     # of the user that they never asked for. That is the claim this test has
     # always been making; naming the signals is what finally states it exactly.
     assert _dispatched(dispatch) == (
-        [signal_pending_update(coordinator.entry.entry_id)]
-        if expect == "pending"
-        else []
+        [signal_pending_update(coordinator.receiver_id)] if expect == "pending" else []
     )
 
 
@@ -243,7 +243,7 @@ async def test_pending_frame_touches_no_adopted_runtime_state(hass, make_coordin
     # a pending-update, which tells the discovery panel its list changed without
     # naming a device to build. No device-update, because there are no entities
     # to fan out to -- that is the regression this whole test guards.
-    assert _dispatched(dispatch) == [signal_pending_update(coordinator.entry.entry_id)]
+    assert _dispatched(dispatch) == [signal_pending_update(coordinator.receiver_id)]
 
     # Long past any timeout: the watchdog has nothing to say about a device that
     # was only ever heard.

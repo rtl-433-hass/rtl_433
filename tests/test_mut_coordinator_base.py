@@ -452,7 +452,7 @@ async def test_async_start_arms_the_watchdog_for_this_hub(hass, make_coordinator
             hass,
             coordinator._async_publish_noise,
             NOISE_PUBLISH_INTERVAL,
-            name=f"rtl_433 noise {coordinator.entry.entry_id}",
+            name=f"rtl_433 noise {coordinator.receiver_id}",
         ),
     ]
     assert coordinator._watchdog_unsub is track.return_value
