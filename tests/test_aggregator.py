@@ -12,7 +12,20 @@ tests pin what the integration does with that:
   after a live one never regresses it; and
 * **the exclusion set** -- ``rssi`` / ``snr`` / ``last_seen`` describe the link
   between one receiver and the sensor, so they are partitioned out on the way in
-  and neither unioned nor deduped.
+  and neither unioned nor deduped;
+* **merged availability** -- a receiver *vouches* for a device when it is
+  connected AND heard it inside the timeout, and the device is available when at
+  least one receiver vouches. The full cross-product is asserted because the row
+  an independent OR of the two gates gets wrong (connected-but-deaf plus
+  offline-but-fresh) is the whole reason the rule is shaped this way;
+* **per-receiver signal entities** -- one ``rssi`` / ``snr`` / ``last_seen``
+  entity per (sensor x receiver) on the ONE merged device, each naming its
+  receiver so no ``entity_id`` gains a ``_2`` suffix, each carrying no
+  ``config_subentry_id``, and the comparison between them served from aggregator
+  state so nothing has to be enabled to see it; and
+* **receiver removal** -- deleting a receiver takes its own device and its signal
+  entities, keeps every merged device and its history, and leaves a device only
+  that receiver ever heard unavailable rather than deleted.
 
 Frames are fed straight into each receiver's client (``_process_event``), the
 same seam the rest of the suite uses, with an explicit ``time`` because the
@@ -22,6 +35,7 @@ dedup's whole rule is expressed in terms of the frame's own stamp.
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import logging
 
 from freezegun import freeze_time
 import pytest
@@ -33,9 +47,11 @@ from custom_components.rtl_433.aggregator import (
     LINK_FIELD_KEYS,
     Rtl433LocationAggregator,
     is_link_field,
+    location_aggregator,
     partition_fields,
 )
 from custom_components.rtl_433.const import (
+    CONF_DEVICES,
     CONF_MODEL,
     DATA_AGGREGATOR,
     DEVICE_FIELDS,
@@ -46,7 +62,12 @@ from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.util import dt as dt_util
-from tests.conftest import build_receiver_entry, build_receiver_subentry, receiver_id
+from tests.conftest import (
+    build_receiver_entry,
+    build_receiver_subentry,
+    receiver_id,
+    receiver_subentry,
+)
 
 _MODEL = "Acurite-606TX"
 _DEVICE_KEY = "Acurite-606TX-42"
@@ -177,7 +198,12 @@ async def test_two_receivers_hearing_one_sensor_yield_one_device(hass):
 
 
 async def test_two_receivers_yield_one_entity_per_mapped_field(hass):
-    """One physical sensor, one entity per field, however many receivers hear it."""
+    """One physical sensor, one entity per *unioned* field, however many hear it.
+
+    The link fields are the deliberate exception: they are excluded from the
+    union, so each receiver contributes its own (see the per-receiver signal
+    tests below).
+    """
     location = await _setup_two_receivers(hass)
     with freeze_time(_NOW):
         for coordinator in _coordinators(hass, location):
@@ -190,10 +216,14 @@ async def test_two_receivers_yield_one_entity_per_mapped_field(hass):
         for entity in er.async_entries_for_config_entry(ent_reg, location.entry_id)
         if f":{_DEVICE_KEY}:" in entity.unique_id
     )
-    assert unique_ids == [
-        f"{location.entry_id}:{_DEVICE_KEY}:T",
-        f"{location.entry_id}:{_DEVICE_KEY}:last_seen",
-    ]
+    attic, garage = (receiver_id(location, index) for index in (0, 1))
+    assert unique_ids == sorted(
+        [
+            f"{location.entry_id}:{_DEVICE_KEY}:T",
+            f"{location.entry_id}:{_DEVICE_KEY}:{attic}:last_seen",
+            f"{location.entry_id}:{_DEVICE_KEY}:{garage}:last_seen",
+        ]
+    )
 
 
 async def test_device_field_unique_id_is_receiver_agnostic(hass):
@@ -432,7 +462,9 @@ async def test_a_link_field_entity_still_follows_its_own_receiver(hass):
     # would and let the debounced reload rebuild the platform.
     ent_reg = er.async_get(hass)
     rssi_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{location.entry_id}:{_DEVICE_KEY}:rssi"
+        "sensor",
+        DOMAIN,
+        f"{location.entry_id}:{_DEVICE_KEY}:{receiver_id(location)}:rssi",
     )
     assert rssi_eid is not None
     ent_reg.async_update_entity(rssi_eid, disabled_by=None)
@@ -513,3 +545,693 @@ async def test_a_device_adopted_mid_session_is_subscribed_to(hass):
         await hass.async_block_till_done()
 
     assert (receiver_id(location, 0), _DEVICE_KEY) in aggregator._subscribed
+
+
+# --------------------------------------------------------------------------- #
+# Merged availability: vouching, evaluated per receiver and then OR-ed.       #
+# --------------------------------------------------------------------------- #
+def _set_connected(coordinator, connected: bool) -> None:
+    """Flip one receiver's transport gate and dispatch the repaint."""
+    coordinator._client.connected = connected
+    coordinator._async_sync_receiver_availability()
+
+
+def _merged_entity(hass, location):
+    """Return the merged device's temperature entity object."""
+    eid = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{location.entry_id}:{_DEVICE_KEY}:T"
+    )
+    assert eid is not None
+    entity = hass.data["entity_components"]["sensor"].get_entity(eid)
+    assert entity is not None
+    return entity
+
+
+@pytest.mark.parametrize(
+    ("attic", "garage", "expected"),
+    [
+        # (connected, heard-recently) per receiver -> merged availability.
+        pytest.param((True, True), (True, True), True, id="both-vouch"),
+        pytest.param((True, True), (False, True), True, id="attic-vouches-alone"),
+        pytest.param((False, True), (True, True), True, id="garage-vouches-alone"),
+        pytest.param((True, True), (True, False), True, id="garage-deaf-attic-hears"),
+        # The bug the naive merge introduces: "some receiver connected" AND "some
+        # last_seen fresh" both hold, yet no single receiver can hear the device.
+        pytest.param(
+            (True, False), (False, True), False, id="connected-deaf-vs-offline-fresh"
+        ),
+        pytest.param((True, False), (True, False), False, id="both-deaf"),
+        pytest.param((False, True), (False, True), False, id="both-offline"),
+        pytest.param((False, False), (False, False), False, id="nothing-at-all"),
+    ],
+)
+async def test_merged_availability_is_the_or_of_per_receiver_vouches(
+    hass, attic, garage, expected
+):
+    """A device is available exactly while some receiver both hears and is heard.
+
+    The cross-product is spelled out rather than sampled because the whole point
+    of evaluating the pair per receiver is the one row an independent OR of the
+    two gates gets wrong: a connected receiver that is deaf to the sensor plus an
+    offline receiver that heard it a minute ago satisfies "a receiver is
+    connected" and "a last_seen is fresh" while nothing can actually hear the
+    device.
+    """
+    location = await _setup_two_receivers(hass)
+    entity = _merged_entity(hass, location)
+    now = dt_util.utcnow()
+
+    for coordinator, (connected, fresh) in zip(
+        _coordinators(hass, location), (attic, garage), strict=True
+    ):
+        _set_connected(coordinator, connected)
+        # 600s is the location's configured timeout, so "stale" is well past it.
+        coordinator.last_seen[_DEVICE_KEY] = now - timedelta(
+            seconds=1 if fresh else 6000
+        )
+    await hass.async_block_till_done()
+
+    assert entity.available is expected
+
+
+async def test_a_receiver_vouches_at_exactly_the_timeout(hass):
+    """The silence gate is inclusive: age == timeout is still fresh.
+
+    Pinned because the boundary is the one place the merged rule can silently
+    disagree with the watchdog, which uses the same comparison.
+    """
+    location = await _setup_two_receivers(hass)
+    entity = _merged_entity(hass, location)
+    attic, garage = _coordinators(hass, location)
+    start = dt_util.utcnow()
+    for coordinator in (attic, garage):
+        coordinator.last_seen[_DEVICE_KEY] = start
+
+    # 600s is the location's configured availability timeout.
+    with freeze_time(start + timedelta(seconds=600)):
+        assert entity.available is True
+    with freeze_time(start + timedelta(seconds=601)):
+        assert entity.available is False
+
+
+def test_there_is_no_aggregator_before_any_location_is_set_up(hass):
+    """``hass.data`` has no domain bucket at all yet -- that is not an error.
+
+    An entity reading ``available`` outside a running location has to get a
+    ``None`` it can fall back from, never an ``AttributeError``.
+    """
+    hass.data.pop(DOMAIN, None)
+    assert location_aggregator(hass, "no-such-entry") is None
+
+
+def test_there_is_no_aggregator_before_the_location_stores_one(hass):
+    """The domain bucket exists but the aggregator map does not yet."""
+    hass.data[DOMAIN] = {}
+    assert location_aggregator(hass, "no-such-entry") is None
+    hass.data[DOMAIN][DATA_AGGREGATOR] = {}
+    assert location_aggregator(hass, "no-such-entry") is None
+
+
+async def test_the_running_aggregator_is_found_by_its_location_id(hass):
+    """And the lookup really returns the location's own aggregator."""
+    location = await _setup_two_receivers(hass)
+    assert (
+        location_aggregator(hass, location.entry_id)
+        is hass.data[DOMAIN][DATA_AGGREGATOR][location.entry_id]
+    )
+
+
+async def test_a_receiver_that_never_heard_the_device_cannot_vouch(hass):
+    """No ``last_seen`` at all is not "fresh", however healthy the socket is."""
+    location = await _setup_two_receivers(hass)
+    entity = _merged_entity(hass, location)
+    for coordinator in _coordinators(hass, location):
+        coordinator.last_seen.pop(_DEVICE_KEY, None)
+
+    assert entity.available is False
+
+
+async def test_never_expire_still_needs_a_connected_receiver(hass):
+    """The never-expire exemption is from silence, not from the transport.
+
+    An event-driven device never expires on silence, but a receiver with its
+    socket down hears nothing at all, so it cannot vouch -- and with no other
+    receiver the merged device is unavailable. The exemption itself is unchanged:
+    reconnect the receiver and the same stale timestamp vouches again.
+    """
+    location = build_receiver_entry(
+        availability_timeout=0,
+        devices={_DEVICE_KEY: {CONF_MODEL: _MODEL, DEVICE_FIELDS: ["temperature_C"]}},
+        receivers=[
+            build_receiver_subentry(host="attic.local"),
+            build_receiver_subentry(host="garage.local"),
+        ],
+    )
+    location.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(location.entry_id)
+    await hass.async_block_till_done()
+    entity = _merged_entity(hass, location)
+    stale = dt_util.utcnow() - timedelta(days=7)
+    attic, garage = _coordinators(hass, location)
+    for coordinator in (attic, garage):
+        coordinator.last_seen[_DEVICE_KEY] = stale
+    assert entity.available is True
+
+    for coordinator in (attic, garage):
+        _set_connected(coordinator, False)
+    await hass.async_block_till_done()
+    assert entity.available is False
+
+    _set_connected(garage, True)
+    await hass.async_block_till_done()
+    assert entity.available is True
+
+
+async def test_a_receiver_edge_repaints_the_merged_entity(hass):
+    """Any receiver's connection edge re-writes the merged entity's state.
+
+    A unioned entity is built by one receiver but its availability is the OR over
+    all of them, so it has to be subscribed to every receiver's availability
+    signal -- not only to the one that happened to construct it.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    eid = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{location.entry_id}:{_DEVICE_KEY}:T"
+    )
+    with freeze_time(_NOW):
+        for coordinator in (attic, garage):
+            _feed(coordinator, _frame(21.4, 0))
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "21.4"
+
+        # Taking down only the *second* receiver -- the one that did not build
+        # the entity -- must still reach it, and leave it available (attic
+        # vouches).
+        _set_connected(garage, False)
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "21.4"
+
+        # Now the builder goes too: nothing vouches and the entity repaints.
+        _set_connected(attic, False)
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "unavailable"
+
+
+async def test_the_non_building_receivers_edge_is_the_one_that_flips_it(hass):
+    """The edge that matters can come from a receiver that built nothing.
+
+    The merged entity is constructed by the location's *first* receiver, so a
+    subscription to "my own receiver" alone still looks right in every case where
+    that receiver is the one vouching. This is the case where it does not: the
+    builder is deaf, the second receiver is the only voucher, and its edge is the
+    only thing that can take the entity unavailable.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    eid = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{location.entry_id}:{_DEVICE_KEY}:T"
+    )
+    with freeze_time(_NOW):
+        _feed(garage, _frame(21.4, 0))
+        await hass.async_block_till_done()
+        # Only garage has heard it; attic holds nothing but its startup baseline,
+        # which is cleared here so garage is unambiguously the sole voucher.
+        attic.last_seen.pop(_DEVICE_KEY, None)
+        assert hass.states.get(eid).state == "21.4"
+
+        _set_connected(garage, False)
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "unavailable"
+
+
+async def test_a_link_entity_reads_only_its_own_receiver(hass):
+    """``RSSI Attic`` goes unavailable with Attic, whatever Garage still hears.
+
+    The merged OR would be wrong here: another receiver hearing the sensor says
+    nothing about whether *this* receiver's signal reading is current.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0))
+        _feed(garage, _frame(21.4, 1, rssi=-89.0))
+        await hass.async_block_till_done()
+
+    rssi_eid = _enable_link_entity(hass, location, "rssi", 0)
+    await _reload_after_enable(hass)
+    attic, garage = _coordinators(hass, location)
+    entity = hass.data["entity_components"]["sensor"].get_entity(rssi_eid)
+
+    now = dt_util.utcnow()
+    for coordinator in (attic, garage):
+        coordinator.last_seen[_DEVICE_KEY] = now
+    assert entity.available is True
+
+    _set_connected(attic, False)
+    await hass.async_block_till_done()
+    assert entity.available is False
+
+
+# --------------------------------------------------------------------------- #
+# Per-receiver signal entities on the merged device.                          #
+# --------------------------------------------------------------------------- #
+def _link_entries(hass, location, object_suffix: str):
+    """Return the device's registry entries for one link field, per receiver."""
+    ent_reg = er.async_get(hass)
+    return [
+        ent_reg.async_get(
+            ent_reg.async_get_entity_id(
+                "sensor",
+                DOMAIN,
+                f"{location.entry_id}:{_DEVICE_KEY}:"
+                f"{receiver_id(location, index)}:{object_suffix}",
+            )
+            or ""
+        )
+        for index in (0, 1)
+    ]
+
+
+def _enable_link_entity(hass, location, object_suffix: str, index: int) -> str:
+    """Enable one receiver's link entity (they all ship disabled) and return its id."""
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "sensor",
+        DOMAIN,
+        f"{location.entry_id}:{_DEVICE_KEY}:"
+        f"{receiver_id(location, index)}:{object_suffix}",
+    )
+    assert eid is not None
+    ent_reg.async_update_entity(eid, disabled_by=None)
+    return eid
+
+
+async def _reload_after_enable(hass) -> None:
+    """Let the debounced reload that an enable schedules actually run."""
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=RELOAD_AFTER_UPDATE_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+
+
+async def test_one_signal_entity_per_sensor_and_receiver(hass):
+    """``rssi`` / ``snr`` / ``last_seen`` are one entity per (sensor x receiver).
+
+    All of them on the ONE merged device -- that is the point: a user reads
+    "strong at Attic, weak at Garage" off a single device page.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0, snr=11.5))
+        _feed(garage, _frame(21.4, 1, rssi=-89.0, snr=3.0))
+        await hass.async_block_till_done()
+
+    dev_reg = dr.async_get(hass)
+    merged = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{location.entry_id}:{_DEVICE_KEY}"), location.entry_id
+    )
+    assert merged is not None
+    for object_suffix in ("rssi", "snr", "last_seen"):
+        entries = _link_entries(hass, location, object_suffix)
+        assert all(entry is not None for entry in entries), object_suffix
+        assert {entry.device_id for entry in entries} == {merged.id}
+
+
+async def test_a_signal_entity_names_its_receiver_and_never_gains_a_suffix(hass):
+    """The receiver lives in the NAME, so HA never mints a ``_2`` entity_id.
+
+    ``_attr_has_entity_name`` plus the descriptor's own name would give one
+    merged device two entities both called "RSSI"; Home Assistant resolves that
+    collision by appending ``_2`` to the second entity_id, which is the issue
+    #132 failure mode. The unique_id carries the subentry id; the name carries
+    the receiver the user actually recognises.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0, snr=11.5))
+        _feed(garage, _frame(21.4, 1, rssi=-89.0, snr=3.0))
+        await hass.async_block_till_done()
+
+    titles = [receiver_subentry(location, index).title for index in (0, 1)]
+    for object_suffix, base in (
+        ("rssi", "RSSI"),
+        ("snr", "SNR"),
+        ("last_seen", "Last seen"),
+    ):
+        entries = _link_entries(hass, location, object_suffix)
+        assert [entry.original_name for entry in entries] == [
+            f"{base} {title}" for title in titles
+        ]
+
+    ent_reg = er.async_get(hass)
+    device_entity_ids = [
+        entry.entity_id
+        for entry in er.async_entries_for_config_entry(ent_reg, location.entry_id)
+        if f":{_DEVICE_KEY}:" in entry.unique_id
+    ]
+    assert device_entity_ids
+    assert not [eid for eid in device_entity_ids if eid.endswith(("_2", "_3"))]
+
+
+async def test_signal_entities_carry_no_subentry_and_warn_about_no_move(hass, caplog):
+    """They are about a receiver but hang off the merged device: no subentry id.
+
+    Adding them under their receiver's subentry would give one device entities
+    from two subentries, which silently moves the device today and raises in HA
+    Core 2027.8. Home Assistant reports that move as it happens, so the absence
+    of the report after both receivers have loaded is the assertion.
+    """
+    caplog.set_level(logging.DEBUG)
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0))
+        _feed(garage, _frame(21.4, 1, rssi=-89.0))
+        await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    device_entries = [
+        entry
+        for entry in er.async_entries_for_config_entry(ent_reg, location.entry_id)
+        if f":{_DEVICE_KEY}:" in entry.unique_id
+    ]
+    assert device_entries
+    assert {entry.config_subentry_id for entry in device_entries} == {None}
+    assert (
+        "assigns an existing device to a different config subentry" not in caplog.text
+    )
+
+
+async def test_signal_entities_ship_disabled_by_default(hass):
+    """A location does not pay sensors x receivers x 2 entities to see coverage."""
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0, snr=11.5))
+        _feed(garage, _frame(21.4, 1, rssi=-89.0, snr=3.0))
+        await hass.async_block_till_done()
+
+    for object_suffix in ("rssi", "snr"):
+        for entry in _link_entries(hass, location, object_suffix):
+            assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+
+
+async def test_one_receivers_frame_never_moves_the_others_signal_reading(hass):
+    """Garage hearing the sensor badly must not rewrite Attic's RSSI.
+
+    The union would publish whichever receiver won the debounce race, which for a
+    signal measurement is a number that belongs to neither of them.
+    """
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    # The entities only exist once the field has been seen, so hear it first,
+    # then enable both (they ship disabled) and let the reload rebuild them.
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0))
+        _feed(garage, _frame(21.4, 1, rssi=-89.0))
+        await hass.async_block_till_done()
+    attic_eid = _enable_link_entity(hass, location, "rssi", 0)
+    garage_eid = _enable_link_entity(hass, location, "rssi", 1)
+    await _reload_after_enable(hass)
+    attic, garage = _coordinators(hass, location)
+
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 10, rssi=-62.0))
+        await hass.async_block_till_done()
+        assert hass.states.get(attic_eid).state == "-62.0"
+
+        # The same transmission, heard by the other receiver a second later and
+        # much more weakly. The temperature is deduped away; the RSSI is not
+        # shared.
+        _feed(garage, _frame(21.4, 11, rssi=-89.0))
+        await hass.async_block_till_done()
+
+        assert hass.states.get(attic_eid).state == "-62.0"
+        assert hass.states.get(garage_eid).state == "-89.0"
+
+
+async def test_the_coverage_map_serves_the_comparison_without_any_entity(hass):
+    """The A-vs-B comparison comes off aggregator state, entities all disabled.
+
+    That is what lets the panel show "heard by Attic (-62) / Garage (-89)" while
+    ``rssi`` / ``snr`` stay disabled-by-default.
+    """
+    location = await _setup_two_receivers(hass)
+    aggregator = hass.data[DOMAIN][DATA_AGGREGATOR][location.entry_id]
+    attic, garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0, snr=11.5))
+        _feed(garage, _frame(21.4, 1, rssi=-89.0, snr=3.0))
+        await hass.async_block_till_done()
+
+        coverage = {
+            entry.receiver_id: entry for entry in aggregator.coverage(_DEVICE_KEY)
+        }
+        assert set(coverage) == {receiver_id(location, 0), receiver_id(location, 1)}
+        assert coverage[receiver_id(location, 0)].rssi == -62.0
+        assert coverage[receiver_id(location, 0)].snr == 11.5
+        assert coverage[receiver_id(location, 1)].rssi == -89.0
+        assert coverage[receiver_id(location, 1)].snr == 3.0
+        assert all(entry.last_seen is not None for entry in coverage.values())
+        assert all(entry.connected and entry.vouches for entry in coverage.values())
+
+    # Nothing had to be enabled for any of that.
+    for object_suffix in ("rssi", "snr"):
+        for entry in _link_entries(hass, location, object_suffix):
+            assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+
+
+async def test_coverage_distinguishes_offline_from_deaf(hass):
+    """ "Garage is down" and "Garage cannot hear this sensor" are different answers."""
+    location = await _setup_two_receivers(hass)
+    aggregator = hass.data[DOMAIN][DATA_AGGREGATOR][location.entry_id]
+    attic, garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0))
+        await hass.async_block_till_done()
+
+    # Garage is up but has never heard this sensor: connected, does not vouch.
+    by_receiver = {e.receiver_id: e for e in aggregator.coverage(_DEVICE_KEY)}
+    deaf = by_receiver[receiver_id(location, 1)]
+    assert (deaf.connected, deaf.vouches, deaf.last_seen, deaf.rssi) == (
+        True,
+        False,
+        None,
+        None,
+    )
+
+    # Attic then goes offline: it still has a coverage record, but cannot vouch.
+    _set_connected(attic, False)
+    await hass.async_block_till_done()
+    offline = {e.receiver_id: e for e in aggregator.coverage(_DEVICE_KEY)}[
+        receiver_id(location, 0)
+    ]
+    assert offline.connected is False
+    assert offline.vouches is False
+    assert offline.rssi == -62.0
+
+
+async def test_a_watchdog_repaint_does_not_move_the_coverage_timestamp(hass):
+    """A re-paint carries the cached frame, so it is not the receiver hearing it."""
+    location = await _setup_two_receivers(hass)
+    aggregator = hass.data[DOMAIN][DATA_AGGREGATOR][location.entry_id]
+    attic, _garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0))
+        await hass.async_block_till_done()
+    heard_at = aggregator.coverage(_DEVICE_KEY)[0].last_seen
+
+    later = datetime.fromisoformat(_NOW) + timedelta(seconds=6000)
+    with freeze_time(later):
+        await attic._async_watchdog(later)
+        await hass.async_block_till_done()
+
+    assert aggregator.coverage(_DEVICE_KEY)[0].last_seen == heard_at
+
+
+async def test_forgetting_a_device_drops_its_coverage(hass):
+    """A device the user removed leaves no coverage behind either."""
+    location = await _setup_two_receivers(hass)
+    aggregator = hass.data[DOMAIN][DATA_AGGREGATOR][location.entry_id]
+    attic, _garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0))
+        await hass.async_block_till_done()
+    assert aggregator._coverage
+
+    aggregator.forget_device(_DEVICE_KEY)
+    assert aggregator._coverage == {}
+
+
+# --------------------------------------------------------------------------- #
+# Removing a receiver from a location.                                        #
+# --------------------------------------------------------------------------- #
+_GARAGE_ONLY_KEY = "Acurite-606TX-77"
+
+
+async def _setup_for_removal(hass):
+    """Two receivers; one sensor both hear, one only the garage ever hears."""
+    location = build_receiver_entry(
+        availability_timeout=600,
+        devices={
+            _DEVICE_KEY: {CONF_MODEL: _MODEL, DEVICE_FIELDS: ["temperature_C"]},
+            _GARAGE_ONLY_KEY: {CONF_MODEL: _MODEL, DEVICE_FIELDS: ["temperature_C"]},
+        },
+        receivers=[
+            build_receiver_subentry(host="attic.local"),
+            build_receiver_subentry(host="garage.local"),
+        ],
+    )
+    location.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(location.entry_id)
+    await hass.async_block_till_done()
+
+    attic, garage = _coordinators(hass, location)
+    with freeze_time(_NOW):
+        _feed(attic, _frame(21.4, 0, rssi=-62.0, snr=11.5))
+        _feed(garage, _frame(21.4, 1, rssi=-89.0, snr=3.0))
+        garage._client._process_event(
+            {
+                "time": _at(0),
+                "model": _MODEL,
+                "id": 77,
+                "temperature_C": 18.0,
+                "rssi": -91.0,
+            }
+        )
+        await hass.async_block_till_done()
+    return location
+
+
+async def _remove_garage(hass, location) -> str:
+    """Delete the second receiver subentry and let the reload settle."""
+    garage_id = receiver_id(location, 1)
+    hass.config_entries.async_remove_subentry(location, garage_id)
+    await hass.async_block_till_done()
+    return garage_id
+
+
+async def test_removing_a_receiver_takes_its_own_device_and_entities(hass):
+    """The receiver device, its radio controls, noise and connectivity go with it."""
+    location = await _setup_for_removal(hass)
+    garage_scope = f"{location.entry_id}:receiver:{receiver_id(location, 1)}"
+    dev_reg = dr.async_get(hass)
+    assert (
+        dev_reg.async_get_device_by_identifier(
+            (DOMAIN, garage_scope), location.entry_id
+        )
+        is not None
+    )
+
+    garage_id = await _remove_garage(hass, location)
+
+    assert (
+        dev_reg.async_get_device_by_identifier(
+            (DOMAIN, garage_scope), location.entry_id
+        )
+        is None
+    )
+    ent_reg = er.async_get(hass)
+    assert not [
+        entry
+        for entry in er.async_entries_for_config_entry(ent_reg, location.entry_id)
+        if entry.unique_id.startswith(f"{garage_scope}:")
+    ]
+    assert garage_id not in hass.data[DOMAIN]
+
+
+async def test_removing_a_receiver_takes_its_signal_entities_off_merged_devices(hass):
+    """Its per-receiver ``rssi`` / ``snr`` / ``last_seen`` go too -- the other's stay.
+
+    Those entities carry no ``config_subentry_id`` (they hang off the merged
+    device), so Home Assistant's subentry sweep cannot see them; without the
+    integration removing them by identity they would survive as permanently
+    unavailable orphans of a server that is gone.
+    """
+    location = await _setup_for_removal(hass)
+    attic_id = receiver_id(location, 0)
+    garage_id = await _remove_garage(hass, location)
+
+    ent_reg = er.async_get(hass)
+    survivors = {
+        entry.unique_id
+        for entry in er.async_entries_for_config_entry(ent_reg, location.entry_id)
+    }
+    for device_key in (_DEVICE_KEY, _GARAGE_ONLY_KEY):
+        for object_suffix in ("rssi", "snr", "last_seen"):
+            assert (
+                f"{location.entry_id}:{device_key}:{garage_id}:{object_suffix}"
+                not in survivors
+            )
+    assert f"{location.entry_id}:{_DEVICE_KEY}:{attic_id}:last_seen" in survivors
+
+
+async def test_removing_a_receiver_keeps_merged_devices_and_their_history(hass):
+    """The sensor's device, entity_id and recorded value all survive untouched."""
+    location = await _setup_for_removal(hass)
+    ent_reg = er.async_get(hass)
+    temperature_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{location.entry_id}:{_DEVICE_KEY}:T"
+    )
+    assert hass.states.get(temperature_eid).state == "21.4"
+
+    await _remove_garage(hass, location)
+
+    dev_reg = dr.async_get(hass)
+    merged = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{location.entry_id}:{_DEVICE_KEY}"), location.entry_id
+    )
+    assert merged is not None
+    # Same entity, same entity_id -- which is what carries the recorder history.
+    assert (
+        ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, f"{location.entry_id}:{_DEVICE_KEY}:T"
+        )
+        == temperature_eid
+    )
+    assert hass.states.get(temperature_eid).state == "21.4"
+
+
+async def test_removing_a_receiver_recomputes_availability_over_the_rest(hass):
+    """The surviving receiver alone decides; the sensor stays available."""
+    location = await _setup_for_removal(hass)
+    await _remove_garage(hass, location)
+
+    attic = hass.data[DOMAIN][receiver_id(location, 0)]
+    attic.last_seen[_DEVICE_KEY] = dt_util.utcnow()
+    assert _merged_entity(hass, location).available is True
+
+    _set_connected(attic, False)
+    await hass.async_block_till_done()
+    assert _merged_entity(hass, location).available is False
+
+
+async def test_a_device_only_the_removed_receiver_heard_goes_unavailable_not_deleted(
+    hass,
+):
+    """Removing it stays an explicit user action, exactly like any other device."""
+    location = await _setup_for_removal(hass)
+    await _remove_garage(hass, location)
+
+    dev_reg = dr.async_get(hass)
+    orphan = dev_reg.async_get_device_by_identifier(
+        (DOMAIN, f"{location.entry_id}:{_GARAGE_ONLY_KEY}"), location.entry_id
+    )
+    assert orphan is not None, "the device must survive its only receiver"
+    assert _GARAGE_ONLY_KEY in location.data[CONF_DEVICES]
+
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{location.entry_id}:{_GARAGE_ONLY_KEY}:T"
+    )
+    assert eid is not None
+    entity = hass.data["entity_components"]["sensor"].get_entity(eid)
+
+    # The surviving receiver baselines a missing last_seen to "now" on add
+    # ("restore then time out"), so the honest answer arrives once that elapses:
+    # no remaining receiver has ever heard this sensor, so none can vouch.
+    with freeze_time(dt_util.utcnow() + timedelta(seconds=6000)):
+        assert entity.available is False

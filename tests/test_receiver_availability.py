@@ -43,6 +43,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
 from tests.conftest import (
+    link_unique_id,
     mark_receiver_connected,
     receiver_id,
     receiver_scope,
@@ -669,7 +670,7 @@ async def test_offline_receiver_takes_the_last_seen_sensor_unavailable(
     )
     ent_reg = er.async_get(hass)
     last_seen_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+        "sensor", DOMAIN, link_unique_id(receiver, device_key, "last_seen")
     )
     assert last_seen_eid is not None
     await _enable_entity(hass, receiver, last_seen_eid)
