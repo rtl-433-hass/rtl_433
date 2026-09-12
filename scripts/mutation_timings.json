@@ -2,6 +2,7 @@
   "files": {
     "custom_components/rtl_433/__init__.py": 5814.638999999999,
     "custom_components/rtl_433/adoption.py": 49.682,
+    "custom_components/rtl_433/aggregator.py": 554.453,
     "custom_components/rtl_433/binary_sensor.py": 261.369,
     "custom_components/rtl_433/calibration.py": 182.611,
     "custom_components/rtl_433/config_flow.py": 447.19199999999995,
