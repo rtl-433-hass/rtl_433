@@ -57,6 +57,9 @@ _NO_SINGLE_MODULE = {
     "tests/test_mutation_config.py",
     # Meta: tests scripts/release_credits.py, which is not package source.
     "tests/test_release_credits.py",
+    # Meta: asserts the screenshot harness's image pins against hacs.json. It
+    # reads repository metadata and imports no package source at all.
+    "tests/test_harness_pins.py",
 }
 
 # The number of shards the mutation workflow's matrix uses. Checked explicitly

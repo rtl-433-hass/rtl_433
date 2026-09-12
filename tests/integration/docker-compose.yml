@@ -20,7 +20,9 @@
 #             integration bind-mounted into /config/custom_components. HA reaches
 #             the stream at ws://wsbridge:8433/ws (compose DNS name).
 #
-# Images are pinned by digest. All three digests were resolved on linux/arm64.
+# Images are pinned by digest. The rtl433 and wsbridge digests were resolved on
+# linux/arm64; the Home Assistant one is a multi-arch index digest (resolved on
+# linux/amd64), so it pulls on either.
 # Bring-up MUST be backgrounded and polled (Clarification #14); see run-harness.sh.
 
 services:
@@ -86,8 +88,20 @@ services:
     restart: "no"
 
   homeassistant:
-    # ghcr.io/home-assistant/home-assistant:stable == 2026.5.4 (2026-05-25, arm64)
-    image: ghcr.io/home-assistant/home-assistant@sha256:ceb1202133a5a036e8b03e20a10eb113186cc2f871968323c6fc6c3fc4205716
+    # This tag tracks the `homeassistant` key in hacs.json exactly -- it is the
+    # oldest Home Assistant we claim to support, so it is the one worth running
+    # against: on a newer release the harness would pass while the integration
+    # was quietly broken for everyone sitting on the minimum. It moves when the
+    # hacs.json floor moves, and tests/test_harness_pins.py fails if the two
+    # drift apart.
+    #
+    # The floor is real rather than nominal: the integration calls APIs that do
+    # not exist before it (device_registry.async_get_device_by_identifier,
+    # adopted in #241), and the previous 2026.5.4 pin sat below it -- so the
+    # config entry raised AttributeError on setup and every panel screenshot
+    # silently skipped. Multi-arch index digest (resolved on linux/amd64), so it
+    # pulls on either architecture.
+    image: ghcr.io/home-assistant/home-assistant:2026.9.0@sha256:372d991e58882a1d8c68c07e9aa3f3b509276e695355f73ccdb03baa70407293
     container_name: ha_harness
     volumes:
       - ../../custom_components/rtl_433:/config/custom_components/rtl_433:ro
