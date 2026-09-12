@@ -24,15 +24,29 @@ The step order in :func:`async_replace_device` is load-bearing:
    only the ``unique_id`` changes. Removing and recreating a survivor would mint
    a new ``entity_id`` (or a ``_2`` suffix) and orphan its history.
 
-Only the ``device_key`` *value* a row carries changes: the entity ``unique_id``
-template ``f"{location_entry_id}:{device_key}:{object_suffix}"`` and the device
-identifiers template ``(DOMAIN, f"{location_entry_id}:{device_key}")`` are
-re-emitted verbatim.
+**No identity template is defined here.** Both rewrites are a prefix swap --
+``f"{entry_id}:{old_key}:"`` for ``f"{entry_id}:{new_key}:"`` on a re-key,
+``f"{source_entry_id}:"`` for ``f"{target_entry_id}:"`` on a consolidation -- so
+whatever shape ``COMPATIBILITY_CONTRACT.md`` (§2, §3) freezes is re-emitted
+verbatim with one value changed. Do not hardcode a template here: the contract
+has already moved once (revision 1's single-server "hub" model to revision 2's
+location/receiver one), and a copy kept in this docstring is a copy that will be
+wrong after the next amendment.
 
-A location may hold several receivers, but they all feed **one** merged device
-under one location-scoped identity, so the rewrite is a single pass rather than
-one per receiver: there is only ever one row to re-point however many servers
-heard the sensor.
+Two consequences of the revision-2 shapes are worth stating, because they are
+what make one pass enough:
+
+* **A location may hold several receivers, but they all feed one merged device**
+  under one location-scoped identity, so a re-key is a single pass rather than
+  one per receiver: there is only ever one device row to re-point, and one entity
+  per mapped field, however many servers heard the sensor.
+* **The per-receiver link fields (``rssi`` / ``snr`` / ``last_seen``) carry
+  through for free.** They are one entity per (sensor x receiver) and their
+  ``unique_id`` gains a receiver segment -- but it sits *after* the
+  ``device_key`` and *before* the object suffix, so the ``{entry_id}:{key}:``
+  prefix the swap matches on is unchanged. That ordering is deliberate (see
+  ``entity.field_unique_id``); reversing it would silently strand every link
+  entity on the old key.
 
 The second caller of that ordering is :func:`async_consolidate_location`, which
 folds one location into another when a user decides two of their rtl_433 servers

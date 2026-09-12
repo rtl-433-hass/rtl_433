@@ -185,8 +185,11 @@ def _migrate_motion_event_to_binary_sensor(
             f":{_MOTION_OBJECT_SUFFIX}"
         ):
             continue
-        # unique_id is ``{receiver_entry_id}:{device_key}:motion``; the middle part is
-        # the device_key (device_keys may themselves contain ``:``).
+        # unique_id is ``{location_entry_id}:{device_key}:motion``; the middle
+        # part is the device_key. A ``device_key`` can never contain a ``:``
+        # (``const.py``'s identity grammar: ``pyrtl_433.naming.safe_token`` maps
+        # ``:`` to ``_``), so this is always exactly three segments; the join
+        # below is simply tolerant of a malformed legacy row.
         parts = ent.unique_id.split(":")
         if len(parts) >= 3:
             removed_device_keys.add(":".join(parts[1:-1]))
