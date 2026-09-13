@@ -190,11 +190,16 @@ to use the 90-second default.
 
 A device is marked *unavailable* when it is not received past its availability
 timeout. RF devices signal availability only by transmitting, so the timeout is
-resolved per device: a per-device override, then an explicit hub default, then a
-**device-class default** derived from the device's known fields — both its
-adopted (persisted) fields and its latest payload, so an event-driven device that
-has been silent since a restart is still classified correctly before it next
-transmits (rather than briefly expiring its battery at the periodic default).
+resolved per device, in this order:
+
+1. A per-device override.
+2. An explicit hub default.
+3. A **device-class default** derived from the device's known fields.
+
+The known fields are both its adopted (persisted) fields and its latest payload,
+so an event-driven device that has been silent since a restart is still
+classified correctly before it next transmits (rather than briefly expiring its
+battery at the periodic default).
 
 The class default has two outcomes:
 
