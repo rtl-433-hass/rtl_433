@@ -17,8 +17,7 @@ the shipped library.
 
 ## Adding device mappings
 
-You can extend or correct the shipped library **without editing the integration
-files** directly from the Home Assistant UI:
+You can extend or correct device mappings directly from the Home Assistant UI.
 
 > **Settings → Devices & Services → rtl_433 → Configure (the gear icon) → Device mappings**
 
