@@ -66,7 +66,7 @@ def _hub_unique_id(host: str, port: int) -> str:
     return f"hub:{host}:{port}"
 
 
-async def async_rebind_hub(
+async def async_rebind_receiver(
     hass: HomeAssistant,
     entry: ConfigEntry,
     new_unique_id: str,
@@ -310,7 +310,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
                     entry.unique_id or ""
                 )
                 if new_uid and new_uid != entry.unique_id:
-                    status = await async_rebind_hub(
+                    status = await async_rebind_receiver(
                         self.hass, entry, new_uid, conn, title=f"rtl_433 ({host})"
                     )
                     if status == "already_configured":
@@ -363,7 +363,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             # Never create a duplicate unique_id: if another entry already owns
             # this radio id, leave it untouched when it is a real (populated) hub
             # or drop it when it is an empty orphan, before re-keying. Mirrors the
-            # collision handling in ``async_rebind_hub``.
+            # collision handling in ``async_rebind_receiver``.
             collision = next(
                 (
                     other
@@ -522,7 +522,7 @@ class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
             # The discovered radio id reached this step only because
             # ``_abort_if_unique_id_configured`` did not abort, so no entry owns
             # it — the rebind can never collide here and always succeeds.
-            await async_rebind_hub(
+            await async_rebind_receiver(
                 self.hass,
                 entry,
                 disc["unique_id"],

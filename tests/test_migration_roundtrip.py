@@ -47,10 +47,10 @@ from custom_components.rtl_433.const import (
     CONF_DEVICES,
     CONF_ENTRY_TYPE,
     CONF_HOST,
-    CONF_HUB_ENTRY_ID,
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    CONF_RECEIVER_ENTRY_ID,
     CONF_USER_MAPPINGS,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
@@ -58,7 +58,7 @@ from custom_components.rtl_433.const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
-    ENTRY_TYPE_HUB,
+    ENTRY_TYPE_RECEIVER,
 )
 from custom_components.rtl_433.migration import (
     _LAST_SEEN_OBJECT_SUFFIX,
@@ -232,7 +232,7 @@ async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(ha
             CONF_HOST: "legacy.local",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
         },
     )
     child = MockConfigEntry(
@@ -242,7 +242,7 @@ async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(ha
         entry_id=child_id,
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_id,
+            CONF_RECEIVER_ENTRY_ID: hub_id,
             CONF_DEVICE_KEY: device_key,
             CONF_MODEL: "Acurite-Tower",
         },
