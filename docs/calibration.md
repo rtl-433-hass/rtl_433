@@ -47,7 +47,7 @@ device class. Home Assistant treats that as a non-convertible change for long
 term statistics.
 
 The entity keeps its ID, but previous long-term statistics are orphaned. Calibrate
-intentionally, ideally once. Saving a calibration reloads the hub so the sensor is
+intentionally, ideally once. Saving a calibration reloads the receiver so the sensor is
 rebuilt with the new unit and class.
 
 ## Model-Scoped Mappings

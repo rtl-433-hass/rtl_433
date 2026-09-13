@@ -1,8 +1,8 @@
 # Configuration
 
-There are two ways to create a hub: automatically through
+There are two ways to create a receiver: automatically through
 [add-on discovery](#home-assistant-os-add-on-discovery) (recommended), or
-[manually](#manual-configuration) for any other rtl_433 server. Each hub points
+[manually](#manual-configuration) for any other rtl_433 server. Each receiver points
 at one rtl_433 server's WebSocket endpoint.
 
 ## Home Assistant OS Add-On Discovery
@@ -18,14 +18,14 @@ when the add-on starts — install the integration, restart Home Assistant, and
 then start the add-on. If you started the add-on first and no card appeared,
 restart the add-on so it republishes discovery.
 
-Discovered radios use the add-on's stable per-radio identifier, so the same hub
+Discovered radios use the add-on's stable per-radio identifier, so the same receiver
 and nested-device history can survive add-on restarts and USB port changes. For
 multi-dongle setups, stability is best when each dongle stays in a fixed USB port
 or has a unique serial.
 
 ## Manual Configuration
 
-Add a hub from **Settings → Devices & Services → Add Integration → rtl_433**.
+Add a receiver from **Settings → Devices & Services → Add Integration → rtl_433**.
 
 ![The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings toggle, and initial frequency](images/06-config-user.png)
 
@@ -35,11 +35,11 @@ Add a hub from **Settings → Devices & Services → Add Integration → rtl_433
 | **Port** | `8433` | The rtl_433 HTTP API port. |
 | **Path** | `/ws` | The WebSocket path on the rtl_433 HTTP server. |
 | **Secure** | off | Connect with `wss://` instead of `ws://`. |
-| **Manage rtl_433 settings from Home Assistant** | on | Expose SDR controls and let Home Assistant adopt and enforce receiver settings. |
+| **Manage rtl_433 settings from Home Assistant** | on | Expose SDR controls and let Home Assistant adopt and enforce radio settings. |
 | **Initial frequency (MHz)** | `433.92` | Center frequency to apply once on first connect when managed settings are enabled. |
 
 The integration validates that the WebSocket can be reached before creating the
-hub. Manual hub identity is derived from `host:port`, so the same server cannot
+receiver. Manual receiver identity is derived from `host:port`, so the same server cannot
 be added twice.
 
 ## Manual rtl_433 Configuration
@@ -100,7 +100,7 @@ integration separate two transmissions from the same device inside one second.
 
 ## Reconfigure vs Configure
 
-Use **Reconfigure** to point an existing hub at the same server's new address:
+Use **Reconfigure** to point an existing receiver at the same server's new address:
 host, port, path, or secure mode. Devices and their history are preserved.
 
 Use **Configure** to open the rtl_433 page. It is where devices are added and
@@ -114,7 +114,7 @@ settings pages:
 - **Device mappings**: this receiver's mapping overrides.
 
 **Receiver settings** configures the default availability timeout for every
-device on the hub, and whether Home Assistant manages the server's SDR settings.
+device on the receiver, and whether Home Assistant manages the server's SDR settings.
 The timeout is one of three choices rather than a bare number:
 
 - **Per-device-type defaults** — the default, and what keeps event-driven
@@ -124,7 +124,7 @@ The timeout is one of three choices rather than a bare number:
 - **A fixed timeout** — a count of seconds that applies to every device without
   an override of its own.
 
-![The Receiver settings page, with the availability-timeout choice set to the per-device-type defaults and the managed-settings toggle below it](images/07-hub-settings.png)
+![The Receiver settings page, with the availability-timeout choice set to the per-device-type defaults and the managed-settings toggle below it](images/07-receiver-settings.png)
 
 **Device settings** targets one device for a timeout override, motion clear
 delay, or utility-meter calibration. Pick the device at the top of the page and
@@ -136,7 +136,7 @@ only once a commodity is chosen.
 ![The Device settings page with the device picker, availability timeout override, and meter commodity selector](images/08-device-settings.png)
 
 Changing timeout options applies live. Changing the managed-settings toggle
-reloads the hub because the entity set changes.
+reloads the receiver because the entity set changes.
 
 ## ws, wss, and Authentication
 
@@ -144,7 +144,7 @@ By default the integration connects to `ws://host:port/path`. Turning on
 **Secure** connects with `wss://`.
 
 rtl_433's built-in HTTP server does not terminate TLS. To use `wss://`, put a
-TLS reverse proxy such as nginx or Caddy in front of rtl_433 and point the hub at
+TLS reverse proxy such as nginx or Caddy in front of rtl_433 and point the receiver at
 the proxy.
 
 rtl_433's HTTP API is unauthenticated, and the integration sends no credentials.

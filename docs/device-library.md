@@ -27,24 +27,24 @@ files** directly from the Home Assistant UI:
 > **Settings → Devices & Services → rtl_433 → Configure → Device mappings**
 
 The *Device mappings* step opens Home Assistant's built-in YAML editor pre-filled
-with that hub's current mappings. You edit mappings as YAML, using the **same
+with that receiver's current mappings. You edit mappings as YAML, using the **same
 schema** as the shipped library ([reference](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/)): top-level keys are rtl_433
 field names, values are entry mappings. They may optionally include a `skip_keys:` list to add extra
 skip entries, and an optional [`models:` block](#model-scoped-mappings-models) to
 add or override model-scoped descriptors.
 
-Mappings are stored **per hub** in that hub's config entry — each hub has its own
+Mappings are stored **per receiver** in that receiver's config entry — each receiver has its own
 independent set. The editor:
 
 - **Blocks invalid YAML syntax** before you can submit.
 - **Validates the mapping schema on save** and rejects bad input with a
   per-field error naming the offending field and the reason.
-- **Reloads the hub automatically.**
+- **Reloads the receiver automatically.**
 
 ![Device mappings step showing the YAML editor pre-filled with an example mapping](images/05-mapping-overrides.png)
 
 To find fields your device reports that do not yet have entities, download
-diagnostics for the hub from **Settings → Devices & Services → the rtl_433
+diagnostics for the receiver from **Settings → Devices & Services → the rtl_433
 integration → ⋮ → Download diagnostics** and inspect `unmatched_field_keys`. Each
 key is either a candidate for a mapping or, if it is genuinely noise/identity
 data, an entry for `skip_keys:`.
@@ -198,7 +198,7 @@ Leave it blank to use the 90 s default. The override is resolved at runtime
 
 A device is marked *unavailable* when it falls silent past its availability
 timeout. RF devices signal presence only by transmitting, so the timeout is
-resolved per device: a per-device override, then an explicit hub default, then a
+resolved per device: a per-device override, then an explicit receiver default, then a
 **device-class default** derived from the device's known fields — both its
 adopted (persisted) fields and its latest payload, so an event-driven device that
 has been silent since a restart is still classified correctly before it next
@@ -219,7 +219,7 @@ The class default has two outcomes:
 Diagnostic fields such as `battery_ok` do not decide the class on their own. If a
 device also has an event-driven field, the whole device uses the event-driven
 default, so its battery and other entities stay available between events. An
-explicit per-device or hub timeout always overrides the class default.
+explicit per-device or receiver timeout always overrides the class default.
 
 Because an event-driven device's availability no longer signals freshness, its
 per-device **Last seen** timestamp sensor is enabled by default (it ships
@@ -381,7 +381,7 @@ next pyrtl_433 release and the integration's requirement bump.
 ### Add-a-mapping workflow
 
 1. **Find the field name.** Watch your rtl_433 stream, or download diagnostics
-   for the hub from **Settings → Devices & Services → the rtl_433 integration →
+   for the receiver from **Settings → Devices & Services → the rtl_433 integration →
    ⋮ → Download diagnostics**. The export lists unmapped fields your hardware has
    sent in `unmatched_field_keys`. Each key is either a candidate for a mapping
    or, if it is genuinely noise/identity data, an entry for `_skip_keys.yaml`.

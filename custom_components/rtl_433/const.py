@@ -17,7 +17,7 @@ from homeassistant.const import Platform
 # Integration domain. Must match the "domain" key in manifest.json.
 DOMAIN: Final = "rtl_433"
 
-# Generic device-registry manufacturer. The hub entry starts with this and is
+# Generic device-registry manufacturer. The receiver entry starts with this and is
 # refined to the SDR's real vendor once the coordinator connects; nested devices
 # keep it (rtl_433 decodes them, the physical vendor is unknown).
 MANUFACTURER: Final = "rtl_433"
@@ -25,7 +25,7 @@ MANUFACTURER: Final = "rtl_433"
 # Module-level logger; other modules use ``from .const import LOGGER``.
 LOGGER: Final[logging.Logger] = logging.getLogger(__package__)
 
-# Platforms forwarded once on the hub config entry.
+# Platforms forwarded once on the receiver config entry.
 PLATFORMS: Final[list[Platform]] = [
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
@@ -37,69 +37,102 @@ PLATFORMS: Final[list[Platform]] = [
 
 # --- Config-entry "type" discriminator -------------------------------------
 # Legacy/migration only. Older (0.1.0) installs created a per-device config
-# entry per device; the current model is a single hub entry with nested
+# entry per device; the current model is a single receiver entry with nested
 # devices, so setup no longer branches on this. ``migration.py`` still reads
-# ENTRY_TYPE_DEVICE to re-home those legacy per-device entries onto the hub.
+# ENTRY_TYPE_DEVICE to re-home those legacy per-device entries onto the receiver.
 CONF_ENTRY_TYPE: Final = "entry_type"
+# The stored value is the frozen legacy v1 spelling: the discriminator was
+# written into config entries before the vocabulary rename, so the *name* moved
+# to "receiver" while the *value* stays "hub" for the entries already on disk.
 ENTRY_TYPE_RECEIVER: Final = "hub"
 ENTRY_TYPE_DEVICE: Final = "device"
 
-# --- Hub config-entry keys --------------------------------------------------
+# --- Receiver config-entry keys --------------------------------------------------
 # Connection target for one rtl_433 HTTP server's WebSocket endpoint.
 CONF_HOST: Final = "host"
 CONF_PORT: Final = "port"
 CONF_PATH: Final = "path"
-# Free-text "new stable radio unique_id" the user supplies when re-pointing a hub
+# Free-text "new stable radio unique_id" the user supplies when re-pointing a receiver
 # at a replacement radio (reconfigure / discovery-replace / unreachable repair).
 CONF_RADIO_ID: Final = "radio_id"
-# Per-hub toggle: let Home Assistant manage (adopt + enforce) the SDR settings.
-# When on, the hub exposes number/select/switch controls and re-applies the
+# Per-receiver toggle: let Home Assistant manage (adopt + enforce) the SDR settings.
+# When on, the receiver exposes number/select/switch controls and re-applies the
 # stored desired state after a reconnect; when off, those controls are not
-# created and the integration leaves the receiver's settings untouched.
+# created and the integration leaves the radio's settings untouched.
 CONF_MANAGE_SETTINGS: Final = "manage_settings"
 # Effective "go unavailable after this many seconds of silence" window.
-# Lives on the hub as the default and may be overridden per device.
+# Lives on the receiver as the default and may be overridden per device.
 CONF_AVAILABILITY_TIMEOUT: Final = "availability_timeout"
 # Optional one-shot initial center frequency (MHz) chosen at add time and seeded
-# into the hub's managed desired state on first connect. Absent means "adopt the
+# into the receiver's managed desired state on first connect. Absent means "adopt the
 # server's current frequency". Only applied when ``manage_settings`` is on.
 CONF_INITIAL_FREQUENCY: Final = "initial_frequency"
 # Pre-filled value for the add-time initial-frequency field: the common 433.92 MHz
 # ISM band most rtl_433 sensors use. Users can clear it to adopt the server's
 # current frequency instead.
 DEFAULT_INITIAL_FREQUENCY: Final = 433.92
-# Per-hub flag set when the user picks "keep the current rate" on the
+# Per-receiver flag set when the user picks "keep the current rate" on the
 # low-sample-rate advisory. Persisted so the edge-triggered repairs tracker stays
-# silent for this hub across restarts/reloads (where its in-memory state resets).
+# silent for this receiver across restarts/reloads (where its in-memory state resets).
 # Absent / falsey means "not dismissed" — many users deliberately want the lower
 # rate, so this lets them silence the advisory for good.
 CONF_SAMPLE_RATE_DISMISSED: Final = "sample_rate_advisory_dismissed"
-# Per-hub flag set when the user acknowledges the unusable-event-time advisory.
+# Per-receiver flag set when the user acknowledges the unusable-event-time advisory.
 # Persisted for the same reason as the flag above: the remedy is a server-side
 # rtl_433 setting we cannot apply for them, so a user who deliberately runs
 # without parseable timestamps would otherwise be re-warned on every restart.
 CONF_EVENT_TIME_DISMISSED: Final = "event_time_advisory_dismissed"
 
 # --- Per-device config-entry keys ------------------------------------------
-# entry id of the parent hub entry; enables cascade removal when a hub is
-# deleted (a device entry records which hub it belongs to).
+# entry id of the parent receiver entry; enables cascade removal when a receiver is
+# deleted (a device entry records which receiver it belongs to).
+# As with ``ENTRY_TYPE_RECEIVER``, the key spelling is frozen legacy v1 data --
+# only the constant's name follows the receiver vocabulary.
 CONF_RECEIVER_ENTRY_ID: Final = "hub_entry_id"
 # Deterministic device identity derived from ``model`` plus the present subset
 # of identity fields (id / channel / subtype). Used to scope unique_ids and
 # dispatcher signals.
 CONF_DEVICE_KEY: Final = "device_key"
+
+# --- Identity grammar: the reserved ``receiver`` marker ---------------------
+# Colon-separated identity strings (entity unique_ids, device-registry
+# identifiers) are parsed positionally, by segment count plus this literal
+# marker: a receiver-scoped identifier carries ``receiver`` in its second
+# segment (``{location_entry_id}:receiver:{receiver_subentry_id}``), where a
+# device-scoped one carries a ``device_key``.
+#
+# ``pyrtl_433.naming.safe_token`` -- the frozen builder every ``device_key`` is
+# made of -- maps ``:`` to ``_``, so a ``device_key`` can never contain a colon
+# and the segment count is always unambiguous. It does, however, pass
+# ``"receiver"`` through unchanged, so a device whose ``model`` is literally
+# ``receiver`` would mint a ``device_key`` that reads as the marker. The token is
+# therefore RESERVED: no ``device_key`` may equal it, and the parsers below
+# refuse to decode it as one rather than silently addressing the wrong thing.
+RECEIVER_SEGMENT: Final = "receiver"
+RESERVED_DEVICE_KEYS: Final = frozenset({RECEIVER_SEGMENT})
+
+
+def is_reserved_device_key(device_key: str) -> bool:
+    """Return whether ``device_key`` collides with a structural identity marker.
+
+    Identity parsers call this instead of comparing against the literal, so the
+    reserved set has exactly one definition (see ``RESERVED_DEVICE_KEYS``).
+    """
+    return device_key in RESERVED_DEVICE_KEYS
+
+
 # The rtl_433 ``model`` string for the device (e.g. "Acurite-606TXN").
 CONF_MODEL: Final = "model"
 
-# --- Hub devices-map keys ---------------------------------------------------
-# Key under a hub entry's ``data`` holding the consolidated per-device map for
-# that hub. Maps ``device_key`` -> a record with the device's model, the set of
+# --- Receiver devices-map keys ---------------------------------------------------
+# Key under a receiver entry's ``data`` holding the consolidated per-device map for
+# that receiver. Maps ``device_key`` -> a record with the device's model, the set of
 # observed mapped field keys, and an optional per-device availability-timeout
 # override. This map is the single source of truth for recreating nested devices
 # and their entities on startup, for the dynamic-add listeners, the options-flow
 # per-device override, and the 0.1.0 migration.
 CONF_DEVICES: Final = "devices"
-# Per-hub list of device keys the user has explicitly ignored. Ignored devices
+# Per-receiver list of device keys the user has explicitly ignored. Ignored devices
 # never enter the coordinator's pending list, so they cannot be adopted by
 # accident and do not reappear after a restart. Mirrors Home Assistant's
 # "ignored discovered integrations": the user-facing verb is *Ignore*, never
@@ -120,7 +153,7 @@ DEVICE_EVENT_TYPES: Final = "event_types"
 # base unit + ``total_increasing`` + a value scale). Absent (or commodity =
 # ``none``) means the consumption field keeps its library/global descriptor.
 DEVICE_CALIBRATION: Final = "calibration"
-# Per-hub user mapping overrides. Holds the normalized override object (the same
+# Per-receiver user mapping overrides. Holds the normalized override object (the same
 # shape ``merge_overrides`` consumes: flat field entries, an optional ``models``
 # block, and an optional ``skip_keys`` list) edited via the options flow and
 # merged over the shipped library at setup.
@@ -160,19 +193,19 @@ CONSUMPTION_FIELD_KEYS: Final[frozenset[str]] = frozenset(
 # --- hass.data keys ---------------------------------------------------------
 # Key under ``hass.data[DOMAIN]`` holding the once-loaded **shipped** mapping
 # library tuple ``(registry, skip_keys)`` (no user overrides). The library is
-# loaded in an executor during hub setup and shared across hubs so nothing
-# re-reads the YAML files on the event loop. Per-hub user overrides are merged
+# loaded in an executor during receiver setup and shared across receivers so nothing
+# re-reads the YAML files on the event loop. Per-receiver user overrides are merged
 # over this and cached separately under ``DATA_ENTRY_LIBRARY``.
 DATA_LIBRARY: Final = "_library"
 # Key under ``hass.data[DOMAIN]`` holding the per-entry merged library map
-# ``{entry_id: (registry, skip_keys)}`` — the shipped library with that hub's
+# ``{entry_id: (registry, skip_keys)}`` — the shipped library with that receiver's
 # stored ``CONF_USER_MAPPINGS`` overrides merged in. The coordinator, entity
-# platforms, options flow, and diagnostics read their hub's entry here.
+# platforms, options flow, and diagnostics read their receiver's entry here.
 DATA_ENTRY_LIBRARY: Final = "_entry_library"
 # Key under ``hass.data[DOMAIN]`` holding the tables Home Assistant describes its
 # own entities with: each platform's ``icons.json`` device-class map, and its
 # ``entity_component`` strings (names, and a binary entity's on/off words).
-# Warmed once during hub setup, because both accessors do file I/O on first use,
+# Warmed once during receiver setup, because both accessors do file I/O on first use,
 # so the discovery payload can preview a field's entity without awaiting.
 DATA_ENTITY_META: Final = "_entity_meta"
 
@@ -184,10 +217,10 @@ DEFAULT_PATH: Final = "/ws"
 # Default availability window in seconds. RF devices signal presence only by
 # transmitting; 600 s (10 min) is a conservative default that tolerates slow
 # reporters while still detecting genuinely offline devices. Configurable per
-# hub and overridable per device, so this is not a magic constant elsewhere.
+# receiver and overridable per device, so this is not a magic constant elsewhere.
 DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
 # The pre-device-class-defaults global default. The options flow used to persist
-# this exact value into a hub entry's options on every save, so an entry still
+# this exact value into a receiver entry's options on every save, so an entry still
 # carrying it is assumed to be on the old default (not a deliberate user choice)
 # and is migrated to the device-class-aware defaults (see ``async_migrate_entry``
 # minors 4 and 7). The options flow now drops the field when it equals the plain
@@ -198,13 +231,13 @@ LEGACY_DEFAULT_AVAILABILITY_TIMEOUT: Final = 600
 # Sentinel availability-timeout value meaning "never expire": a device that has
 # been seen at least once stays available indefinitely (the watchdog skips the
 # staleness flip and the entity's ``available`` short-circuits to True). Set
-# explicitly per device or, as an explicit hub default, for every non-overridden
+# explicitly per device or, as an explicit receiver default, for every non-overridden
 # device.
 AVAILABILITY_TIMEOUT_NEVER: Final = 0
-# NOTE: there is deliberately no grace window on the hub-connection availability
+# NOTE: there is deliberately no grace window on the receiver-connection availability
 # gate. The per-device timeouts above answer "has this radio transmitted
 # recently?", which is only meaningful while the integration is listening; once
-# the socket is down every device behind the hub reads unavailable *immediately*
+# the socket is down every device behind the receiver reads unavailable *immediately*
 # (see ``coordinator/_watchdog.py``). That is what every Home Assistant
 # integration gating on a live connection flag does -- ``mqtt``, ``zwave_js``,
 # ``esphome``, ``deconz``, ``unifi``, and the newest arrivals alike -- and it is
@@ -216,8 +249,8 @@ AVAILABILITY_TIMEOUT_NEVER: Final = 0
 # Default seconds after which a motion/event binary_sensor auto-clears to "off"
 # when no explicit clear signal arrives. Overridable per device.
 DEFAULT_MOTION_CLEAR_DELAY: Final = 90
-# Default for the per-hub manage-settings toggle. New hubs adopt and manage the
-# SDR settings by default; users can opt out per hub via the options flow.
+# Default for the per-receiver manage-settings toggle. New receivers adopt and manage the
+# SDR settings by default; users can opt out per receiver via the options flow.
 DEFAULT_MANAGE_SETTINGS: Final = True
 
 
@@ -229,7 +262,7 @@ def class_default_timeout(
 
     Pure classifier (no I/O, no HA deps) used as the third tier of the
     availability-timeout resolution order: when neither a per-device override nor
-    an explicit hub default is set, a device's *class default* is chosen from its
+    an explicit receiver default is set, a device's *class default* is chosen from its
     latest rtl_433 payload. If the payload is a mapping carrying any
     ``event_driven_keys`` key — an open/close/motion/button/doorbell device,
     which transmits only on a state change and so has no periodic check-in — it
@@ -241,7 +274,7 @@ def class_default_timeout(
 
     ``event_driven_keys`` is derived from the active device library via
     :func:`pyrtl_433.library.event_driven_field_keys`, so the classification
-    stays in sync with the shipped library and any per-hub user mappings. The
+    stays in sync with the shipped library and any per-receiver user mappings. The
     intersection test itself is
     :func:`pyrtl_433.availability.is_event_driven`; this function only maps its
     boolean onto the integration's two timeout constants.
@@ -253,16 +286,16 @@ def class_default_timeout(
 
 # --- Managed-SDR desired-state Store ---------------------------------------
 # The coordinator persists the desired SDR settings in a
-# ``homeassistant.helpers.storage.Store`` keyed by the hub ``entry_id`` so a
+# ``homeassistant.helpers.storage.Store`` keyed by the receiver ``entry_id`` so a
 # value change never churns the config entry. ``SDR_STORE_VERSION`` is the Store
-# schema version; ``sdr_store_key`` builds the per-hub key.
+# schema version; ``sdr_store_key`` builds the per-receiver key.
 # Version 2 stores ``center_frequency`` in MHz; version 1 stored it in Hz and is
 # migrated on load by the coordinator's Store (see ``_SdrStore``).
 SDR_STORE_VERSION: Final = 2
 
 
 def sdr_store_key(entry_id: str) -> str:
-    """Return the desired-state Store key for one hub entry."""
+    """Return the desired-state Store key for one receiver entry."""
     return f"{DOMAIN}.sdr_{entry_id}"
 
 
@@ -274,7 +307,7 @@ SIGNAL_DEVICE_UPDATE: Final = "rtl_433_device_update_{receiver_entry_id}_{device
 
 
 def signal_device_update(receiver_entry_id: str, device_key: str) -> str:
-    """Return the dispatcher signal name for one device under one hub.
+    """Return the dispatcher signal name for one device under one receiver.
 
     Coordinator and entities must agree on this key, so both call this helper
     rather than formatting the template independently.
@@ -284,7 +317,7 @@ def signal_device_update(receiver_entry_id: str, device_key: str) -> str:
     )
 
 
-# Hub-level "an adopted device needs building" signal. The coordinator's
+# Receiver-level "an adopted device needs building" signal. The coordinator's
 # new-device callback (wired in ``__init__.py``) dispatches this for a device the
 # user has adopted -- either on its first frame of this process, or the moment it
 # is adopted from the options flow -- and the entity platforms subscribe to it to
@@ -294,38 +327,40 @@ SIGNAL_NEW_DEVICE: Final = "rtl_433_new_device_{receiver_entry_id}"
 
 
 def signal_new_device(receiver_entry_id: str) -> str:
-    """Return the hub-level new-device dispatcher signal for one hub."""
+    """Return the receiver-level new-device dispatcher signal for one receiver."""
     return SIGNAL_NEW_DEVICE.format(receiver_entry_id=receiver_entry_id)
 
 
-# Hub-level "connectivity / SDR meta / server stats changed" signal. The
-# coordinator dispatches this (no payload) whenever the hub's connection state,
-# meta/SDR configuration, or server stats change; the statically-registered hub
-# entities subscribe and re-read the coordinator's hub state.
-SIGNAL_RECEIVER_UPDATE: Final = "rtl_433_hub_update_{receiver_entry_id}"
+# Receiver-level "connectivity / SDR meta / server stats changed" signal. The
+# coordinator dispatches this (no payload) whenever the receiver's connection state,
+# meta/SDR configuration, or server stats change; the statically-registered receiver
+# entities subscribe and re-read the coordinator's receiver state.
+SIGNAL_RECEIVER_UPDATE: Final = "rtl_433_receiver_update_{receiver_entry_id}"
 
 
 def signal_receiver_update(receiver_entry_id: str) -> str:
-    """Return the hub-level update dispatcher signal for one hub."""
+    """Return the receiver-level update dispatcher signal for one receiver."""
     return SIGNAL_RECEIVER_UPDATE.format(receiver_entry_id=receiver_entry_id)
 
 
-# Hub-level "the connection-backed availability gate flipped" signal. The
+# Receiver-level "the connection-backed availability gate flipped" signal. The
 # coordinator dispatches this (no payload) only on an edge: when the socket drops
-# (every device behind the hub becomes unavailable) and when it comes back. Every
-# *device* entity subscribes, so one dispatch repaints the whole hub. Kept
+# (every device behind the receiver becomes unavailable) and when it comes back. Every
+# *device* entity subscribes, so one dispatch repaints the whole receiver. Kept
 # separate from
 # :data:`SIGNAL_RECEIVER_UPDATE` — which also fires on every meta/stats refresh — so
-# a routine hub poll never writes state for hundreds of device entities.
-SIGNAL_RECEIVER_AVAILABILITY: Final = "rtl_433_hub_availability_{receiver_entry_id}"
+# a routine receiver poll never writes state for hundreds of device entities.
+SIGNAL_RECEIVER_AVAILABILITY: Final = (
+    "rtl_433_receiver_availability_{receiver_entry_id}"
+)
 
 
 def signal_receiver_availability(receiver_entry_id: str) -> str:
-    """Return the hub-level availability-gate dispatcher signal for one hub."""
+    """Return the receiver-level availability-gate dispatcher signal for one receiver."""
     return SIGNAL_RECEIVER_AVAILABILITY.format(receiver_entry_id=receiver_entry_id)
 
 
-# Hub-level "the pending-device list changed" signal. Fired when the *membership*
+# Receiver-level "the pending-device list changed" signal. Fired when the *membership*
 # of the coordinator's pending map changes — a candidate appears, or one is
 # adopted, ignored, or forgotten — so the WebSocket subscription behind the
 # discovery panel can push a fresh list the moment the answer to "what is waiting
@@ -342,5 +377,5 @@ SIGNAL_PENDING_UPDATE: Final = "rtl_433_pending_update_{receiver_entry_id}"
 
 
 def signal_pending_update(receiver_entry_id: str) -> str:
-    """Return the hub-level pending-list-changed dispatcher signal for one hub."""
+    """Return the receiver-level pending-list-changed dispatcher signal for one receiver."""
     return SIGNAL_PENDING_UPDATE.format(receiver_entry_id=receiver_entry_id)

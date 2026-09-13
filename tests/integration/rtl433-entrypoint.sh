@@ -76,7 +76,7 @@ echo "rtl433-entrypoint: replaying $CAPTURE at -s $RATE -> $EVENTS_FILE (JSON li
 #                      The decoded-event JSON output carries NO log messages, so
 #                      the pulse detector's "Auto Level" noise lines — the only
 #                      place rtl_433 exposes its noise floor, and the source of
-#                      the hub's noise sensors — are only visible here. The
+#                      the receiver's noise sensors — are only visible here. The
 #                      ws-bridge tails this file and re-frames those lines the
 #                      way a real `-F http` server sends them (see ws-bridge.mjs).
 #   -M level           include signal-level metadata in events
@@ -99,7 +99,7 @@ trap 'kill "$RTL_PID" 2>/dev/null || true; rm -f "$FIFO"; exit 0' INT TERM
 # silence (cu8 zero-amplitude samples, byte 0x80). Back-to-back capture passes
 # would keep the receiver permanently "loud": the noise estimate creeps up to the
 # replayed burst level and settles, so `-Y autolevel` never sees a shift over
-# 1 dB and never logs an adjustment (the source of the hub's minimum-detection-
+# 1 dB and never logs an adjustment (the source of the receiver's minimum-detection-
 # level sensor). The silence gap is also what a real receiver mostly hears — it
 # makes the noise floor genuinely move, so both "Auto Level" message forms are
 # emitted from real measurements. If the decoder dies, stop so the container

@@ -52,10 +52,10 @@ Entry point rejects future schemas first:
 hub model.
 - `migration.py:449-460` — a legacy **device** entry (`CONF_ENTRY_TYPE ==
   ENTRY_TYPE_DEVICE`) processed on its own re-homes its registry objects to the
-  parent hub (`CONF_RECEIVER_ENTRY_ID`), then sets `version=2, minor_version=2` and
+  parent hub (`CONF_HUB_ENTRY_ID`), then sets `version=2, minor_version=2` and
   returns `True`. The hub later folds and removes it.
 - `migration.py:462-463` — a **hub** entry consolidates all child device entries
-  into `entry.data[CONF_DEVICES]` (via `_migrate_receiver_entry`), re-homing their
+  into `entry.data[CONF_DEVICES]` (via `_migrate_hub_entry`), re-homing their
   registry objects before removal. Then it falls through the minor ladder below.
 
 **Minor-version ladder** — each step guarded by `if (entry.minor_version or 1) < N`:
@@ -94,18 +94,18 @@ hub model.
 ## 2. Entity `unique_id` formats
 
 All entity `unique_id`s are scoped by the parent hub's config-entry id, so two hubs
-observing the same model+id never collide. **`receiver_entry_id` is passed as
+observing the same model+id never collide. **`hub_entry_id` is passed as
 `entry.entry_id`** at every call site (see §4), so the two names denote the same
 value.
 
 | Entity kind | Format | Source |
 |---|---|---|
-| Per-device field entity (sensor / binary_sensor / event) | `f"{receiver_entry_id}:{device_key}:{object_suffix}"` | `entity.py:164` |
-| Hub SDR control (number / select / switch) | `f"{receiver_entry_id}:hub:{object_suffix}"` | `entity.py:350` |
-| Hub connectivity binary_sensor | `f"{receiver_entry_id}:hub:connectivity"` | `binary_sensor.py:164` |
+| Per-device field entity (sensor / binary_sensor / event) | `f"{hub_entry_id}:{device_key}:{object_suffix}"` | `entity.py:164` |
+| Hub SDR control (number / select / switch) | `f"{hub_entry_id}:hub:{object_suffix}"` | `entity.py:350` |
+| Hub connectivity binary_sensor | `f"{hub_entry_id}:hub:connectivity"` | `binary_sensor.py:164` |
 
 Component provenance:
-- `receiver_entry_id` == the config entry's `entry_id` (`entry.entry_id`).
+- `hub_entry_id` == the config entry's `entry_id` (`entry.entry_id`).
 - `device_key` — the deterministic per-device identity `<model-token>-<id>[-ch..][-st..]`
   (`const.py:83-85`, `CONF_DEVICE_KEY`), stored as the key of
   `entry.data[CONF_DEVICES]`.
@@ -116,10 +116,10 @@ Component provenance:
 Corroborating construction site: the platform builder assembles the same device
 unique_id independently as
 `f"{entry.entry_id}:{device_key}:{descriptor.object_suffix}"` (`entity.py:551`),
-confirming `receiver_entry_id == entry.entry_id`.
+confirming `hub_entry_id == entry.entry_id`.
 
 Migration sweeps depend on these tails and MUST stay valid:
-- device unique-id shape `{receiver_entry_id}:{device_key}:{object_suffix}`
+- device unique-id shape `{hub_entry_id}:{device_key}:{object_suffix}`
   (`migration.py:120-121`, `137`);
 - `:motion` tail — legacy `event.*_motion` cleanup (`migration.py:133-141`);
 - `:last_seen` tail — Last-seen enable/disable sweeps (`migration.py:251`, `292`).
@@ -132,8 +132,8 @@ Migration sweeps depend on these tails and MUST stay valid:
 
 | Device | Identifier tuple | Source |
 |---|---|---|
-| Hub device | `(DOMAIN, entry.entry_id)` | `__init__.py:175`, `__init__.py:219`; hub entities `(DOMAIN, receiver_entry_id)` at `entity.py:297` |
-| Per-device (nested) | `(DOMAIN, f"{receiver_entry_id}:{device_key}")` | `entity.py:165`; linked to the hub by `via_device_id`, resolved from `(DOMAIN, receiver_entry_id)` at `entity.py:173` |
+| Hub device | `(DOMAIN, entry.entry_id)` | `__init__.py:175`, `__init__.py:219`; hub entities `(DOMAIN, hub_entry_id)` at `entity.py:297` |
+| Per-device (nested) | `(DOMAIN, f"{hub_entry_id}:{device_key}")` | `entity.py:165`; linked to the hub by `via_device_id`, resolved from `(DOMAIN, hub_entry_id)` at `entity.py:173` |
 | Phantom `unknown` (legacy cleanup target only) | `(DOMAIN, f"{entry.entry_id}:{PHANTOM_DEVICE_KEY}")` | `migration.py:106` |
 
 `PHANTOM_DEVICE_KEY == "unknown"` — **defined in `migration.py:64`, not `const.py`**
@@ -144,20 +144,20 @@ phantom device.
 
 ---
 
-## 4. Critical invariant: `receiver_entry_id == entry.entry_id`
+## 4. Critical invariant: `hub_entry_id == entry.entry_id`
 
 Both spellings appear in the code and refer to the **same string**:
-- `entity.py:556` and `entity.py:570` pass `entry.entry_id` as the `receiver_entry_id`
+- `entity.py:556` and `entity.py:570` pass `entry.entry_id` as the `hub_entry_id`
   argument into `entity_cls(...)` / `per_device_factory(...)`.
-- `entity.py:383` passes `entry.entry_id` as `receiver_entry_id` for hub controls.
+- `entity.py:383` passes `entry.entry_id` as `hub_entry_id` for hub controls.
 - `binary_sensor.py:184` passes `entry.entry_id` for the hub connectivity entity.
 - The hub device is registered with `(DOMAIN, entry.entry_id)` (`__init__.py:175`),
-  while hub-attached entities declare `(DOMAIN, receiver_entry_id)` (`entity.py:297`) —
+  while hub-attached entities declare `(DOMAIN, hub_entry_id)` (`entity.py:297`) —
   identical because of the above.
 
 Therefore the entry-scoped identifiers (`entry.entry_id`) and the
-`receiver_entry_id`-scoped identifiers are one and the same scope. The minimal Core build
-MUST use `entry.entry_id` wherever these templates reference `receiver_entry_id`.
+`hub_entry_id`-scoped identifiers are one and the same scope. The minimal Core build
+MUST use `entry.entry_id` wherever these templates reference `hub_entry_id`.
 
 ---
 

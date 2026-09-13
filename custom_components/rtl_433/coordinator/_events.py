@@ -23,7 +23,7 @@ library does not carry on the event object is ``is_backlog`` (the
 pre-connection-backlog flag that keeps a reconnect re-broadcast out of the
 pending list), so it is re-derived here from the event's ``event_time`` and the
 time this connection came up (``_connection_time``, recorded in ``base.py``'s
-``_emit_hub_update``) using the same :data:`DISCOVERY_BACKLOG_GRACE` boundary the
+``_emit_receiver_update``) using the same :data:`DISCOVERY_BACKLOG_GRACE` boundary the
 library applied.
 
 :class:`_EventProcessingMixin` is mixed into ``Rtl433Coordinator`` (see
@@ -53,7 +53,7 @@ from homeassistant.util import dt as dt_util
 
 from ..const import LOGGER
 
-# Hard cap on how many candidates one hub holds at once. "One entry per device
+# Hard cap on how many candidates one receiver holds at once. "One entry per device
 # the receiver hears" is not self-limiting: 433 MHz is a shared band that
 # produces spurious decodes with arbitrary ids, and several real protocols roll
 # their id on a battery change, so an uncapped list grows for the life of the
@@ -149,7 +149,7 @@ class _EventProcessingMixin:
         # replays when a connection comes up. The event object does not carry
         # that flag, so re-derive it from the event's timestamp and
         # ``_connection_time`` -- the time this connection was established,
-        # recorded in ``_emit_hub_update`` -- using the same cut-off the library
+        # recorded in ``_emit_receiver_update`` -- using the same cut-off the library
         # uses. ``_connection_time`` is ``None`` while disconnected; that case,
         # and a frame with no usable ``event_time``, both leave ``is_backlog``
         # False, so a frame we cannot place is treated as live rather than
@@ -260,7 +260,7 @@ class _EventProcessingMixin:
         Replays and pre-connection backlog frames are re-broadcasts of already
         transmitted events, never a device's first live transmission, so they
         must not create a candidate -- otherwise every reconnect would repopulate
-        the list with stale entries. A key on the hub's ignore list is dropped
+        the list with stale entries. A key on the receiver's ignore list is dropped
         outright; that is what makes ignoring a neighbour's sensor stick.
         """
         if is_replay or is_backlog:
@@ -271,7 +271,9 @@ class _EventProcessingMixin:
             # the ignore list name a device that was ignored before a restart.
             if normalized.model:
                 self.ignored_models[key] = normalized.model
-            LOGGER.debug("rtl_433 ignoring device %s (on the hub's ignore list)", key)
+            LOGGER.debug(
+                "rtl_433 ignoring device %s (on the receiver's ignore list)", key
+            )
             return
 
         now = dt_util.utcnow()
@@ -287,7 +289,7 @@ class _EventProcessingMixin:
                 fields=dict(normalized.fields),
             )
             LOGGER.info(
-                "rtl_433 heard a new device %s (model %s); add it from the hub's "
+                "rtl_433 heard a new device %s (model %s); add it from the receiver's "
                 "options to create it in Home Assistant",
                 key,
                 normalized.model,

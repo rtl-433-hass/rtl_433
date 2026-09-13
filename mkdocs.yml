@@ -42,6 +42,6 @@ nav:
   - Availability: availability.md
   - Event-based Devices: event-based-devices.md
   - Diagnostics & Debugging: diagnostics.md
-  - Hub Entities: hub-entities.md
+  - Receiver Entities: receiver-entities.md
   - Device Library: device-library.md
   - Utility-Meter Calibration: calibration.md
