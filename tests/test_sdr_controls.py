@@ -880,10 +880,10 @@ async def test_load_with_no_store_yields_empty_state(
     """
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
-    assert sdr_store_key(entry.entry_id) not in hass_storage
+    assert sdr_store_key(receiver_id(entry)) not in hass_storage
 
     coordinator = Rtl433Coordinator(
-        hass, entry, host="rtl433.local", manage_settings=True
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
     )
     await coordinator.async_load_desired_state()
 
@@ -903,13 +903,17 @@ async def test_load_restores_the_initial_frequency_seeded_flag(
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
 
-    first = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    first = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
+    )
     first._desired = {KEY_CENTER_FREQUENCY: 868.0}
     first._managed = {KEY_CENTER_FREQUENCY}
     first._initial_freq_seeded = True
     await first._persist_desired()
 
-    second = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    second = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
+    )
     await second.async_load_desired_state()
     assert second._initial_freq_seeded is True
 
@@ -923,13 +927,13 @@ async def test_load_treats_a_store_without_the_seeded_flag_as_unseeded(
     """
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
-    hass_storage[sdr_store_key(entry.entry_id)] = {
+    hass_storage[sdr_store_key(receiver_id(entry))] = {
         "version": SDR_STORE_VERSION,
         "data": {"values": {KEY_CENTER_FREQUENCY: 868.0}, "managed": []},
     }
 
     coordinator = Rtl433Coordinator(
-        hass, entry, host="rtl433.local", manage_settings=True
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
     )
     await coordinator.async_load_desired_state()
     assert coordinator._initial_freq_seeded is False
@@ -947,13 +951,21 @@ async def test_management_off_also_clears_the_seeded_flag(
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
 
-    managed = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    managed = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
+    )
     managed._desired = {KEY_CENTER_FREQUENCY: 868.0}
     managed._managed = {KEY_CENTER_FREQUENCY}
     managed._initial_freq_seeded = True
     await managed._persist_desired()
 
-    off = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=False)
+    off = Rtl433Coordinator(
+        hass,
+        entry,
+        receiver_subentry(entry),
+        host="rtl433.local",
+        manage_settings=False,
+    )
     off._initial_freq_seeded = True
     await off.async_load_desired_state()
     assert off._initial_freq_seeded is False
@@ -971,13 +983,17 @@ async def test_loaded_state_is_a_copy_not_a_view_of_the_payload(
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
 
-    first = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    first = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
+    )
     first._desired = {KEY_CENTER_FREQUENCY: 868.0}
     first._managed = {KEY_CENTER_FREQUENCY}
     await first._persist_desired()
-    stored = hass_storage[sdr_store_key(entry.entry_id)]["data"]
+    stored = hass_storage[sdr_store_key(receiver_id(entry))]["data"]
 
-    second = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    second = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
+    )
     await second.async_load_desired_state()
     second._desired[KEY_SAMPLE_RATE] = 250000
     second._managed.add(KEY_SAMPLE_RATE)
@@ -998,7 +1014,7 @@ def _coordinator(hass, receiver_entry_builder, desired):
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(
-        hass, entry, host="rtl433.local", manage_settings=True
+        hass, entry, receiver_subentry(entry), host="rtl433.local", manage_settings=True
     )
     coordinator._desired = dict(desired)
     return coordinator
