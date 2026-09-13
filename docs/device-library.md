@@ -7,7 +7,7 @@ files that map each rtl_433 field name to a Home Assistant entity descriptor.
 Use device mappings to add support for fields your rtl_433 hardware already
 reports, without editing the integration code or waiting for a new release. You
 can add mappings from the Home Assistant UI; contributors can add mappings to
-the shipped library.
+pyrtl_433.
 
 > The YAML files and their loader are part of
 > [`pyrtl_433`](https://github.com/rtl-433-hass/pyrtl_433), the integration's
@@ -48,11 +48,11 @@ data, an entry for `skip_keys:`.
 > so any comments or hand-formatting in what you paste are dropped once the
 > mappings are stored. The mapping *content* is preserved exactly.
 
-Mappings you add in the UI layer **on top of** the shipped library:
+Mappings you add in the UI layer **on top of** pyrtl_433:
 
-- A field present in both the UI mapping and the shipped library: the **UI mapping
-  wins** (full entry replacement, not a deep merge), so you can correct a unit,
-  device class, or transform.
+- A field present in both the UI mapping and pyrtl_433: the **UI mapping
+  wins** (full entry replacement, not a deep merge), so you can correct a
+  unit, device class, or transform.
 - A field present only in the UI mapping: it is **added** as a new mapping.
 - `skip_keys` entries in the UI mapping are **unioned** with the shipped skip
   list.
@@ -88,8 +88,8 @@ battery_ok:
   object_suffix: B
 ```
 
-`skip_keys:` entries work in the editor exactly as in the shipped library, and so
-do model-scoped mappings — the way to correct a mapping for **one specific device
+`skip_keys:` entries work in the editor exactly as in pyrtl_433, and so do
+model-scoped mappings — the way to correct a mapping for **one specific device
 model** rather than every device that emits the field. Nest the per-model
 descriptors under a [`models:` block](#model-scoped-mappings-models) keyed by the
 exact rtl_433 `model` string; a model-scoped entry beats any global one for that
@@ -347,14 +347,14 @@ single field on a single device is, **highest to lowest**:
 The rule is **specificity-first**: a model-scoped entry always beats a global one
 *regardless of source*. In particular a **shipped** `models:` entry outranks a
 **UI global** entry for a matching model. Within each tier the UI mapping beats
-the shipped library. (This falls out naturally from the merge: the UI mapping
-replaces the shipped entry *within* a tier, and the lookup checks the model tier
-before the global tier.)
+pyrtl_433. (This falls out naturally from the merge: the UI mapping replaces
+the shipped entry *within* a tier, and the lookup checks the model tier before
+the global tier.)
 
 > **No speculative real-meter mappings ship.** Because a meter's consumption
-> unit/scale is not knowable from the signal, the shipped library does **not**
-> carry a guessed `models:` consumption mapping for any real model — a wrong
-> scale would silently corrupt real Energy data. The example below is purely
+> unit/scale is not knowable from the signal, pyrtl_433 does **not** carry a
+> guessed `models:` consumption mapping for any real model — a wrong scale
+> would silently corrupt real Energy data. The example below is purely
 > illustrative; for a real meter use the per-device calibration step in the
 > *Device settings* page (see [Utility-meter calibration](calibration.md)) until a model's unit/scale is authoritatively
 > known.
