@@ -43,6 +43,25 @@ reason. Two receivers decoding one transmission carry the *same* value, so the
 cost is a redundant state write (and, for an ``event`` entity, a second fire),
 where a wrong rejection would drop a real reading for good.
 
+**Availability is merged across both gates.** Each receiver has a transport gate
+(is its WebSocket up?) and each device has a silence gate (did *that* receiver
+hear it within its effective timeout?). OR-ing the two independently -- "any
+receiver connected" AND "the newest last_seen is fresh" -- is a correctness bug:
+a connected receiver that is deaf to the sensor would keep it alive on an
+*offline* receiver's minute-old timestamp. So the pair is evaluated per receiver
+and only the *result* is OR-ed: a receiver **vouches** for a device when it is
+connected AND heard it inside the timeout (:func:`receiver_vouches`), and the
+merged device is available when at least one receiver vouches
+(:meth:`Rtl433LocationAggregator.device_available`). The per-receiver watchdogs
+keep running unchanged; this only unions what they conclude, and the
+device-class-aware timeout resolution and never-expire exemption are the
+coordinator's own, reused verbatim.
+
+**Per-receiver coverage is kept.** The link half of each partitioned frame is
+recorded per ``(device_key, receiver)`` (:class:`ReceiverCoverage`), which is
+what lets the panel render "heard by Attic (-62 dB) / Garage (-89 dB)" without
+anyone enabling the disabled-by-default ``rssi`` / ``snr`` entities.
+
 The policy lives here rather than in ``pyrtl_433`` deliberately: it is a
 Home-Assistant-side merge over *several* clients, not a property of any single
 client's stream, and the library has no idea the other receiver exists.
@@ -64,7 +83,10 @@ from homeassistant.helpers.dispatcher import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    AVAILABILITY_TIMEOUT_NEVER,
     CONF_DEVICES,
+    DATA_AGGREGATOR,
+    DOMAIN,
     signal_device_update,
     signal_location_device_update,
     signal_new_device,
@@ -129,6 +151,82 @@ def partition_fields(
     return unioned, link
 
 
+def receiver_vouches(coordinator: Rtl433Coordinator, device_key: str) -> bool:
+    """Return whether one receiver can currently vouch for one device.
+
+    A receiver vouches when **both** of its gates hold *for the same receiver*:
+
+    * **transport** -- ``receiver_available`` is the socket state, ``False`` the
+      instant the WebSocket drops with no grace window. A receiver that is not
+      listening has nothing to vouch with, whatever it heard before; and
+    * **silence** -- it heard this device within the device's effective timeout.
+      A timeout of :data:`~.const.AVAILABILITY_TIMEOUT_NEVER` is the never-expire
+      exemption: once heard, always fresh (but never heard is still not heard).
+
+    The timeout comes from the coordinator's own ``_effective_timeout``, so the
+    device-class-aware resolution ladder (per-device override -> location default
+    -> class default) and the never-expire semantics are identical to the
+    watchdog's rather than a second copy that could drift.
+
+    Exported because both halves of the availability story call it: the merged
+    device OR-s it over the location's receivers
+    (:meth:`Rtl433LocationAggregator.device_available`), and a per-receiver link
+    entity (``RSSI Attic``) applies it to its own receiver alone -- "how well does
+    *this* receiver hear it" is meaningless while *this* receiver is deaf.
+    """
+    if not coordinator.receiver_available:
+        return False
+    last_seen = coordinator.last_seen.get(device_key)
+    if last_seen is None:
+        return False
+    timeout = coordinator._effective_timeout(device_key)
+    if timeout == AVAILABILITY_TIMEOUT_NEVER:
+        return True
+    return (dt_util.utcnow() - last_seen) <= timedelta(seconds=timeout)
+
+
+def location_aggregator(
+    hass: HomeAssistant, location_entry_id: str
+) -> Rtl433LocationAggregator | None:
+    """Return a location's running aggregator, or ``None``.
+
+    The lookup an entity uses to reach the union from its own coordinator.
+    ``None`` means the location is mid-setup or being torn down, and every caller
+    treats that as "fall back to the receiver I was built by" rather than
+    failing: a single-receiver answer is the honest one when there is no union
+    running to consult.
+    """
+    return hass.data.get(DOMAIN, {}).get(DATA_AGGREGATOR, {}).get(location_entry_id)
+
+
+@dataclasses.dataclass(slots=True, frozen=True)
+class ReceiverCoverage:
+    """One receiver's view of one device: how well, and how recently, it hears it.
+
+    The union deliberately throws this detail away for the *sensor's* values, so
+    it is kept here instead. ``rssi`` / ``snr`` are the last values that receiver
+    reported for the device (``None`` until it reports one -- not every decoder
+    emits them) and ``last_seen`` is when that receiver last heard a real frame,
+    which is not the same as the coordinator's ``last_seen``: that one also
+    carries the entity's startup baseline, and a coverage display must not report
+    a device as "heard just now" because Home Assistant restarted.
+
+    ``connected`` and ``vouches`` are **not** recorded: :meth:`coverage` fills
+    them in from the receiver's live transport gate and from
+    :func:`receiver_vouches` each time it is asked, because a stored answer would
+    be wrong the moment a socket dropped. They are here so a caller can tell
+    "offline" from "online but deaf to this sensor" -- the distinction the merged
+    availability rule turns on.
+    """
+
+    receiver_id: str
+    connected: bool = False
+    vouches: bool = False
+    last_seen: datetime | None = None
+    rssi: Any = None
+    snr: Any = None
+
+
 @dataclasses.dataclass(slots=True)
 class _AppliedFrame:
     """The last frame whose value was actually applied for one device field.
@@ -167,6 +265,11 @@ class Rtl433LocationAggregator:
         # memory. Bounded by the adopted device set times its mapped fields, and
         # cleared per device by :meth:`forget_device`.
         self._applied: dict[tuple[str, str], _AppliedFrame] = {}
+        # The coverage map: the link half of every frame, kept per
+        # ``(device_key, receiver_id)`` instead of being merged away. Real frames
+        # only -- no startup baseline -- because this is what a coverage display
+        # reads (see :class:`ReceiverCoverage`).
+        self._coverage: dict[tuple[str, str], ReceiverCoverage] = {}
         self._subscribed: set[tuple[str, str]] = set()
         self._unsubs: list[Callable[[], None]] = []
         # Coordinators this aggregator hooked a device-remover onto, so
@@ -215,6 +318,7 @@ class Rtl433LocationAggregator:
         self._unsubs.clear()
         self._subscribed.clear()
         self._applied.clear()
+        self._coverage.clear()
         for coordinator in self._hooked:
             if self.forget_device in coordinator.device_removers:
                 coordinator.device_removers.remove(self.forget_device)
@@ -222,9 +326,11 @@ class Rtl433LocationAggregator:
 
     @callback
     def forget_device(self, device_key: str) -> None:
-        """Forget one device's dedup anchors (it was removed by the user)."""
+        """Forget one device's dedup anchors and coverage (the user removed it)."""
         for key in [k for k in self._applied if k[0] == device_key]:
             del self._applied[key]
+        for key in [k for k in self._coverage if k[0] == device_key]:
+            del self._coverage[key]
 
     # ------------------------------------------------------------------ #
     # Subscription bookkeeping                                           #
@@ -260,26 +366,118 @@ class Rtl433LocationAggregator:
             async_dispatcher_connect(
                 self.hass,
                 signal_device_update(receiver_id, device_key),
-                self._device_handler(device_key),
+                self._device_handler(receiver_id, device_key),
             )
         )
 
     @callback
-    def _device_handler(self, device_key: str) -> Callable[[NormalizedEvent], None]:
-        """Build the per-device listener bound to one ``device_key``."""
+    def _device_handler(
+        self, receiver_id: str, device_key: str
+    ) -> Callable[[NormalizedEvent], None]:
+        """Build the per-device listener bound to one ``(receiver, device_key)``.
+
+        The receiver is bound in as well as the device because the location
+        signal is receiver-agnostic by design: once the frame is re-emitted there
+        is nothing left on it to say who heard it, and the coverage map needs
+        exactly that.
+        """
 
         @callback
         def _handle(event: NormalizedEvent) -> None:
-            self._handle_event(device_key, event)
+            self._handle_event(receiver_id, device_key, event)
 
         return _handle
+
+    # ------------------------------------------------------------------ #
+    # Merged availability + per-receiver coverage                        #
+    # ------------------------------------------------------------------ #
+    def device_available(self, device_key: str) -> bool:
+        """Return whether *any* receiver can currently vouch for this device.
+
+        The merged gate. Each receiver's transport and silence gates are
+        evaluated together (:func:`receiver_vouches`) and only the results are
+        OR-ed, which is what keeps a device from reading available on an offline
+        receiver's stale timestamp while the connected one hears nothing.
+
+        ``False`` for a location with no running coordinator (mid-setup or
+        mid-teardown): nothing is listening, so nothing can vouch.
+        """
+        return any(
+            receiver_vouches(coordinator, device_key)
+            for coordinator in receiver_coordinators(self.hass, self.entry).values()
+        )
+
+    def coverage(self, device_key: str) -> list[ReceiverCoverage]:
+        """Return one device's per-receiver coverage, in receiver order.
+
+        The A-vs-B comparison the union hides, served straight from aggregator
+        state so the panel can render "heard by Attic (-62 dB) / Garage (-89 dB)"
+        with **no** entity enabled -- ``rssi`` / ``snr`` ship
+        disabled-by-default and a location would otherwise pay
+        *sensors x receivers x 2* entities for a detail most users only glance at.
+
+        Every running receiver appears, including one that has never heard this
+        device at all (``last_seen``/``rssi``/``snr`` all ``None``): "Garage does
+        not hear it" is exactly as much a coverage answer as a weak signal is.
+        """
+        result: list[ReceiverCoverage] = []
+        for receiver_id, coordinator in receiver_coordinators(
+            self.hass, self.entry
+        ).items():
+            recorded = self._coverage.get((device_key, receiver_id))
+            result.append(
+                dataclasses.replace(
+                    recorded or ReceiverCoverage(receiver_id=receiver_id),
+                    connected=coordinator.receiver_available,
+                    vouches=receiver_vouches(coordinator, device_key),
+                )
+            )
+        return result
+
+    @callback
+    def _record_coverage(
+        self,
+        receiver_id: str,
+        device_key: str,
+        link: dict[str, Any],
+        event: NormalizedEvent,
+    ) -> None:
+        """Fold one frame's link half into this receiver's coverage record.
+
+        A re-paint carries the device's *cached* frame rather than a new
+        transmission, so it must not move ``last_seen`` forward -- doing so would
+        make a silent sensor look freshly heard every watchdog tick, which is the
+        opposite of what a coverage display is for. Its link values are equally
+        stale, so the whole record is left alone.
+
+        A live frame always stamps ``last_seen`` (that *is* the receiver hearing
+        it) and overwrites whichever of ``rssi`` / ``snr`` it carries, keeping the
+        previous value for one it does not: not every decoder emits both on every
+        frame, and a missing key means "not reported", not "signal lost".
+        """
+        if event.is_repaint:
+            return
+        previous = self._coverage.get((device_key, receiver_id))
+        self._coverage[(device_key, receiver_id)] = ReceiverCoverage(
+            receiver_id=receiver_id,
+            last_seen=dt_util.utcnow(),
+            rssi=link.get("rssi", previous.rssi if previous else None),
+            snr=link.get("snr", previous.snr if previous else None),
+        )
 
     # ------------------------------------------------------------------ #
     # The union itself                                                   #
     # ------------------------------------------------------------------ #
     @callback
-    def _handle_event(self, device_key: str, event: NormalizedEvent) -> None:
+    def _handle_event(
+        self, receiver_id: str, device_key: str, event: NormalizedEvent
+    ) -> None:
         """Partition, dedup, and re-emit one receiver's frame for the location.
+
+        The link half is recorded against this receiver on the way past (see
+        :meth:`coverage`) rather than dropped: it is the only record of which
+        receiver hears the sensor how well, and the union is about to make the
+        frame receiver-agnostic.
 
         The event is re-emitted **unconditionally**, even when every field was
         rejected: a dispatch is also how an entity is told to re-read
@@ -287,8 +485,9 @@ class Rtl433LocationAggregator:
         cached frame and no new value at all), so swallowing it would freeze
         availability on the merged device.
         """
-        unioned, _link = partition_fields(event.fields)
+        unioned, link = partition_fields(event.fields)
         now = dt_util.utcnow()
+        self._record_coverage(receiver_id, device_key, link, event)
         accepted = {
             field_key: value
             for field_key, value in unioned.items()

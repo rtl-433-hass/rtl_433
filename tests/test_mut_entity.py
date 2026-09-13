@@ -39,10 +39,14 @@ from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.entity import (
     Rtl433Entity,
     _apply_calibration,
+    _combine,
+    _link_field_base_name,
     _resolve_entity_category,
     async_setup_receiver_platform,
     async_upsert_device,
     async_upsert_event_types,
+    field_unique_id,
+    receiver_label,
 )
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -129,6 +133,90 @@ def test_resolve_entity_category_unknown_returns_none():
 def test_resolve_entity_category_empty_string_returns_none():
     """Empty string is not a valid category -> None."""
     assert _resolve_entity_category("") is None
+
+
+# ---------------------------------------------------------------------------
+# field_unique_id / receiver_label / _link_field_base_name / _combine
+# ---------------------------------------------------------------------------
+
+
+def _link_descriptor(**overrides) -> FieldDescriptor:
+    """Build the shipped ``rssi`` descriptor, with overrides."""
+    defaults = {
+        "field_key": "rssi",
+        "platform": "sensor",
+        "name": "RSSI",
+        "object_suffix": "rssi",
+        "device_class": "signal_strength",
+    }
+    return FieldDescriptor(**{**defaults, **overrides})
+
+
+def test_field_unique_id_is_receiver_agnostic_for_a_unioned_field():
+    """A sensor field is one entity per device, so its id names no receiver."""
+    descriptor = FieldDescriptor(
+        field_key="temperature_C",
+        platform="sensor",
+        name=None,
+        object_suffix="T",
+    )
+    assert field_unique_id("loc", "Model-1", "recv", descriptor) == "loc:Model-1:T"
+
+
+@pytest.mark.parametrize("field_key", ["rssi", "snr", "__last_seen__"])
+def test_field_unique_id_adds_a_receiver_segment_for_a_link_field(field_key):
+    """A link field is one entity per (device x receiver), so the id says which."""
+    descriptor = _link_descriptor(field_key=field_key, object_suffix=field_key)
+    assert (
+        field_unique_id("loc", "Model-1", "recv", descriptor)
+        == f"loc:Model-1:recv:{field_key}"
+    )
+
+
+def test_receiver_label_prefers_the_subentry_title():
+    """The label is what the user called the server."""
+    coordinator = MagicMock()
+    coordinator.subentry.title = "Attic"
+    coordinator.receiver_id = "01ABC"
+    assert receiver_label(coordinator) == "Attic"
+
+
+def test_receiver_label_falls_back_to_the_receiver_id():
+    """A title-less subentry still yields a label that differs per receiver.
+
+    An empty label would put two receivers' link entities back on one name, which
+    is exactly the ``_2`` collision the label exists to prevent.
+    """
+    coordinator = MagicMock()
+    coordinator.subentry.title = ""
+    coordinator.receiver_id = "01ABC"
+    assert receiver_label(coordinator) == "01ABC"
+
+
+def test_link_field_base_name_uses_the_descriptors_own_name():
+    assert _link_field_base_name(_link_descriptor()) == "RSSI"
+
+
+def test_link_field_base_name_falls_back_to_the_object_suffix():
+    """A nameless link descriptor must NOT derive its name from device_class.
+
+    Both receivers' entities would derive the same one and collide on the merged
+    device; the object suffix is per field and always present.
+    """
+    descriptor = _link_descriptor(name=None, object_suffix="last_seen")
+    assert _link_field_base_name(descriptor) == "Last seen"
+
+
+def test_combine_calls_every_unsubscribe_exactly_once():
+    """One handle, however many receivers were subscribed to."""
+    calls: list[str] = []
+    combined = _combine([lambda: calls.append("a"), lambda: calls.append("b")])
+    combined()
+    assert calls == ["a", "b"]
+
+
+def test_combine_of_nothing_is_a_no_op():
+    _combine([])()
 
 
 # ---------------------------------------------------------------------------
@@ -2434,3 +2522,37 @@ async def test_a_receiver_agnostic_extra_is_added_once_for_the_location(hass):
     await hass.async_block_till_done()
 
     assert [entity.object_suffix for entity in added].count("extra") == 1
+
+
+async def test_an_extra_entity_with_no_unique_id_is_not_added(
+    hass, receiver_entry_builder
+):
+    """The optional per-device extra is only added when it can be deduped.
+
+    Its whole job is to appear once on a merged device however many receivers
+    contribute one, and the ``unique_id`` is what decides that; an entity without
+    one would be added again by every receiver's pass and land on the device
+    several times over.
+    """
+    device_key = "Acurite-606TX-42"
+    receiver = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+
+    added: list = []
+    await _built(
+        hass,
+        receiver,
+        added,
+        per_device_factory=lambda *args: SimpleNamespace(unique_id=None),
+    )
+    await hass.async_block_till_done()
+
+    assert [entity.object_suffix for entity in added] == ["T"]

@@ -77,7 +77,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
-from tests.conftest import receiver_id
+from tests.conftest import receiver_id, receiver_subentry
 
 # The three devices the receiver hears in the fixture below, spelled out as the
 # normalizer derives them from ``model`` + ``id`` so the assertions read the way
@@ -1164,8 +1164,22 @@ def _adopted_snapshot(hass, entry, device_key) -> dict[str, Any]:
     # Identity is scoped by the location, not by whichever receiver heard the
     # device, so the prefix stripped here is the location entry id -- otherwise
     # two locations' snapshots would differ only by the id this helper exists to
-    # normalise away.
+    # normalise away. The per-receiver link entities (``rssi`` / ``snr`` /
+    # ``last_seen``) name their receiver in *both* their unique_id and their
+    # name, deliberately, so those two coordinates get the same treatment.
+    subentry = receiver_subentry(entry)
     prefix = f"{entry.entry_id}:"
+
+    def _normalise(text: str | None) -> str | None:
+        """Strip every trace of *which* location/receiver produced this entity."""
+        if text is None:
+            return None
+        return (
+            text.removeprefix(prefix)
+            .replace(f"{subentry.subentry_id}:", "")
+            .replace(subentry.title, "<receiver>")
+        )
+
     return {
         "model": device.model,
         "manufacturer": device.manufacturer,
@@ -1175,8 +1189,8 @@ def _adopted_snapshot(hass, entry, device_key) -> dict[str, Any]:
         "entities": {
             (
                 registry_entry.domain,
-                registry_entry.unique_id.removeprefix(prefix),
-                registry_entry.original_name,
+                _normalise(registry_entry.unique_id),
+                _normalise(registry_entry.original_name),
                 registry_entry.original_device_class,
                 registry_entry.unit_of_measurement,
                 registry_entry.entity_category,
