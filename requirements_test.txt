@@ -45,4 +45,9 @@ mutmut==3.7.0
 # package rather than the scripts/mutation_*.py helpers it replaced. Configured
 # under [tool.mutmut_ratchet] in pyproject.toml.
 # https://github.com/rtl-433-hass/mutmut-ratchet
-mutmut-ratchet>=0.1.0
+#
+# 0.2.0 for function-level scoping: `targets --base`, `shards
+# --restrict-functions`, and `ratchet --mode functions`, all of which the
+# mutation workflow now calls. This is the file CI installs from, so the floor
+# has to be stated here and not only in pyproject.toml.
+mutmut-ratchet>=0.2.0

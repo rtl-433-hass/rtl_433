@@ -57,7 +57,27 @@ name: Mutation
 # zero-tolerance gate would fail spuriously. The baseline only ratchets upward.
 #
 # The mutants/ working tree is never cached: a stale cache could report a higher
-# score than reality and let a regression through. Only uv's download cache is reused.
+# score than reality and let a regression through. Only uv's download cache is
+# reused. (mutmut can cache per-function results across runs, and PIT -- the most
+# mature tool in any ecosystem -- labels the equivalent feature experimental and
+# its core assumption "unproven". Scoping the run is the safe way to spend less
+# time: it never reuses a verdict, it just runs fewer mutants.)
+#
+# On a pull request the scope narrows twice. First to the modules the diff could
+# have affected (`targets`), then -- once the committed baseline carries a
+# per-function block -- to the changed FUNCTIONS within them (`targets --base`,
+# `shards --restrict-functions`). A one-line edit to a 750-line module then
+# mutates one function rather than all 275 of its mutants. A changed line that
+# belongs to no mutable function (module-level code, an import, a class body)
+# escalates its file to the whole module, and a module reached through a changed
+# *test* is never narrowed, because a weakened test can free a mutant anywhere
+# in the module it exercises.
+#
+# A narrowed run is gated per function rather than per file: the functions its
+# filter did not select come back "not checked", which counts as survived, so
+# those files' scores are partial measurements. `--mode functions` reads which
+# functions were actually measured out of the stats payload, so the scope step
+# never has to hand the gate a list. See the `Enforce the mutation gate` step.
 #
 # The one thing the shards DO share is mutmut's stats profile
 # (`mutants/mutmut-stats.json`): the function -> covering-tests map and per-test
@@ -182,7 +202,7 @@ jobs:
     # 98% complete. This is a backstop for a hung run, not a target, so it is sized
     # off the heaviest shard with room for the package to keep growing. (The old
     # single full job used 90.)
-    timeout-minutes: 45
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -219,16 +239,29 @@ jobs:
             git fetch --no-tags origin "${{ github.base_ref }}"
             changed=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
             echo "Changed files:"; echo "$changed"
-            uv run mutmut-ratchet targets $changed > targets.txt
+            # --base narrows the scope to the changed FUNCTIONS. Line 4 is the
+            # complete set the run will mutate, which the gate needs so it never
+            # reads an unmutated function as a survivor. The narrowing is only
+            # usable once the committed baseline carries a per-function block;
+            # until then this behaves exactly as it did before.
+            if jq -e 'has("functions")' scripts/mutation_baseline.json >/dev/null 2>&1; then
+              uv run mutmut-ratchet targets --base "origin/${{ github.base_ref }}" $changed > targets.txt
+            else
+              echo "Baseline has no per-function block yet; scoping by module."
+              uv run mutmut-ratchet targets $changed > targets.txt
+            fi
             cat targets.txt
             {
               echo "mode=$(sed -n '1p' targets.txt)"
               echo "paths=$(sed -n '3p' targets.txt)"
+              echo "functions=$(sed -n '4p' targets.txt)"
             } >> "$GITHUB_OUTPUT"
           else
-            # Push to main / nightly: always the full package.
+            # Push to main / nightly: always the full package, never
+            # narrowed -- this is the run that re-measures the whole baseline.
             echo "mode=all" >> "$GITHUB_OUTPUT"
             echo "paths=" >> "$GITHUB_OUTPUT"
+            echo "functions=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Determine this shard's modules
@@ -237,7 +270,13 @@ jobs:
           if [ "${{ steps.scope.outputs.mode }}" = "all" ]; then
             uv run mutmut-ratchet shards --shard ${{ matrix.shard }} --of 6 > shard.txt
           elif [ -n "${{ steps.scope.outputs.paths }}" ]; then
-            uv run mutmut-ratchet shards --shard ${{ matrix.shard }} --of 6 --restrict ${{ steps.scope.outputs.paths }} > shard.txt
+            # --restrict-functions turns this shard's whole-module patterns into
+            # per-function ones for the modules the PR narrowed. Without it the
+            # narrowing computed by `targets` is discarded, because what actually
+            # runs is the shard's patterns, not the scope step's.
+            uv run mutmut-ratchet shards --shard ${{ matrix.shard }} --of 6 \
+              --restrict ${{ steps.scope.outputs.paths }} \
+              --restrict-functions ${{ steps.scope.outputs.functions }} > shard.txt
           else
             # Scoped run with nothing in scope (e.g. a docs-only PR): no work.
             printf '\n\n' > shard.txt
@@ -267,9 +306,28 @@ jobs:
           uv run mutmut run ${{ steps.shard.outputs.patterns }}
           uv run mutmut-ratchet stats --paths ${{ steps.shard.outputs.paths }} > mutation-stats.json
 
-      - name: Enforce per-file floor vs baseline
+      # A narrowed run cannot be gated per file: the functions its filter did
+      # not select come back "not checked", which the exporter counts as
+      # survived, so those files' scores are partial measurements. Each measured
+      # function's score is complete, so the gate moves to those -- failing on
+      # survivors a function did not have before, and on a new function that
+      # misses the floor. `--mode functions` works out which functions were
+      # measured from the stats payload itself, so nothing has to be threaded
+      # through from the scope step.
+      #
+      # The choice is made once for the whole matrix rather than per shard: on a
+      # narrowed PR a shard may hold both narrowed and whole modules, and gating
+      # a whole module per function is valid (every one of its functions was
+      # measured) and slightly stricter, where gating a narrowed one per file is
+      # simply wrong.
+      - name: Enforce the mutation gate vs baseline
         if: steps.shard.outputs.patterns != ''
-        run: uv run mutmut-ratchet ratchet --mode floor --stats mutation-stats.json
+        run: |
+          if [ -n "${{ steps.scope.outputs.functions }}" ]; then
+            uv run mutmut-ratchet ratchet --mode functions --stats mutation-stats.json
+          else
+            uv run mutmut-ratchet ratchet --mode floor --stats mutation-stats.json
+          fi
 
       # On a FULL run (push to main / nightly) each shard also exports the
       # timings for the modules it just measured; the `timings` job merges the
@@ -288,6 +346,19 @@ jobs:
         with:
           name: mutation-timings-${{ matrix.shard }}
           path: timings-${{ matrix.shard }}.json
+          retention-days: 7
+          if-no-files-found: error
+
+      # The same trade as the timings profile: a refreshed baseline is a
+      # reviewed input, not something CI commits. Full runs publish what they
+      # measured so regenerating it -- including the per-function block the
+      # function gate needs -- is a download rather than a local full run.
+      - name: Upload this shard's stats
+        if: steps.shard.outputs.patterns != '' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-stats-${{ matrix.shard }}
+          path: mutation-stats.json
           retention-days: 7
           if-no-files-found: error
 
@@ -349,6 +420,102 @@ jobs:
         with:
           name: mutation-timings
           path: mutation_timings.json
+          retention-days: 30
+          if-no-files-found: error
+
+  # Merge the shards' partial stats into one refreshed baseline. Full runs only:
+  # a scoped PR measures a handful of modules, and recording that as "the
+  # baseline" would drop every module it did not run.
+  #
+  # This is also how the per-function block is bootstrapped. Until the committed
+  # baseline has one, the PR gate stays on whole-module scoping and the per-file
+  # floor -- so rolling the function gate out is: run this, download, commit.
+  baseline:
+    name: "Mutation baseline refresh"
+    needs: [mutation]
+    if: github.event_name != 'pull_request' && needs.mutation.result == 'success'
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 10
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v7.1.1
+        with:
+          enable-cache: true
+
+      - name: Download the shards' partial stats
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: mutation-stats-*
+          merge-multiple: false
+          path: partials
+
+      # The shards mutate disjoint module sets, so the partials never disagree;
+      # a duplicated key would mean the partition itself is broken, so fail
+      # loudly rather than silently picking a winner.
+      - name: Merge into one stats payload
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          files: dict[str, dict] = {}
+          functions: dict[str, dict] = {}
+          sources = sorted(Path("partials").rglob("mutation-stats.json"))
+          if not sources:
+              raise SystemExit("no partial stats were uploaded")
+          for part in sources:
+              payload = json.loads(part.read_text(encoding="utf-8"))
+              for path, stats in payload.get("files", {}).items():
+                  if path in files:
+                      raise SystemExit(
+                          f"{path} was measured by more than one shard; the "
+                          "shard partition is not disjoint"
+                      )
+                  files[path] = stats
+              for path, per_function in payload.get("functions", {}).items():
+                  functions.setdefault(path, {}).update(per_function)
+          Path("merged-stats.json").write_text(
+              json.dumps(
+                  {
+                      "files": dict(sorted(files.items())),
+                      "functions": {
+                          p: dict(sorted(f.items()))
+                          for p, f in sorted(functions.items())
+                      },
+                  },
+                  indent=2,
+              )
+              + "\n",
+              encoding="utf-8",
+          )
+          print(
+              f"Merged {len(sources)} shards: {len(files)} files, "
+              f"{sum(len(f) for f in functions.values())} functions."
+          )
+          PY
+
+      # Both blocks, in two passes. `--mode functions --update` deliberately
+      # never writes file scores, because on a *scoped* run the file block also
+      # carries every mutant the filter skipped and recording that would set an
+      # artificially low bar. This job only ever runs on a FULL run, where both
+      # blocks are complete measurements, so it refreshes each with the mode
+      # that owns it.
+      - name: Write the refreshed baseline
+        run: |
+          uv run mutmut-ratchet ratchet --mode floor \
+            --stats merged-stats.json --update
+          uv run mutmut-ratchet ratchet --mode functions \
+            --stats merged-stats.json --update
+          cp scripts/mutation_baseline.json mutation_baseline.json
+
+      - name: Upload the refreshed baseline
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-baseline
+          path: mutation_baseline.json
           retention-days: 30
           if-no-files-found: error
 
