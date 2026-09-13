@@ -189,7 +189,7 @@ to use the 90-second default.
 ### Availability classification
 
 A device is marked *unavailable* when it falls silent past its availability
-timeout. RF devices signal presence only by transmitting, so the timeout is
+timeout. RF devices signal availability only by transmitting, so the timeout is
 resolved per device: a per-device override, then an explicit hub default, then a
 **device-class default** derived from the device's known fields — both its
 adopted (persisted) fields and its latest payload, so an event-driven device that

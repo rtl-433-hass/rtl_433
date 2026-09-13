@@ -1,8 +1,8 @@
 # Availability
 
-RF devices announce their presence only by transmitting, so the integration uses
-a silence-based availability model. If no event for a device arrives within its
-availability timeout, its entities become `unavailable`.
+RF devices announce their availability only by transmitting, so the integration
+uses a silence-based availability model. If no event for a device arrives within
+its availability timeout, its entities become `unavailable`.
 
 ![Device entities showing the unavailable state after the availability timeout](images/04-unavailable-state.png)
 
