@@ -1,9 +1,9 @@
 {
   "files": {
     "custom_components/rtl_433/__init__.py": {
-      "killed": 225,
-      "score": 0.818182,
-      "total": 275
+      "killed": 255,
+      "score": 0.836066,
+      "total": 305
     },
     "custom_components/rtl_433/adoption.py": {
       "killed": 58,
@@ -11,8 +11,8 @@
       "total": 70
     },
     "custom_components/rtl_433/binary_sensor.py": {
-      "killed": 86,
-      "score": 0.914894,
+      "killed": 92,
+      "score": 0.978723,
       "total": 94
     },
     "custom_components/rtl_433/calibration.py": {
@@ -46,14 +46,14 @@
       "total": 118
     },
     "custom_components/rtl_433/coordinator/base.py": {
-      "killed": 130,
-      "score": 0.580357,
-      "total": 224
+      "killed": 146,
+      "score": 0.608333,
+      "total": 240
     },
     "custom_components/rtl_433/device_replace.py": {
-      "killed": 90,
-      "score": 0.9,
-      "total": 100
+      "killed": 96,
+      "score": 0.90566,
+      "total": 106
     },
     "custom_components/rtl_433/device_trigger.py": {
       "killed": 94,
@@ -61,14 +61,14 @@
       "total": 97
     },
     "custom_components/rtl_433/diagnostics.py": {
-      "killed": 130,
+      "killed": 131,
       "score": 1.0,
-      "total": 130
+      "total": 131
     },
     "custom_components/rtl_433/entity.py": {
-      "killed": 317,
-      "score": 0.873278,
-      "total": 363
+      "killed": 331,
+      "score": 0.877984,
+      "total": 377
     },
     "custom_components/rtl_433/event.py": {
       "killed": 63,
@@ -96,14 +96,14 @@
       "total": 27
     },
     "custom_components/rtl_433/options_flow.py": {
-      "killed": 544,
-      "score": 0.854003,
-      "total": 637
+      "killed": 624,
+      "score": 0.857143,
+      "total": 728
     },
     "custom_components/rtl_433/repairs.py": {
-      "killed": 224,
+      "killed": 263,
       "score": 1.0,
-      "total": 224
+      "total": 263
     },
     "custom_components/rtl_433/sdr_settings.py": {
       "killed": 0,
@@ -121,9 +121,9 @@
       "total": 114
     },
     "custom_components/rtl_433/settings.py": {
-      "killed": 205,
-      "score": 0.891304,
-      "total": 230
+      "killed": 198,
+      "score": 0.90411,
+      "total": 219
     },
     "custom_components/rtl_433/switch.py": {
       "killed": 26,
@@ -131,12 +131,1220 @@
       "total": 26
     },
     "custom_components/rtl_433/websocket_api.py": {
-      "killed": 141,
-      "score": 0.671429,
-      "total": 210
+      "killed": 145,
+      "score": 0.69378,
+      "total": 209
     }
   },
   "floor": 0.7,
+  "functions": {
+    "custom_components/rtl_433/__init__.py": {
+      "custom_components.rtl_433.x__async_register_panel": {
+        "killed": 31,
+        "score": 0.775,
+        "survived": 9,
+        "total": 40
+      },
+      "custom_components.rtl_433.x__async_update_listener": {
+        "killed": 29,
+        "score": 0.852941,
+        "survived": 5,
+        "total": 34
+      },
+      "custom_components.rtl_433.x_async_remove_config_entry_device": {
+        "killed": 30,
+        "score": 0.789474,
+        "survived": 8,
+        "total": 38
+      },
+      "custom_components.rtl_433.x_async_setup_entry": {
+        "killed": 145,
+        "score": 0.90625,
+        "survived": 15,
+        "total": 160
+      },
+      "custom_components.rtl_433.x_async_unload_entry": {
+        "killed": 20,
+        "score": 0.606061,
+        "survived": 13,
+        "total": 33
+      }
+    },
+    "custom_components/rtl_433/adoption.py": {
+      "custom_components.rtl_433.adoption.x_async_adopt_devices": {
+        "killed": 12,
+        "score": 0.666667,
+        "survived": 6,
+        "total": 18
+      },
+      "custom_components.rtl_433.adoption.x_async_ignore_devices": {
+        "killed": 16,
+        "score": 0.842105,
+        "survived": 3,
+        "total": 19
+      },
+      "custom_components.rtl_433.adoption.x_async_unignore_devices": {
+        "killed": 18,
+        "score": 0.9,
+        "survived": 2,
+        "total": 20
+      }
+    },
+    "custom_components/rtl_433/binary_sensor.py": {
+      "custom_components.rtl_433.binary_sensor.x_async_setup_entry": {
+        "killed": 16,
+        "score": 1.0,
+        "survived": 0,
+        "total": 16
+      },
+      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433BinarySensor\u01c1__init__": {
+        "killed": 18,
+        "score": 0.947368,
+        "survived": 1,
+        "total": 19
+      },
+      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433BinarySensor\u01c1_apply_value": {
+        "killed": 11,
+        "score": 1.0,
+        "survived": 0,
+        "total": 11
+      },
+      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433BinarySensor\u01c1_async_restore_state": {
+        "killed": 23,
+        "score": 1.0,
+        "survived": 0,
+        "total": 23
+      },
+      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433BinarySensor\u01c1_cancel_clear": {
+        "killed": 1,
+        "score": 0.5,
+        "survived": 1,
+        "total": 2
+      },
+      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433BinarySensor\u01c1_effective_clear_delay": {
+        "killed": 6,
+        "score": 1.0,
+        "survived": 0,
+        "total": 6
+      },
+      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433BinarySensor\u01c1_schedule_clear": {
+        "killed": 8,
+        "score": 1.0,
+        "survived": 0,
+        "total": 8
+      },
+      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433BinarySensor\u01c1async_added_to_hass": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433HubConnectivity\u01c1__init__": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      }
+    },
+    "custom_components/rtl_433/calibration.py": {
+      "custom_components.rtl_433.calibration.x_commodity_from_fields": {
+        "killed": 40,
+        "score": 1.0,
+        "survived": 0,
+        "total": 40
+      },
+      "custom_components.rtl_433.calibration.x_default_unit": {
+        "killed": 3,
+        "score": 1.0,
+        "survived": 0,
+        "total": 3
+      },
+      "custom_components.rtl_433.calibration.x_normalize_calibration": {
+        "killed": 20,
+        "score": 0.833333,
+        "survived": 4,
+        "total": 24
+      }
+    },
+    "custom_components/rtl_433/config_flow.py": {
+      "custom_components.rtl_433.config_flow.x_async_rebind_hub": {
+        "killed": 22,
+        "score": 0.956522,
+        "survived": 1,
+        "total": 23
+      },
+      "custom_components.rtl_433.config_flow.x\u01c1Rtl433ConfigFlow\u01c1_find_entry_by_host_port": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.config_flow.x\u01c1Rtl433ConfigFlow\u01c1_reconfigure_schema": {
+        "killed": 40,
+        "score": 0.784314,
+        "survived": 11,
+        "total": 51
+      },
+      "custom_components.rtl_433.config_flow.x\u01c1Rtl433ConfigFlow\u01c1_safe_to_adopt": {
+        "killed": 3,
+        "score": 0.375,
+        "survived": 5,
+        "total": 8
+      },
+      "custom_components.rtl_433.config_flow.x\u01c1Rtl433ConfigFlow\u01c1async_step_hassio": {
+        "killed": 76,
+        "score": 0.962025,
+        "survived": 3,
+        "total": 79
+      },
+      "custom_components.rtl_433.config_flow.x\u01c1Rtl433ConfigFlow\u01c1async_step_hassio_confirm": {
+        "killed": 62,
+        "score": 0.925373,
+        "survived": 5,
+        "total": 67
+      },
+      "custom_components.rtl_433.config_flow.x\u01c1Rtl433ConfigFlow\u01c1async_step_hassio_replace": {
+        "killed": 72,
+        "score": 0.972973,
+        "survived": 2,
+        "total": 74
+      },
+      "custom_components.rtl_433.config_flow.x\u01c1Rtl433ConfigFlow\u01c1async_step_reconfigure": {
+        "killed": 89,
+        "score": 0.936842,
+        "survived": 6,
+        "total": 95
+      },
+      "custom_components.rtl_433.config_flow.x\u01c1Rtl433ConfigFlow\u01c1async_step_user": {
+        "killed": 52,
+        "score": 0.962963,
+        "survived": 2,
+        "total": 54
+      }
+    },
+    "custom_components/rtl_433/const.py": {
+      "custom_components.rtl_433.const.x_class_default_timeout": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.const.x_signal_device_update": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.const.x_signal_hub_availability": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.const.x_signal_hub_update": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.const.x_signal_new_device": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.const.x_signal_pending_update": {
+        "killed": 0,
+        "score": 0.0,
+        "survived": 1,
+        "total": 1
+      }
+    },
+    "custom_components/rtl_433/coordinator/_events.py": {
+      "custom_components.rtl_433.coordinator._events.x\u01c1_EventProcessingMixin\u01c1_evict_cold_candidates": {
+        "killed": 11,
+        "score": 0.916667,
+        "survived": 1,
+        "total": 12
+      },
+      "custom_components.rtl_433.coordinator._events.x\u01c1_EventProcessingMixin\u01c1_maybe_register_device": {
+        "killed": 26,
+        "score": 0.962963,
+        "survived": 1,
+        "total": 27
+      },
+      "custom_components.rtl_433.coordinator._events.x\u01c1_EventProcessingMixin\u01c1_on_client_event": {
+        "killed": 61,
+        "score": 0.983871,
+        "survived": 1,
+        "total": 62
+      },
+      "custom_components.rtl_433.coordinator._events.x\u01c1_EventProcessingMixin\u01c1_record_pending": {
+        "killed": 49,
+        "score": 0.98,
+        "survived": 1,
+        "total": 50
+      },
+      "custom_components.rtl_433.coordinator._events.x\u01c1_EventProcessingMixin\u01c1_trace_unmapped_fields": {
+        "killed": 19,
+        "score": 0.95,
+        "survived": 1,
+        "total": 20
+      }
+    },
+    "custom_components/rtl_433/coordinator/_sdr.py": {
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1_adopt_from_server": {
+        "killed": 31,
+        "score": 0.939394,
+        "survived": 2,
+        "total": 33
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1_command_args": {
+        "killed": 13,
+        "score": 0.866667,
+        "survived": 2,
+        "total": 15
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1_enforce_all": {
+        "killed": 20,
+        "score": 0.869565,
+        "survived": 3,
+        "total": 23
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1_enforce_field": {
+        "killed": 10,
+        "score": 1.0,
+        "survived": 0,
+        "total": 10
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1_gain_command_arg": {
+        "killed": 4,
+        "score": 0.363636,
+        "survived": 7,
+        "total": 11
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1_persist_desired": {
+        "killed": 6,
+        "score": 0.75,
+        "survived": 2,
+        "total": 8
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1_seed_desired_on_first_connect": {
+        "killed": 8,
+        "score": 1.0,
+        "survived": 0,
+        "total": 8
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1async_load_desired_state": {
+        "killed": 20,
+        "score": 0.645161,
+        "survived": 11,
+        "total": 31
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1clear_desired_state": {
+        "killed": 0,
+        "score": 0.0,
+        "survived": 3,
+        "total": 3
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1get_desired": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1is_managed": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrSettingsMixin\u01c1set_sdr": {
+        "killed": 3,
+        "score": 1.0,
+        "survived": 0,
+        "total": 3
+      },
+      "custom_components.rtl_433.coordinator._sdr.x\u01c1_SdrStore\u01c1_async_migrate_func": {
+        "killed": 10,
+        "score": 0.833333,
+        "survived": 2,
+        "total": 12
+      }
+    },
+    "custom_components/rtl_433/coordinator/_watchdog.py": {
+      "custom_components.rtl_433.coordinator._watchdog.x\u01c1_AvailabilityMixin\u01c1_async_watchdog": {
+        "killed": 31,
+        "score": 0.673913,
+        "survived": 15,
+        "total": 46
+      },
+      "custom_components.rtl_433.coordinator._watchdog.x\u01c1_AvailabilityMixin\u01c1_class_default_timeout": {
+        "killed": 7,
+        "score": 1.0,
+        "survived": 0,
+        "total": 7
+      },
+      "custom_components.rtl_433.coordinator._watchdog.x\u01c1_AvailabilityMixin\u01c1_effective_timeout": {
+        "killed": 2,
+        "score": 1.0,
+        "survived": 0,
+        "total": 2
+      },
+      "custom_components.rtl_433.coordinator._watchdog.x\u01c1_AvailabilityMixin\u01c1_gated_device_count": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.coordinator._watchdog.x\u01c1_AvailabilityMixin\u01c1_known_field_keys": {
+        "killed": 13,
+        "score": 0.764706,
+        "survived": 4,
+        "total": 17
+      },
+      "custom_components.rtl_433.coordinator._watchdog.x\u01c1_AvailabilityMixin\u01c1_log_timeout_change": {
+        "killed": 16,
+        "score": 0.941176,
+        "survived": 1,
+        "total": 17
+      },
+      "custom_components.rtl_433.coordinator._watchdog.x\u01c1_AvailabilityMixin\u01c1_resolve_timeout": {
+        "killed": 11,
+        "score": 0.578947,
+        "survived": 8,
+        "total": 19
+      },
+      "custom_components.rtl_433.coordinator._watchdog.x\u01c1_AvailabilityMixin\u01c1is_event_driven_device": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      }
+    },
+    "custom_components/rtl_433/coordinator/base.py": {
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1__init__": {
+        "killed": 63,
+        "score": 0.7,
+        "survived": 27,
+        "total": 90
+      },
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1_dispatch": {
+        "killed": 20,
+        "score": 0.769231,
+        "survived": 6,
+        "total": 26
+      },
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1_emit_hub_update": {
+        "killed": 18,
+        "score": 0.818182,
+        "survived": 4,
+        "total": 22
+      },
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1_maybe_refresh_hub_identity": {
+        "killed": 0,
+        "score": 0.0,
+        "survived": 14,
+        "total": 14
+      },
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1_on_connect": {
+        "killed": 0,
+        "score": 0.0,
+        "survived": 11,
+        "total": 11
+      },
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1_send_cmd": {
+        "killed": 6,
+        "score": 1.0,
+        "survived": 0,
+        "total": 6
+      },
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1async_start": {
+        "killed": 10,
+        "score": 0.588235,
+        "survived": 7,
+        "total": 17
+      },
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1async_stop": {
+        "killed": 7,
+        "score": 0.388889,
+        "survived": 11,
+        "total": 18
+      },
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1forget_device": {
+        "killed": 21,
+        "score": 0.913043,
+        "survived": 2,
+        "total": 23
+      },
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1validate_connection": {
+        "killed": 1,
+        "score": 0.076923,
+        "survived": 12,
+        "total": 13
+      }
+    },
+    "custom_components/rtl_433/device_replace.py": {
+      "custom_components.rtl_433.device_replace.x_async_replace_device": {
+        "killed": 96,
+        "score": 0.90566,
+        "survived": 10,
+        "total": 106
+      }
+    },
+    "custom_components/rtl_433/device_trigger.py": {
+      "custom_components.rtl_433.device_trigger.x__async_attach_event_trigger": {
+        "killed": 19,
+        "score": 1.0,
+        "survived": 0,
+        "total": 19
+      },
+      "custom_components.rtl_433.device_trigger.x__device_field_from_unique_id": {
+        "killed": 12,
+        "score": 1.0,
+        "survived": 0,
+        "total": 12
+      },
+      "custom_components.rtl_433.device_trigger.x__event_types_for_entry": {
+        "killed": 31,
+        "score": 0.911765,
+        "survived": 3,
+        "total": 34
+      },
+      "custom_components.rtl_433.device_trigger.x_async_attach_trigger": {
+        "killed": 11,
+        "score": 1.0,
+        "survived": 0,
+        "total": 11
+      },
+      "custom_components.rtl_433.device_trigger.x_async_get_triggers": {
+        "killed": 20,
+        "score": 1.0,
+        "survived": 0,
+        "total": 20
+      },
+      "custom_components.rtl_433.device_trigger.x_async_validate_trigger_config": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      }
+    },
+    "custom_components/rtl_433/diagnostics.py": {
+      "custom_components.rtl_433.diagnostics.x__resolve_coordinator": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.diagnostics.x__unmatched_field_keys": {
+        "killed": 10,
+        "score": 1.0,
+        "survived": 0,
+        "total": 10
+      },
+      "custom_components.rtl_433.diagnostics.x_async_get_config_entry_diagnostics": {
+        "killed": 116,
+        "score": 1.0,
+        "survived": 0,
+        "total": 116
+      }
+    },
+    "custom_components/rtl_433/entity.py": {
+      "custom_components.rtl_433.entity.x__apply_calibration": {
+        "killed": 17,
+        "score": 1.0,
+        "survived": 0,
+        "total": 17
+      },
+      "custom_components.rtl_433.entity.x__resolve_entity_category": {
+        "killed": 2,
+        "score": 1.0,
+        "survived": 0,
+        "total": 2
+      },
+      "custom_components.rtl_433.entity.x_async_setup_hub_controls": {
+        "killed": 12,
+        "score": 1.0,
+        "survived": 0,
+        "total": 12
+      },
+      "custom_components.rtl_433.entity.x_async_setup_hub_platform": {
+        "killed": 133,
+        "score": 0.863636,
+        "survived": 21,
+        "total": 154
+      },
+      "custom_components.rtl_433.entity.x_async_upsert_device": {
+        "killed": 32,
+        "score": 0.761905,
+        "survived": 10,
+        "total": 42
+      },
+      "custom_components.rtl_433.entity.x_async_upsert_event_types": {
+        "killed": 31,
+        "score": 0.794872,
+        "survived": 8,
+        "total": 39
+      },
+      "custom_components.rtl_433.entity.x_resolve_event_type": {
+        "killed": 8,
+        "score": 1.0,
+        "survived": 0,
+        "total": 8
+      },
+      "custom_components.rtl_433.entity.x\u01c1Rtl433Entity\u01c1__init__": {
+        "killed": 39,
+        "score": 0.906977,
+        "survived": 4,
+        "total": 43
+      },
+      "custom_components.rtl_433.entity.x\u01c1Rtl433Entity\u01c1async_added_to_hass": {
+        "killed": 23,
+        "score": 1.0,
+        "survived": 0,
+        "total": 23
+      },
+      "custom_components.rtl_433.entity.x\u01c1Rtl433Entity\u01c1async_will_remove_from_hass": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.entity.x\u01c1Rtl433HubControl\u01c1__init__": {
+        "killed": 6,
+        "score": 0.857143,
+        "survived": 1,
+        "total": 7
+      },
+      "custom_components.rtl_433.entity.x\u01c1Rtl433HubEntity\u01c1__init__": {
+        "killed": 4,
+        "score": 0.666667,
+        "survived": 2,
+        "total": 6
+      },
+      "custom_components.rtl_433.entity.x\u01c1Rtl433HubEntity\u01c1async_added_to_hass": {
+        "killed": 16,
+        "score": 1.0,
+        "survived": 0,
+        "total": 16
+      },
+      "custom_components.rtl_433.entity.x\u01c1Rtl433HubEntity\u01c1async_will_remove_from_hass": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      }
+    },
+    "custom_components/rtl_433/event.py": {
+      "custom_components.rtl_433.event.x_async_setup_entry": {
+        "killed": 10,
+        "score": 1.0,
+        "survived": 0,
+        "total": 10
+      },
+      "custom_components.rtl_433.event.x\u01c1Rtl433Event\u01c1__init__": {
+        "killed": 38,
+        "score": 0.863636,
+        "survived": 6,
+        "total": 44
+      },
+      "custom_components.rtl_433.event.x\u01c1Rtl433Event\u01c1async_added_to_hass": {
+        "killed": 15,
+        "score": 1.0,
+        "survived": 0,
+        "total": 15
+      }
+    },
+    "custom_components/rtl_433/hub_settings.py": {
+      "custom_components.rtl_433.hub_settings.x__calibration_map": {
+        "killed": 11,
+        "score": 0.916667,
+        "survived": 1,
+        "total": 12
+      },
+      "custom_components.rtl_433.hub_settings.x__explicit_hub_timeout": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.hub_settings.x__hub_availability_timeout": {
+        "killed": 3,
+        "score": 1.0,
+        "survived": 0,
+        "total": 3
+      },
+      "custom_components.rtl_433.hub_settings.x__hub_connection": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.hub_settings.x__hub_ignored_devices": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.hub_settings.x__hub_manage_settings": {
+        "killed": 9,
+        "score": 1.0,
+        "survived": 0,
+        "total": 9
+      },
+      "custom_components.rtl_433.hub_settings.x__hub_secure": {
+        "killed": 6,
+        "score": 0.75,
+        "survived": 2,
+        "total": 8
+      }
+    },
+    "custom_components/rtl_433/library.py": {
+      "custom_components.rtl_433.library.x__async_load_library": {
+        "killed": 11,
+        "score": 1.0,
+        "survived": 0,
+        "total": 11
+      },
+      "custom_components.rtl_433.library.x__merge_entry_library": {
+        "killed": 26,
+        "score": 1.0,
+        "survived": 0,
+        "total": 26
+      }
+    },
+    "custom_components/rtl_433/migration.py": {
+      "custom_components.rtl_433.migration.x__cleanup_phantom_unknown_device": {
+        "killed": 19,
+        "score": 1.0,
+        "survived": 0,
+        "total": 19
+      },
+      "custom_components.rtl_433.migration.x__disable_existing_last_seen_sensors": {
+        "killed": 17,
+        "score": 1.0,
+        "survived": 0,
+        "total": 17
+      },
+      "custom_components.rtl_433.migration.x__enable_last_seen_for_event_driven_devices": {
+        "killed": 43,
+        "score": 0.877551,
+        "survived": 6,
+        "total": 49
+      },
+      "custom_components.rtl_433.migration.x__migrate_doorbell_event_types": {
+        "killed": 39,
+        "score": 0.975,
+        "survived": 1,
+        "total": 40
+      },
+      "custom_components.rtl_433.migration.x__migrate_hub_entry": {
+        "killed": 47,
+        "score": 0.979167,
+        "survived": 1,
+        "total": 48
+      },
+      "custom_components.rtl_433.migration.x__migrate_motion_event_to_binary_sensor": {
+        "killed": 47,
+        "score": 0.810345,
+        "survived": 11,
+        "total": 58
+      },
+      "custom_components.rtl_433.migration.x__read_legacy_overrides": {
+        "killed": 14,
+        "score": 0.636364,
+        "survived": 8,
+        "total": 22
+      },
+      "custom_components.rtl_433.migration.x__rehome_device_objects": {
+        "killed": 22,
+        "score": 1.0,
+        "survived": 0,
+        "total": 22
+      },
+      "custom_components.rtl_433.migration.x_async_migrate_entry": {
+        "killed": 171,
+        "score": 0.904762,
+        "survived": 18,
+        "total": 189
+      }
+    },
+    "custom_components/rtl_433/number.py": {
+      "custom_components.rtl_433.number.x_async_setup_entry": {
+        "killed": 10,
+        "score": 1.0,
+        "survived": 0,
+        "total": 10
+      },
+      "custom_components.rtl_433.number.x\u01c1Rtl433NumberControl\u01c1__init__": {
+        "killed": 12,
+        "score": 0.923077,
+        "survived": 1,
+        "total": 13
+      },
+      "custom_components.rtl_433.number.x\u01c1Rtl433NumberControl\u01c1async_set_native_value": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      }
+    },
+    "custom_components/rtl_433/options_flow.py": {
+      "custom_components.rtl_433.options_flow.x__pending_label": {
+        "killed": 16,
+        "score": 0.888889,
+        "survived": 2,
+        "total": 18
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1_apply_add_and_ignore": {
+        "killed": 18,
+        "score": 0.782609,
+        "survived": 5,
+        "total": 23
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1_coordinator": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1_device_label": {
+        "killed": 8,
+        "score": 1.0,
+        "survived": 0,
+        "total": 8
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1_replacement_label": {
+        "killed": 9,
+        "score": 1.0,
+        "survived": 0,
+        "total": 9
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1_replacement_model": {
+        "killed": 16,
+        "score": 0.941176,
+        "survived": 1,
+        "total": 17
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1_write_device_record": {
+        "killed": 23,
+        "score": 1.0,
+        "survived": 0,
+        "total": 23
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_add_devices": {
+        "killed": 64,
+        "score": 0.876712,
+        "survived": 9,
+        "total": 73
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_calibration": {
+        "killed": 63,
+        "score": 0.875,
+        "survived": 9,
+        "total": 72
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_device": {
+        "killed": 32,
+        "score": 0.914286,
+        "survived": 3,
+        "total": 35
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_device_settings": {
+        "killed": 69,
+        "score": 0.704082,
+        "survived": 29,
+        "total": 98
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_hub": {
+        "killed": 36,
+        "score": 0.857143,
+        "survived": 6,
+        "total": 42
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_ignored_devices": {
+        "killed": 60,
+        "score": 0.8,
+        "survived": 15,
+        "total": 75
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_init": {
+        "killed": 16,
+        "score": 0.888889,
+        "survived": 2,
+        "total": 18
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_mappings": {
+        "killed": 44,
+        "score": 0.785714,
+        "survived": 12,
+        "total": 56
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_replace": {
+        "killed": 32,
+        "score": 0.914286,
+        "survived": 3,
+        "total": 35
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_replace_target": {
+        "killed": 113,
+        "score": 0.933884,
+        "survived": 8,
+        "total": 121
+      }
+    },
+    "custom_components/rtl_433/repairs.py": {
+      "custom_components.rtl_433.repairs.x__advisory_dismissed": {
+        "killed": 2,
+        "score": 1.0,
+        "survived": 0,
+        "total": 2
+      },
+      "custom_components.rtl_433.repairs.x__event_time_advisory_dismissed": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.repairs.x__event_time_issue_id": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.repairs.x__sample_rate_advisory_dismissed": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.repairs.x__sample_rate_issue_id": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.repairs.x__sample_rate_looks_low": {
+        "killed": 21,
+        "score": 1.0,
+        "survived": 0,
+        "total": 21
+      },
+      "custom_components.rtl_433.repairs.x__unreachable_issue_id": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.repairs.x_async_create_fix_flow": {
+        "killed": 9,
+        "score": 1.0,
+        "survived": 0,
+        "total": 9
+      },
+      "custom_components.rtl_433.repairs.x\u01c1EventTimeRepairFlow\u01c1__init__": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.repairs.x\u01c1EventTimeRepairFlow\u01c1async_step_confirm": {
+        "killed": 25,
+        "score": 1.0,
+        "survived": 0,
+        "total": 25
+      },
+      "custom_components.rtl_433.repairs.x\u01c1HubRadioReplaceRepairFlow\u01c1__init__": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.repairs.x\u01c1HubRadioReplaceRepairFlow\u01c1async_step_confirm": {
+        "killed": 131,
+        "score": 1.0,
+        "survived": 0,
+        "total": 131
+      },
+      "custom_components.rtl_433.repairs.x\u01c1SampleRateRepairFlow\u01c1__init__": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.repairs.x\u01c1SampleRateRepairFlow\u01c1async_step_apply": {
+        "killed": 21,
+        "score": 1.0,
+        "survived": 0,
+        "total": 21
+      },
+      "custom_components.rtl_433.repairs.x\u01c1SampleRateRepairFlow\u01c1async_step_ignore": {
+        "killed": 14,
+        "score": 1.0,
+        "survived": 0,
+        "total": 14
+      },
+      "custom_components.rtl_433.repairs.x\u01c1SampleRateRepairFlow\u01c1async_step_init": {
+        "killed": 17,
+        "score": 1.0,
+        "survived": 0,
+        "total": 17
+      }
+    },
+    "custom_components/rtl_433/sdr_settings.py": {
+      "custom_components.rtl_433.sdr_settings.x__adapt": {
+        "killed": 0,
+        "score": 0.0,
+        "survived": 16,
+        "total": 16
+      }
+    },
+    "custom_components/rtl_433/select.py": {
+      "custom_components.rtl_433.select.x_async_setup_entry": {
+        "killed": 10,
+        "score": 1.0,
+        "survived": 0,
+        "total": 10
+      },
+      "custom_components.rtl_433.select.x\u01c1Rtl433SelectControl\u01c1__init__": {
+        "killed": 9,
+        "score": 1.0,
+        "survived": 0,
+        "total": 9
+      },
+      "custom_components.rtl_433.select.x\u01c1Rtl433SelectControl\u01c1async_select_option": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      }
+    },
+    "custom_components/rtl_433/sensor.py": {
+      "custom_components.rtl_433.sensor.x__center_frequency_mhz": {
+        "killed": 8,
+        "score": 1.0,
+        "survived": 0,
+        "total": 8
+      },
+      "custom_components.rtl_433.sensor.x__frames": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.sensor.x__gain": {
+        "killed": 9,
+        "score": 1.0,
+        "survived": 0,
+        "total": 9
+      },
+      "custom_components.rtl_433.sensor.x__meta": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.sensor.x__restorable_value": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.sensor.x_async_setup_entry": {
+        "killed": 23,
+        "score": 1.0,
+        "survived": 0,
+        "total": 23
+      },
+      "custom_components.rtl_433.sensor.x\u01c1Rtl433HubSensor\u01c1__init__": {
+        "killed": 9,
+        "score": 0.9,
+        "survived": 1,
+        "total": 10
+      },
+      "custom_components.rtl_433.sensor.x\u01c1Rtl433LastSeenSensor\u01c1__init__": {
+        "killed": 13,
+        "score": 0.764706,
+        "survived": 4,
+        "total": 17
+      },
+      "custom_components.rtl_433.sensor.x\u01c1Rtl433LastSeenSensor\u01c1_async_restore_state": {
+        "killed": 13,
+        "score": 0.722222,
+        "survived": 5,
+        "total": 18
+      },
+      "custom_components.rtl_433.sensor.x\u01c1Rtl433Sensor\u01c1__init__": {
+        "killed": 27,
+        "score": 0.964286,
+        "survived": 1,
+        "total": 28
+      },
+      "custom_components.rtl_433.sensor.x\u01c1Rtl433Sensor\u01c1_apply_value": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.sensor.x\u01c1Rtl433Sensor\u01c1_async_restore_state": {
+        "killed": 29,
+        "score": 0.966667,
+        "survived": 1,
+        "total": 30
+      },
+      "custom_components.rtl_433.sensor.x\u01c1Rtl433Sensor\u01c1_drop_stale_temperature_unit_override": {
+        "killed": 21,
+        "score": 1.0,
+        "survived": 0,
+        "total": 21
+      },
+      "custom_components.rtl_433.sensor.x\u01c1Rtl433Sensor\u01c1_to_native_unit": {
+        "killed": 18,
+        "score": 0.947368,
+        "survived": 1,
+        "total": 19
+      }
+    },
+    "custom_components/rtl_433/settings.py": {
+      "custom_components.rtl_433.settings.x_build_device_data": {
+        "killed": 25,
+        "score": 0.862069,
+        "survived": 4,
+        "total": 29
+      },
+      "custom_components.rtl_433.settings.x_build_device_options": {
+        "killed": 23,
+        "score": 0.958333,
+        "survived": 1,
+        "total": 24
+      },
+      "custom_components.rtl_433.settings.x_build_hub_options": {
+        "killed": 7,
+        "score": 0.875,
+        "survived": 1,
+        "total": 8
+      },
+      "custom_components.rtl_433.settings.x_build_mappings_data": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.settings.x_commodity_hint": {
+        "killed": 24,
+        "score": 1.0,
+        "survived": 0,
+        "total": 24
+      },
+      "custom_components.rtl_433.settings.x_device_clear_delay": {
+        "killed": 24,
+        "score": 1.0,
+        "survived": 0,
+        "total": 24
+      },
+      "custom_components.rtl_433.settings.x_device_defaults": {
+        "killed": 42,
+        "score": 0.823529,
+        "survived": 9,
+        "total": 51
+      },
+      "custom_components.rtl_433.settings.x_device_label": {
+        "killed": 14,
+        "score": 1.0,
+        "survived": 0,
+        "total": 14
+      },
+      "custom_components.rtl_433.settings.x_entry_registry": {
+        "killed": 13,
+        "score": 1.0,
+        "survived": 0,
+        "total": 13
+      },
+      "custom_components.rtl_433.settings.x_hub_defaults": {
+        "killed": 2,
+        "score": 1.0,
+        "survived": 0,
+        "total": 2
+      },
+      "custom_components.rtl_433.settings.x_is_motion_bearing": {
+        "killed": 23,
+        "score": 0.793103,
+        "survived": 6,
+        "total": 29
+      }
+    },
+    "custom_components/rtl_433/switch.py": {
+      "custom_components.rtl_433.switch.x_async_setup_entry": {
+        "killed": 10,
+        "score": 1.0,
+        "survived": 0,
+        "total": 10
+      },
+      "custom_components.rtl_433.switch.x\u01c1Rtl433SwitchControl\u01c1__init__": {
+        "killed": 6,
+        "score": 1.0,
+        "survived": 0,
+        "total": 6
+      },
+      "custom_components.rtl_433.switch.x\u01c1Rtl433SwitchControl\u01c1async_turn_off": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.switch.x\u01c1Rtl433SwitchControl\u01c1async_turn_on": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      }
+    },
+    "custom_components/rtl_433/websocket_api.py": {
+      "custom_components.rtl_433.websocket_api.x__async_run_action": {
+        "killed": 29,
+        "score": 0.966667,
+        "survived": 1,
+        "total": 30
+      },
+      "custom_components.rtl_433.websocket_api.x__mappings_yaml": {
+        "killed": 10,
+        "score": 0.625,
+        "survived": 6,
+        "total": 16
+      },
+      "custom_components.rtl_433.websocket_api.x__reading_icon": {
+        "killed": 11,
+        "score": 0.323529,
+        "survived": 23,
+        "total": 34
+      },
+      "custom_components.rtl_433.websocket_api.x__reading_name": {
+        "killed": 9,
+        "score": 0.45,
+        "survived": 11,
+        "total": 20
+      },
+      "custom_components.rtl_433.websocket_api.x__reading_state": {
+        "killed": 38,
+        "score": 0.863636,
+        "survived": 6,
+        "total": 44
+      },
+      "custom_components.rtl_433.websocket_api.x__with_sorted_ranges": {
+        "killed": 12,
+        "score": 0.75,
+        "survived": 4,
+        "total": 16
+      },
+      "custom_components.rtl_433.websocket_api.x_async_preload_entity_metadata": {
+        "killed": 36,
+        "score": 0.734694,
+        "survived": 13,
+        "total": 49
+      }
+    }
+  },
   "tolerance_fraction": 0.02,
   "tolerance_mutants": 3
 }
