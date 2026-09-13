@@ -27,19 +27,31 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | `17-discovery-panel.png` | The **discovered devices** page (`/rtl_433/discovered`): the location's union of candidates, one card per heard device — however many receivers heard it — with its sighting count, signal level, the receivers that heard it, latest readings and per-card Replace / Ignore / Add buttons |
 | `16-ignored-devices.png` | The same page with the ignored section revealed, showing the ignored leak detector and its Un-ignore button |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
-| `05-mapping-overrides.png` | The **Device mappings** page: the YAML editor pre-filled with an example per-receiver override |
+| `05-mapping-overrides.png` | The **Device mappings** page: the YAML editor pre-filled with an example per-location override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
 | `07-location-settings.png` | The **Location settings** page: the availability-timeout choice every device at the location starts from |
 | `07-receiver-settings.png` | One receiver's **Receiver settings** page: the manage-radio toggle, headed by the receiver it belongs to |
 | `18-coverage.png` | The **Signal coverage** page: one card per merged device, one row per receiver, with the level and age each one last heard it at |
 | `08-device-settings.png` | The **Device settings** page for the SCMplus meter: the picker, the timeout override, the commodity pre-filled to `gas`, and the base unit + scale it reveals |
-| `09-home-hero.png` | The integration overview: one receiver with its nested devices (docs home-page hero) |
+| `09-home-hero.png` | The integration overview: a location with its receiver and nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
 | `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
-| `14-receiver-noise.png` | The receiver device's **Diagnostic** card with the radio-noise sensors (Noise level / Minimum detection level) populated from real "Auto Level" log frames |
+| `14-receiver-noise.png` | One receiver device's **Diagnostic** card with the radio-noise sensors (Noise level / Minimum detection level) populated from real "Auto Level" log frames |
 
 Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
 `screenshots/` output directory itself is gitignored.
+
+> **The harness runs ONE receiver, and the shots show one.** There is a single
+> `rtl_433` container and a single `ws-bridge`, so every capture is of a location
+> holding one receiver: the **Receivers** card has one row, the discovered cards
+> name one receiver under *Heard by*, **Signal coverage** has one row per device,
+> and each device carries one set of `RSSI` / `SNR` / `Last seen` entities. That
+> is a faithful picture of the common install, and it is what the docs' alt text
+> describes — but it does **not** exercise the union, the dedup debounce, or the
+> merged-availability OR. Those are covered by the Python unit tests, not here.
+> Adding a second bridge + decoder pair to `docker-compose.yml` and a second
+> receiver subentry to the `add` stage would let the shots show the merge; it has
+> not been done.
 
 The doorbell / energy meter / SCMplus gas meter / door / leak devices in the richer shots come from
 `ws-bridge.mjs` replaying the project fixtures in `tests/fixtures/` (configured
@@ -70,7 +82,7 @@ light one).
 
 - Docker + Docker Compose (tested on Docker 29.x, Compose v5), `arm64` or `amd64`
 - Node 22+ (for the Playwright driver, the bridge, and the WS probe)
-- Network egress to GitHub, ghcr.io, Docker Receiver, and the Playwright CDN
+- Network egress to GitHub, ghcr.io, Docker Hub, and the Playwright CDN
 
 One-time setup:
 
@@ -188,7 +200,7 @@ state, so the harness leaves them alone.
 ## Why every stage drives the panel
 
 The panel is registered with `config_panel_domain`, so Home Assistant turns the
-receiver's Configure control into a link to it and **nothing opens the options flow**.
+location's Configure control into a link to it and **nothing opens the options flow**.
 That is deliberate now, but it was first discovered by accident: for one commit
 it was set while the settings still lived only in the flow, and every one of
 those steps lost its only entry point for real users while passing every Python
@@ -263,6 +275,6 @@ battery indicator in one device.
 | `ws-probe.mjs` | Bounded readiness probe: connects to `/ws`, exits 0 on a decoded event |
 | `ha-config/configuration.yaml` | Minimal HA seed config (debug logging for the integration) |
 | `ha-onboard.mjs` | Seeds HA onboarding (owner + token) via the REST API |
-| `screenshot.mjs` | Playwright driver: login, add receiver, capture the documentation screenshots |
+| `screenshot.mjs` | Playwright driver: login, add the location and its receiver, capture the documentation screenshots |
 | `run-harness.sh` | Orchestrator with background+poll readiness gating |
 | `rtl_433_tests/` | Pinned, sparse git submodule with the `.cu8` captures (not vendored) |
