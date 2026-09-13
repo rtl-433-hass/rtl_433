@@ -18,6 +18,7 @@ from pyrtl_433 import TimePrecision
 from pyrtl_433.library import FieldDescriptor, Registry, load_library
 
 from custom_components.rtl_433.const import (
+    CONF_AVAILABILITY_TIMEOUT,
     CONF_HOST,
     CONF_PATH,
     CONF_PORT,
@@ -31,7 +32,7 @@ from custom_components.rtl_433.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 from homeassistant.core import HomeAssistant
-from tests.conftest import receiver_id
+from tests.conftest import build_receiver_subentry, receiver_id, receiver_subentry
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -317,6 +318,79 @@ async def test_diag_coordinator_absent_entry_block_has_options(
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert "options" in diag["entry"]
     assert diag["entry"]["options"] == {"some_opt": 42}
+
+
+async def test_diag_entry_block_reports_the_locations_own_data(
+    hass: HomeAssistant, receiver_entry_builder
+) -> None:
+    """entry block must include key 'data' carrying the location's stored data.
+
+    The location entry holds the sensor-facing settings (the receivers' own
+    connection records live in the ``receivers`` block below), so a dump that
+    loses this key loses the availability timeout a support report is read for.
+    """
+    entry = receiver_entry_builder(availability_timeout=900)
+    entry.add_to_hass(hass)
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert "data" in diag["entry"]
+    assert diag["entry"]["data"] == {CONF_AVAILABILITY_TIMEOUT: 900}
+    assert diag["entry"]["data"] == dict(entry.data)
+
+
+async def test_diag_receivers_block_has_one_row_per_receiver(
+    hass: HomeAssistant, receiver_entry_builder
+) -> None:
+    """A location's receivers are dumped in order, one row each.
+
+    This is the first question a multi-receiver report raises -- how many
+    receivers does this location have and where does each point -- and the
+    connection block below only ever describes one of them.
+    """
+    entry = receiver_entry_builder(
+        receivers=[
+            build_receiver_subentry(host="attic.local", port=8433),
+            build_receiver_subentry(host="shed.local", port=8434),
+        ]
+    )
+    entry.add_to_hass(hass)
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert [row["receiver_id"] for row in diag["receivers"]] == [
+        receiver_id(entry, 0),
+        receiver_id(entry, 1),
+    ]
+
+
+async def test_diag_receivers_block_row_keys_are_exact(
+    hass: HomeAssistant, receiver_entry_builder
+) -> None:
+    """Each receiver row is keyed receiver_id / title / unique_id / data.
+
+    The stable identity (``unique_id``) is what tells a reader whether two
+    receivers are two radios or one radio reached two ways, and the title is what
+    names them in the UI the report is written about.
+    """
+    entry = receiver_entry_builder(
+        receivers=[
+            build_receiver_subentry(host="attic.local", port=8433),
+            build_receiver_subentry(host="shed.local", port=8434),
+        ]
+    )
+    entry.add_to_hass(hass)
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+
+    attic, shed = diag["receivers"]
+    assert set(attic) == {"receiver_id", "title", "unique_id", "data"}
+    assert attic["title"] == receiver_subentry(entry, 0).title
+    assert shed["title"] == receiver_subentry(entry, 1).title
+    assert attic["title"] != shed["title"]
+    assert attic["unique_id"] == receiver_subentry(entry, 0).unique_id
+    assert shed["unique_id"] == receiver_subentry(entry, 1).unique_id
+    assert attic["unique_id"] != shed["unique_id"]
+    # Ports distinguish the rows and are not redacted; the hosts are.
+    assert [attic["data"][CONF_PORT], shed["data"][CONF_PORT]] == [8433, 8434]
+    assert attic["data"][CONF_HOST] != "attic.local"
+    assert shed["data"][CONF_HOST] != "shed.local"
 
 
 async def test_diag_coordinator_absent_uses_domain_key(

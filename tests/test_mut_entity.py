@@ -8,6 +8,7 @@ removed statements, and negated conditions.
 from __future__ import annotations
 
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from freezegun import freeze_time
@@ -24,10 +25,13 @@ from custom_components.rtl_433.const import (
     COMMODITY_WATER,
     CONF_DEVICES,
     CONF_MODEL,
+    CONF_USER_MAPPINGS,
+    DATA_ENTRY_LIBRARY,
     DEVICE_CALIBRATION,
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DOMAIN,
+    signal_device_update,
     signal_receiver_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
@@ -36,6 +40,7 @@ from custom_components.rtl_433.entity import (
     Rtl433Entity,
     _apply_calibration,
     _resolve_entity_category,
+    async_setup_receiver_platform,
     async_upsert_device,
     async_upsert_event_types,
 )
@@ -44,7 +49,12 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
-from tests.conftest import receiver_id, receiver_scope
+from tests.conftest import (
+    build_receiver_entry,
+    build_receiver_subentry,
+    receiver_id,
+    receiver_scope,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -1997,3 +2007,325 @@ async def test_baseline_sets_available_true(hass, receiver_entry_builder):
     # The baseline should have set available to True for the device
     assert coordinator.available.get(device_key) is True
     assert device_key in coordinator.last_seen
+
+
+# ---------------------------------------------------------------------------
+# The devices map is kept current from every receiver's live view
+# ---------------------------------------------------------------------------
+
+
+async def _two_receiver_location(hass, devices):
+    """Set up one location holding two receivers, seeded with ``devices``."""
+    location = build_receiver_entry(
+        availability_timeout=600,
+        devices=devices,
+        receivers=[
+            build_receiver_subentry(host="attic.local"),
+            build_receiver_subentry(host="garage.local"),
+        ],
+    )
+    location.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(location.entry_id)
+    await hass.async_block_till_done()
+    return location
+
+
+class _StubEntity:
+    """Stand-in for a platform entity, recording what the setup decided to build.
+
+    The platform helper is what these tests are about, so the entities it builds
+    are observed directly rather than through a platform's registration: what
+    matters is which (device, receiver, field) combinations it decided to create
+    and how many times.
+    """
+
+    def __init__(self, coordinator, receiver_id, device_key, model, descriptor):
+        self.receiver_id = receiver_id
+        self.device_key = device_key
+        self.model = model
+        self.object_suffix = descriptor.object_suffix
+
+
+def _built(hass, entry, added, platform="sensor", **kwargs):
+    """Run one platform's setup, collecting the entities into ``added``."""
+    return async_setup_receiver_platform(
+        hass,
+        entry,
+        lambda entities, *args, **kw: added.extend(entities),
+        platform,
+        _StubEntity,
+        **kwargs,
+    )
+
+
+async def test_a_field_first_reported_after_setup_gains_its_entity(hass):
+    """A field a receiver starts reporting later still gets an entity.
+
+    Sensors reveal their fields over time -- a battery reading arrives on a frame
+    hours after the first temperature -- so each device keeps a listener for its
+    own updates, and the entity it builds carries the device's model like any
+    other.
+    """
+    device_key = "Acurite-606TX-42"
+    location = await _two_receiver_location(
+        hass,
+        {
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+
+    added: list = []
+    await _built(hass, location, added)
+    await hass.async_block_till_done()
+    added.clear()
+
+    async_dispatcher_send(
+        hass,
+        signal_device_update(receiver_id(location, 0), device_key),
+        SimpleNamespace(fields={"temperature_C": 21.4, "battery_ok": 1}),
+    )
+    await hass.async_block_till_done()
+
+    assert [
+        (entity.device_key, entity.object_suffix, entity.model) for entity in added
+    ] == [(device_key, "B", "Acurite-606TX")]
+
+
+async def test_a_model_scoped_user_mapping_wins_for_that_model(
+    hass, receiver_entry_builder
+):
+    """A mapping written for one model overrides the global one for its devices.
+
+    That is the whole point of the ``models:`` block: a field that means
+    something different on one decoder -- a raw counter that is litres on this
+    meter and gallons on that one -- is described per model, and the entity a
+    device of that model gets has to be the model's descriptor, not the global
+    fallback.
+    """
+    device_key = "Acurite-606TX-42"
+    receiver = receiver_entry_builder(
+        availability_timeout=600,
+        # Past the minor-2 step, which seeds the mappings from the legacy file
+        # and would overwrite the ones written here.
+        minor_version=2,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+    receiver.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        receiver,
+        data={
+            **receiver.data,
+            CONF_USER_MAPPINGS: {
+                "models": {
+                    "Acurite-606TX": {
+                        "temperature_C": {
+                            "platform": "sensor",
+                            "name": "Kelvin",
+                            "object_suffix": "K",
+                            "unit_of_measurement": "K",
+                        }
+                    }
+                }
+            },
+        },
+    )
+    assert await hass.config_entries.async_setup(receiver.entry_id)
+    await hass.async_block_till_done()
+
+    added: list = []
+    await _built(hass, receiver, added)
+    await hass.async_block_till_done()
+
+    assert [entity.object_suffix for entity in added] == ["K"]
+
+
+async def test_an_unmanaged_receiver_does_not_silence_its_neighbours_controls(hass):
+    """A receiver with management off contributes no controls, and only its own.
+
+    The radio controls are per receiver, so one server the user has opted out of
+    managing must leave the other's set intact -- skipping it, not stopping the
+    walk.
+    """
+    location = build_receiver_entry(
+        availability_timeout=600,
+        receivers=[
+            build_receiver_subentry(host="attic.local", manage_settings=False),
+            build_receiver_subentry(host="garage.local", manage_settings=True),
+        ],
+    )
+    location.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(location.entry_id)
+    await hass.async_block_till_done()
+
+    ent_reg = er.async_get(hass)
+    unmanaged = f"{receiver_scope(location, 0)}:center_frequency"
+    managed = f"{receiver_scope(location, 1)}:center_frequency"
+    assert ent_reg.async_get_entity_id("number", DOMAIN, unmanaged) is None
+    assert ent_reg.async_get_entity_id("number", DOMAIN, managed) is not None
+
+
+async def test_platform_setup_of_a_location_with_no_devices_adds_nothing(
+    hass, receiver_entry_builder
+):
+    """A location that has adopted nothing sets its platforms up quietly.
+
+    Every install starts here, and the devices-map pass has to read an absent
+    map as "no devices" rather than raising -- a platform that dies in setup
+    takes every later device with it while the entry still loads, so the failure
+    would be invisible until a sensor never appeared.
+    """
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+    assert CONF_DEVICES not in receiver.data
+
+    added: list = []
+    await _built(hass, receiver, added)
+    await hass.async_block_till_done()
+
+    assert added == []
+    assert CONF_DEVICES not in receiver.data
+
+
+async def test_platform_setup_before_the_library_is_cached_uses_the_shipped_one(
+    hass, receiver_entry_builder
+):
+    """A platform forwarded before the merged library is cached still builds.
+
+    The per-entry registry is the shipped library plus this location's user
+    mappings; with none cached yet the lookup falls back to the shipped library
+    rather than raising, so the entities exist and a later reload simply rebuilds
+    them against the merged registry.
+    """
+    device_key = "Acurite-606TX-42"
+    receiver = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+    hass.data[DOMAIN].pop(DATA_ENTRY_LIBRARY, None)
+
+    added: list = []
+    await _built(hass, receiver, added)
+    await hass.async_block_till_done()
+
+    assert [entity.object_suffix for entity in added] == ["T"]
+
+
+async def test_a_receiver_control_is_named_by_the_setting_it_drives(
+    hass, receiver_entry_builder
+):
+    """Each radio control carries its setting's name, not the device's.
+
+    A nameless control inherits the receiver device's name, so the seven of them
+    would render as seven identically-labelled rows on one page.
+    """
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+    ent_reg = er.async_get(hass)
+    eid = ent_reg.async_get_entity_id(
+        "number", DOMAIN, f"{receiver_scope(receiver)}:center_frequency"
+    )
+    assert eid is not None
+    assert ent_reg.async_get(eid).original_name == "Center frequency"
+
+
+# ---------------------------------------------------------------------------
+# async_upsert_device / async_upsert_event_types: records written from nothing
+# ---------------------------------------------------------------------------
+
+
+async def test_upsert_device_records_an_empty_model_when_none_is_known_yet(
+    hass, receiver_entry_builder
+):
+    """A device whose model has not decoded is stored with an empty model.
+
+    ``""`` rather than ``None`` because the rest of the integration reads the
+    model as a string -- it is formatted into device names and looked up against
+    the library -- and a ``None`` there surfaces as the word "None" on the
+    device page.
+    """
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+
+    await async_upsert_device(hass, receiver, "Unknown-7", fields=["temperature_C"])
+    await hass.async_block_till_done()
+
+    assert receiver.data[CONF_DEVICES]["Unknown-7"] == {
+        CONF_MODEL: "",
+        DEVICE_FIELDS: ["temperature_C"],
+    }
+
+
+async def test_upsert_device_adds_fields_to_a_record_that_carries_none(
+    hass, receiver_entry_builder
+):
+    """A stored record with no fields key gains them rather than raising."""
+    device_key = "Acurite-606TX-42"
+    receiver = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        devices={device_key: {CONF_MODEL: "Acurite-606TX"}},
+    )
+
+    await async_upsert_device(hass, receiver, device_key, fields=["temperature_C"])
+    await hass.async_block_till_done()
+
+    assert receiver.data[CONF_DEVICES][device_key][DEVICE_FIELDS] == ["temperature_C"]
+
+
+async def test_upsert_event_types_seeds_a_device_the_map_has_never_held(
+    hass, receiver_entry_builder
+):
+    """Event types can arrive before the device has any record at all.
+
+    The first frame from a remote creates the record and its event-type list in
+    one go; requiring a prior record would drop the very first press.
+    """
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+    assert CONF_DEVICES not in receiver.data
+
+    await async_upsert_event_types(hass, receiver, "Generic-Remote-9", "button", ["A"])
+    await hass.async_block_till_done()
+
+    assert receiver.data[CONF_DEVICES]["Generic-Remote-9"] == {
+        CONF_MODEL: "",
+        DEVICE_FIELDS: [],
+        DEVICE_EVENT_TYPES: {"button": ["A"]},
+    }
+
+
+# ---------------------------------------------------------------------------
+# A descriptor's icon reaches the entity
+# ---------------------------------------------------------------------------
+
+
+def _icon_entity(icon: str | None) -> Rtl433Entity:
+    """Build a bare entity for a descriptor carrying (or not carrying) an icon."""
+    descriptor = FieldDescriptor(
+        field_key="MeterType",
+        platform="sensor",
+        name="Meter type",
+        object_suffix="metertype",
+        icon=icon,
+    )
+    return Rtl433Entity(MagicMock(), "receiver", "ERT-SCM-1", "ERT-SCM", descriptor)
+
+
+def test_a_descriptor_icon_becomes_the_entitys_icon():
+    """The library's icon is what the frontend shows for the field."""
+    assert _icon_entity("mdi:meter-gas").icon == "mdi:meter-gas"
+
+
+def test_a_descriptor_without_an_icon_leaves_the_choice_to_home_assistant():
+    """No icon in the library means no override: core picks by device class."""
+    assert _icon_entity(None).icon is None
