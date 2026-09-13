@@ -24,10 +24,10 @@ end-to-end, and compare the before/after identity sets:
 Contract templates encoded here (see COMPATIBILITY_CONTRACT.md §2, §3):
 
 - per-device field entity ``unique_id`` = ``f"{entry_id}:{device_key}:{suffix}"``
-- hub control entity ``unique_id`` = ``f"{entry_id}:hub:{suffix}"``
-- hub device ``identifiers`` = ``{(DOMAIN, entry_id)}``
+- receiver control entity ``unique_id`` = ``f"{entry_id}:hub:{suffix}"``
+- receiver device ``identifiers`` = ``{(DOMAIN, entry_id)}``
 - per-device ``identifiers`` = ``{(DOMAIN, f"{entry_id}:{device_key}")}`` with
-  ``via_device_id`` set to the hub device's id
+  ``via_device_id`` set to the receiver device's id
 """
 
 from __future__ import annotations
@@ -150,15 +150,15 @@ async def test_latest_entry_roundtrip_preserves_registry_identity(hass):
     dev_reg = dr.async_get(hass)
     eid = entry.entry_id
 
-    # --- Devices: hub + one nested device per device_key (contract §3) ---
-    hub_device = dev_reg.async_get_or_create(
+    # --- Devices: receiver + one nested device per device_key (contract §3) ---
+    receiver_device = dev_reg.async_get_or_create(
         config_entry_id=eid, identifiers={(DOMAIN, eid)}
     )
     for device_key in (device_a, device_b):
         dev_reg.async_get_or_create(
             config_entry_id=eid,
             identifiers={(DOMAIN, f"{eid}:{device_key}")},
-            via_device_id=hub_device.id,
+            via_device_id=receiver_device.id,
         )
 
     # --- Entities: per-device field entities (contract §2) ---
@@ -174,7 +174,7 @@ async def test_latest_entry_roundtrip_preserves_registry_identity(hass):
     ent_reg.async_get_or_create(
         "event", DOMAIN, f"{eid}:{device_b}:button", config_entry=entry
     )
-    # --- Entities: hub controls + connectivity (contract §2) ---
+    # --- Entities: receiver controls + connectivity (contract §2) ---
     ent_reg.async_get_or_create(
         "number", DOMAIN, f"{eid}:hub:frequency", config_entry=entry
     )
@@ -185,7 +185,7 @@ async def test_latest_entry_roundtrip_preserves_registry_identity(hass):
     before_entities = _entity_identity_set(ent_reg)
     before_devices = _device_identifier_map(dev_reg)
     assert len(before_entities) == 6
-    assert len(before_devices) == 3  # hub + two nested devices
+    assert len(before_devices) == 3  # receiver + two nested devices
 
     result = await async_migrate_entry(hass, entry)
 
@@ -212,22 +212,22 @@ async def test_latest_entry_roundtrip_preserves_registry_identity(hass):
 
 
 async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(hass):
-    """A legacy v1 hub (with a v1 child device entry) migrates to v2/m7.
+    """A legacy v1 receiver (with a v1 child device entry) migrates to v2/m7.
 
     Asserts the terminal schema is exactly ``version=2, minor_version=8``, that
     the version never decreases along the path (monotonic, non-downgrading), and
     that every pre-existing registry device/entity survives — re-homed onto the
-    hub, never destroyed or duplicated.
+    receiver, never destroyed or duplicated.
     """
-    hub_id = "hub-entry-legacy"
+    receiver_id = "receiver-entry-legacy"
     child_id = "child-entry-legacy"
     device_key = "Acurite-Tower-9001"
 
-    hub = MockConfigEntry(
+    receiver = MockConfigEntry(
         domain=DOMAIN,
         title="rtl_433 (legacy.local)",
         version=1,
-        entry_id=hub_id,
+        entry_id=receiver_id,
         data={
             CONF_HOST: "legacy.local",
             CONF_PORT: 8433,
@@ -242,56 +242,61 @@ async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(ha
         entry_id=child_id,
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_RECEIVER_ENTRY_ID: hub_id,
+            CONF_RECEIVER_ENTRY_ID: receiver_id,
             CONF_DEVICE_KEY: device_key,
             CONF_MODEL: "Acurite-Tower",
         },
         options={LEGACY_CONF_OBSERVED_FIELDS: ["temperature_C", "humidity"]},
     )
-    hub.add_to_hass(hass)
+    receiver.add_to_hass(hass)
     child.add_to_hass(hass)
 
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
 
-    # Hub device is owned by the hub entry; nested device + its entities are owned
+    # Receiver device is owned by the receiver entry; nested device + its entities are owned
     # by the *child* entry, exactly as the 0.1.0 per-device model created them.
-    hub_device = dev_reg.async_get_or_create(
-        config_entry_id=hub_id, identifiers={(DOMAIN, hub_id)}
+    receiver_device = dev_reg.async_get_or_create(
+        config_entry_id=receiver_id, identifiers={(DOMAIN, receiver_id)}
     )
     nested = dev_reg.async_get_or_create(
         config_entry_id=child_id,
-        identifiers={(DOMAIN, f"{hub_id}:{device_key}")},
-        via_device_id=hub_device.id,
+        identifiers={(DOMAIN, f"{receiver_id}:{device_key}")},
+        via_device_id=receiver_device.id,
     )
 
     temp_ent = ent_reg.async_get_or_create(
-        "sensor", DOMAIN, f"{hub_id}:{device_key}:temperature_C", config_entry=child
+        "sensor",
+        DOMAIN,
+        f"{receiver_id}:{device_key}:temperature_C",
+        config_entry=child,
     )
     hum_ent = ent_reg.async_get_or_create(
-        "sensor", DOMAIN, f"{hub_id}:{device_key}:humidity", config_entry=child
+        "sensor", DOMAIN, f"{receiver_id}:{device_key}:humidity", config_entry=child
     )
     # A "Last seen" sensor: minor 3 disables it (identity preserved, not removed).
     last_seen_ent = ent_reg.async_get_or_create(
         "sensor",
         DOMAIN,
-        f"{hub_id}:{device_key}:{_LAST_SEEN_OBJECT_SUFFIX}",
+        f"{receiver_id}:{device_key}:{_LAST_SEEN_OBJECT_SUFFIX}",
         config_entry=child,
     )
 
     before_entities = _entity_identity_set(ent_reg)
     before_devices = _device_identifier_map(dev_reg)
     assert len(before_entities) == 3
-    assert len(before_devices) == 2  # hub + nested device
+    assert len(before_devices) == 2  # receiver + nested device
 
     # Record every (version, minor_version) the migration writes, to prove the
     # schema is monotonic and never downgrades.
-    seen_versions: list[tuple[int, int]] = [(hub.version, hub.minor_version or 1)]
+    seen_versions: list[tuple[int, int]] = [
+        (receiver.version, receiver.minor_version or 1)
+    ]
     original_update = hass.config_entries.async_update_entry
 
     def _record_update(target_entry, **kwargs):
         res = original_update(target_entry, **kwargs)
-        if target_entry.entry_id == hub_id:
+        if target_entry.entry_id == receiver_id:
             seen_versions.append(
                 (target_entry.version, target_entry.minor_version or 1)
             )
@@ -306,12 +311,12 @@ async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(ha
             hass.config_entries, "async_update_entry", side_effect=_record_update
         ),
     ):
-        result = await async_migrate_entry(hass, hub)
+        result = await async_migrate_entry(hass, receiver)
 
     # Terminal schema is exactly the frozen contract version.
     assert result is True
-    assert hub.version == CONTRACT_VERSION
-    assert hub.minor_version == CONTRACT_MINOR_VERSION
+    assert receiver.version == CONTRACT_VERSION
+    assert receiver.minor_version == CONTRACT_MINOR_VERSION
 
     # Monotonic, non-downgrading: each recorded (version, minor) >= its predecessor
     # and nothing ever dropped below the starting version 1.
@@ -328,20 +333,20 @@ async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(ha
     # No identifier split across two devices (no duplicated identity).
     assert len(after_devices) == len(set(after_devices))
 
-    # The nested device kept its identifier tuple and was re-homed onto the hub
-    # (owned by the hub entry now, no longer by the removed child).
+    # The nested device kept its identifier tuple and was re-homed onto the receiver
+    # (owned by the receiver entry now, no longer by the removed child).
     rehomed = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{hub_id}:{device_key}"), hub_id
+        (DOMAIN, f"{receiver_id}:{device_key}"), receiver_id
     )
     assert rehomed is not None
     assert rehomed.id == nested.id  # same physical device, not a duplicate
-    assert rehomed.config_entry_id == hub_id
+    assert rehomed.config_entry_id == receiver_id
 
-    # Field entities survived and were re-homed onto the hub.
+    # Field entities survived and were re-homed onto the receiver.
     for ent in (temp_ent, hum_ent, last_seen_ent):
         moved = ent_reg.async_get(ent.entity_id)
         assert moved is not None
-        assert moved.config_entry_id == hub_id
+        assert moved.config_entry_id == receiver_id
 
     # The "Last seen" sensor is disabled by the integration (minor 3), not deleted —
     # its identity is intact even though it is now disabled-by-default.
@@ -358,7 +363,7 @@ async def test_v1_entry_migrates_to_latest_without_downgrade_or_registry_loss(ha
 # Minor 7 -> 8: the retired discovery toggle is stripped, devices are not
 # ===========================================================================
 
-# The retired per-hub toggle, spelled as a literal for the same reason the
+# The retired per-receiver toggle, spelled as a literal for the same reason the
 # migration does: the constant is gone, but entries written by older versions
 # still carry the string, and this test is what proves they stop carrying it.
 RETIRED_DISCOVERY_KEY = "discovery_enabled"
@@ -397,7 +402,7 @@ def _upgraded_devices_map() -> dict[str, dict]:
 
 
 def _minor_7_entry(hass, *, devices, with_toggle: bool) -> MockConfigEntry:
-    """Build (and register) a pre-upgrade hub entry at version 2, minor 7."""
+    """Build (and register) a pre-upgrade receiver entry at version 2, minor 7."""
     data = {
         CONF_HOST: "rtl433.local",
         CONF_PORT: 8433,
@@ -408,7 +413,7 @@ def _minor_7_entry(hass, *, devices, with_toggle: bool) -> MockConfigEntry:
     options = {CONF_AVAILABILITY_TIMEOUT: 300}
     if with_toggle:
         # A real upgrade carries the key in *both* mappings: the add flows wrote
-        # it into ``data`` and the hub options step wrote it into ``options``.
+        # it into ``data`` and the receiver options step wrote it into ``options``.
         data[RETIRED_DISCOVERY_KEY] = True
         options[RETIRED_DISCOVERY_KEY] = False
     entry = MockConfigEntry(
@@ -456,7 +461,7 @@ async def test_toggle_strip_is_idempotent_and_writes_nothing_when_absent(hass):
 
     The strip compares before it writes, which matters twice over: an entry that
     never carried the key must not be rewritten (a needless write fires the
-    update listener, and on a loaded hub that is a chance to reload for nothing),
+    update listener, and on a loaded receiver that is a chance to reload for nothing),
     and re-running migration against an already-migrated entry — which happens on
     every restart — must be a complete no-op.
     """

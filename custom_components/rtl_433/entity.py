@@ -1,12 +1,12 @@
-"""Shared base entity and hub-wide platform-setup helper for the integration.
+"""Shared base entity and receiver-wide platform-setup helper for the integration.
 
 Every ``sensor``/``binary_sensor`` entity created for a device nested under the
-hub config entry derives from :class:`Rtl433Entity`. The base centralizes the
+receiver config entry derives from :class:`Rtl433Entity`. The base centralizes the
 four concerns the platforms would otherwise duplicate:
 
 * **Device registry** — a single :class:`DeviceInfo` keyed by
-  ``{receiver_entry_id}:{device_key}`` and linked to the hub device via
-  ``via_device_id`` so every device groups under its hub.
+  ``{receiver_entry_id}:{device_key}`` and linked to the receiver device via
+  ``via_device_id`` so every device groups under its receiver.
 * **Dispatcher subscription** — each entity subscribes to the per-device signal
   ``signal_device_update(receiver_entry_id, device_key)`` that the coordinator fans a
   :class:`~pyrtl_433.normalizer.NormalizedEvent` out on, and
@@ -20,7 +20,7 @@ four concerns the platforms would otherwise duplicate:
 
 The module also hosts :func:`async_setup_receiver_platform`, the shared
 ``async_setup_entry`` body used by both the ``sensor`` and ``binary_sensor``
-platforms. It runs once on the single hub config entry and: creates entities for
+platforms. It runs once on the single receiver config entry and: creates entities for
 every device recorded in ``entry.data[CONF_DEVICES]`` (unioned with the fields
 the coordinator already knows), subscribes to ``signal_new_device`` to add a new
 device's entities at runtime (the ``dynamic-devices`` Quality Scale rule),
@@ -138,12 +138,12 @@ class Rtl433Entity(RestoreEntity):
     ) -> None:
         """Initialize identity, device info, and entity description fields."""
         self._coordinator = coordinator
-        self._hub_entry_id = receiver_entry_id
+        self._receiver_entry_id = receiver_entry_id
         self._device_key = device_key
         self._descriptor = descriptor
 
-        # Instance-scoped unique_id: scoping by the parent hub entry id means two
-        # hubs observing the same model+id never collide.
+        # Instance-scoped unique_id: scoping by the parent receiver entry id means two
+        # receivers observing the same model+id never collide.
         self._attr_unique_id = (
             f"{receiver_entry_id}:{device_key}:{descriptor.object_suffix}"
         )
@@ -169,7 +169,7 @@ class Rtl433Entity(RestoreEntity):
             model=model or None,
             serial_number=identity_suffix(model, device_key),
             manufacturer=MANUFACTURER,
-            # The hub device is registered by ``async_setup_entry`` before any
+            # The receiver device is registered by ``async_setup_entry`` before any
             # platform is forwarded, so the lookup always resolves; ``via_device``
             # (the identifier tuple) is deprecated and gone from ``DeviceInfo``.
             via_device_id=dr.async_get_device_id_by_identifier(
@@ -180,21 +180,21 @@ class Rtl433Entity(RestoreEntity):
         )
 
         self._unsub_dispatcher: Callable[[], None] | None = None
-        self._unsub_hub_availability: Callable[[], None] | None = None
+        self._unsub_receiver_availability: Callable[[], None] | None = None
 
     # ------------------------------------------------------------------ #
     # Availability                                                       #
     # ------------------------------------------------------------------ #
     @property
     def available(self) -> bool:
-        """Return whether the hub is connected and the device seen within its timeout.
+        """Return whether the receiver is connected and the device seen within its timeout.
 
         Two gates, both owned by the coordinator (see ``coordinator/_watchdog.py``):
 
-        * **Hub connection.** ``receiver_available`` is ``False`` the moment the
-          hub's WebSocket drops — no grace window. The integration is then
+        * **Receiver connection.** ``receiver_available`` is ``False`` the moment the
+          receiver's WebSocket drops — no grace window. The integration is then
           hearing nothing at all, so no device's cached state means anything and
-          every entity behind the hub reads unavailable — including never-expire
+          every entity behind the receiver reads unavailable — including never-expire
           devices, whose exemption is from *silence*, not from the transport
           being gone.
         * **Per-device silence.** Mirrors the coordinator's watchdog logic but
@@ -240,17 +240,17 @@ class Rtl433Entity(RestoreEntity):
 
         self._unsub_dispatcher = async_dispatcher_connect(
             self.hass,
-            signal_device_update(self._hub_entry_id, self._device_key),
+            signal_device_update(self._receiver_entry_id, self._device_key),
             self._handle_dispatch,
         )
-        # The hub-connection gate flips for every device at once and is not tied
-        # to any device's event stream, so it gets its own hub-wide signal. It
+        # The receiver-connection gate flips for every device at once and is not tied
+        # to any device's event stream, so it gets its own receiver-wide signal. It
         # fires only on a connection edge, so this subscription costs one state
         # write per entity per outage.
-        self._unsub_hub_availability = async_dispatcher_connect(
+        self._unsub_receiver_availability = async_dispatcher_connect(
             self.hass,
-            signal_receiver_availability(self._hub_entry_id),
-            self._handle_hub_availability,
+            signal_receiver_availability(self._receiver_entry_id),
+            self._handle_receiver_availability,
         )
 
     async def async_will_remove_from_hass(self) -> None:
@@ -258,9 +258,9 @@ class Rtl433Entity(RestoreEntity):
         if self._unsub_dispatcher is not None:
             self._unsub_dispatcher()
             self._unsub_dispatcher = None
-        if self._unsub_hub_availability is not None:
-            self._unsub_hub_availability()
-            self._unsub_hub_availability = None
+        if self._unsub_receiver_availability is not None:
+            self._unsub_receiver_availability()
+            self._unsub_receiver_availability = None
 
     # ------------------------------------------------------------------ #
     # Update handling                                                    #
@@ -284,8 +284,8 @@ class Rtl433Entity(RestoreEntity):
         self.async_write_ha_state()
 
     @callback
-    def _handle_hub_availability(self) -> None:
-        """Repaint when the hub-connection availability gate flips.
+    def _handle_receiver_availability(self) -> None:
+        """Repaint when the receiver-connection availability gate flips.
 
         Values are untouched — only ``available`` changed — so this just re-reads
         the entity state. The Last-seen sensor, the one device entity that
@@ -306,15 +306,15 @@ class Rtl433Entity(RestoreEntity):
 
 
 class Rtl433ReceiverEntity(Entity):
-    """Base for statically-registered entities on the hub device itself.
+    """Base for statically-registered entities on the receiver device itself.
 
     Unlike :class:`Rtl433Entity` (one per device field, availability gated by the
-    per-device timeout), hub entities are one-per-hub, attach to the hub device,
-    and re-read the coordinator's hub state on every ``signal_receiver_update``.
+    per-device timeout), receiver entities are one-per-receiver, attach to the receiver device,
+    and re-read the coordinator's receiver state on every ``signal_receiver_update``.
 
     They also subscribe to ``signal_receiver_availability``, which fires only when the
-    hub-connection gate flips (see ``coordinator/_watchdog.py``), so a
-    connection-gated hub entity repaints on exactly the edge where its
+    receiver-connection gate flips (see ``coordinator/_watchdog.py``), so a
+    connection-gated receiver entity repaints on exactly the edge where its
     ``available`` changes. Subclasses that do not read the gate (the connectivity
     sensor, the SDR controls) simply re-write an unchanged state on that edge.
     """
@@ -323,57 +323,57 @@ class Rtl433ReceiverEntity(Entity):
     _attr_should_poll = False
 
     def __init__(self, coordinator: Rtl433Coordinator, receiver_entry_id: str) -> None:
-        """Attach to the hub device and remember the coordinator."""
+        """Attach to the receiver device and remember the coordinator."""
         self._coordinator = coordinator
-        self._hub_entry_id = receiver_entry_id
+        self._receiver_entry_id = receiver_entry_id
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, receiver_entry_id)},
         )
-        self._unsub_hub: Callable[[], None] | None = None
-        self._unsub_hub_availability: Callable[[], None] | None = None
+        self._unsub_receiver: Callable[[], None] | None = None
+        self._unsub_receiver_availability: Callable[[], None] | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to the hub-update and availability-gate signals."""
+        """Subscribe to the receiver-update and availability-gate signals."""
         await super().async_added_to_hass()
-        self._unsub_hub = async_dispatcher_connect(
+        self._unsub_receiver = async_dispatcher_connect(
             self.hass,
-            signal_receiver_update(self._hub_entry_id),
-            self._handle_hub_update,
+            signal_receiver_update(self._receiver_entry_id),
+            self._handle_receiver_update,
         )
-        self._unsub_hub_availability = async_dispatcher_connect(
+        self._unsub_receiver_availability = async_dispatcher_connect(
             self.hass,
-            signal_receiver_availability(self._hub_entry_id),
-            self._handle_hub_update,
+            signal_receiver_availability(self._receiver_entry_id),
+            self._handle_receiver_update,
         )
 
     async def async_will_remove_from_hass(self) -> None:
-        """Tear down both hub subscriptions."""
-        if self._unsub_hub is not None:
-            self._unsub_hub()
-            self._unsub_hub = None
-        if self._unsub_hub_availability is not None:
-            self._unsub_hub_availability()
-            self._unsub_hub_availability = None
+        """Tear down both receiver subscriptions."""
+        if self._unsub_receiver is not None:
+            self._unsub_receiver()
+            self._unsub_receiver = None
+        if self._unsub_receiver_availability is not None:
+            self._unsub_receiver_availability()
+            self._unsub_receiver_availability = None
 
     @callback
-    def _handle_hub_update(self) -> None:
-        """Re-read hub state and write the entity state."""
+    def _handle_receiver_update(self) -> None:
+        """Re-read receiver state and write the entity state."""
         self.async_write_ha_state()
 
 
 class Rtl433ReceiverControl(Rtl433ReceiverEntity):
-    """Shared base for the managed SDR control entities on the hub device.
+    """Shared base for the managed SDR control entities on the receiver device.
 
     The ``number`` / ``select`` / ``switch`` control platforms each subclass this
     (alongside the matching HA entity mixin) so the four concerns common to every
-    control live in one place: attachment to the hub device (inherited from
+    control live in one place: attachment to the receiver device (inherited from
     :class:`Rtl433ReceiverEntity`), the :data:`EntityCategory.CONFIG` category, the
     stable unique_id ``f"{receiver_entry_id}:hub:{object_suffix}"``, and the
     device-relative entity name — all sourced from the field's
     :class:`~custom_components.rtl_433.sdr_settings.SdrSetting`.
 
     Read-back/repaint is inherited too: :class:`Rtl433ReceiverEntity` subscribes to
-    ``signal_receiver_update`` and its ``_handle_hub_update`` calls
+    ``signal_receiver_update`` and its ``_handle_receiver_update`` calls
     ``async_write_ha_state``, so after a write the coordinator's post-read-back
     ``signal_receiver_update`` repaints the control with the server's actual value.
     """
@@ -386,7 +386,7 @@ class Rtl433ReceiverControl(Rtl433ReceiverEntity):
         receiver_entry_id: str,
         setting: SdrSetting,
     ) -> None:
-        """Attach to the hub device and adopt the setting's identity/name."""
+        """Attach to the receiver device and adopt the setting's identity/name."""
         super().__init__(coordinator, receiver_entry_id)
         self._setting = setting
         self._attr_unique_id = f"{receiver_entry_id}:hub:{setting.object_suffix}"
@@ -403,17 +403,17 @@ class Rtl433ReceiverControl(Rtl433ReceiverEntity):
         return self._setting.available(self._coordinator.meta)
 
 
-async def async_setup_hub_controls(
+async def async_setup_receiver_controls(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
     platform: str,
     control_cls: Callable[[Rtl433Coordinator, str, SdrSetting], Rtl433ReceiverControl],
 ) -> None:
-    """Register the hub's managed controls for one control platform.
+    """Register the receiver's managed controls for one control platform.
 
     Shared by the ``number`` / ``select`` / ``switch`` platforms, which differ
-    only in their entity class. When the hub's ``manage_settings`` toggle is off
+    only in their entity class. When the receiver's ``manage_settings`` toggle is off
     it creates **no** entities and returns immediately; when management is on it
     statically registers one ``control_cls`` per :data:`SDR_SETTINGS` entry whose
     ``platform`` matches and whose capability gate is satisfied.
@@ -489,7 +489,7 @@ async def async_upsert_event_types(
     field_key: str,
     types: Iterable[str],
 ) -> None:
-    """Union observed event types into the hub devices map, stored sorted.
+    """Union observed event types into the receiver devices map, stored sorted.
 
     Writes ``entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES][field_key]``
     only when the stored set for that field actually grows (a no-op otherwise),
@@ -513,7 +513,7 @@ async def async_upsert_event_types(
 
 
 # --------------------------------------------------------------------------- #
-# Hub-wide platform setup (sensor + binary_sensor use the same flow).          #
+# Receiver-wide platform setup (sensor + binary_sensor use the same flow).          #
 # --------------------------------------------------------------------------- #
 async def async_setup_receiver_platform(
     hass: HomeAssistant,
@@ -524,9 +524,9 @@ async def async_setup_receiver_platform(
     per_device_factory: Callable[[Rtl433Coordinator, str, str, str], Rtl433Entity]
     | None = None,
 ) -> None:
-    """Set up one entity platform for every device nested under the hub entry.
+    """Set up one entity platform for every device nested under the receiver entry.
 
-    Runs once on the single hub config entry. It:
+    Runs once on the single receiver config entry. It:
 
     1. creates entities for every device in ``entry.data[CONF_DEVICES]`` (unioned
        with the fields the coordinator already knows for that device);
@@ -552,8 +552,8 @@ async def async_setup_receiver_platform(
     """
     coordinator: Rtl433Coordinator = hass.data[DOMAIN][entry.entry_id]
 
-    # Use the per-entry merged registry (shipped library + this hub's user
-    # overrides) that the hub built at setup and cached, so descriptor lookups
+    # Use the per-entry merged registry (shipped library + this receiver's user
+    # overrides) that the receiver built at setup and cached, so descriptor lookups
     # never re-read the YAML files on the event loop.
     registry: Registry | None = (
         hass.data[DOMAIN]
@@ -574,7 +574,7 @@ async def async_setup_receiver_platform(
     def _calibration_for(device_key: str) -> dict[str, Any] | None:
         """Return the validated per-device calibration record, or ``None``.
 
-        Read from the hub's per-device record on every build so a reload picks up
+        Read from the receiver's per-device record on every build so a reload picks up
         a freshly-written calibration; ``None`` (no/none calibration) leaves the
         consumption field on its library descriptor.
         """

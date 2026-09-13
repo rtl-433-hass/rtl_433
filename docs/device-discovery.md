@@ -135,13 +135,13 @@ sensor means the next time it is triggered.
 ## The Discovered List Is Temporary
 
 The list of discovered devices is held in memory only. It is empty after a
-restart or a reload of the hub, and fills again as devices transmit. A sensor
+restart or a reload of the receiver, and fills again as devices transmit. A sensor
 that reports every few minutes is back almost immediately; one that reports
 twice a day takes longer.
 
 So an empty list shortly after a restart is normal — it means nothing has
 transmitted yet. Devices you have already added are unaffected: they are stored
-with the hub and come back with their entities and history on every start.
+with the receiver and come back with their entities and history on every start.
 Ignored devices are stored too, and stay ignored.
 
 ## Deleting Devices

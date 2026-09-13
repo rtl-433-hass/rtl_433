@@ -1,6 +1,6 @@
 """Tests for the managed SDR controls (Plan 6).
 
-These cover the seven acceptance areas of the hub-SDR-controls work:
+These cover the seven acceptance areas of the receiver-SDR-controls work:
 
 1. Write path / command mapping — each control's ``set_sdr`` write emits the
    exact ``/cmd`` (``val`` strings / verbatim ``arg``) and records desired state.
@@ -20,7 +20,7 @@ These cover the seven acceptance areas of the hub-SDR-controls work:
 
 The coordinator-level scenarios drive the public API directly (no real socket).
 The integration scenarios reuse the ``test_lifecycle`` ``_no_socket`` /
-``_setup_hub`` harness, so adoption/enforcement is invoked explicitly where a
+``_setup_receiver`` harness, so adoption/enforcement is invoked explicitly where a
 scenario needs it.
 """
 
@@ -109,14 +109,14 @@ def _mock_setters(aioclient_mock) -> None:
 
 
 @pytest.fixture
-async def coordinator(hass, hub_entry_builder, aioclient_mock):
-    """A coordinator wired to a managed hub entry (no socket opened).
+async def coordinator(hass, receiver_entry_builder, aioclient_mock):
+    """A coordinator wired to a managed receiver entry (no socket opened).
 
     Async + ``aioclient_mock`` so the client is constructed inside the loop
     with the mocked aiohttp session already patched in (the client captures
     the session at construction).
     """
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     return Rtl433Coordinator(
         hass,
@@ -243,10 +243,10 @@ def test_adoption_hop_mode_skips_center_frequency(hass, coordinator):
 
 
 async def test_initial_frequency_seeds_over_adoption_on_first_connect(
-    hass, hub_entry_builder, hass_storage
+    hass, receiver_entry_builder, hass_storage
 ):
     """An ``initial_center_frequency`` overrides adoption + is enforced as Hz."""
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(
         hass,
@@ -277,7 +277,7 @@ async def test_initial_frequency_seeds_over_adoption_on_first_connect(
 
 
 async def test_initial_frequency_wins_when_desired_already_populated(
-    hass, hub_entry_builder, hass_storage
+    hass, receiver_entry_builder, hass_storage
 ):
     """Regression: the setup frequency wins even if desired state already exists.
 
@@ -285,7 +285,7 @@ async def test_initial_frequency_wins_when_desired_already_populated(
     center frequency persisted by an earlier connect) previously caused the
     user's configured frequency to be dropped in favour of the server default.
     """
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(
         hass,
@@ -309,10 +309,10 @@ async def test_initial_frequency_wins_when_desired_already_populated(
 
 
 async def test_initial_frequency_seeded_once_preserves_user_change(
-    hass, hub_entry_builder, hass_storage
+    hass, receiver_entry_builder, hass_storage
 ):
     """Once consumed, the one-time seed never overwrites a later user change."""
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(
         hass,
@@ -402,7 +402,7 @@ def test_enforce_all_reconciles_meta_and_emits(hass, coordinator, aioclient_mock
     """After replaying the managed fields, ``_enforce_all`` re-reads meta + emits.
 
     Regression: a first-connect seed sent ``center_frequency`` but never refreshed
-    ``self.meta``, so the hub's actual-frequency sensor kept showing the stale
+    ``self.meta``, so the receiver's actual-frequency sensor kept showing the stale
     pre-enforce value until the next 60s tick. The post-replay read-back now
     converges it immediately (and the emit repaints the controls).
     """
@@ -432,7 +432,7 @@ def test_enforce_all_reconciles_meta_and_emits(hass, coordinator, aioclient_mock
     by_cmd = {q["cmd"]: q for q in _setter_queries(aioclient_mock)}
     assert by_cmd["center_frequency"] == {"cmd": "center_frequency", "val": "915000000"}
     assert coordinator.meta["center_frequency"] == 915000000
-    # A hub update was emitted so the sensor/controls repaint without waiting.
+    # A receiver update was emitted so the sensor/controls repaint without waiting.
     assert dispatch.called
 
 
@@ -454,9 +454,11 @@ def test_enforce_all_no_managed_skips_meta_reconcile(hass, coordinator, aioclien
 # --------------------------------------------------------------------------- #
 # 4. Store persistence across reload / recreate.                              #
 # --------------------------------------------------------------------------- #
-async def test_store_persistence_across_recreate(hass, hub_entry_builder, hass_storage):
+async def test_store_persistence_across_recreate(
+    hass, receiver_entry_builder, hass_storage
+):
     """A written desired state is restored from the Store on a fresh coordinator."""
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
 
     first = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
@@ -464,7 +466,7 @@ async def test_store_persistence_across_recreate(hass, hub_entry_builder, hass_s
     first._managed = {"center_frequency", KEY_GAIN_AUTO}
     await first._persist_desired()
 
-    # The payload landed in the per-hub Store key.
+    # The payload landed in the per-receiver Store key.
     assert sdr_store_key(entry.entry_id) in hass_storage
 
     # A brand-new coordinator (as a reload would build) loads from the Store —
@@ -478,9 +480,11 @@ async def test_store_persistence_across_recreate(hass, hub_entry_builder, hass_s
     assert second.is_managed(KEY_GAIN_AUTO)
 
 
-async def test_store_wiped_when_management_off(hass, hub_entry_builder, hass_storage):
+async def test_store_wiped_when_management_off(
+    hass, receiver_entry_builder, hass_storage
+):
     """Loading with management off removes the Store and clears desired state."""
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
 
     managed = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
@@ -497,16 +501,16 @@ async def test_store_wiped_when_management_off(hass, hub_entry_builder, hass_sto
 
 
 def _seed_store(hass_storage, entry_id, *, version, values, managed):
-    """Pre-seed the per-hub SDR Store with an on-disk payload at ``version``."""
+    """Pre-seed the per-receiver SDR Store with an on-disk payload at ``version``."""
     hass_storage[sdr_store_key(entry_id)] = {
         "version": version,
         "data": {"values": values, "managed": managed},
     }
 
 
-async def test_store_migration_v1_hz_to_mhz(hass, hub_entry_builder, hass_storage):
+async def test_store_migration_v1_hz_to_mhz(hass, receiver_entry_builder, hass_storage):
     """A version-1 payload's center frequency is migrated Hz -> MHz on load."""
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     _seed_store(
         hass_storage,
@@ -526,10 +530,10 @@ async def test_store_migration_v1_hz_to_mhz(hass, hub_entry_builder, hass_storag
 
 
 async def test_store_migration_v2_value_unchanged(
-    hass, hub_entry_builder, hass_storage
+    hass, receiver_entry_builder, hass_storage
 ):
     """An already-current (version-2) MHz value is loaded as-is (no re-division)."""
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     _seed_store(
         hass_storage,
@@ -548,10 +552,10 @@ async def test_store_migration_v2_value_unchanged(
 
 
 async def test_store_migration_v1_without_center_frequency(
-    hass, hub_entry_builder, hass_storage
+    hass, receiver_entry_builder, hass_storage
 ):
     """A version-1 payload lacking center_frequency migrates other fields untouched."""
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     _seed_store(
         hass_storage,
@@ -601,13 +605,13 @@ def _no_socket():
         yield
 
 
-async def _setup_hub(hass, hub_entry_builder, **kwargs):
-    """Set up a single hub entry and return it."""
-    hub = hub_entry_builder(availability_timeout=600, **kwargs)
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+async def _setup_receiver(hass, receiver_entry_builder, **kwargs):
+    """Set up a single receiver entry and return it."""
+    receiver = receiver_entry_builder(availability_timeout=600, **kwargs)
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
-    return hub
+    return receiver
 
 
 # (entry_suffix, platform) for the seven control entities.
@@ -623,55 +627,57 @@ _CONTROLS = (
 
 
 async def test_controls_present_and_config_category_when_managed(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Managed mode registers every control with EntityCategory.CONFIG."""
-    hub = await _setup_hub(hass, hub_entry_builder)  # managed by default
+    receiver = await _setup_receiver(hass, receiver_entry_builder)  # managed by default
     ent_reg = er.async_get(hass)
 
     for suffix, platform in _CONTROLS:
         eid = ent_reg.async_get_entity_id(
-            platform, DOMAIN, f"{hub.entry_id}:hub:{suffix}"
+            platform, DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
         )
         assert eid is not None, (platform, suffix)
         assert ent_reg.async_get(eid).entity_category is EntityCategory.CONFIG
 
 
-async def test_center_and_hop_availability_track_frequencies(hass, hub_entry_builder):
+async def test_center_and_hop_availability_track_frequencies(
+    hass, receiver_entry_builder
+):
     """Center frequency and hop interval availability track the hop mode.
 
     Single frequency: center frequency is controllable, hop interval is inert
     (unavailable). Hopping (>1 frequency): hop interval applies, while pinning a
     single center frequency would break hopping, so that control is hidden.
     """
-    hub = await _setup_hub(hass, hub_entry_builder)  # managed by default
-    coordinator = hass.data[DOMAIN][hub.entry_id]
+    receiver = await _setup_receiver(hass, receiver_entry_builder)  # managed by default
+    coordinator = hass.data[DOMAIN][receiver.entry_id]
     ent_reg = er.async_get(hass)
 
     def num_state(suffix):
         eid = ent_reg.async_get_entity_id(
-            "number", DOMAIN, f"{hub.entry_id}:hub:{suffix}"
+            "number", DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
         )
         assert eid is not None, suffix
         return hass.states.get(eid).state
 
     # Single frequency -> center frequency available, hop interval hidden.
     coordinator._client.meta = dict(_META_SINGLE)
-    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
     await hass.async_block_till_done()
     assert num_state("center_frequency") != STATE_UNAVAILABLE
     assert num_state("hop_interval") == STATE_UNAVAILABLE
 
     # Hopping -> hop interval available, center frequency hidden.
     coordinator._client.meta = dict(_META_HOPPING)
-    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver.entry_id))
     await hass.async_block_till_done()
     assert num_state("hop_interval") != STATE_UNAVAILABLE
     assert num_state("center_frequency") == STATE_UNAVAILABLE
 
 
 async def test_select_entity_writes_convert_int_command(
-    hass, hub_entry_builder, aioclient_mock
+    hass, receiver_entry_builder, aioclient_mock
 ):
     """Selecting via the Select entity sends ``convert val=<int>`` and repaints.
 
@@ -681,13 +687,13 @@ async def test_select_entity_writes_convert_int_command(
     selected through the real entity.
     """
     _mock_setters(aioclient_mock)
-    hub = await _setup_hub(hass, hub_entry_builder)  # managed by default
-    coordinator = hass.data[DOMAIN][hub.entry_id]
+    receiver = await _setup_receiver(hass, receiver_entry_builder)  # managed by default
+    coordinator = hass.data[DOMAIN][receiver.entry_id]
     coordinator._client.connected = True
     coordinator._was_connected = True  # already past the connect edge
 
     eid = er.async_get(hass).async_get_entity_id(
-        "select", DOMAIN, f"{hub.entry_id}:hub:conversion_mode"
+        "select", DOMAIN, f"{receiver.entry_id}:hub:conversion_mode"
     )
     assert eid is not None
 
@@ -707,18 +713,18 @@ async def test_select_entity_writes_convert_int_command(
 
 
 async def test_no_controls_and_no_cmd_when_unmanaged(
-    hass, hub_entry_builder, aioclient_mock
+    hass, receiver_entry_builder, aioclient_mock
 ):
     """Unmanaged mode registers no controls and issues no /cmd at setup."""
-    hub = await _setup_hub(
-        hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, options={CONF_MANAGE_SETTINGS: False}
     )
     ent_reg = er.async_get(hass)
 
     for suffix, platform in _CONTROLS:
         assert (
             ent_reg.async_get_entity_id(
-                platform, DOMAIN, f"{hub.entry_id}:hub:{suffix}"
+                platform, DOMAIN, f"{receiver.entry_id}:hub:{suffix}"
             )
             is None
         ), (platform, suffix)
@@ -731,29 +737,29 @@ async def test_no_controls_and_no_cmd_when_unmanaged(
 # --------------------------------------------------------------------------- #
 # 6. Reload-on-toggle vs live-apply.                                          #
 # --------------------------------------------------------------------------- #
-async def test_toggle_manage_settings_triggers_reload(hass, hub_entry_builder):
+async def test_toggle_manage_settings_triggers_reload(hass, receiver_entry_builder):
     """Flipping CONF_MANAGE_SETTINGS in options reloads the entry."""
-    hub = await _setup_hub(hass, hub_entry_builder)  # managed -> True
+    receiver = await _setup_receiver(hass, receiver_entry_builder)  # managed -> True
 
     with patch.object(
         hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
     ) as reload:
         hass.config_entries.async_update_entry(
-            hub, options={CONF_MANAGE_SETTINGS: False}
+            receiver, options={CONF_MANAGE_SETTINGS: False}
         )
         await hass.async_block_till_done()
 
-    reload.assert_called_once_with(hub.entry_id)
+    reload.assert_called_once_with(receiver.entry_id)
 
 
-async def test_timeout_change_applied_live_no_reload(hass, hub_entry_builder):
+async def test_timeout_change_applied_live_no_reload(hass, receiver_entry_builder):
     """A timeout-only options change applies live without reloading the entry."""
-    hub = await _setup_hub(hass, hub_entry_builder)
-    coordinator = hass.data[DOMAIN][hub.entry_id]
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+    coordinator = hass.data[DOMAIN][receiver.entry_id]
 
     with patch.object(hass.config_entries, "async_reload") as reload:
         hass.config_entries.async_update_entry(
-            hub,
+            receiver,
             options={
                 CONF_AVAILABILITY_TIMEOUT: 123,
                 # manage_settings unchanged -> no reload.
@@ -817,7 +823,7 @@ def test_enforcement_failure_keeps_desired_and_event_stream_works(
     # pyrtl_433 0.4.0 the client also fires ``on_hub_update`` the first time it
     # observes the server's event ``time`` resolution -- here the frame carries no
     # ``time`` at all, so the resolution resolves to UNUSABLE and that first
-    # observation reaches ``_emit_hub_update``. It is hub state changing, not a
+    # observation reaches ``_emit_receiver_update``. It is receiver state changing, not a
     # second delivery of this device's event, and this test is about the event
     # stream surviving a failed enforcement.
     device_signals = [

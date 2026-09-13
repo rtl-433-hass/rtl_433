@@ -15,7 +15,7 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     [Runtime dependency](#runtime-dependency-pyrtl_433) below). `base.py` owns and
     drives the client; the mixins (`_events.py`, `_sdr.py`, `_watchdog.py`) hold
     the HA-side policy (event fan-out, managed-SDR desired state, the silence
-    watchdog and the hub-connection availability gate) the library deliberately
+    watchdog and the receiver-connection availability gate) the library deliberately
     leaves out.
   - `frontend/rtl_433-panel.js` — the shipped discovery panel: one hand-written
     vanilla custom element, **no build step** (see
@@ -36,7 +36,7 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     `migration.py` (config-entry v1→v2 migration + one-time legacy cleanups,
     re-exported `async_migrate_entry`), `library.py` (device-library load/merge
     over `pyrtl_433.library`, cached on `hass.data`),
-    and `receiver_settings.py` (hub-entry setting resolvers: `_hub_*`,
+    and `receiver_settings.py` (receiver-entry setting resolvers: `_receiver_*`,
     `_calibration_map`).
 - `docs/device-library.md` — the Home-Assistant-facing device-library guide (UI
   overrides, diagnostics, workflow). The **authoritative schema reference** is
@@ -83,13 +83,13 @@ shipped **device-mapping library**, the **device-naming** helpers, and the
 own copy of any of that; it consumes the library:
 
 - **`pyrtl_433.Rtl433Client`** — owns the transport. The coordinator
-  (`coordinator/base.py`) **owns and drives one client per hub**, constructed with
+  (`coordinator/base.py`) **owns and drives one client per receiver**, constructed with
   Home Assistant's **shared aiohttp session** (`async_get_clientsession`), which the
   client therefore **never closes** on `stop()` (HA owns the session lifecycle).
   Events arrive via the client's **`on_event`** callback →
   `_EventProcessingMixin._on_client_event` (HA-side dispatch), and connectivity /
-  meta / stats / dev-info changes via **`on_hub_update`** → `_emit_hub_update`
-  (connect/disconnect edge handling, hub-identity refresh, `signal_receiver_update`
+  meta / stats / dev-info changes via **`on_hub_update`** → `_emit_receiver_update`
+  (connect/disconnect edge handling, receiver-identity refresh, `signal_receiver_update`
   fan-out). The library owns neither the managed-SDR policy nor the availability
   watchdog, so those are driven HA-side off the connect edge and a time interval.
 - **`pyrtl_433.normalizer`** — `normalize` / `device_key` / `NormalizedEvent` /
@@ -103,7 +103,7 @@ own copy of any of that; it consumes the library:
   as package data (`Path(pyrtl_433.library.__file__).parent / "data"`), so
   `load_library()` with no argument finds it. `library.py` here is the thin Home
   Assistant layer: run the blocking load in the executor, cache the shipped
-  `(registry, skip_keys)` on `hass.data[DATA_LIBRARY]`, and merge each hub's
+  `(registry, skip_keys)` on `hass.data[DATA_LIBRARY]`, and merge each receiver's
   stored overrides into `DATA_ENTRY_LIBRARY[entry_id]`.
   **Log records from the library are emitted under `pyrtl_433.library._loader` /
   `pyrtl_433.library._transform`**, not `custom_components.rtl_433` — relevant to
@@ -145,16 +145,16 @@ own copy of any of that; it consumes the library:
   `/cmd` issuance is serialized **inside the client** (its own send lock), so a user
   write and a reconnect enforcement replay can never interleave.
 
-## Config-entry model (hub + nested devices)
+## Config-entry model (receiver + nested devices)
 
 The integration is **rfxtrx-style**, not Battery-Notes-style:
 
-- **One config entry per rtl_433 server** (the hub, `integration_type: "hub"`).
+- **One config entry per rtl_433 server** (the receiver, `integration_type: "receiver"`).
   Platforms are forwarded once on that entry
   (`async_forward_entry_setups(entry, PLATFORMS)`).
-- The RF devices it decodes are **device-registry devices nested under the hub
+- The RF devices it decodes are **device-registry devices nested under the receiver
   entry**, *not* separate config entries. They are recreated on startup from the
-  per-hub `entry.data["devices"]` map (the single source of truth: model,
+  per-receiver `entry.data["devices"]` map (the single source of truth: model,
   observed mapped fields, optional per-device timeout override) and added at
   runtime via the new-device dispatcher signal (the Quality-Scale
   `dynamic-devices` rule).
@@ -184,12 +184,12 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   options flow, below), which promotes the stored event into runtime state and
   fires the **same** `new_device_callback` / `SIGNAL_NEW_DEVICE` seam a live
   sighting used — one registration path, not two. There is **no** persistent
-  notification for a heard device (the per-device notification, and the per-hub
+  notification for a heard device (the per-device notification, and the per-receiver
   discovery toggle that used to gate auto-add, were both removed); the
   `INFO` log line in `_record_pending` is the only signal.
 - `async_remove_config_entry_device` (`__init__.py`) backs the per-device
   **Delete** affordance (the `stale-devices` rule): it returns `False` for the
-  hub device (so the hub can't be removed out from under its entry) and `True`
+  receiver device (so the receiver can't be removed out from under its entry) and `True`
   for nested RF devices, dropping the device from the devices map and **evicting
   its `device_key` from coordinator runtime state** (`coordinator.forget_device`,
   which also drops it from `adopted`) so its next transmission makes it a
@@ -207,13 +207,13 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   `device_key` value changes), so the contract is unaffected by a replace.
 - `async_migrate_entry` (`migration.py`, config-entry `VERSION` 1 → 2) performs a
   **seamless in-place upgrade from 0.1.0**: it re-homes the legacy per-device
-  config entries' registry devices/entities onto the hub entry (preserving
-  unique_ids, entity_ids, and history), folds their state into the hub's devices
+  config entries' registry devices/entities onto the receiver entry (preserving
+  unique_ids, entity_ids, and history), folds their state into the receiver's devices
   map, and removes the obsolete per-device entries. The minor-7 → 8 step
   (`_strip_discovery_toggle`) drops the retired discovery key from `entry.data`
   and `entry.options`; it never rewrites `entry.data["devices"]`, so every
   already-adopted device, override and calibration is preserved untouched.
-- Adoption and per-device configuration live in the **hub OptionsFlow**
+- Adoption and per-device configuration live in the **receiver OptionsFlow**
   (`options_flow.py`): a menu led by the two approval steps — `add_devices`
   (renders `coordinator.pending` newest-first, one row per candidate labelled
   model, key, sighting count, signal level and relative last-seen, with two
@@ -225,7 +225,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   and the panel is the other, richer view of the same list. The ignore list is
   applied **live** through the update listener, never a reload. The user-facing verb is
   **Ignore/Ignored**, matching HA's ignored-discovery vocabulary; "reject" must
-  not appear. The menu then carries a *Hub settings* step (default timeout +
+  not appear. The menu then carries a *Receiver settings* step (default timeout +
   managed-settings, written to `entry.options`) and a *Device settings* pair — a
   `device` picker step
   followed by a `device_settings` step (per-device timeout override, commodity
@@ -239,7 +239,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   three forms. `settings.py` returns plain dicts and writes nothing, because the two
   callers must persist differently: `async_create_entry` *is* the options write
   for a flow, and adding an `async_update_entry` beside it would fire the update
-  listener twice and reload the hub twice for one save, while the WebSocket path
+  listener twice and reload the receiver twice for one save, while the WebSocket path
   has no flow to finish and writes data and options in one call.
 - **The per-device motion clear-delay is read from `entry.options` first, then
   `entry.data`** (`settings.device_clear_delay`). The migration from per-device
@@ -247,7 +247,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   The resolver used to read only `data`, so a clear-delay set by hand persisted,
   displayed, and did nothing — do not narrow it back to one location. Saving a
   device drops the `data` copy (`settings.build_device_data`), so options becomes
-  the only copy from the first save onwards; without that, a migrated hub could
+  the only copy from the first save onwards; without that, a migrated receiver could
   never clear the delay, because blanking the field emptied options and the read
   fell straight back to the leftover.
 - **Utility-meter calibration** (`calibration.py`, options `device_settings` →
@@ -256,7 +256,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   `timeout_override`. It overlays the consumption descriptor (the
   `CONSUMPTION_FIELD_KEYS` only) at entity build — precedence tier #1 above the
   `models:`/global library lookup. Applied via **reload**: the device-step write
-  fires `_async_update_listener` (`__init__.py`), which `async_reload`s the hub
+  fires `_async_update_listener` (`__init__.py`), which `async_reload`s the receiver
   **only when the normalized calibration map differs** from the coordinator's
   setup snapshot (`coordinator.calibration_snapshot` / `_calibration_map`), so
   routine devices-map upserts never reload — mirroring the `manage_settings`
@@ -265,7 +265,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   User-facing detail is in `docs/calibration.md` and `docs/device-library.md` —
   keep this contributor-facing.
 - `Rtl433ConfigFlow` also implements `async_step_reconfigure` (`config_flow.py`)
-  to edit a hub's connection params (host/port/path/secure) in place — "same
+  to edit a receiver's connection params (host/port/path/secure) in place — "same
   server, new address". The nested-device map is preserved because the new params
   are merged via `data_updates=` (which leaves `entry.data["devices"]` and
   `manage_settings` untouched). The `unique_id` handling is identity-aware: a
@@ -281,15 +281,15 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   (the duplicate Supervisor discovery may auto-create on a new `host:port`). The
   same helper backs the discovery `hassio_replace` step and the rebind form
   embedded in the `server_unreachable` repair fix flow (`repairs.py`).
-- **The update listener is the *only* place that reloads a hub entry.** Home
+- **The update listener is the *only* place that reloads a receiver entry.** Home
   Assistant deprecated pairing a config-entry update listener with the reloading
   config-flow helpers in 2026.6 (it double-reloads and races; it becomes an error
-  in 2026.12 — issue #168), so every flow that re-points a hub only **writes**:
+  in 2026.12 — issue #168), so every flow that re-points a receiver only **writes**:
   `async_step_reconfigure` uses `async_update_and_abort` (not
   `async_update_reload_and_abort`), the Supervisor discovery step passes
   `reload_on_update=False` to `_abort_if_unique_id_configured`, and
   `async_rebind_receiver` does not reload either. `_async_update_listener` then
-  compares `(host, port, path, secure, unique_id)` (`_hub_connection`,
+  compares `(host, port, path, secure, unique_id)` (`_receiver_connection`,
   `receiver_settings.py`) against `coordinator.connection_snapshot` and reloads once
   when it differs — the same snapshot-vs-live pattern as `manage_settings` /
   `calibration_snapshot` / `user_mappings_snapshot`. Never reintroduce a
@@ -297,20 +297,20 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
 - **Config-flow sources and dual identity scheme.** `Rtl433ConfigFlow` supports
   `user` (manual add), `reconfigure`, and `hassio` (Supervisor add-on discovery),
   plus the options flow above. Two `unique_id` schemes coexist:
-  - **Manual hubs** key on `unique_id = hub:{host}:{port}` (`_hub_unique_id`).
+  - **Manual receivers** key on `unique_id = hub:{host}:{port}` (`_receiver_unique_id`).
   - **Add-on-discovered radios** key on the add-on's advertised stable per-radio
     `unique_id` (`serial:…` / `usbpath:…` / `template:…`), carried in the
     `hassio` discovery message.
   `async_step_hassio` (`config_flow.py`) reconciles the two: a discovery message
   that matches an existing entry by `host:port` (`_find_entry_by_host_port`)
   **adopts/re-keys** that entry onto the stable radio id (migration; aborts
-  `already_configured`), so a manually-added hub and its later discovery never
+  `already_configured`), so a manually-added receiver and its later discovery never
   duplicate and the entry's history is preserved. A genuinely new radio
   (unknown stable id, no `host:port` match) is routed through
-  `async_step_hassio_replace` **when at least one hub already exists** — a guided
-  step that offers to rebind one of those hubs onto the new radio (the likely
+  `async_step_hassio_replace` **when at least one receiver already exists** — a guided
+  step that offers to rebind one of those receivers onto the new radio (the likely
   "replacement landed on a new `host:port`" case) or to add it as new; with no
-  existing hubs it goes straight to `async_step_hassio_confirm` (a confirmation
+  existing receivers it goes straight to `async_step_hassio_confirm` (a confirmation
   that revalidates
   connectivity before creating the entry and offers the same setup choices as the
   manual flow — `manage_settings` and an optional `initial_frequency` in MHz);
@@ -345,12 +345,12 @@ second implementation.
 - **`websocket_api.py`** registers every panel command, all
   `@websocket_api.require_admin`: `rtl_433/hubs`, `rtl_433/devices/pending`,
   `.../add`, `.../ignore`, `.../unignore`, `.../replace`, `.../clear`,
-  `.../subscribe`, and `rtl_433/settings/get`, `.../hub`, `.../device`,
+  `.../subscribe`, and `rtl_433/settings/get`, `.../receiver`, `.../device`,
   `.../mappings`. Registration is per
   Home Assistant *run*, not per entry — the integration has no `async_setup`, so
   `async_register_commands` is called from every `async_setup_entry` and guarded
   by the `DATA_WS_REGISTERED` sentinel on `hass.data[DOMAIN]`; registering a
-  command name twice raises, and a second hub must not lose to that.
+  command name twice raises, and a second receiver must not lose to that.
   `_async_get_coordinator` answers an unknown `entry_id` with `ERR_NOT_FOUND`
   and one whose entry exists but is not set up with `not_loaded`, so a panel
   left open across a reload reports a condition instead of raising.
@@ -359,7 +359,7 @@ second implementation.
   sighting*, which only ages a row's count and last-seen, is picked up by the
   `_REFRESH_INTERVAL` (5s) timer, which re-renders and sends **only when the
   payload differs from the last one sent**. N frames for a known candidate cost
-  at most one message per interval, and an idle hub costs nothing. Do not push
+  at most one message per interval, and an idle receiver costs nothing. Do not push
   per frame (a busy urban receiver decodes constantly), and do not move the
   coalescing into the coordinator — it stays a state holder that does not know a
   UI exists.
@@ -388,11 +388,11 @@ second implementation.
 - **`config_panel_domain` replaces the options flow's only route — so the panel
   has to carry every step it displaces.** It does not add a route to the panel.
   Verified in a real browser against Home Assistant 2026.5.4: with it set, the
-  hub row's Configure control on Settings → Devices & services → rtl_433 renders
+  receiver row's Configure control on Settings → Devices & services → rtl_433 renders
   as `<a href="/rtl_433?config_entry=…">` and nothing else opens the options
   flow — the entry's overflow menu offers only Reload / Rename / Copy entry ID /
   Download diagnostics / Reconfigure / System options / Disable / Delete, and the
-  hub device page offers no route either. (Reconfigure still reaches the hub's
+  receiver device page offers no route either. (Reconfigure still reaches the receiver's
   *connection* settings; that is a config-flow step, not an options one.)
 
   It is set deliberately, and the panel now renders all six displaced steps: Add
@@ -410,14 +410,14 @@ second implementation.
   `config_panel_domain == DOMAIN` and that no sidebar slot is taken alongside
   it.
 - The frontend passes the entry it was opened for as `?config_entry=<entry_id>`.
-  The panel ignores it and opens on the first loaded hub; with two receivers,
+  The panel ignores it and opens on the first loaded receiver; with two receivers,
   Configure on either lands on the same one.
 - **The panel draws its own toolbar.** Home Assistant renders no chrome around a
   non-iframe custom panel, and with no sidebar entry there is otherwise no way
   back out on a phone, where the sidebar is closed. The back button is
   `history.back()` — the page is always arrived at from somewhere — falling back
   to `/config/integrations/integration/rtl_433` when opened cold by URL.
-- **A save that reloads the hub must not read as a failure.** Saving a
+- **A save that reloads the receiver must not read as a failure.** Saving a
   calibration, a mapping override or the manage-settings toggle reloads the
   entry, and for a second afterwards `rtl_433/devices/subscribe` answers
   `not_loaded`. The panel re-subscribes after every save (the old subscription
@@ -426,8 +426,8 @@ second implementation.
   an error banner at the moment the user succeeded.
 - **Author CSS beats the user agent's `[hidden]` rule.** Any selector in the
   panel's stylesheet that sets `display` needs its own `[hidden]` rule, or the
-  `hidden` property does nothing — this is what kept the single-hub receiver
-  picker on screen until it was fixed. There is no JS test harness in this
+  `hidden` property does nothing — this is what kept the receiver
+  picker on screen with a single receiver until it was fixed. There is no JS test harness in this
   repository, by choice: the panel is covered by the Python registration test
   and by the container harness, whose `STAGE=panel` capture
   (`17-discovery-panel.png`) is also the only check that a real browser loads
@@ -470,8 +470,8 @@ base `async_added_to_hass` baseline:
 - **Always-available override.** It overrides `available` to be true whenever it
   has a value, so it stays readable after the device falls silent (it ignores
   the per-device availability timeout) and can drive "last_seen older than X"
-  staleness automations. It is **not** exempt from the hub-connection gate (see
-  [Hub-connection availability gate](#hub-connection-availability-gate)): with
+  staleness automations. It is **not** exempt from the receiver-connection gate (see
+  [Receiver-connection availability gate](#receiver-connection-availability-gate)): with
   the socket down the timestamp only records when the integration stopped
   listening, so the sensor goes unavailable with the rest of the device.
 
@@ -511,9 +511,9 @@ coordinator watchdog, and the devices map:
   extra attributes** (the type is the whole payload); there is **no `payload`
   and no `value_transform`** — the raw value is stringified directly.
 - **Unmodified availability; no construction-time replay.** `available` is **not**
-  overridden — the entity takes the base gate whole: the hub connection *and* the
+  overridden — the entity takes the base gate whole: the receiver connection *and* the
   per-device silence timeout (see
-  [Hub-connection availability gate](#hub-connection-availability-gate)). This
+  [Receiver-connection availability gate](#receiver-connection-availability-gate)). This
   matches zigbee2mqtt (its `event` discovery payload carries the bridge-state and
   per-device availability topics, `availability_mode: all`) and core (Shelly's
   event entities inherit `CoordinatorEntity.available`; ESPHome's follow the
@@ -563,7 +563,7 @@ timer. Contracts that must survive refactors:
   `:motion`, drops the `motion` slot from any persisted `DEVICE_EVENT_TYPES` (so
   the event platform never recreates it), and — only if it removed at least one —
   raises a single integration-wide repairs issue `motion_moved_to_binary_sensor`
-  (`is_fixable=False`, WARNING; stable id, so never duplicated across hubs or
+  (`is_fixable=False`, WARNING; stable id, so never duplicated across receivers or
   restarts). Idempotent and safe on every startup.
 
 ## Device triggers (`device_trigger.py`)
@@ -602,23 +602,23 @@ UI-pickable **device triggers**. Contracts that must survive refactors:
     trigger, which fires on a match_all `None`→state transition — the same
     re-fire-on-restart bug, now closed for both paths.)
   - `old_state.state == STATE_UNAVAILABLE` — a **config-entry reload** *or* a
-    **hub outage**, either of which takes the entity
+    **receiver outage**, either of which takes the entity
     `<event>` → `unavailable` → restored `<event>` while the listener is still
-    attached. Since event entities are gated on the hub connection this is the
+    attached. Since event entities are gated on the receiver connection this is the
     common case, not the rare one.
 
   It also ignores a `new_state` that is `None`/`unavailable`/`unknown` (the
   unload edge). An `old_state` of `unknown` is deliberately allowed: the very
   first press rises from the never-fired `unknown` state and must fire.
 
-## WebSocket frames & hub observability
+## WebSocket frames & receiver observability
 
-Durable contracts for how streamed frames become device/hub updates and drive the
-hub diagnostic entities. Frame classification, normalization, the replay/stale
+Durable contracts for how streamed frames become device/receiver updates and drive the
+receiver diagnostic entities. Frame classification, normalization, the replay/stale
 classifier, and the `/cmd` getters now live **inside `pyrtl_433.Rtl433Client`**;
 the coordinator (`coordinator/base.py`, `sensor.py`, `binary_sensor.py`) consumes
 them via the client's callbacks and adds the HA-side policy (dispatch, the
-registration gate, hub-identity refresh, sensor mapping). The method names below
+registration gate, receiver-identity refresh, sensor mapping). The method names below
 name the library's internals unless stated otherwise — they are documented here
 because these are the contracts the integration relies on:
 
@@ -631,7 +631,7 @@ because these are the contracts the integration relies on:
   `_handle_log`: `src == "Auto Level"` messages are parsed
   (`pyrtl_433.autolevel`, exact upstream wording, unparsable ⇒ ignored) into
   the client's `noise_level` / `min_level` snapshots — the **only** source of
-  the receiver noise floor rtl_433 offers (no structured getter exists) — and
+  the radio noise floor rtl_433 offers (no structured getter exists) — and
   fire `on_hub_update` on change; the raw frame also reaches the optional
   `on_log` callback (unused by the integration today).
   **Every other frame is ignored** on the socket (`meta`, periodic state/stats,
@@ -683,7 +683,7 @@ because these are the contracts the integration relies on:
   treated as post-connection (registers), and once disconnected
   (`_connection_time is None`) the gate is open. **Assumes the server and HA
   clocks are roughly NTP-synced.**
-- **Hub observability data source** (client-side, `pyrtl_433.Rtl433Client`). SDR/meta
+- **Receiver observability data source** (client-side, `pyrtl_433.Rtl433Client`). SDR/meta
   and server stats are **not** read
   from the socket. The client issues one-shot HTTP GETs to `scheme://host:port/cmd`
   at the **server root** (`https` when `secure`/`wss`, else `http`) — the `/cmd` URL
@@ -702,8 +702,8 @@ because these are the contracts the integration relies on:
   `get_dev_info`/`get_dev_query` are the SDR's identity and the client fetches them
   **only on (re)connect** (not on its interval tick): they are static
   per dongle. When the identity changes, the client fires `on_hub_update`, and the
-  coordinator's `_maybe_refresh_hub_identity` then fires the HA-side
-  `hub_info_callback` so `__init__.py` refreshes the **hub** device-registry entry's
+  coordinator's `_maybe_refresh_receiver_identity` then fires the HA-side
+  `receiver_info_callback` so `__init__.py` refreshes the **receiver** device-registry entry's
   `manufacturer`/`model`/`serial_number` (replacing the generic `rtl_433` /
   `rtl_433 server` placeholders). Empty when no SDR is open (e.g. `-D manual`),
   in which case the placeholders are kept.
@@ -721,17 +721,17 @@ because these are the contracts the integration relies on:
     flags (**no `gain`, no `ppm`**).
   - `get_gain` → string (empty ⇒ auto); `get_ppm_error` → int.
   - `get_dev_info` → librtlsdr USB label JSON
-    `{"vendor": <str>, "product": <str>, "serial": <str>}` (mapped to the hub
+    `{"vendor": <str>, "product": <str>, "serial": <str>}` (mapped to the receiver
     device's `manufacturer`/`model`/`serial_number`); `get_dev_query` → the `-d`
     selector string rtl_433 opened. Both empty/unset when no SDR device is open.
   - `get_stats` → `{"enabled": <int>, "since": <str>, "frames": {"count":
     <ook>, "fsk": <fsk>, "events": <decoded>}, "stats": [<per-protocol>...]}`.
-    Hub sensors map `frames.events` → decoded events, `frames.count` → OOK
+    Receiver sensors map `frames.events` → decoded events, `frames.count` → OOK
     frames, and `frames.fsk` → FSK frames, all **`TOTAL_INCREASING`** (cumulative
     since-start counters that tolerate the server-restart reset, so HA records
     long-term statistics); `enabled` → enabled decoders is a gauge →
     **`MEASUREMENT`**; `stats[]` / `since` are surfaced as attributes.
-  - Noise level / minimum detection level hub sensors → the coordinator's
+  - Noise level / minimum detection level receiver sensors → the coordinator's
     `noise_level` / `min_level` properties (delegating to the client's parsed
     "Auto Level" snapshots above) — **socket-sourced**, not `/cmd`-sourced, so
     they survive a proxy that hides `/cmd` but stay `unknown` unless the server
@@ -743,17 +743,17 @@ because these are the contracts the integration relies on:
   registry device `(DOMAIN, f"{entry_id}:unknown")`. Safe on every setup; the
   classifier above prevents recreation.
 
-## Hub-connection availability gate
+## Receiver-connection availability gate
 
 Durable contract for the second availability gate (`coordinator/_watchdog.py`,
 `entity.py`, `event.py`, `sensor.py`). The per-device *silence* timeouts answer
 "has this radio transmitted lately?", which only means anything while the
 integration is listening; this gate answers "is the integration listening at
 all?". End-user docs live in
-[docs/availability.md](docs/availability.md#hub-connection).
+[docs/availability.md](docs/availability.md#receiver-connection).
 
 - **`coordinator.receiver_available` is exactly `self.connected`.** No grace window,
-  no debounce, no timer: the socket drops, every device behind the hub is
+  no debounce, no timer: the socket drops, every device behind the receiver is
   unavailable on the same tick. **Do not add a delay here.** It was tried and
   removed deliberately — a delay presents readings as current while the
   integration knows it cannot hear the radio, which is what the Silver-tier
@@ -793,11 +793,11 @@ all?". End-user docs live in
   `available` is False and the state string is then unrestorable. Without it a
   restart during an outage strands every never-expire contact at `unknown` until
   it next transmits — possibly days.
-- **The hub's own diagnostic sensors read it too.** `Rtl433ReceiverSensor.available`
+- **The receiver's own diagnostic sensors read it too.** `Rtl433ReceiverSensor.available`
   returns `receiver_available`: every value it renders is HTTP `/cmd`-sourced, so an
   outage freezes it with nothing on the entity to say so. A key missing from a
   *live* payload still reads `unknown` (a `None` native value), not unavailable.
-  Two hub entities stay ungated: `Rtl433ReceiverConnectivity` (it *is* the connection
+  Two receiver entities stay ungated: `Rtl433ReceiverConnectivity` (it *is* the connection
   report — `available` is hardcoded `True` and it flips `off` on the drop with no
   grace window — same as the devices now) and `Rtl433ReceiverControl` (availability is
   a capability gate on
@@ -809,8 +809,8 @@ all?". End-user docs live in
   state read, so it is always correct; the coordinator only *repaints*. The
   disconnect edge and the connect edge each call it, and each watchdog tick
   re-checks as a cheap backstop in case an edge is ever missed. All
-  three funnel into `_async_sync_hub_availability`, which dispatches
-  `SIGNAL_RECEIVER_AVAILABILITY` **once per flip** (a hub-wide signal, deliberately
+  three funnel into `_async_sync_receiver_availability`, which dispatches
+  `SIGNAL_RECEIVER_AVAILABILITY` **once per flip** (a receiver-wide signal, deliberately
   separate from `SIGNAL_RECEIVER_UPDATE`, which also fires on every meta/stats refresh
   and would otherwise write state for every device entity on each poll). Both
   `Rtl433Entity` and `Rtl433ReceiverEntity` subscribe: `SIGNAL_RECEIVER_UPDATE` covers the
@@ -823,22 +823,22 @@ all?". End-user docs live in
   count — from the *persisted* device map, not the live-session one, which is
   empty in the restart-while-down case the gate exists for). A teardown
   (`async_stop`) is not an outage and logs neither — the `_started` guard in
-  `_emit_hub_update` covers the socket close it performs. A failed
+  `_emit_receiver_update` covers the socket close it performs. A failed
   `async_start` cancels the timer it armed, so an entry left in `setup_retry`
   does not leak a repaint onto the coordinator the retry installs.
-- **Tests default to a connected hub.** Feeding events straight into the client
+- **Tests default to a connected receiver.** Feeding events straight into the client
   leaves `connected` False, which the gate reads as one long outage, so the
-  autouse `tests/conftest.py::hub_connected_by_default` fixture marks every
+  autouse `tests/conftest.py::receiver_connected_by_default` fixture marks every
   started coordinator connected (including after a reload, which rebuilds it).
   Modules that exercise the outage side opt out with
-  `@pytest.mark.hub_disconnected` and drive the edges themselves.
+  `@pytest.mark.receiver_disconnected` and drive the edges themselves.
 
-## Hub SDR controls (HA-managed settings)
+## Receiver SDR controls (HA-managed settings)
 
 Durable contracts for the optional HA-managed SDR controls (`sdr_settings.py`,
 `coordinator/base.py`, `__init__.py`, the `number`/`select`/`switch` platforms).
 End-user docs live in
-[docs/hub-entities.md](docs/hub-entities.md#managing-sdr-settings-from-home-assistant) —
+[docs/receiver-entities.md](docs/receiver-entities.md#managing-sdr-settings-from-home-assistant) —
 keep this contributor-facing.
 
 - **Settings-registry contract** (`sdr_settings.py`, import-disjoint like
@@ -891,11 +891,11 @@ keep this contributor-facing.
     `len(meta["frequencies"])` (unknown/pre-connect ⇒ available): `hop_interval`
     is available **only when hopping** (`> 1` frequency — a single frequency has
     nothing to hop between), and `center_frequency` is available **only when not
-    hopping** (`≤ 1`), mirroring the adoption hop-mode guard so a hopping receiver
+    hopping** (`≤ 1`), mirroring the adoption hop-mode guard so a hopping radio
     is never pinned. The API has no command to set the frequency *list*, so these
     modes are mutually exclusive and set in the rtl_433 config.
 - **Adoption + full enforcement on reconnect** (`coordinator/base.py`, driven
-  HA-side off the client's connect edge: `_emit_hub_update` → `_on_connect` →
+  HA-side off the client's connect edge: `_emit_receiver_update` → `_on_connect` →
   `_seed_desired_on_first_connect`, `_sdr.py`). The library client owns the
   transport but **not** this managed-SDR policy. When `manage_settings` is
   on: on first connect (when `_desired` is empty) `_adopt_from_server()` seeds the
@@ -910,7 +910,7 @@ keep this contributor-facing.
     frequency even on a re-connect or after management was toggled on later, and is
     never re-applied once the user changes it via the control.
   - **Hop-mode guard:** adoption **skips `center_frequency` when
-    `len(frequencies) > 1`** so HA never pins a hopping receiver to one freq.
+    `len(frequencies) > 1`** so HA never pins a hopping radio to one freq.
   - **`/cmd`-down guard:** if `self.meta` is empty (getters failed / proxy hides
     `/cmd`) adoption seeds **nothing** and leaves the Store empty — never raises.
   - **Serialization lock:** all issuance (user write, reconnect replay,
@@ -931,7 +931,7 @@ keep this contributor-facing.
   and `clear_desired_state()`.
 - **Management-toggle behavior** (`CONF_MANAGE_SETTINGS = "manage_settings"`,
   `const.py`; default `DEFAULT_MANAGE_SETTINGS = True`). Offered on the initial
-  connection form **and** in hub options. ON ⇒ controls created, adopt + enforce
+  connection form **and** in receiver options. ON ⇒ controls created, adopt + enforce
   as above, and the five folded SDR/meta diagnostic **sensors** are replaced by
   their controls (center-frequency keeps its actual sensor). OFF ⇒ no controls,
   no commands; `async_load_desired_state` **wipes the Store on load**
@@ -943,7 +943,7 @@ keep this contributor-facing.
   when the toggle changed** (the entity set + adopt/enforce behaviour flips);
   timeout and ignore-list changes are applied live with no reload. The same
   listener also owns the reload for a changed connection target / stable radio id
-  (see the config-flow section) — no flow reloads a hub itself.
+  (see the config-flow section) — no flow reloads a receiver itself.
 - **HA is the authority; no re-adopt action — by design.** Once managed, HA
   re-applies its stored values on reconnect and **overrides later direct edits**
   to the rtl_433 config. There is deliberately **no re-adopt button/service**.
@@ -964,8 +964,8 @@ Assistant entity descriptor. The files ship **inside the `pyrtl_433` wheel**
 (`pyrtl_433/library/data/*.yaml`), not in this repository; the loader merges
 every `*.yaml` (except `_skip_keys.yaml`) into one field-keyed table cached in
 `DATA_LIBRARY`.
-`DATA_LIBRARY` now caches the **shipped library only** — per-hub user overrides
-are merged separately per entry (see [Per-hub user overrides](#per-hub-user-overrides-data-flow)).
+`DATA_LIBRARY` now caches the **shipped library only** — per-receiver user overrides
+are merged separately per entry (see [Per-receiver user overrides](#per-receiver-user-overrides-data-flow)).
 
 A mapping entry, keyed by the exact rtl_433 field name:
 
@@ -998,7 +998,7 @@ descriptor}`, same per-field schema; `pyrtl_433.library` `Registry.models`) carr
 model-scoped → global → `None`. Precedence is **specificity-first**: per-device
 calibration > model-scoped (user > shipped) > global (user > shipped), so a
 *shipped* model entry beats a *user-override global* entry for a matching model.
-Per-hub user overrides support `models:` too. Full detail (incl. the
+Per-receiver user overrides support `models:` too. Full detail (incl. the
 illustrative non-real-model worked example) is in `docs/device-library.md`; do
 not duplicate it here.
 
@@ -1009,14 +1009,14 @@ skip-keys file — is defined upstream, where the library now lives:
 - **<https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/>**
   (authoritative schema reference).
 - **[docs/device-library.md](docs/device-library.md)** — the Home-Assistant-facing
-  half: per-hub user overrides, the options-flow editor, diagnostics.
+  half: per-receiver user overrides, the options-flow editor, diagnostics.
 
-## Per-hub user overrides (data flow)
+## Per-receiver user overrides (data flow)
 
-User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
+User overrides are **per receiver**, stored in `entry.data[CONF_USER_MAPPINGS]`
 (`CONF_USER_MAPPINGS = "user_mappings"`, `const.py`) — **not** a global file.
 
-- **`DATA_LIBRARY` caches the shipped library only.** Per-hub overrides are
+- **`DATA_LIBRARY` caches the shipped library only.** Per-receiver overrides are
   merged into a per-entry library cached in `DATA_ENTRY_LIBRARY[entry_id]`; the
   lookup at entity build reads that per-entry merged registry. There is **no**
   global override layer.
@@ -1027,16 +1027,16 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
   config-entry migration, any existing `<config>/rtl_433_mappings.yaml` is read
   **once**, normalized, and folded into each existing entry's
   `CONF_USER_MAPPINGS`. The file is then **ignored and left untouched** on disk
-  (never edited or deleted). Hubs added after the upgrade start with empty
+  (never edited or deleted). Receivers added after the upgrade start with empty
   overrides.
 - **Editing surface: `async_step_mappings`** (the options-flow *Device mappings*
   step, `config_flow.py`). It presents an `ObjectSelector` / `ha-yaml-editor`
-  pre-filled with the hub's current `CONF_USER_MAPPINGS`. The editor blocks
+  pre-filled with the receiver's current `CONF_USER_MAPPINGS`. The editor blocks
   invalid YAML syntax; on submit the integration **validates the mapping schema**
   and re-shows the form with a **per-field error** (offending field + reason)
   instead of silently dropping invalid entries. A successful save writes
   `CONF_USER_MAPPINGS` into `entry.data` and triggers an **automatic reload** of
-  that hub (entities rebuild) — no HA restart. The editor returns parsed YAML, so
+  that receiver (entities rebuild) — no HA restart. The editor returns parsed YAML, so
   comments/formatting are not preserved.
 
 ## Add-a-mapping workflow
@@ -1061,7 +1061,7 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
    library. Field names are
    case-sensitive and a mismatch is **silent** — no entity, no warning, no error
    (SCMplus emits `Consumption`, ERT-SCM emits `consumption_data`).
-4. **Read the diagnostics' unmatched keys.** The hub diagnostics export contains
+4. **Read the diagnostics' unmatched keys.** The receiver diagnostics export contains
    an `unmatched_field_keys` list — JSON keys that are neither skipped nor
    mapped. Download it from **Settings → Devices & Services → rtl_433 → ⋮ →
    Download diagnostics**. Every key there is a one-line YAML addition; the list
@@ -1069,7 +1069,7 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
    [add-a-mapping workflow](docs/device-library.md#add-a-mapping-workflow).
 
 For an installation-local change that should **not** be committed, use the
-hub's *Device mappings* page instead of editing the shipped library (see
+receiver's *Device mappings* page instead of editing the shipped library (see
 [Adding device mappings](docs/device-library.md#adding-device-mappings)).
 
 ## Running the unit tests
@@ -1282,9 +1282,9 @@ fully documented, including prerequisites, the orchestrator steps
 - The bridge also tails rtl_433's `-F log` output and re-frames each log line as
   the structured `{"time","src","lvl","msg"}` frame a real `-F http` server
   pushes, which is the only channel carrying the "Auto Level" noise-floor data
-  behind the hub's noise sensors. The replay feeds RF silence between capture
+  behind the receiver's noise sensors. The replay feeds RF silence between capture
   passes so that noise floor genuinely moves; without it `-Y autolevel` never
-  logs an adjustment. The bridge serves no `/cmd`, so the `/cmd`-sourced hub
+  logs an adjustment. The bridge serves no `/cmd`, so the `/cmd`-sourced receiver
   sensors read `unknown` in the harness — never synthesize them.
 
 Full runbook:
@@ -1299,11 +1299,11 @@ Full runbook:
 - Keep `const.py` the single source of truth for config keys and defaults
   (`DEFAULT_PORT=8433`, `DEFAULT_PATH="/ws"`, `DEFAULT_AVAILABILITY_TIMEOUT=600`)
   and for the dispatcher signals (`SIGNAL_NEW_DEVICE`, `SIGNAL_RECEIVER_UPDATE` — the
-  latter fans connectivity/meta/stats changes out to the hub entities — and
+  latter fans connectivity/meta/stats changes out to the receiver entities — and
   `SIGNAL_RECEIVER_AVAILABILITY`, the per-flip device repaint behind the
-  hub-connection gate).
+  receiver-connection gate).
 - Always run `pytest tests/` before proposing a change, and follow the
   conventional-commit and lint rules in [CONTRIBUTING.md](CONTRIBUTING.md).
 - Always open pull requests with a **conventional-commit-style title** that
-  summarizes the branch's changes (e.g. `feat(rtl_433): add hub observability
+  summarizes the branch's changes (e.g. `feat(rtl_433): add receiver observability
   sensors`), matching the commit convention above.

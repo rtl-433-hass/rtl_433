@@ -32,11 +32,11 @@ surfaces two ways, and the listener guards both:
 * **HA restart** — the restore is a ``state_changed`` with ``old_state is None``
   (the entity's first appearance in the state machine).
 * **Config-entry reload** (an options change, or the "server unreachable" repair
-  forcing a reconnect) **or a hub outage** — the entity goes
+  forcing a reconnect) **or a receiver outage** — the entity goes
   value → ``unavailable`` → restored value *while the automation's listener is
   still attached* (a restart re-attaches it only after the restore), so the
   restore arrives as ``unavailable`` → ``<old event>`` rather than ``None`` →.
-  Event entities are gated on the hub connection like every other device entity
+  Event entities are gated on the receiver connection like every other device entity
   (see ``event.py``), so every socket drop produces this edge, not only a reload.
 
 A momentary event never legitimately fires from these, so the listener ignores
@@ -76,7 +76,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.trigger import TriggerActionType, TriggerInfo
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_DEVICES, DEVICE_EVENT_TYPES, DOMAIN
+from .const import CONF_DEVICES, DEVICE_EVENT_TYPES, DOMAIN, is_reserved_device_key
 
 # Two trigger ``type`` values per event entity: a base "triggered" (fires on any
 # transmission) and a "triggered_subtype" whose specific ``event_type`` value is
@@ -158,10 +158,10 @@ def _event_types_for_entry(hass: HomeAssistant, entry: er.RegistryEntry) -> list
     """
     device_key, field_key = _device_field_from_unique_id(entry.unique_id)
     if device_key is not None and field_key is not None:
-        hub_entry = hass.config_entries.async_get_entry(entry.config_entry_id)
-        if hub_entry is not None:
+        receiver_entry = hass.config_entries.async_get_entry(entry.config_entry_id)
+        if receiver_entry is not None:
             persisted = (
-                hub_entry.data.get(CONF_DEVICES, {})
+                receiver_entry.data.get(CONF_DEVICES, {})
                 .get(device_key, {})
                 .get(DEVICE_EVENT_TYPES, {})
                 .get(field_key, [])
@@ -181,18 +181,37 @@ def _device_field_from_unique_id(
 ) -> tuple[str | None, str | None]:
     """Recover ``(device_key, field_key)`` from an event entity's unique_id.
 
-    The unique_id is ``f"{receiver_entry_id}:{device_key}:{object_suffix}"``
-    (``entity.py``); the ``device_key`` never contains a colon (it is built from
-    safe tokens, ``pyrtl_433.normalizer.device_key``) and an event field's
-    ``object_suffix`` equals its ``field_key`` (``pyrtl_433.library``'s
-    ``events.yaml``).
+    An event entity is always a *device field*, so its unique_id is the
+    three-segment ``f"{entry_id}:{device_key}:{object_suffix}"`` (``entity.py``);
+    the ``device_key`` never contains a colon (it is built from safe tokens,
+    ``pyrtl_433.naming.safe_token``) and an event field's ``object_suffix``
+    equals its ``field_key`` (``pyrtl_433.library``'s ``events.yaml``).
+
+    Other entities share the same colon grammar with a *different* shape, and
+    this parser must not decode those as device fields:
+
+    - ``{location_entry_id}:receiver:{receiver_subentry_id}:{object_suffix}`` --
+      a receiver control (radio controls, noise sensors, connectivity).
+    - ``{location_entry_id}:{device_key}:{receiver_subentry_id}:{object_suffix}``
+      -- a per-receiver signal entity (``rssi`` / ``snr`` / ``last_seen``).
+
+    Both are four segments, so the shape is decided by segment count first, and
+    by the reserved ``receiver`` marker second: a three-segment id whose middle
+    segment is the marker is not a device field either (``const.py``'s
+    ``RESERVED_DEVICE_KEYS``). Anything that is not an unambiguous device field
+    yields ``(None, None)``, which the callers already treat as "no event types
+    to offer" rather than guessing.
     """
     if not unique_id:
         return None, None
-    parts = unique_id.split(":", 2)
+    parts = unique_id.split(":")
     if len(parts) != 3:
+        # Four segments is a receiver control or a per-receiver signal entity;
+        # anything else is not an identity string this integration minted.
         return None, None
-    _hub_entry_id, device_key, field_key = parts
+    _entry_id, device_key, field_key = parts
+    if is_reserved_device_key(device_key):
+        return None, None
     return device_key, field_key
 
 
@@ -250,7 +269,7 @@ async def _async_attach_event_trigger(
         #   (``unavailable`` / ``unknown``) -- the unload edge, not a press.
         # * ``old_state`` is ``None`` (the entity's restore / initial add at an HA
         #   restart) or ``unavailable``. The latter covers both a config-entry
-        #   reload and a hub outage: either takes the entity
+        #   reload and a receiver outage: either takes the entity
         #   value -> ``unavailable`` -> restored value *with this listener already
         #   attached* (a full restart re-attaches the listener only after restore,
         #   so it never sees that edge). Re-surfacing the restored last event from

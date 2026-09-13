@@ -18,7 +18,7 @@ entry, because the things worth protecting are integration-shaped:
   frame, and going quiet on unsubscribe;
 * that adopting over the socket produces the same device as adopting from the
   options form;
-* that the panel and its static path survive a second hub entry.
+* that the panel and its static path survive a second receiver entry.
 
 Pending state is always built by feeding real frames through the client's own
 normalize + classify seam (``_hear`` below), never by assigning
@@ -78,7 +78,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 
-# The three devices the hub hears in the fixture below, spelled out as the
+# The three devices the receiver hears in the fixture below, spelled out as the
 # normalizer derives them from ``model`` + ``id`` so the assertions read the way
 # the panel's table does.
 #
@@ -153,7 +153,7 @@ def _message(command: str, entry_id: str) -> dict[str, Any]:
 
 
 def _coordinator(hass, entry):
-    """Return the running coordinator for a loaded hub entry."""
+    """Return the running coordinator for a loaded receiver entry."""
     return hass.data[DOMAIN][entry.entry_id]
 
 
@@ -211,9 +211,9 @@ async def _call(client, message: dict[str, Any]):
         return received, events
 
 
-async def _setup_hub(hass, hub_entry_builder, **kwargs):
-    """Add and set up one hub entry, returning it loaded."""
-    entry = hub_entry_builder(availability_timeout=600, **kwargs)
+async def _setup_receiver(hass, receiver_entry_builder, **kwargs):
+    """Add and set up one receiver entry, returning it loaded."""
+    entry = receiver_entry_builder(availability_timeout=600, **kwargs)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -221,8 +221,8 @@ async def _setup_hub(hass, hub_entry_builder, **kwargs):
 
 
 @pytest.fixture
-async def hub(hass, hub_entry_builder, no_socket):
-    """A loaded hub that has heard three devices at four distinct instants.
+async def receiver(hass, receiver_entry_builder, no_socket):
+    """A loaded receiver that has heard three devices at four distinct instants.
 
     The sightings are frozen a minute apart so "most recently heard first" is a
     real ordering rather than an artefact of insertion order, and the newest
@@ -230,7 +230,7 @@ async def hub(hass, hub_entry_builder, no_socket):
     distinguishable from the others' and its ``first_seen`` is provably not its
     ``last_seen``.
     """
-    entry = await _setup_hub(hass, hub_entry_builder)
+    entry = await _setup_receiver(hass, receiver_entry_builder)
     coordinator = _coordinator(hass, entry)
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -248,7 +248,9 @@ async def hub(hass, hub_entry_builder, no_socket):
 # --------------------------------------------------------------------------- #
 # The payload the panel renders.                                              #
 # --------------------------------------------------------------------------- #
-async def test_pending_returns_the_columns_the_panel_renders(hass, hub, hass_ws_client):
+async def test_pending_returns_the_columns_the_panel_renders(
+    hass, receiver, hass_ws_client
+):
     """One command, the whole table: order, counts, signal, ISO times, values.
 
     Every field asserted here is one the panel puts on screen and a user judges a
@@ -266,7 +268,7 @@ async def test_pending_returns_the_columns_the_panel_renders(hass, hub, hass_ws_
     client = await hass_ws_client(hass)
 
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/pending", "entry_id": receiver.entry_id}
     )
 
     assert reply["success"]
@@ -310,7 +312,7 @@ async def test_pending_returns_the_columns_the_panel_renders(hass, hub, hass_ws_
 
 
 async def test_pending_readings_preview_the_entities_adoption_would_create(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """A candidate's readings are named and valued the way its entities will be.
 
@@ -336,7 +338,7 @@ async def test_pending_readings_preview_the_entities_adoption_would_create(
     client = await hass_ws_client(hass)
 
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/pending", "entry_id": receiver.entry_id}
     )
     rows = {row["key"]: row for row in reply["result"]["pending"]}
 
@@ -382,7 +384,7 @@ async def test_pending_readings_preview_the_entities_adoption_would_create(
 
 
 async def test_binary_readings_use_the_device_class_vocabulary(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """Safety reads Safe/Unsafe and moisture Dry/Wet, not On/Off.
 
@@ -393,13 +395,13 @@ async def test_binary_readings_use_the_device_class_vocabulary(
     preview exists not to do.
     """
     _hear(
-        _coordinator(hass, hub),
+        _coordinator(hass, receiver),
         {"model": "Wet-1", "id": 9, "detect_wet": 1, "tamper": 0},
     )
     client = await hass_ws_client(hass)
 
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/pending", "entry_id": receiver.entry_id}
     )
     rows = {row["key"]: row for row in reply["result"]["pending"]}
     readings = {r["key"]: r for r in rows["Wet-1-9"]["readings"]}
@@ -408,7 +410,9 @@ async def test_binary_readings_use_the_device_class_vocabulary(
     assert readings["tamper"]["display"] == "Safe"
 
 
-async def test_an_event_field_previews_its_mapped_event_type(hass, hub, hass_ws_client):
+async def test_an_event_field_previews_its_mapped_event_type(
+    hass, receiver, hass_ws_client
+):
     """A doorbell previews the event type its entity will fire, not the raw code.
 
     An ``event`` descriptor does not become a sensor: its entity's state is the
@@ -417,13 +421,13 @@ async def test_an_event_field_previews_its_mapped_event_type(hass, hub, hass_ws_
     never holds.
     """
     _hear(
-        _coordinator(hass, hub),
+        _coordinator(hass, receiver),
         {"model": "Honeywell-Doorbell", "id": 77, "secret_knock": 0},
     )
     client = await hass_ws_client(hass)
 
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/pending", "entry_id": receiver.entry_id}
     )
     rows = {row["key"]: row for row in reply["result"]["pending"]}
     readings = {r["key"]: r for r in rows["Honeywell-Doorbell-77"]["readings"]}
@@ -437,7 +441,7 @@ async def test_an_event_field_previews_its_mapped_event_type(hass, hub, hass_ws_
 
 
 async def test_a_device_class_name_comes_from_core_not_from_spelling(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """Names are looked up in core's table, not derived from the class string.
 
@@ -446,13 +450,13 @@ async def test_a_device_class_name_comes_from_core_not_from_spelling(
     spelling heuristic, which would also silently drop translation.
     """
     _hear(
-        _coordinator(hass, hub),
+        _coordinator(hass, receiver),
         {"model": "Air-1", "id": 4, "pm2_5_ug_m3": 12.0, "temperature_C": 18.0},
     )
     client = await hass_ws_client(hass)
 
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/pending", "entry_id": receiver.entry_id}
     )
     rows = {row["key"]: row for row in reply["result"]["pending"]}
     readings = {r["key"]: r for r in rows["Air-1-4"]["readings"]}
@@ -461,7 +465,7 @@ async def test_a_device_class_name_comes_from_core_not_from_spelling(
     assert readings["temperature_C"]["name"] == "Temperature"
 
 
-async def test_readings_are_ordered_like_a_device_page(hass, hub, hass_ws_client):
+async def test_readings_are_ordered_like_a_device_page(hass, receiver, hass_ws_client):
     """Readings first, diagnostics last, alphabetical within each group.
 
     A device page puts the readings a user came for above the diagnostics, and
@@ -474,7 +478,7 @@ async def test_readings_are_ordered_like_a_device_page(hass, hub, hass_ws_client
     must sort *after* a humidity that is alphabetically later than it.
     """
     _hear(
-        _coordinator(hass, hub),
+        _coordinator(hass, receiver),
         {
             "model": "Ordered-1",
             "id": 3,
@@ -486,7 +490,7 @@ async def test_readings_are_ordered_like_a_device_page(hass, hub, hass_ws_client
     client = await hass_ws_client(hass)
 
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/pending", "entry_id": receiver.entry_id}
     )
     rows = {row["key"]: row for row in reply["result"]["pending"]}
     names = [reading["name"] for reading in rows["Ordered-1-3"]["readings"]]
@@ -495,7 +499,7 @@ async def test_readings_are_ordered_like_a_device_page(hass, hub, hass_ws_client
 
 
 async def test_a_field_with_no_library_mapping_is_not_previewed(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """An unmapped field creates no entity, so the card must not promise one.
 
@@ -505,13 +509,13 @@ async def test_a_field_with_no_library_mapping_is_not_previewed(
     which it does not.
     """
     _hear(
-        _coordinator(hass, hub),
+        _coordinator(hass, receiver),
         {"model": "Oddball-1", "id": 5, "temperature_C": 9.0, "not_a_real_field": 7},
     )
     client = await hass_ws_client(hass)
 
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/pending", "entry_id": receiver.entry_id}
     )
     rows = {row["key"]: row for row in reply["result"]["pending"]}
     readings = {reading["key"]: reading for reading in rows["Oddball-1-5"]["readings"]}
@@ -521,7 +525,7 @@ async def test_a_field_with_no_library_mapping_is_not_previewed(
 
 
 async def test_replace_repoints_an_existing_device_onto_a_candidate(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """The battery-swap recovery, driven from the candidate the user is looking at.
 
@@ -537,7 +541,7 @@ async def test_replace_repoints_an_existing_device_onto_a_candidate(
         client,
         {
             "type": "rtl_433/devices/add",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_OLD_KEY],
         },
     )
@@ -547,7 +551,7 @@ async def test_replace_repoints_an_existing_device_onto_a_candidate(
         client,
         {
             "type": "rtl_433/devices/replace",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_key": _NEW_KEY,
             "replaces": _OLD_KEY,
         },
@@ -556,17 +560,19 @@ async def test_replace_repoints_an_existing_device_onto_a_candidate(
     assert reply["success"]
     assert reply["result"] == {"replaced": _OLD_KEY}
     # The survivor now lives under the candidate's key, and the old one is gone.
-    stored = hub.data[CONF_DEVICES]
+    stored = receiver.data[CONF_DEVICES]
     assert _NEW_KEY in stored
     assert _OLD_KEY not in stored
 
 
-async def test_replace_reports_a_refused_request_as_an_error(hass, hub, hass_ws_client):
+async def test_replace_reports_a_refused_request_as_an_error(
+    hass, receiver, hass_ws_client
+):
     """A replace the helper refuses comes back as an error, not a traceback.
 
     A panel is held open across reloads and adoptions, so asking to replace a
     device that is no longer there is an ordinary stale-UI outcome. It carries
-    its own error code so a caller can tell it from "the hub is not loaded",
+    its own error code so a caller can tell it from "the receiver is not loaded",
     which is retryable and this is not.
     """
     client = await hass_ws_client(hass)
@@ -575,7 +581,7 @@ async def test_replace_reports_a_refused_request_as_an_error(hass, hub, hass_ws_
         client,
         {
             "type": "rtl_433/devices/replace",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_key": _NEW_KEY,
             "replaces": "Nothing-Like-This-99",
         },
@@ -586,27 +592,27 @@ async def test_replace_reports_a_refused_request_as_an_error(hass, hub, hass_ws_
 
 
 async def test_the_payload_lists_the_devices_a_candidate_could_replace(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
-    """The hub's own devices ride along with the candidates.
+    """The receiver's own devices ride along with the candidates.
 
     The replace dialog is built from this list, and it travels in the same
     payload as the cards so the two halves of "which of these is the same
-    hardware?" can never disagree about what the hub has.
+    hardware?" can never disagree about what the receiver has.
     """
     client = await hass_ws_client(hass)
     await _call(
         client,
         {
             "type": "rtl_433/devices/add",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_OLD_KEY],
         },
     )
     await hass.async_block_till_done()
 
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/pending", "entry_id": receiver.entry_id}
     )
 
     devices = {row["key"]: row for row in reply["result"]["devices"]}
@@ -621,7 +627,7 @@ async def test_the_payload_lists_the_devices_a_candidate_could_replace(
 # The three actions.                                                          #
 # --------------------------------------------------------------------------- #
 async def test_add_creates_only_what_was_asked_for_and_reports_the_rest_skipped(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """Adding over the socket builds the device; a stale key is skipped, not an error.
 
@@ -642,7 +648,7 @@ async def test_add_creates_only_what_was_asked_for_and_reports_the_rest_skipped(
         client,
         {
             "type": "rtl_433/devices/add",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_NEW_KEY, "Ghost-Device-1"],
         },
     )
@@ -651,22 +657,24 @@ async def test_add_creates_only_what_was_asked_for_and_reports_the_rest_skipped(
     assert reply["success"]
     assert reply["result"] == {"applied": [_NEW_KEY], "skipped": ["Ghost-Device-1"]}
 
-    assert set(hub.data[CONF_DEVICES]) == {_NEW_KEY}
-    record = hub.data[CONF_DEVICES][_NEW_KEY]
+    assert set(receiver.data[CONF_DEVICES]) == {_NEW_KEY}
+    record = receiver.data[CONF_DEVICES][_NEW_KEY]
     assert record[CONF_MODEL] == "EnergyMeter-2000"
     assert "power_W" in record[DEVICE_FIELDS]
 
-    assert _registry_device(hass, hub, _NEW_KEY) is not None
-    assert _device_entity_unique_ids(hass, hub, _NEW_KEY)
+    assert _registry_device(hass, receiver, _NEW_KEY) is not None
+    assert _device_entity_unique_ids(hass, receiver, _NEW_KEY)
 
-    coordinator = _coordinator(hass, hub)
+    coordinator = _coordinator(hass, receiver)
     assert _NEW_KEY in coordinator.adopted
     assert set(coordinator.pending) == {_MID_KEY, _OLD_KEY}
     for key in (_MID_KEY, _OLD_KEY):
-        assert _registry_device(hass, hub, key) is None
+        assert _registry_device(hass, receiver, key) is None
 
 
-async def test_an_ignored_device_is_still_named_by_its_model(hass, hub, hass_ws_client):
+async def test_an_ignored_device_is_still_named_by_its_model(
+    hass, receiver, hass_ws_client
+):
     """The ignore list names the device, before and after it transmits again.
 
     The persisted list is bare keys, and an ignored device has no stored record
@@ -682,19 +690,21 @@ async def test_an_ignored_device_is_still_named_by_its_model(hass, hub, hass_ws_
     ever gets a model at all).
     """
     client = await hass_ws_client(hass)
-    coordinator = _coordinator(hass, hub)
+    coordinator = _coordinator(hass, receiver)
 
     reply, _ = await _call(
         client,
         {
             "type": "rtl_433/devices/ignore",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_NEW_KEY],
         },
     )
     assert reply["success"] is True
 
-    reply, _ = await _call(client, _message("rtl_433/devices/pending", hub.entry_id))
+    reply, _ = await _call(
+        client, _message("rtl_433/devices/pending", receiver.entry_id)
+    )
     (ignored,) = reply["result"]["ignored"]
     assert ignored["key"] == _NEW_KEY
     assert ignored["model"] == _NEW_FRAME["model"]
@@ -704,7 +714,9 @@ async def test_an_ignored_device_is_still_named_by_its_model(hass, hub, hass_ws_
     _hear(coordinator, _NEW_FRAME)
     await hass.async_block_till_done()
 
-    reply, _ = await _call(client, _message("rtl_433/devices/pending", hub.entry_id))
+    reply, _ = await _call(
+        client, _message("rtl_433/devices/pending", receiver.entry_id)
+    )
     (ignored,) = reply["result"]["ignored"]
     assert ignored["model"] == _NEW_FRAME["model"]
     # ...and it is still ignored: naming it is not un-ignoring it.
@@ -714,7 +726,7 @@ async def test_an_ignored_device_is_still_named_by_its_model(hass, hub, hass_ws_
 
 
 async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """Ignoring and un-ignoring reach both stores, and take effect immediately.
 
@@ -733,18 +745,18 @@ async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
     its next transmission.
     """
     client = await hass_ws_client(hass)
-    coordinator = _coordinator(hass, hub)
+    coordinator = _coordinator(hass, receiver)
 
     reply, _ = await _call(
         client,
         {
             "type": "rtl_433/devices/ignore",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_MID_KEY],
         },
     )
     assert reply["result"] == {"applied": [_MID_KEY], "skipped": []}
-    assert hub.data[CONF_IGNORED_DEVICES] == [_MID_KEY]
+    assert receiver.data[CONF_IGNORED_DEVICES] == [_MID_KEY]
     assert coordinator.ignored == {_MID_KEY}
     assert _MID_KEY not in coordinator.pending
 
@@ -758,18 +770,18 @@ async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
         client,
         {
             "type": "rtl_433/devices/ignore",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_MID_KEY],
         },
     )
     assert reply["result"] == {"applied": [], "skipped": [_MID_KEY]}
-    assert hub.data[CONF_IGNORED_DEVICES] == [_MID_KEY]
+    assert receiver.data[CONF_IGNORED_DEVICES] == [_MID_KEY]
 
     # The pending payload carries the ignore list, which is how the panel renders
     # its second view. No model is stored for a device ignored while pending, so
     # the panel falls back to the key.
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/pending", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/pending", "entry_id": receiver.entry_id}
     )
     # Named, not just keyed: the coordinator remembers what it was told to
     # ignore, so the list can say what the user is looking at.
@@ -783,12 +795,12 @@ async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
         client,
         {
             "type": "rtl_433/devices/unignore",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_MID_KEY, "Never-Ignored-1"],
         },
     )
     assert reply["result"] == {"applied": [_MID_KEY], "skipped": ["Never-Ignored-1"]}
-    assert hub.data[CONF_IGNORED_DEVICES] == []
+    assert receiver.data[CONF_IGNORED_DEVICES] == []
     assert coordinator.ignored == set()
     # Not retroactive: still absent until the device transmits again.
     assert _MID_KEY not in coordinator.pending
@@ -799,7 +811,7 @@ async def test_ignore_and_unignore_round_trip_through_the_entry_and_coordinator(
 
 
 async def test_clear_empties_the_list_without_undoing_any_decision(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """Clearing forgets candidates, keeps ignores, and refills from live traffic.
 
@@ -816,21 +828,21 @@ async def test_clear_empties_the_list_without_undoing_any_decision(
     back on its next transmission.
     """
     client = await hass_ws_client(hass)
-    coordinator = _coordinator(hass, hub)
+    coordinator = _coordinator(hass, receiver)
 
     # Ignore one candidate first, so the clear has a decision to leave alone.
     reply, _ = await _call(
         client,
         {
             "type": "rtl_433/devices/ignore",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_MID_KEY],
         },
     )
     assert reply["success"]
 
     await client.send_json_auto_id(
-        {"type": "rtl_433/devices/subscribe", "entry_id": hub.entry_id}
+        {"type": "rtl_433/devices/subscribe", "entry_id": receiver.entry_id}
     )
     ack = await client.receive_json()
     assert ack["success"]
@@ -839,7 +851,7 @@ async def test_clear_empties_the_list_without_undoing_any_decision(
     assert listed == [_NEW_KEY, _OLD_KEY]
 
     reply, events = await _call(
-        client, {"type": "rtl_433/devices/clear", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/clear", "entry_id": receiver.entry_id}
     )
     # The count is what the user was looking at, so the panel can say "cleared 2".
     assert reply["result"] == {"cleared": len(listed)}
@@ -849,7 +861,7 @@ async def test_clear_empties_the_list_without_undoing_any_decision(
 
     # The ignore list is a persisted decision and is left exactly as it was.
     assert [row["key"] for row in events[-1]["event"]["ignored"]] == [_MID_KEY]
-    assert hub.data[CONF_IGNORED_DEVICES] == [_MID_KEY]
+    assert receiver.data[CONF_IGNORED_DEVICES] == [_MID_KEY]
     assert coordinator.ignored == {_MID_KEY}
 
     # Nothing was persisted, so the next transmission re-lists the candidate --
@@ -863,22 +875,22 @@ async def test_clear_empties_the_list_without_undoing_any_decision(
     # Clearing an already-empty list is a no-op that reports it honestly.
     coordinator.pending.clear()
     reply, _ = await _call(
-        client, {"type": "rtl_433/devices/clear", "entry_id": hub.entry_id}
+        client, {"type": "rtl_433/devices/clear", "entry_id": receiver.entry_id}
     )
     assert reply["result"] == {"cleared": 0}
 
 
-async def test_hubs_lists_every_configured_receiver_loaded_or_not(
-    hass, hub, hub_entry_builder, hass_ws_client
+async def test_receivers_lists_every_configured_receiver_loaded_or_not(
+    hass, receiver, receiver_entry_builder, hass_ws_client
 ):
-    """A panel opened from the sidebar has to be able to name a hub to address.
+    """A panel opened from the sidebar has to be able to name a receiver to address.
 
     Every other command needs an ``entry_id`` the panel cannot invent, so this is
-    the entry point. An unloaded hub is listed and flagged rather than hidden: a
+    the entry point. An unloaded receiver is listed and flagged rather than hidden: a
     user with an unreachable receiver should see it named and explained instead of
     silently absent while they wonder where it went.
     """
-    unloaded = hub_entry_builder(host="unreachable.local")
+    unloaded = receiver_entry_builder(host="unreachable.local")
     unloaded.add_to_hass(hass)  # deliberately never set up
 
     client = await hass_ws_client(hass)
@@ -886,9 +898,9 @@ async def test_hubs_lists_every_configured_receiver_loaded_or_not(
 
     assert reply["success"]
     by_id = {entry["entry_id"]: entry for entry in reply["result"]["hubs"]}
-    assert set(by_id) == {hub.entry_id, unloaded.entry_id}
-    assert by_id[hub.entry_id]["loaded"] is True
-    assert by_id[hub.entry_id]["title"] == hub.title
+    assert set(by_id) == {receiver.entry_id, unloaded.entry_id}
+    assert by_id[receiver.entry_id]["loaded"] is True
+    assert by_id[receiver.entry_id]["title"] == receiver.title
     assert by_id[unloaded.entry_id]["loaded"] is False
 
 
@@ -897,12 +909,12 @@ async def test_hubs_lists_every_configured_receiver_loaded_or_not(
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("command", _ALL_COMMANDS)
 async def test_every_command_rejects_a_non_admin(
-    hass, hub, hass_ws_client, hass_read_only_access_token, command
+    hass, receiver, hass_ws_client, hass_read_only_access_token, command
 ):
     """A non-admin gets ``unauthorized`` from all six, and changes nothing.
 
     Approving a device creates entities and writes the config entry, and the
-    ignore list is a persistent hub setting — neither is a read-only user's to
+    ignore list is a persistent receiver setting — neither is a read-only user's to
     change, and even the *list* names devices in radio range of the home. The
     gate has to sit ahead of the work rather than beside it, which is why the
     entry is checked for side effects afterwards: a decorator applied in the
@@ -913,28 +925,28 @@ async def test_every_command_rejects_a_non_admin(
     # the approval commands never touch, so the sweep compares whole snapshots
     # rather than a list of keys -- otherwise it would pass while one of them
     # quietly wrote somewhere nobody thought to look.
-    before_data = dict(hub.data)
-    before_options = dict(hub.options)
+    before_data = dict(receiver.data)
+    before_options = dict(receiver.options)
 
-    await client.send_json_auto_id(_message(command, hub.entry_id))
+    await client.send_json_auto_id(_message(command, receiver.entry_id))
     reply = await client.receive_json()
 
     assert reply["success"] is False
     assert reply["error"]["code"] == "unauthorized"
-    assert hub.data.get(CONF_DEVICES, {}) == {}
-    assert CONF_IGNORED_DEVICES not in hub.data
-    assert dict(hub.data) == before_data
-    assert dict(hub.options) == before_options
-    assert _registry_device(hass, hub, _NEW_KEY) is None
+    assert receiver.data.get(CONF_DEVICES, {}) == {}
+    assert CONF_IGNORED_DEVICES not in receiver.data
+    assert dict(receiver.data) == before_data
+    assert dict(receiver.options) == before_options
+    assert _registry_device(hass, receiver, _NEW_KEY) is None
 
 
 @pytest.mark.parametrize("command", _ENTRY_COMMANDS)
 async def test_an_unusable_entry_id_is_an_error_not_an_exception(
-    hass, hub, hub_entry_builder, hass_ws_client, command
+    hass, receiver, receiver_entry_builder, hass_ws_client, command
 ):
     """Three unusable ids, three errors, no traceback — for every entry command.
 
-    A panel left open across a hub reload, a stale bookmark, or a script with a
+    A panel left open across a receiver reload, a stale bookmark, or a script with a
     typo will all send commands for an entry that cannot be served, and that is a
     normal condition to report rather than a crash to log. The cases are
     distinguishable on purpose:
@@ -943,11 +955,11 @@ async def test_an_unusable_entry_id_is_an_error_not_an_exception(
       are both ``not_found`` — this integration must never reach into an entry it
       does not own;
     * an id whose rtl_433 entry exists but is not set up is ``not_loaded``, which
-      is a hub to wait for or repair rather than a mistake. The pending list lives
+      is a receiver to wait for or repair rather than a mistake. The pending list lives
       only in the coordinator's memory, so there is nothing to answer with either
       way, but the two deserve different answers.
     """
-    unloaded = hub_entry_builder(host="unreachable.local")
+    unloaded = receiver_entry_builder(host="unreachable.local")
     unloaded.add_to_hass(hass)  # deliberately never set up
     foreign = MockConfigEntry(domain="light", title="Someone else's entry")
     foreign.add_to_hass(hass)
@@ -968,7 +980,7 @@ async def test_an_unusable_entry_id_is_an_error_not_an_exception(
 # The subscription.                                                           #
 # --------------------------------------------------------------------------- #
 async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribed(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """Subscribe, see the list, see it change three ways, then see it go quiet.
 
@@ -987,10 +999,10 @@ async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribe
     command's reply with no events queued ahead of it — rather than by waiting.
     """
     client = await hass_ws_client(hass)
-    coordinator = _coordinator(hass, hub)
+    coordinator = _coordinator(hass, receiver)
 
     await client.send_json_auto_id(
-        {"type": "rtl_433/devices/subscribe", "entry_id": hub.entry_id}
+        {"type": "rtl_433/devices/subscribe", "entry_id": receiver.entry_id}
     )
     ack = await client.receive_json()
     assert ack["success"]
@@ -1019,7 +1031,7 @@ async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribe
         client,
         {
             "type": "rtl_433/devices/add",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_NEW_KEY],
         },
     )
@@ -1032,7 +1044,7 @@ async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribe
         client,
         {
             "type": "rtl_433/devices/ignore",
-            "entry_id": hub.entry_id,
+            "entry_id": receiver.entry_id,
             "device_keys": [_MID_KEY],
         },
     )
@@ -1063,7 +1075,7 @@ async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribe
 
 
 async def test_repeat_sightings_are_coalesced_instead_of_one_push_per_frame(
-    hass, hub, hass_ws_client
+    hass, receiver, hass_ws_client
 ):
     """Twenty frames for a known candidate must not be twenty WebSocket messages.
 
@@ -1087,10 +1099,10 @@ async def test_repeat_sightings_are_coalesced_instead_of_one_push_per_frame(
     would leave the panel's counts frozen, and would pass a one-sided assertion.
     """
     client = await hass_ws_client(hass)
-    coordinator = _coordinator(hass, hub)
+    coordinator = _coordinator(hass, receiver)
 
     await client.send_json_auto_id(
-        {"type": "rtl_433/devices/subscribe", "entry_id": hub.entry_id}
+        {"type": "rtl_433/devices/subscribe", "entry_id": receiver.entry_id}
     )
     ack = await client.receive_json()
     assert ack["success"]
@@ -1130,7 +1142,7 @@ async def test_repeat_sightings_are_coalesced_instead_of_one_push_per_frame(
 
     reply, idle = await _call(client, {"type": "rtl_433/hubs"})
     assert reply["success"]
-    assert len(idle) <= 1, "an idle hub must not be repainted every interval"
+    assert len(idle) <= 1, "an idle receiver must not be repainted every interval"
     latest = {row["key"]: row for row in (events + idle)[-1]["event"]["pending"]}
     assert latest[_NEW_KEY]["count"] == before + frames
 
@@ -1139,10 +1151,10 @@ async def test_repeat_sightings_are_coalesced_instead_of_one_push_per_frame(
 # One adoption path behind two surfaces.                                      #
 # --------------------------------------------------------------------------- #
 def _adopted_snapshot(hass, entry, device_key) -> dict[str, Any]:
-    """Describe an adopted device in terms independent of which hub owns it.
+    """Describe an adopted device in terms independent of which receiver owns it.
 
     Everything identifying — ``entry_id``, the registry ids, the ``entity_id``
-    Home Assistant disambiguates when two hubs produce identically-named devices
+    Home Assistant disambiguates when two receivers produce identically-named devices
     — is stripped or normalised out, so two snapshots are comparable if and only
     if the two surfaces really produced the same device.
     """
@@ -1154,7 +1166,7 @@ def _adopted_snapshot(hass, entry, device_key) -> dict[str, Any]:
         "manufacturer": device.manufacturer,
         "name": device.name,
         "entry_type": device.entry_type,
-        "linked_to_its_hub": device.via_device_id is not None,
+        "linked_to_its_receiver": device.via_device_id is not None,
         "entities": {
             (
                 registry_entry.domain,
@@ -1174,7 +1186,7 @@ def _adopted_snapshot(hass, entry, device_key) -> dict[str, Any]:
 
 
 async def test_adopting_over_the_socket_matches_adopting_from_the_options_flow(
-    hass, hub_entry_builder, hass_ws_client, no_socket
+    hass, receiver_entry_builder, hass_ws_client, no_socket
 ):
     """The panel and the options form must produce the same device, not a similar one.
 
@@ -1186,15 +1198,19 @@ async def test_adopting_over_the_socket_matches_adopting_from_the_options_flow(
     integrations, and the difference would show up as a missing entity or a wrong
     unit long after the fact.
 
-    Two identical hubs hear the identical frame; one is adopted over the socket
+    Two identical receivers hear the identical frame; one is adopted over the socket
     and the other through the form, and the resulting device metadata, entity set
     (names, device classes, units, categories, enabled-ness) and persisted record
     are compared. This is the mirror of the equivalence check the options flow
     already carries, extended to the third surface.
     """
-    socket_hub = await _setup_hub(hass, hub_entry_builder, host="socket-hub.local")
-    form_hub = await _setup_hub(hass, hub_entry_builder, host="form-hub.local")
-    for entry in (socket_hub, form_hub):
+    socket_receiver = await _setup_receiver(
+        hass, receiver_entry_builder, host="socket-receiver.local"
+    )
+    form_receiver = await _setup_receiver(
+        hass, receiver_entry_builder, host="form-receiver.local"
+    )
+    for entry in (socket_receiver, form_receiver):
         _hear(_coordinator(hass, entry), _NEW_FRAME)
     await hass.async_block_till_done()
 
@@ -1203,14 +1219,14 @@ async def test_adopting_over_the_socket_matches_adopting_from_the_options_flow(
         client,
         {
             "type": "rtl_433/devices/add",
-            "entry_id": socket_hub.entry_id,
+            "entry_id": socket_receiver.entry_id,
             "device_keys": [_NEW_KEY],
         },
     )
     assert reply["success"]
     await hass.async_block_till_done()
 
-    result = await hass.config_entries.options.async_init(form_hub.entry_id)
+    result = await hass.config_entries.options.async_init(form_receiver.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": "add_devices"}
     )
@@ -1220,21 +1236,21 @@ async def test_adopting_over_the_socket_matches_adopting_from_the_options_flow(
     await hass.async_block_till_done()
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
-    socket_device = _adopted_snapshot(hass, socket_hub, _NEW_KEY)
+    socket_device = _adopted_snapshot(hass, socket_receiver, _NEW_KEY)
     assert socket_device["entities"], "adoption produced no entities at all"
-    assert socket_device == _adopted_snapshot(hass, form_hub, _NEW_KEY)
+    assert socket_device == _adopted_snapshot(hass, form_receiver, _NEW_KEY)
 
 
 # --------------------------------------------------------------------------- #
 # The panel itself.                                                           #
 # --------------------------------------------------------------------------- #
 async def test_the_panel_registers_once_and_serves_its_module(
-    hass, hub_entry_builder, hass_client, no_socket
+    hass, receiver_entry_builder, hass_client, no_socket
 ):
     """Two receivers, one panel — and the module is really on disk and served.
 
     Panel and static-path registration are per Home Assistant *run*, but this
-    integration has no ``async_setup`` and so registers from every hub's
+    integration has no ``async_setup`` and so registers from every receiver's
     ``async_setup_entry``. Both underlying APIs refuse a duplicate — the frontend
     raises ``Overwriting panel`` and aiohttp refuses a second route on the same
     prefix — so without the guard a user's *second* receiver simply fails to set
@@ -1265,8 +1281,12 @@ async def test_the_panel_registers_once_and_serves_its_module(
     the log — and a fetch is also the only thing that catches the file failing to
     ship at all, which no amount of Python-side assertion would notice.
     """
-    first = await _setup_hub(hass, hub_entry_builder, host="hub-one.local")
-    second = await _setup_hub(hass, hub_entry_builder, host="hub-two.local")
+    first = await _setup_receiver(
+        hass, receiver_entry_builder, host="receiver-one.local"
+    )
+    second = await _setup_receiver(
+        hass, receiver_entry_builder, host="receiver-two.local"
+    )
     assert first.state is ConfigEntryState.LOADED
     assert second.state is ConfigEntryState.LOADED
 
@@ -1294,7 +1314,7 @@ async def test_the_panel_registers_once_and_serves_its_module(
 
 
 # --------------------------------------------------------------------------- #
-# Settings: the hub's options, one device's overrides, the mapping document.   #
+# Settings: the receiver's options, one device's overrides, the mapping document.   #
 #                                                                             #
 # These are the panel's half of the three forms the options flow also renders. #
 # What is worth protecting is not the transport but the *rules underneath* --  #
@@ -1308,11 +1328,11 @@ _METER_MODEL = "SCM"
 
 
 @pytest.fixture
-async def settings_hub(hass, hub_entry_builder, no_socket):
-    """A loaded hub with one adopted meter, ready for the settings forms."""
-    return await _setup_hub(
+async def settings_receiver(hass, receiver_entry_builder, no_socket):
+    """A loaded receiver with one adopted meter, ready for the settings forms."""
+    return await _setup_receiver(
         hass,
-        hub_entry_builder,
+        receiver_entry_builder,
         devices={
             _METER_KEY: {
                 CONF_MODEL: _METER_MODEL,
@@ -1323,9 +1343,9 @@ async def settings_hub(hass, hub_entry_builder, no_socket):
 
 
 async def test_settings_get_answers_with_what_the_three_forms_render(
-    hass, settings_hub, hass_ws_client
+    hass, settings_receiver, hass_ws_client
 ):
-    """One call fills all three dialogs: hub values, device rows, and the tables.
+    """One call fills all three dialogs: receiver values, device rows, and the tables.
 
     The commodity tables travel in the payload rather than living in the panel
     because which units Home Assistant will convert for a gas meter is a fact
@@ -1337,12 +1357,12 @@ async def test_settings_get_answers_with_what_the_three_forms_render(
     client = await hass_ws_client(hass)
 
     reply, _ = await _call(
-        client, {"type": "rtl_433/settings/get", "entry_id": settings_hub.entry_id}
+        client, {"type": "rtl_433/settings/get", "entry_id": settings_receiver.entry_id}
     )
 
     assert reply["success"] is True
     result = reply["result"]
-    # The hub's effective values, not the raw entry: 600 is what the fixture set.
+    # The receiver's effective values, not the raw entry: 600 is what the fixture set.
     assert result["hub"][CONF_AVAILABILITY_TIMEOUT] == 600
     assert result["hub"][CONF_MANAGE_SETTINGS] is True
     assert result["defaults"][CONF_AVAILABILITY_TIMEOUT] == DEFAULT_AVAILABILITY_TIMEOUT
@@ -1363,8 +1383,8 @@ async def test_settings_get_answers_with_what_the_three_forms_render(
     assert result["mappings_docs_url"].startswith("https://")
 
 
-async def test_the_hub_timeout_is_dropped_only_when_the_panel_says_none(
-    hass, settings_hub, hass_ws_client
+async def test_the_receiver_timeout_is_dropped_only_when_the_panel_says_none(
+    hass, settings_receiver, hass_ws_client
 ):
     """``None`` stores no timeout; every number is kept, the plain default too.
 
@@ -1387,34 +1407,34 @@ async def test_the_hub_timeout_is_dropped_only_when_the_panel_says_none(
         client,
         {
             "type": "rtl_433/settings/hub",
-            "entry_id": settings_hub.entry_id,
+            "entry_id": settings_receiver.entry_id,
             CONF_AVAILABILITY_TIMEOUT: None,
             CONF_MANAGE_SETTINGS: True,
         },
     )
     await hass.async_block_till_done()
     assert reply["success"] is True
-    assert CONF_AVAILABILITY_TIMEOUT not in settings_hub.options
-    assert settings_hub.options[CONF_MANAGE_SETTINGS] is True
+    assert CONF_AVAILABILITY_TIMEOUT not in settings_receiver.options
+    assert settings_receiver.options[CONF_MANAGE_SETTINGS] is True
 
     reply, _ = await _call(
         client,
         {
             "type": "rtl_433/settings/hub",
-            "entry_id": settings_hub.entry_id,
+            "entry_id": settings_receiver.entry_id,
             CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
             CONF_MANAGE_SETTINGS: True,
         },
     )
     await hass.async_block_till_done()
     assert reply["success"] is True
-    assert settings_hub.options[CONF_AVAILABILITY_TIMEOUT] == (
+    assert settings_receiver.options[CONF_AVAILABILITY_TIMEOUT] == (
         DEFAULT_AVAILABILITY_TIMEOUT
     )
     # And it reads back as a set value, so the form reopens on it rather than on
     # "defaults" -- which is what would silently undo it on the next save.
     reply, _ = await _call(
-        client, {"type": "rtl_433/settings/get", "entry_id": settings_hub.entry_id}
+        client, {"type": "rtl_433/settings/get", "entry_id": settings_receiver.entry_id}
     )
     assert reply["result"]["hub"][CONF_AVAILABILITY_TIMEOUT] == (
         DEFAULT_AVAILABILITY_TIMEOUT
@@ -1424,18 +1444,18 @@ async def test_the_hub_timeout_is_dropped_only_when_the_panel_says_none(
         client,
         {
             "type": "rtl_433/settings/hub",
-            "entry_id": settings_hub.entry_id,
+            "entry_id": settings_receiver.entry_id,
             CONF_AVAILABILITY_TIMEOUT: 0,
             CONF_MANAGE_SETTINGS: True,
         },
     )
     await hass.async_block_till_done()
     assert reply["success"] is True
-    assert settings_hub.options[CONF_AVAILABILITY_TIMEOUT] == 0
+    assert settings_receiver.options[CONF_AVAILABILITY_TIMEOUT] == 0
 
 
 async def test_a_device_calibration_round_trips_and_then_clears(
-    hass, settings_hub, hass_ws_client
+    hass, settings_receiver, hass_ws_client
 ):
     """A real commodity is stored; ``none`` clears it, and so does a bad unit.
 
@@ -1448,7 +1468,7 @@ async def test_a_device_calibration_round_trips_and_then_clears(
     client = await hass_ws_client(hass)
     message = {
         "type": "rtl_433/settings/device",
-        "entry_id": settings_hub.entry_id,
+        "entry_id": settings_receiver.entry_id,
         "device_key": _METER_KEY,
         DEVICE_TIMEOUT_OVERRIDE: 1800,
         CALIBRATION_COMMODITY: "gas",
@@ -1461,7 +1481,7 @@ async def test_a_device_calibration_round_trips_and_then_clears(
         await hass.async_block_till_done()
 
     assert reply["success"] is True
-    record = settings_hub.data[CONF_DEVICES][_METER_KEY]
+    record = settings_receiver.data[CONF_DEVICES][_METER_KEY]
     assert record[DEVICE_TIMEOUT_OVERRIDE] == 1800
     assert record[DEVICE_CALIBRATION] == {
         CALIBRATION_COMMODITY: "gas",
@@ -1480,14 +1500,14 @@ async def test_a_device_calibration_round_trips_and_then_clears(
 
     assert reply["success"] is True
     assert reply["result"]["calibration"] is None
-    record = settings_hub.data[CONF_DEVICES][_METER_KEY]
+    record = settings_receiver.data[CONF_DEVICES][_METER_KEY]
     assert DEVICE_CALIBRATION not in record
     # The blank timeout cleared with it, rather than persisting as a zero.
     assert DEVICE_TIMEOUT_OVERRIDE not in record
 
 
 async def test_a_device_clear_delay_lands_where_the_resolver_reads_it(
-    hass, settings_hub, hass_ws_client
+    hass, settings_receiver, hass_ws_client
 ):
     """The clear-delay is written to options, and read back from there.
 
@@ -1503,7 +1523,7 @@ async def test_a_device_clear_delay_lands_where_the_resolver_reads_it(
             client,
             {
                 "type": "rtl_433/settings/device",
-                "entry_id": settings_hub.entry_id,
+                "entry_id": settings_receiver.entry_id,
                 "device_key": _METER_KEY,
                 DEVICE_MOTION_CLEAR_DELAY: 30,
             },
@@ -1512,7 +1532,8 @@ async def test_a_device_clear_delay_lands_where_the_resolver_reads_it(
 
     assert reply["success"] is True
     assert (
-        settings_hub.options[CONF_DEVICES][_METER_KEY][DEVICE_MOTION_CLEAR_DELAY] == 30
+        settings_receiver.options[CONF_DEVICES][_METER_KEY][DEVICE_MOTION_CLEAR_DELAY]
+        == 30
     )
     assert reply["result"][DEVICE_MOTION_CLEAR_DELAY] == 30
 
@@ -1523,7 +1544,7 @@ async def test_a_device_clear_delay_lands_where_the_resolver_reads_it(
             client,
             {
                 "type": "rtl_433/settings/device",
-                "entry_id": settings_hub.entry_id,
+                "entry_id": settings_receiver.entry_id,
                 "device_key": _METER_KEY,
                 DEVICE_MOTION_CLEAR_DELAY: None,
             },
@@ -1531,13 +1552,13 @@ async def test_a_device_clear_delay_lands_where_the_resolver_reads_it(
         await hass.async_block_till_done()
 
     assert reply["success"] is True
-    assert _METER_KEY not in settings_hub.options.get(CONF_DEVICES, {})
+    assert _METER_KEY not in settings_receiver.options.get(CONF_DEVICES, {})
 
 
 async def test_a_clear_delay_left_in_data_by_the_migration_can_be_cleared(
-    hass, hub_entry_builder, hass_ws_client, no_socket
+    hass, receiver_entry_builder, hass_ws_client, no_socket
 ):
-    """A hub that came from per-device entries can still blank the delay.
+    """A receiver that came from per-device entries can still blank the delay.
 
     The migration from per-device config entries writes the clear-delay into
     ``entry.data``; every edit since writes it to ``entry.options``, and
@@ -1550,9 +1571,9 @@ async def test_a_clear_delay_left_in_data_by_the_migration_can_be_cleared(
     test the interesting one: the form reads back empty, so the device falls back
     to the descriptor's own default.
     """
-    migrated = await _setup_hub(
+    migrated = await _setup_receiver(
         hass,
-        hub_entry_builder,
+        receiver_entry_builder,
         devices={
             _METER_KEY: {
                 CONF_MODEL: _METER_MODEL,
@@ -1598,11 +1619,11 @@ async def test_a_clear_delay_left_in_data_by_the_migration_can_be_cleared(
 
 
 async def test_settings_for_an_unknown_device_are_refused(
-    hass, settings_hub, hass_ws_client
+    hass, settings_receiver, hass_ws_client
 ):
-    """A device key this hub has never adopted is ``not_found``, not a new record.
+    """A device key this receiver has never adopted is ``not_found``, not a new record.
 
-    Without the check the write would happily create the record, and the hub
+    Without the check the write would happily create the record, and the receiver
     would grow a device it has never heard -- from a stale panel, or a typo in a
     script.
     """
@@ -1612,23 +1633,23 @@ async def test_settings_for_an_unknown_device_are_refused(
         client,
         {
             "type": "rtl_433/settings/device",
-            "entry_id": settings_hub.entry_id,
+            "entry_id": settings_receiver.entry_id,
             "device_key": "Nothing-Like-This-1",
         },
     )
 
     assert reply["success"] is False
     assert reply["error"]["code"] == "not_found"
-    assert set(settings_hub.data[CONF_DEVICES]) == {_METER_KEY}
+    assert set(settings_receiver.data[CONF_DEVICES]) == {_METER_KEY}
 
 
 async def test_mapping_overrides_round_trip_as_yaml_text(
-    hass, settings_hub, hass_ws_client
+    hass, settings_receiver, hass_ws_client
 ):
     """Overrides go out and come back as the YAML the documentation writes.
 
     Text rather than a JSON object because that is the form the user already has
-    -- copied from the README, or from someone else's hub -- and because the
+    -- copied from the README, or from someone else's receiver -- and because the
     panel has no YAML parser and should not grow one. Parsing on this side is
     also what keeps ``safe_load`` in charge of a string a client submitted.
     """
@@ -1646,14 +1667,14 @@ async def test_mapping_overrides_round_trip_as_yaml_text(
             client,
             {
                 "type": "rtl_433/settings/mappings",
-                "entry_id": settings_hub.entry_id,
+                "entry_id": settings_receiver.entry_id,
                 "yaml": document,
             },
         )
         await hass.async_block_till_done()
 
     assert reply["success"] is True
-    stored = settings_hub.data[CONF_USER_MAPPINGS]
+    stored = settings_receiver.data[CONF_USER_MAPPINGS]
     assert stored["temperature_C"]["unit_of_measurement"] == "\N{DEGREE SIGN}C"
     # And it renders back as a document the same editor can re-submit. The unit
     # is deliberately not plain ASCII: units are where non-ASCII characters live,
@@ -1671,14 +1692,14 @@ async def test_mapping_overrides_round_trip_as_yaml_text(
             client,
             {
                 "type": "rtl_433/settings/mappings",
-                "entry_id": settings_hub.entry_id,
+                "entry_id": settings_receiver.entry_id,
                 "yaml": "   \n",
             },
         )
         await hass.async_block_till_done()
 
     assert reply["success"] is True
-    assert settings_hub.data[CONF_USER_MAPPINGS] == {}
+    assert settings_receiver.data[CONF_USER_MAPPINGS] == {}
 
 
 @pytest.mark.parametrize(
@@ -1690,7 +1711,7 @@ async def test_mapping_overrides_round_trip_as_yaml_text(
     ],
 )
 async def test_mappings_that_will_not_store_are_refused_and_change_nothing(
-    hass, settings_hub, hass_ws_client, document, why
+    hass, settings_receiver, hass_ws_client, document, why
 ):
     """Three ways to submit a bad document, one answer, and nothing written.
 
@@ -1699,17 +1720,17 @@ async def test_mappings_that_will_not_store_are_refused_and_change_nothing(
     from all of them: the overrides they already had, still there.
     """
     client = await hass_ws_client(hass)
-    before = dict(settings_hub.data)
+    before = dict(settings_receiver.data)
 
     reply, _ = await _call(
         client,
         {
             "type": "rtl_433/settings/mappings",
-            "entry_id": settings_hub.entry_id,
+            "entry_id": settings_receiver.entry_id,
             "yaml": document,
         },
     )
 
     assert reply["success"] is False, why
     assert reply["error"]["code"] == "invalid_mappings", why
-    assert dict(settings_hub.data) == before, why
+    assert dict(settings_receiver.data) == before, why

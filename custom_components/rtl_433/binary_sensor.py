@@ -1,11 +1,11 @@
-"""Binary-sensor platform for the rtl_433 hub config entry.
+"""Binary-sensor platform for the rtl_433 receiver config entry.
 
-``async_setup_entry`` runs once for the hub config entry and delegates to the
+``async_setup_entry`` runs once for the receiver config entry and delegates to the
 shared :func:`~custom_components.rtl_433.entity.async_setup_receiver_platform`
-helper, which resolves the hub coordinator, builds a
+helper, which resolves the receiver coordinator, builds a
 :class:`Rtl433BinarySensor` for every device's observed mapped fields whose
 descriptor ``platform == "binary_sensor"`` (battery, tamper, contact/reed,
-alarm, leak), adds new devices/fields at runtime, and keeps the hub's devices
+alarm, leak), adds new devices/fields at runtime, and keeps the receiver's devices
 map current.
 
 Raw values are converted to ``True``/``False`` via
@@ -142,7 +142,7 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
         """Persist the on/off value independently of ``available``.
 
         Home Assistant writes ``unavailable`` as the *state* whenever
-        ``available`` is False, so a restart during a hub outage (or after a
+        ``available`` is False, so a restart during a receiver outage (or after a
         device's silence timeout elapsed) would otherwise lose the value
         entirely. Never-expire contacts are the ones that suffer: they may not
         transmit again for days.
@@ -174,7 +174,7 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
 
 
 class Rtl433ReceiverConnectivity(Rtl433ReceiverEntity, BinarySensorEntity):
-    """Reports whether the hub's WebSocket connection is currently open."""
+    """Reports whether the receiver's WebSocket connection is currently open."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -187,7 +187,7 @@ class Rtl433ReceiverConnectivity(Rtl433ReceiverEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return True while the hub's WebSocket connection is open."""
+        """Return True while the receiver's WebSocket connection is open."""
         return self._coordinator.connected
 
     @property
@@ -201,7 +201,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up rtl_433 binary sensors for every device under the hub entry."""
+    """Set up rtl_433 binary sensors for every device under the receiver entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([Rtl433ReceiverConnectivity(coordinator, entry.entry_id)])
     await async_setup_receiver_platform(
