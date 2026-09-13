@@ -1,8 +1,8 @@
 """Managed SDR-settings subsystem for the rtl_433 coordinator.
 
-When a hub has ``manage_settings`` enabled, Home Assistant owns the receiver's
+When a receiver has ``manage_settings`` enabled, Home Assistant owns the radio's
 SDR settings: it adopts the server's current values on the first connect,
-persists the desired state to a per-hub ``Store`` (so a value change never churns
+persists the desired state to a per-receiver ``Store`` (so a value change never churns
 the config entry), and replays that desired state on every reconnect. This
 module holds that policy — the ``Store`` subclass, the desired/managed maps' load
 and persist, the per-field command builders, the write path, adoption, and
@@ -33,12 +33,12 @@ from ..sdr_settings import (
 
 
 class _SdrStore(Store[dict[str, Any]]):
-    """Per-hub desired-state Store with a Hz->MHz center-frequency migration.
+    """Per-receiver desired-state Store with a Hz->MHz center-frequency migration.
 
     Version 1 persisted ``values["center_frequency"]`` in Hz; version 2 stores it
     in MHz (matching the control entity and the setup field). ``async_load``
     invokes this migrator when the on-disk version is older than
-    :data:`..const.SDR_STORE_VERSION`, so an existing managed hub's frequency
+    :data:`..const.SDR_STORE_VERSION`, so an existing managed receiver's frequency
     converts transparently on the next load.
     """
 
@@ -84,7 +84,7 @@ class _SdrSettingsMixin:
         self._initial_freq_seeded = bool(data.get("initial_freq_seeded", False))
 
     async def _persist_desired(self) -> None:
-        """Persist the desired-state map + managed-set to the per-hub Store."""
+        """Persist the desired-state map + managed-set to the per-receiver Store."""
         await self._store.async_save(
             {
                 "values": self._desired,
@@ -223,7 +223,7 @@ class _SdrSettingsMixin:
         the combined desired values and emitted exactly once.
 
         After the replay, reconcile ``self.meta`` from the server (mirroring the
-        single-field :meth:`_enforce_field` read-back) so the hub's "actual" SDR
+        single-field :meth:`_enforce_field` read-back) so the receiver's "actual" SDR
         sensors — and the controls that fall back to meta — reflect the values
         just applied instead of the pre-enforce snapshot taken on connect. The
         emit inside ``_refresh_meta`` also repaints the controls after the

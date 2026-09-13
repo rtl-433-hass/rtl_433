@@ -1,12 +1,12 @@
-"""Sensor platform for the rtl_433 hub config entry.
+"""Sensor platform for the rtl_433 receiver config entry.
 
-``async_setup_entry`` runs once for the hub config entry. It registers the
-hub-level DIAGNOSTIC sensors (SDR/meta configuration and server statistics that
+``async_setup_entry`` runs once for the receiver config entry. It registers the
+receiver-level DIAGNOSTIC sensors (SDR/meta configuration and server statistics that
 the coordinator sources over HTTP) and then delegates to the shared
 :func:`~custom_components.rtl_433.entity.async_setup_receiver_platform` helper, which
-resolves the hub coordinator, builds a :class:`Rtl433Sensor` for every device's
+resolves the receiver coordinator, builds a :class:`Rtl433Sensor` for every device's
 observed mapped fields whose descriptor ``platform == "sensor"``, adds new
-devices/fields at runtime, and keeps the hub's devices map current.
+devices/fields at runtime, and keeps the receiver's devices map current.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
 from homeassistant.util.enum import try_parse_enum
 
-from .const import DOMAIN, signal_hub_noise
+from .const import DOMAIN, signal_receiver_noise
 from .entity import Rtl433Entity, Rtl433ReceiverEntity, async_setup_receiver_platform
 
 if TYPE_CHECKING:
@@ -177,7 +177,7 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
         Home Assistant writes ``unavailable`` as the *state* whenever
         ``available`` is False, so the state string alone cannot carry a value
         across a restart that happens while the entity is unavailable — which
-        both the hub-connection gate and a device's own silence timeout can
+        both the receiver-connection gate and a device's own silence timeout can
         cause. Keeping the value in the restore entity's extra data means a
         never-expire door contact (or any other device) comes back with its last
         reading instead of ``unknown``.
@@ -329,7 +329,7 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
         """Persist the timestamp independently of ``available``.
 
         Same reason as :attr:`Rtl433Sensor.extra_restore_state_data`: this sensor
-        reads unavailable while the hub gate is closed, and a persisted
+        reads unavailable while the receiver gate is closed, and a persisted
         ``unavailable`` state string carries no timestamp.
         """
         if self._attr_native_value is None:
@@ -374,7 +374,7 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
 
         The device's silence timeout is deliberately not applied (the whole point
         of this sensor is to keep reporting how long the device has been quiet),
-        but the hub-connection gate is: with the socket down the timestamp is
+        but the receiver-connection gate is: with the socket down the timestamp is
         frozen at whenever the integration stopped listening and would read as a
         device that has just gone quiet, which is exactly the wrong conclusion.
         """
@@ -384,7 +384,7 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
 
 
 # --------------------------------------------------------------------------- #
-# Hub-level DIAGNOSTIC sensors (SDR/meta + server stats).                       #
+# Receiver-level DIAGNOSTIC sensors (SDR/meta + server stats).                       #
 # --------------------------------------------------------------------------- #
 def _meta(coordinator: Rtl433Coordinator, key: str) -> Any:
     """Read a key from ``coordinator.meta`` defensively (missing -> None)."""
@@ -421,12 +421,12 @@ def _gain(coordinator: Rtl433Coordinator) -> Any:
 
 
 @dataclass(frozen=True, kw_only=True)
-class HubSensorDesc:
-    """Lightweight description of one hub diagnostic sensor.
+class ReceiverSensorDesc:
+    """Lightweight description of one receiver diagnostic sensor.
 
     ``value`` extracts the native value from the coordinator; ``attrs`` (when
     set) extracts extra-state attributes. Both read live coordinator state so
-    the entity always reflects the latest HTTP-sourced hub data.
+    the entity always reflects the latest HTTP-sourced receiver data.
 
     ``folded_when_managing`` marks a sensor whose concept is folded into a managed
     control (number/select/switch) in managed mode; its diagnostic sensor is then
@@ -436,7 +436,7 @@ class HubSensorDesc:
     server-stats sensors are never folded.
 
     ``noise`` marks a sensor fed by the coordinator's scheduled noise publish
-    (``signal_hub_noise``) rather than by every hub update.
+    (``signal_receiver_noise``) rather than by every hub update.
     """
 
     suffix: str
@@ -450,9 +450,9 @@ class HubSensorDesc:
     noise: bool = False
 
 
-RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
+RECEIVER_SENSORS: tuple[ReceiverSensorDesc, ...] = (
     # --- SDR/meta configuration (from coordinator.meta) ------------------- #
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="center_frequency",
         name="Center frequency",
         value=_center_frequency_mhz,
@@ -463,35 +463,37 @@ RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
             "hop_times": c.meta.get("hop_times"),
         },
     ),
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="sample_rate",
         name="Sample rate",
         value=lambda c: _meta(c, "samp_rate"),
         native_unit="Hz",
         folded_when_managing=True,
     ),
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="conversion_mode",
         name="Conversion mode",
         value=lambda c: _meta(c, "conversion_mode"),
         folded_when_managing=True,
     ),
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="hop_interval",
         name="Hop interval",
         value=lambda c: _meta(c, "hop_interval"),
         native_unit="s",
         folded_when_managing=True,
     ),
-    HubSensorDesc(suffix="gain", name="Gain", value=_gain, folded_when_managing=True),
-    HubSensorDesc(
+    ReceiverSensorDesc(
+        suffix="gain", name="Gain", value=_gain, folded_when_managing=True
+    ),
+    ReceiverSensorDesc(
         suffix="ppm_error",
         name="Frequency correction",
         value=lambda c: _meta(c, "ppm_error"),
         folded_when_managing=True,
     ),
     # --- Server statistics (from coordinator.stats) ----------------------- #
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="decoded_events",
         name="Decoded events",
         value=lambda c: _frames(c, "events"),
@@ -501,7 +503,7 @@ RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
             "since": c.stats.get("since"),
         },
     ),
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="ook_frames",
         name="OOK frames",
         value=lambda c: _frames(c, "count"),
@@ -509,13 +511,13 @@ RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
         # TOTAL_INCREASING tolerates (same shape as decoded events).
         state_class=SensorStateClass.TOTAL_INCREASING,
     ),
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="fsk_frames",
         name="FSK frames",
         value=lambda c: _frames(c, "fsk"),
         state_class=SensorStateClass.TOTAL_INCREASING,
     ),
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="enabled_decoders",
         name="Enabled decoders",
         value=lambda c: c.stats.get("enabled"),
@@ -523,7 +525,7 @@ RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
         # decoders are toggled), not a running total -> MEASUREMENT.
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    # --- Receiver noise floor (from the server's "Auto Level" log frames) -- #
+    # --- Radio noise floor (from the server's "Auto Level" log frames) ----- #
     # rtl_433 has no structured noise getter; the pyrtl_433 client parses the
     # pulse detector's "Auto Level" log frames into these snapshots. They stay
     # ``unknown`` unless the server runs with ``-Y autolevel`` (adjustments)
@@ -531,24 +533,24 @@ RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
     # together: the periodic report carries the noise estimate alone, so
     # ``min_level`` rides the ``-Y autolevel`` adjustment line only -- which
     # upstream emits just while the estimate sits >3 dB below the configured
-    # ``minlevel`` and the new threshold moves by >1 dB. A settled receiver
+    # ``minlevel`` and the new threshold moves by >1 dB. A settled radio
     # emits none, so ``min_level`` can stay ``unknown`` indefinitely even with
-    # ``autolevel`` on (see ``docs/hub-entities.md``). A busy receiver sends
+    # ``autolevel`` on (see ``docs/receiver-entities.md``). A busy receiver sends
     # these lines several times a second, so both sensors show what the
     # coordinator publishes at most once a minute (``NOISE_PUBLISH_INTERVAL``):
     # the time-weighted mean of each over that minute.
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="noise_level",
         name="Noise level",
         value=lambda c: c.noise_level,
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         native_unit=SIGNAL_STRENGTH_DECIBELS,
-        # A live gauge of the receiver's noise floor -> MEASUREMENT, so HA
+        # A live gauge of the radio's noise floor -> MEASUREMENT, so HA
         # records long-term statistics ("is my noise creeping up?").
         state_class=SensorStateClass.MEASUREMENT,
         noise=True,
     ),
-    HubSensorDesc(
+    ReceiverSensorDesc(
         suffix="min_level",
         name="Minimum detection level",
         value=lambda c: c.min_level,
@@ -561,7 +563,7 @@ RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
 
 
 class Rtl433ReceiverSensor(Rtl433ReceiverEntity, SensorEntity):
-    """A diagnostic sensor on the hub device, driven by a :class:`HubSensorDesc`.
+    """A diagnostic sensor on the receiver device, driven by a :class:`ReceiverSensorDesc`.
 
     Reads live coordinator state via the description's callables and refreshes on
     ``signal_receiver_update`` (handled by :class:`Rtl433ReceiverEntity`). A missing key
@@ -575,10 +577,10 @@ class Rtl433ReceiverSensor(Rtl433ReceiverEntity, SensorEntity):
     # alone overflows the recorder's 16 KiB attribute limit -- and
     # ``center_frequency`` carries the ``frequencies``/``hop_times`` lists that
     # grow with the hop set. None of it is time-series worth persisting, so keep
-    # every hub sensor's attributes out of the recorder: the live state still
+    # every receiver sensor's attributes out of the recorder: the live state still
     # shows them, but they are never written to the database (avoiding the
     # "State attributes ... exceed maximum size" warning and the DB churn it
-    # warns about). MATCH_ALL future-proofs any later hub sensor that adds a
+    # warns about). MATCH_ALL future-proofs any later receiver sensor that adds a
     # large attribute.
     _unrecorded_attributes = frozenset({MATCH_ALL})
 
@@ -586,7 +588,7 @@ class Rtl433ReceiverSensor(Rtl433ReceiverEntity, SensorEntity):
         self,
         coordinator: Rtl433Coordinator,
         receiver_entry_id: str,
-        desc: HubSensorDesc,
+        desc: ReceiverSensorDesc,
     ) -> None:
         """Initialize identity and entity-description fields from ``desc``."""
         super().__init__(coordinator, receiver_entry_id)
@@ -604,14 +606,14 @@ class Rtl433ReceiverSensor(Rtl433ReceiverEntity, SensorEntity):
             self.async_on_remove(
                 async_dispatcher_connect(
                     self.hass,
-                    signal_hub_noise(self._hub_entry_id),
+                    signal_receiver_noise(self._receiver_entry_id),
                     self._handle_hub_update,
                 )
             )
 
     @property
     def available(self) -> bool:
-        """Available while the hub connection is up; a missing key reads ``unknown``.
+        """Available while the receiver connection is up; a missing key reads ``unknown``.
 
         Every value here is read from the server over HTTP ``/cmd`` — the SDR
         configuration and the since-start frame counters — so the moment the
@@ -622,7 +624,7 @@ class Rtl433ReceiverSensor(Rtl433ReceiverEntity, SensorEntity):
 
         Within the connection, a key the server does not report is still
         ``unknown`` (a ``None`` native value), not unavailable — that is a gap in
-        the payload, not a dead hub. The hub's Connectivity binary sensor stays
+        the payload, not a dead receiver. The receiver's Connectivity binary sensor stays
         available throughout: it is the entity that reports the outage.
         """
         return self._coordinator.receiver_available
@@ -646,9 +648,9 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up rtl_433 sensors for the hub config entry.
+    """Set up rtl_433 sensors for the receiver config entry.
 
-    Registers the hub-level diagnostic sensors and then the per-device sensors.
+    Registers the receiver-level diagnostic sensors and then the per-device sensors.
     """
     coordinator = hass.data[DOMAIN][entry.entry_id]
     managed = coordinator.manage_settings

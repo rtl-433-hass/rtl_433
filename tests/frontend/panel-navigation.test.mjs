@@ -91,7 +91,7 @@ test("the overview never resolves to a within-panel move", () => {
 test("a known path segment picks its own view", () => {
   assert.equal(viewFor("").view, "overview");
   assert.equal(viewFor("discovered").view, "discovered");
-  assert.equal(viewFor("options").form, "hub");
+  assert.equal(viewFor("options").form, "receiver");
   assert.equal(viewFor("device-settings").form, "device");
   assert.equal(viewFor("mappings").form, "mappings");
 });
