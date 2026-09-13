@@ -124,7 +124,7 @@ Top-level keys are rtl_433 field names **exactly** as they appear in the JSON
 event (`temperature_C`, `wind_avg_km_h`, `battery_ok`). Names are matched
 **case-sensitively**, and not every decoder uses `snake_case` — SCMplus emits
 `Consumption`, ERT-SCM emits `consumption_data`. A key that differs only in case
-silently never matches: no entity, no warning, no error.
+silently never matches and will not show up in Home Assistant.
 
 ```yaml
 temperature_C:
