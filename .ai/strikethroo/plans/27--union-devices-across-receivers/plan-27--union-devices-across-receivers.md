@@ -524,10 +524,10 @@ graph TD
 - ✔️ Task 008: v2→v3 migration, control unique-id rewrite, non-merging conversion, consolidation via `device_replace.py` (depends on: 004, 005)
 - ✔️ Task 009: `COMPATIBILITY_CONTRACT.md` revision + `CORE_UPSTREAM.md` realignment (depends on: 008)
 
-### Phase 7: Tests & docs (file-disjoint, parallel)
+### ✅ Phase 7: Tests & docs (file-disjoint, parallel)
 **Parallel Tasks:**
-- Task 010: Test suite (depends on: 007, 008)
-- Task 011: Docs & screenshots, including the `device_replace.py` module docstring whose hardcoded v2 templates this plan falsifies (depends on: 008)
+- ✔️ Task 010: Test suite (depends on: 007, 008)
+- ✔️ Task 011: Docs & screenshots, including the `device_replace.py` module docstring whose hardcoded v2 templates this plan falsifies (depends on: 008)
 
 ### Post-phase Actions
 Each phase ends with the `POST_PHASE.md` gate: linting passes (`uv run ruff check custom_components/rtl_433`) and a conventional-commit for the phase is created; the plan's task/phase statuses are updated (✅ phase, ✔️ tasks). Tests (`uv run pytest tests/`) are additionally run at each phase boundary since most phases change runtime behavior.
