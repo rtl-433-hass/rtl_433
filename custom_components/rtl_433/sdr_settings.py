@@ -100,7 +100,7 @@ class SdrSetting:
 
     # Identity / platform routing (HA-only).
     name: str  # entity name (has_entity_name relative)
-    object_suffix: str  # unique-id token -> f"{entry_id}:hub:{object_suffix}"
+    object_suffix: str  # unique-id tail -> f"{receiver_identity}:{object_suffix}"
     platform: str  # "number" | "select" | "switch"
 
     # number-only entity-description parameters.

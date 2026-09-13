@@ -52,7 +52,11 @@ from .const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
-from .receiver_settings import _explicit_receiver_timeout, _receiver_manage_settings
+from .receiver_settings import (
+    _explicit_receiver_timeout,
+    _receiver_manage_settings,
+    receiver_coordinator,
+)
 
 if TYPE_CHECKING:
     from pyrtl_433.library import Registry
@@ -141,7 +145,7 @@ def commodity_hint(hass: HomeAssistant, entry: ConfigEntry, device_key: str) -> 
     because this decorates a form and must never be the reason one fails to
     render.
     """
-    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coordinator = receiver_coordinator(hass, entry)
     event = getattr(coordinator, "devices", {}).get(device_key)
     return commodity_from_fields(getattr(event, "fields", None))
 

@@ -1,14 +1,14 @@
-"""Shared base entity and receiver-wide platform-setup helper for the integration.
+"""Shared base entity and per-receiver platform-setup helper for the integration.
 
 Every ``sensor``/``binary_sensor`` entity created for a device nested under the
-receiver config entry derives from :class:`Rtl433Entity`. The base centralizes the
+location config entry derives from :class:`Rtl433Entity`. The base centralizes the
 four concerns the platforms would otherwise duplicate:
 
 * **Device registry** — a single :class:`DeviceInfo` keyed by
-  ``{receiver_entry_id}:{device_key}`` and linked to the receiver device via
-  ``via_device_id`` so every device groups under its receiver.
+  ``{receiver_id}:{device_key}`` and linked to the receiver device via
+  ``via_device_id`` so every device groups under the receiver that heard it.
 * **Dispatcher subscription** — each entity subscribes to the per-device signal
-  ``signal_device_update(receiver_entry_id, device_key)`` that the coordinator fans a
+  ``signal_device_update(receiver_id, device_key)`` that the coordinator fans a
   :class:`~pyrtl_433.normalizer.NormalizedEvent` out on, and
   unsubscribes in ``async_will_remove_from_hass``.
 * **Availability** — computed from the coordinator's ``last_seen`` timestamp
@@ -20,13 +20,23 @@ four concerns the platforms would otherwise duplicate:
 
 The module also hosts :func:`async_setup_receiver_platform`, the shared
 ``async_setup_entry`` body used by both the ``sensor`` and ``binary_sensor``
-platforms. It runs once on the single receiver config entry and: creates entities for
+platforms. The platforms are forwarded **once**, on the location entry, and run
+this once **per receiver subentry**; for each receiver it: creates entities for
 every device recorded in ``entry.data[CONF_DEVICES]`` (unioned with the fields
-the coordinator already knows), subscribes to ``signal_new_device`` to add a new
-device's entities at runtime (the ``dynamic-devices`` Quality Scale rule),
-registers a per-device listener on ``signal_device_update`` that adds entities as
-previously unseen mapped fields arrive, and keeps ``entry.data[CONF_DEVICES]``
-current via the idempotent :func:`async_upsert_device` helper.
+that receiver's coordinator already knows), subscribes to ``signal_new_device``
+to add a new device's entities at runtime (the ``dynamic-devices`` Quality Scale
+rule), registers a per-device listener on ``signal_device_update`` that adds
+entities as previously unseen mapped fields arrive, and keeps
+``entry.data[CONF_DEVICES]`` current via the idempotent
+:func:`async_upsert_device` helper.
+
+Every RF-device entity is added with **no** ``config_subentry_id``, leaving its
+device owned by the location entry itself. That is what keeps a device legal once
+two receivers feed it: Home Assistant gives a device exactly one owning subentry,
+and adding entities from two subentries that share a device silently moves it
+today and raises in HA Core 2027.8. Only receiver-owned entities — the radio
+controls here, plus the noise and connectivity sensors in the platform modules —
+pass their receiver's subentry id.
 """
 
 from __future__ import annotations
@@ -45,7 +55,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, Entity, EntityCategory
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
@@ -69,6 +79,7 @@ from .const import (
     signal_receiver_availability,
     signal_receiver_update,
 )
+from .receiver_settings import receiver_coordinators
 from .sdr_settings import SDR_SETTINGS
 
 if TYPE_CHECKING:
@@ -131,22 +142,20 @@ class Rtl433Entity(RestoreEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        receiver_entry_id: str,
+        receiver_id: str,
         device_key: str,
         model: str,
         descriptor: FieldDescriptor,
     ) -> None:
         """Initialize identity, device info, and entity description fields."""
         self._coordinator = coordinator
-        self._receiver_entry_id = receiver_entry_id
+        self._receiver_id = receiver_id
         self._device_key = device_key
         self._descriptor = descriptor
 
-        # Instance-scoped unique_id: scoping by the parent receiver entry id means two
-        # receivers observing the same model+id never collide.
-        self._attr_unique_id = (
-            f"{receiver_entry_id}:{device_key}:{descriptor.object_suffix}"
-        )
+        # Instance-scoped unique_id: scoping by the receiver (its config subentry
+        # id) means two receivers observing the same model+id never collide.
+        self._attr_unique_id = f"{receiver_id}:{device_key}:{descriptor.object_suffix}"
 
         # Per-field entity metadata common to both platforms. ``_attr_name`` is a
         # device-relative name because ``_attr_has_entity_name`` is set. A
@@ -164,7 +173,7 @@ class Rtl433Entity(RestoreEntity):
 
         device_name = display_name(model, device_key)
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{receiver_entry_id}:{device_key}")},
+            identifiers={(DOMAIN, f"{receiver_id}:{device_key}")},
             name=device_name,
             model=model or None,
             serial_number=identity_suffix(model, device_key),
@@ -172,10 +181,12 @@ class Rtl433Entity(RestoreEntity):
             # The receiver device is registered by ``async_setup_entry`` before any
             # platform is forwarded, so the lookup always resolves; ``via_device``
             # (the identifier tuple) is deprecated and gone from ``DeviceInfo``.
+            # The lookup is scoped to the *location* entry, which owns both this
+            # device and the receiver device the link points at.
             via_device_id=dr.async_get_device_id_by_identifier(
                 coordinator.hass,
-                (DOMAIN, receiver_entry_id),
-                config_entry_id=receiver_entry_id,
+                (DOMAIN, coordinator.receiver_identity),
+                config_entry_id=coordinator.entry.entry_id,
             ),
         )
 
@@ -240,7 +251,7 @@ class Rtl433Entity(RestoreEntity):
 
         self._unsub_dispatcher = async_dispatcher_connect(
             self.hass,
-            signal_device_update(self._receiver_entry_id, self._device_key),
+            signal_device_update(self._receiver_id, self._device_key),
             self._handle_dispatch,
         )
         # The receiver-connection gate flips for every device at once and is not tied
@@ -249,7 +260,7 @@ class Rtl433Entity(RestoreEntity):
         # write per entity per outage.
         self._unsub_receiver_availability = async_dispatcher_connect(
             self.hass,
-            signal_receiver_availability(self._receiver_entry_id),
+            signal_receiver_availability(self._receiver_id),
             self._handle_receiver_availability,
         )
 
@@ -322,12 +333,18 @@ class Rtl433ReceiverEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, coordinator: Rtl433Coordinator, receiver_entry_id: str) -> None:
-        """Attach to the receiver device and remember the coordinator."""
+    def __init__(self, coordinator: Rtl433Coordinator) -> None:
+        """Attach to the receiver device and remember the coordinator.
+
+        Identity comes from the coordinator rather than a passed-in id, because a
+        receiver entity is one-per-receiver by construction: its device *is* the
+        coordinator's receiver, and the two could not disagree without producing
+        an entity attached to the wrong server's device page.
+        """
         self._coordinator = coordinator
-        self._receiver_entry_id = receiver_entry_id
+        self._receiver_id = coordinator.receiver_id
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, receiver_entry_id)},
+            identifiers={(DOMAIN, coordinator.receiver_identity)},
         )
         self._unsub_receiver: Callable[[], None] | None = None
         self._unsub_receiver_availability: Callable[[], None] | None = None
@@ -337,12 +354,12 @@ class Rtl433ReceiverEntity(Entity):
         await super().async_added_to_hass()
         self._unsub_receiver = async_dispatcher_connect(
             self.hass,
-            signal_receiver_update(self._receiver_entry_id),
+            signal_receiver_update(self._receiver_id),
             self._handle_receiver_update,
         )
         self._unsub_receiver_availability = async_dispatcher_connect(
             self.hass,
-            signal_receiver_availability(self._receiver_entry_id),
+            signal_receiver_availability(self._receiver_id),
             self._handle_receiver_update,
         )
 
@@ -368,7 +385,9 @@ class Rtl433ReceiverControl(Rtl433ReceiverEntity):
     (alongside the matching HA entity mixin) so the four concerns common to every
     control live in one place: attachment to the receiver device (inherited from
     :class:`Rtl433ReceiverEntity`), the :data:`EntityCategory.CONFIG` category, the
-    stable unique_id ``f"{receiver_entry_id}:hub:{object_suffix}"``, and the
+    stable unique_id
+    ``f"{location_entry_id}:receiver:{receiver_subentry_id}:{object_suffix}"``,
+    and the
     device-relative entity name — all sourced from the field's
     :class:`~custom_components.rtl_433.sdr_settings.SdrSetting`.
 
@@ -383,13 +402,14 @@ class Rtl433ReceiverControl(Rtl433ReceiverEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        receiver_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Attach to the receiver device and adopt the setting's identity/name."""
-        super().__init__(coordinator, receiver_entry_id)
+        super().__init__(coordinator)
         self._setting = setting
-        self._attr_unique_id = f"{receiver_entry_id}:hub:{setting.object_suffix}"
+        self._attr_unique_id = (
+            f"{coordinator.receiver_identity}:{setting.object_suffix}"
+        )
         self._attr_name = setting.name
 
     @property
@@ -406,26 +426,34 @@ class Rtl433ReceiverControl(Rtl433ReceiverEntity):
 async def async_setup_receiver_controls(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
     platform: str,
-    control_cls: Callable[[Rtl433Coordinator, str, SdrSetting], Rtl433ReceiverControl],
+    control_cls: Callable[[Rtl433Coordinator, SdrSetting], Rtl433ReceiverControl],
 ) -> None:
-    """Register the receiver's managed controls for one control platform.
+    """Register every receiver's managed controls for one control platform.
 
     Shared by the ``number`` / ``select`` / ``switch`` platforms, which differ
-    only in their entity class. When the receiver's ``manage_settings`` toggle is off
-    it creates **no** entities and returns immediately; when management is on it
-    statically registers one ``control_cls`` per :data:`SDR_SETTINGS` entry whose
-    ``platform`` matches and whose capability gate is satisfied.
+    only in their entity class. The platform is forwarded once on the location, so
+    this walks the location's receivers: a receiver whose ``manage_settings``
+    toggle is off contributes **no** entities; one with management on statically
+    registers one ``control_cls`` per :data:`SDR_SETTINGS` entry whose ``platform``
+    matches and whose capability gate is satisfied.
+
+    The controls are added **with** their receiver's ``config_subentry_id``: they
+    describe that radio and live on that receiver's device, so the subentry is
+    their rightful owner and deleting the receiver takes them with it.
     """
-    coordinator: Rtl433Coordinator = hass.data[DOMAIN][entry.entry_id]
-    if not coordinator.manage_settings:
-        return
-    async_add_entities(
-        control_cls(coordinator, entry.entry_id, setting)
-        for setting in SDR_SETTINGS
-        if setting.platform == platform and setting.capability(coordinator.meta)
-    )
+    for receiver_id, coordinator in receiver_coordinators(hass, entry).items():
+        if not coordinator.manage_settings:
+            continue
+        async_add_entities(
+            (
+                control_cls(coordinator, setting)
+                for setting in SDR_SETTINGS
+                if setting.platform == platform and setting.capability(coordinator.meta)
+            ),
+            config_subentry_id=receiver_id,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -518,20 +546,23 @@ async def async_upsert_event_types(
 async def async_setup_receiver_platform(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
     platform: str,
     entity_cls: Callable[..., Rtl433Entity],
     per_device_factory: Callable[[Rtl433Coordinator, str, str, str], Rtl433Entity]
     | None = None,
 ) -> None:
-    """Set up one entity platform for every device nested under the receiver entry.
+    """Set up one entity platform for every device of every receiver in a location.
 
-    Runs once on the single receiver config entry. It:
+    The platform is forwarded once, on the location entry, so this fans out over
+    the location's receivers and runs the same per-receiver body for each.
+
+    Per receiver it:
 
     1. creates entities for every device in ``entry.data[CONF_DEVICES]`` (unioned
-       with the fields the coordinator already knows for that device);
-    2. subscribes to ``signal_new_device(entry_id)`` so a newly observed device's
-       entities are created at runtime (gated upstream by the discovery toggle);
+       with the fields that receiver's coordinator already knows for it);
+    2. subscribes to ``signal_new_device(receiver_id)`` so a newly observed
+       device's entities are created at runtime;
     3. for each device, registers a ``signal_device_update`` listener that adds
        entities as previously unseen mapped fields arrive; and
     4. keeps ``entry.data[CONF_DEVICES]`` current via :func:`async_upsert_device`.
@@ -540,21 +571,70 @@ async def async_setup_receiver_platform(
     each only builds descriptors whose ``platform`` matches, and the devices-map
     writes are idempotent unions so the two converge.
 
+    Every entity here is added with **no** ``config_subentry_id``: an RF device
+    belongs to the location, not to whichever receiver happened to decode it, and
+    a device that gained entities from two subentries would be silently moved
+    today and rejected outright in HA Core 2027.8.
+
     ``per_device_factory`` is an optional caller-supplied hook for a single
     "extra" per-device entity that is not field-driven (e.g. the sensor
     platform's synthetic Last-seen sensor). When set, it is invoked once per
     device — in both the initial devices-map build and the new-device handler —
-    as ``per_device_factory(coordinator, entry.entry_id, device_key, model)``.
+    as ``per_device_factory(coordinator, receiver_id, device_key, model)``.
     Passing it as a callable (rather than importing the entity class here) keeps
     the dependency direction clean: ``entity.py`` does not import from the
     platform modules. Callers that omit it (e.g. ``binary_sensor``) create no
     extra entity.
     """
-    coordinator: Rtl433Coordinator = hass.data[DOMAIN][entry.entry_id]
+    for coordinator in receiver_coordinators(hass, entry).values():
+        _setup_receiver_platform(
+            hass,
+            entry,
+            coordinator,
+            async_add_entities,
+            platform,
+            entity_cls,
+            per_device_factory,
+        )
+    # The initial devices-map build persists any coordinator-known fields that
+    # are not stored yet; done after every receiver has registered its listeners
+    # so one receiver's write cannot race another's build.
+    for device_key, rec in entry.data.get(CONF_DEVICES, {}).items():
+        await async_upsert_device(
+            hass,
+            entry,
+            device_key,
+            model=rec.get(CONF_MODEL, ""),
+            fields=_known_fields(hass, entry, device_key, rec),
+        )
 
-    # Use the per-entry merged registry (shipped library + this receiver's user
-    # overrides) that the receiver built at setup and cached, so descriptor lookups
-    # never re-read the YAML files on the event loop.
+
+def _known_fields(
+    hass: HomeAssistant, entry: ConfigEntry, device_key: str, record: dict[str, Any]
+) -> set[str]:
+    """Union a stored device record's fields with every receiver's live view."""
+    fields = set(record.get(DEVICE_FIELDS, []))
+    for coordinator in receiver_coordinators(hass, entry).values():
+        fields |= coordinator.device_fields.get(device_key, set())
+    return fields
+
+
+def _setup_receiver_platform(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: Rtl433Coordinator,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+    platform: str,
+    entity_cls: Callable[..., Rtl433Entity],
+    per_device_factory: Callable[[Rtl433Coordinator, str, str, str], Rtl433Entity]
+    | None,
+) -> None:
+    """Run :func:`async_setup_receiver_platform`'s body for one receiver."""
+    receiver_id = coordinator.receiver_id
+
+    # Use the per-entry merged registry (shipped library + this location's user
+    # overrides) that setup built and cached, so descriptor lookups never re-read
+    # the YAML files on the event loop.
     registry: Registry | None = (
         hass.data[DOMAIN]
         .get(DATA_ENTRY_LIBRARY, {})
@@ -607,12 +687,12 @@ async def async_setup_receiver_platform(
             # known consumption field(s), overriding the library descriptor.
             if calibration is not None and field_key in CONSUMPTION_FIELD_KEYS:
                 descriptor = _apply_calibration(descriptor, calibration)
-            unique_id = f"{entry.entry_id}:{device_key}:{descriptor.object_suffix}"
+            unique_id = f"{receiver_id}:{device_key}:{descriptor.object_suffix}"
             if unique_id in seen:
                 continue
             seen.add(unique_id)
             new_entities.append(
-                entity_cls(coordinator, entry.entry_id, device_key, model, descriptor)
+                entity_cls(coordinator, receiver_id, device_key, model, descriptor)
             )
         return new_entities
 
@@ -626,7 +706,7 @@ async def async_setup_receiver_platform(
         if per_device_factory is None or device_key in extra_created:
             return []
         extra_created.add(device_key)
-        return [per_device_factory(coordinator, entry.entry_id, device_key, model)]
+        return [per_device_factory(coordinator, receiver_id, device_key, model)]
 
     def _register_field_listener(device_key: str, model: str) -> None:
         """Register a per-device listener that adds entities for new fields.
@@ -661,7 +741,7 @@ async def async_setup_receiver_platform(
 
         field_unsubs[device_key] = async_dispatcher_connect(
             hass,
-            signal_device_update(entry.entry_id, device_key),
+            signal_device_update(receiver_id, device_key),
             _handle_new_fields,
         )
 
@@ -699,11 +779,11 @@ async def async_setup_receiver_platform(
         union = set(rec.get(DEVICE_FIELDS, [])) | coordinator.device_fields.get(
             device_key, set()
         )
+        # No ``config_subentry_id``: the device is the location's, not this
+        # receiver's (see the module docstring).
         async_add_entities(
             _build(device_key, model, union) + _build_extra(device_key, model)
         )
-        # Persist any coordinator-known fields not yet stored in the map.
-        await async_upsert_device(hass, entry, device_key, model=model, fields=union)
         _register_field_listener(device_key, model)
 
     # --- New-device dynamic add ------------------------------------------- #
@@ -724,7 +804,7 @@ async def async_setup_receiver_platform(
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
-            signal_new_device(entry.entry_id),
+            signal_new_device(receiver_id),
             _handle_new_device,
         )
     )
