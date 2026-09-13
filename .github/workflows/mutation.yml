@@ -495,8 +495,16 @@ jobs:
           )
           PY
 
+      # Both blocks, in two passes. `--mode functions --update` deliberately
+      # never writes file scores, because on a *scoped* run the file block also
+      # carries every mutant the filter skipped and recording that would set an
+      # artificially low bar. This job only ever runs on a FULL run, where both
+      # blocks are complete measurements, so it refreshes each with the mode
+      # that owns it.
       - name: Write the refreshed baseline
         run: |
+          uv run mutmut-ratchet ratchet --mode floor \
+            --stats merged-stats.json --update
           uv run mutmut-ratchet ratchet --mode functions \
             --stats merged-stats.json --update
           cp scripts/mutation_baseline.json mutation_baseline.json
