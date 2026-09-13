@@ -127,7 +127,7 @@ const TRANSLATION_PREFIX = `component.${DOMAIN}.${TRANSLATION_CATEGORY}.`;
 export const STRINGS = {
   title: "rtl_433",
   "view.discovered": "Discovered devices",
-  "view.hub_settings": "Receiver settings",
+  "view.receiver_settings": "Receiver settings",
   "view.device_settings": "Device settings",
   "view.mappings": "Device mappings",
   "common.back": "Back",
@@ -379,7 +379,7 @@ function pluralCandidates(key, args, language) {
 export const VIEWS = {
   "": { view: "overview", title: "title" },
   discovered: { view: "discovered", title: "view.discovered" },
-  options: { view: "settings", title: "view.hub_settings", form: "hub" },
+  options: { view: "settings", title: "view.receiver_settings", form: "hub" },
   "device-settings": {
     view: "settings",
     title: "view.device_settings",
@@ -1307,7 +1307,7 @@ class Rtl433Panel extends HTMLElement {
    * The device registry entry adoption created for `key`, or `null`.
    *
    * Matched on the identifier the entities are built with
-   * (`entity.py`: `(DOMAIN, f"{hub_entry_id}:{device_key}")`), which is the only
+   * (`entity.py`: `(DOMAIN, f"{receiver_entry_id}:{device_key}")`), which is the only
    * stable join between a pending candidate and the device it becomes.
    *
    * `hass.devices` is read defensively: it is a documented part of the frontend
@@ -1850,7 +1850,7 @@ class Rtl433Panel extends HTMLElement {
         {
           className: "open-hub-settings",
           icon: ICON_RECEIVER,
-          headline: this._t("view.hub_settings"),
+          headline: this._t("view.receiver_settings"),
           supporting: this._t("overview.hub_settings_description"),
           segment: "options",
         },

@@ -191,7 +191,7 @@ async def test_async_turn_off_two_positional_args():
 def test_init_wires_coordinator_to_entity():
     """The entity's _coordinator must be the coordinator passed to __init__."""
     entity, coordinator = _make_switch_entity()
-    # Rtl433HubControl.__init__ → Rtl433HubEntity.__init__ stores it as _coordinator.
+    # Rtl433ReceiverControl.__init__ → Rtl433ReceiverEntity.__init__ stores it as _coordinator.
     assert entity._coordinator is coordinator
 
 
@@ -388,10 +388,10 @@ async def test_setup_entry_entity_reads_coordinator_meta(hass, hub_entry_builder
     """The switch entity created by async_setup_entry can read coordinator.meta.
 
     This proves the real coordinator (not None) was wired in. We set
-    coordinator.meta and fire signal_hub_update; if the entity's coordinator
+    coordinator.meta and fire signal_receiver_update; if the entity's coordinator
     is None the attribute access would raise and the state would not update.
     """
-    from custom_components.rtl_433.const import signal_hub_update
+    from custom_components.rtl_433.const import signal_receiver_update
     from homeassistant.helpers import entity_registry as er
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -406,7 +406,7 @@ async def test_setup_entry_entity_reads_coordinator_meta(hass, hub_entry_builder
 
     # Update coordinator state and trigger repaint (meta is client-owned).
     coordinator._client.meta = {"gain": ""}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     state = hass.states.get(gain_auto_eid)

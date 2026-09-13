@@ -36,7 +36,7 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     `migration.py` (config-entry v1→v2 migration + one-time legacy cleanups,
     re-exported `async_migrate_entry`), `library.py` (device-library load/merge
     over `pyrtl_433.library`, cached on `hass.data`),
-    and `hub_settings.py` (hub-entry setting resolvers: `_hub_*`,
+    and `receiver_settings.py` (hub-entry setting resolvers: `_hub_*`,
     `_calibration_map`).
 - `docs/device-library.md` — the Home-Assistant-facing device-library guide (UI
   overrides, diagnostics, workflow). The **authoritative schema reference** is
@@ -89,7 +89,7 @@ own copy of any of that; it consumes the library:
   Events arrive via the client's **`on_event`** callback →
   `_EventProcessingMixin._on_client_event` (HA-side dispatch), and connectivity /
   meta / stats / dev-info changes via **`on_hub_update`** → `_emit_hub_update`
-  (connect/disconnect edge handling, hub-identity refresh, `signal_hub_update`
+  (connect/disconnect edge handling, hub-identity refresh, `signal_receiver_update`
   fan-out). The library owns neither the managed-SDR policy nor the availability
   watchdog, so those are driven HA-side off the connect edge and a time interval.
 - **`pyrtl_433.normalizer`** — `normalize` / `device_key` / `NormalizedEvent` /
@@ -274,7 +274,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   entry **preserves** its stable radio `unique_id` by default, but the form also
   offers an optional `radio_id` field to **rebind** it to a *new* stable radio id
   — the "replace a dead dongle" path. Rebinds funnel through the module-level
-  `async_rebind_hub(hass, entry, new_unique_id, conn_updates, title=…)` helper,
+  `async_rebind_receiver(hass, entry, new_unique_id, conn_updates, title=…)` helper,
   which preserves `entry_id` (so every nested device/entity/history survives),
   aborts `already_configured` when the target id is owned by a *populated* entry,
   and adopts-and-deletes an *empty orphan* entry that already holds the target id
@@ -288,9 +288,9 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   `async_step_reconfigure` uses `async_update_and_abort` (not
   `async_update_reload_and_abort`), the Supervisor discovery step passes
   `reload_on_update=False` to `_abort_if_unique_id_configured`, and
-  `async_rebind_hub` does not reload either. `_async_update_listener` then
+  `async_rebind_receiver` does not reload either. `_async_update_listener` then
   compares `(host, port, path, secure, unique_id)` (`_hub_connection`,
-  `hub_settings.py`) against `coordinator.connection_snapshot` and reloads once
+  `receiver_settings.py`) against `coordinator.connection_snapshot` and reloads once
   when it differs — the same snapshot-vs-live pattern as `manage_settings` /
   `calibration_snapshot` / `user_mappings_snapshot`. Never reintroduce a
   flow-side reload.
@@ -437,7 +437,7 @@ second implementation.
 
 The per-device **Last seen** sensor (`Rtl433LastSeenSensor`, `sensor.py`) is
 **synthetic** — it is *not* driven by a device-library field. Two invariants
-must survive any refactor of `async_setup_hub_platform` (`entity.py`) and of the
+must survive any refactor of `async_setup_receiver_platform` (`entity.py`) and of the
 base `async_added_to_hass` baseline:
 
 - **Created unconditionally, once per device, on the `sensor` platform only.**
@@ -445,7 +445,7 @@ base `async_added_to_hass` baseline:
   sentinel `field_key="__last_seen__"` that no rtl_433 event can carry,
   `object_suffix="last_seen"`, `device_class=timestamp`, diagnostic,
   descriptor `enabled_by_default=False`) and added via the **`per_device_factory`
-  hook** of `async_setup_hub_platform` (`async_setup_entry` passes
+  hook** of `async_setup_receiver_platform` (`async_setup_entry` passes
   `per_device_factory=Rtl433LastSeenSensor`). It is **disabled by default for
   periodic devices** but the sensor flips `_attr_entity_registry_enabled_default`
   to `True` for **event-driven devices** (`coordinator.is_event_driven_device`),
@@ -479,9 +479,9 @@ base `async_added_to_hass` baseline:
 
 `Rtl433Event` (`event.py`) is the third platform (`Platform.EVENT` in
 `PLATFORMS`). Unlike the Last seen sensor it is **field-driven** — built via
-`async_setup_hub_platform` for descriptors whose `platform == "event"`, with
+`async_setup_receiver_platform` for descriptors whose `platform == "event"`, with
 **no `per_device_factory`** — using the **unchanged shared 5-arg constructor**.
-Invariants that must survive refactors of `async_setup_hub_platform`, the
+Invariants that must survive refactors of `async_setup_receiver_platform`, the
 coordinator watchdog, and the devices map:
 
 - **Flag-based watchdog dedupe.** It overrides `_handle_dispatch` to suppress the
@@ -752,7 +752,7 @@ integration is listening; this gate answers "is the integration listening at
 all?". End-user docs live in
 [docs/availability.md](docs/availability.md#hub-connection).
 
-- **`coordinator.hub_available` is exactly `self.connected`.** No grace window,
+- **`coordinator.receiver_available` is exactly `self.connected`.** No grace window,
   no debounce, no timer: the socket drops, every device behind the hub is
   unavailable on the same tick. **Do not add a delay here.** It was tried and
   removed deliberately — a delay presents readings as current while the
@@ -793,27 +793,27 @@ all?". End-user docs live in
   `available` is False and the state string is then unrestorable. Without it a
   restart during an outage strands every never-expire contact at `unknown` until
   it next transmits — possibly days.
-- **The hub's own diagnostic sensors read it too.** `Rtl433HubSensor.available`
-  returns `hub_available`: every value it renders is HTTP `/cmd`-sourced, so an
+- **The hub's own diagnostic sensors read it too.** `Rtl433ReceiverSensor.available`
+  returns `receiver_available`: every value it renders is HTTP `/cmd`-sourced, so an
   outage freezes it with nothing on the entity to say so. A key missing from a
   *live* payload still reads `unknown` (a `None` native value), not unavailable.
-  Two hub entities stay ungated: `Rtl433HubConnectivity` (it *is* the connection
+  Two hub entities stay ungated: `Rtl433ReceiverConnectivity` (it *is* the connection
   report — `available` is hardcoded `True` and it flips `off` on the drop with no
-  grace window — same as the devices now) and `Rtl433HubControl` (availability is
+  grace window — same as the devices now) and `Rtl433ReceiverControl` (availability is
   a capability gate on
   `meta`).
 - **The clock starts at `async_start`,** not at the first drop, so a Home
   Assistant restart while the server is down expires the restored states at once
   instead of leaving them available forever.
-- **Lazy gate, edge-driven repaint.** Entities evaluate `hub_available` on every
+- **Lazy gate, edge-driven repaint.** Entities evaluate `receiver_available` on every
   state read, so it is always correct; the coordinator only *repaints*. The
   disconnect edge and the connect edge each call it, and each watchdog tick
   re-checks as a cheap backstop in case an edge is ever missed. All
   three funnel into `_async_sync_hub_availability`, which dispatches
-  `SIGNAL_HUB_AVAILABILITY` **once per flip** (a hub-wide signal, deliberately
-  separate from `SIGNAL_HUB_UPDATE`, which also fires on every meta/stats refresh
+  `SIGNAL_RECEIVER_AVAILABILITY` **once per flip** (a hub-wide signal, deliberately
+  separate from `SIGNAL_RECEIVER_UPDATE`, which also fires on every meta/stats refresh
   and would otherwise write state for every device entity on each poll). Both
-  `Rtl433Entity` and `Rtl433HubEntity` subscribe: `SIGNAL_HUB_UPDATE` covers the
+  `Rtl433Entity` and `Rtl433ReceiverEntity` subscribe: `SIGNAL_RECEIVER_UPDATE` covers the
   connect/disconnect edges, which is exactly when a gated entity's `available`
   changes.
 - **Logging.** The library logs drops at DEBUG under its own logger, which is
@@ -885,8 +885,8 @@ keep this contributor-facing.
   hide unsupported fields without touching consumers.
   - **Runtime `available` gate** (`Callable[[meta], bool]`, default `_always`):
     distinct from `capability` (evaluated once at setup to decide whether the
-    entity is *created*), `available` is read by `Rtl433HubControl.available` on
-    **every `signal_hub_update`** to decide whether the *created* control reports
+    entity is *created*), `available` is read by `Rtl433ReceiverControl.available` on
+    **every `signal_receiver_update`** to decide whether the *created* control reports
     available for the current `meta`. Two fields override it, keyed on
     `len(meta["frequencies"])` (unknown/pre-connect ⇒ available): `hop_interval`
     is available **only when hopping** (`> 1` frequency — a single frequency has
@@ -1298,9 +1298,9 @@ Full runbook:
   entities.
 - Keep `const.py` the single source of truth for config keys and defaults
   (`DEFAULT_PORT=8433`, `DEFAULT_PATH="/ws"`, `DEFAULT_AVAILABILITY_TIMEOUT=600`)
-  and for the dispatcher signals (`SIGNAL_NEW_DEVICE`, `SIGNAL_HUB_UPDATE` — the
+  and for the dispatcher signals (`SIGNAL_NEW_DEVICE`, `SIGNAL_RECEIVER_UPDATE` — the
   latter fans connectivity/meta/stats changes out to the hub entities — and
-  `SIGNAL_HUB_AVAILABILITY`, the per-flip device repaint behind the
+  `SIGNAL_RECEIVER_AVAILABILITY`, the per-flip device repaint behind the
   hub-connection gate).
 - Always run `pytest tests/` before proposing a change, and follow the
   conventional-commit and lint rules in [CONTRIBUTING.md](CONTRIBUTING.md).

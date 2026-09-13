@@ -27,11 +27,11 @@ from custom_components.rtl_433.const import (
     CONF_DEVICES,
     CONF_ENTRY_TYPE,
     CONF_HOST,
-    CONF_HUB_ENTRY_ID,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    CONF_RECEIVER_ENTRY_ID,
     DATA_LIBRARY,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MANAGE_SETTINGS,
@@ -44,24 +44,24 @@ from custom_components.rtl_433.const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
-    ENTRY_TYPE_HUB,
+    ENTRY_TYPE_RECEIVER,
     PLATFORMS,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
-from custom_components.rtl_433.hub_settings import (
-    _calibration_map,
-    _hub_availability_timeout,
-    _hub_connection,
-    _hub_manage_settings,
-    _hub_secure,
-)
 from custom_components.rtl_433.migration import (
     LEGACY_CONF_OBSERVED_FIELDS,
     PHANTOM_DEVICE_KEY,
     _cleanup_phantom_unknown_device,
     _migrate_motion_event_to_binary_sensor,
     _rehome_device_objects,
+)
+from custom_components.rtl_433.receiver_settings import (
+    _calibration_map,
+    _hub_availability_timeout,
+    _hub_connection,
+    _hub_manage_settings,
+    _hub_secure,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -1311,7 +1311,7 @@ async def test_migrate_entry_v2_returns_true_immediately(hass):
             CONF_HOST: "h",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
         },
     )
     entry.add_to_hass(hass)
@@ -1331,7 +1331,7 @@ async def test_migrate_entry_v1_hub_bumps_version_to_2(hass):
             CONF_HOST: "h",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
         },
     )
     hub.add_to_hass(hass)
@@ -1353,7 +1353,7 @@ async def test_migrate_entry_v1_device_bumps_version_to_2(hass):
             CONF_HOST: "h",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
         },
     )
     device = MockConfigEntry(
@@ -1362,7 +1362,7 @@ async def test_migrate_entry_v1_device_bumps_version_to_2(hass):
         version=1,
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_id,
+            CONF_RECEIVER_ENTRY_ID: hub_id,
             CONF_DEVICE_KEY: "Sensor-1",
             CONF_MODEL: "Sensor",
         },
@@ -1389,7 +1389,7 @@ async def test_migrate_entry_v1_hub_removes_child_entries(hass):
             CONF_HOST: "h",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
         },
     )
     child = MockConfigEntry(
@@ -1398,7 +1398,7 @@ async def test_migrate_entry_v1_hub_removes_child_entries(hass):
         version=1,
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_id,
+            CONF_RECEIVER_ENTRY_ID: hub_id,
             CONF_DEVICE_KEY: key_a,
             CONF_MODEL: "Acurite-606TX",
         },
@@ -1431,7 +1431,7 @@ async def test_migrate_entry_v1_hub_folds_device_into_devices_map(hass):
             CONF_HOST: "h",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
         },
     )
     child = MockConfigEntry(
@@ -1440,7 +1440,7 @@ async def test_migrate_entry_v1_hub_folds_device_into_devices_map(hass):
         version=1,
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_id,
+            CONF_RECEIVER_ENTRY_ID: hub_id,
             CONF_DEVICE_KEY: key_a,
             CONF_MODEL: "Acurite-606TX",
         },
@@ -1472,7 +1472,7 @@ async def test_migrate_entry_v1_hub_preserves_timeout_override(hass):
             CONF_HOST: "h",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
         },
     )
     child = MockConfigEntry(
@@ -1481,7 +1481,7 @@ async def test_migrate_entry_v1_hub_preserves_timeout_override(hass):
         version=1,
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_id,
+            CONF_RECEIVER_ENTRY_ID: hub_id,
             CONF_DEVICE_KEY: key_b,
             CONF_MODEL: "EnergyMeter-2000",
         },
@@ -1500,7 +1500,7 @@ async def test_migrate_entry_v1_hub_preserves_timeout_override(hass):
 
 
 async def test_migrate_entry_v1_device_without_hub_id_returns_true(hass):
-    """A v1 device entry with no CONF_HUB_ENTRY_ID still returns True."""
+    """A v1 device entry with no CONF_RECEIVER_ENTRY_ID still returns True."""
     device = MockConfigEntry(
         domain=DOMAIN,
         title="orphan device",
@@ -1509,7 +1509,7 @@ async def test_migrate_entry_v1_device_without_hub_id_returns_true(hass):
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
             CONF_DEVICE_KEY: "Sensor-99",
             CONF_MODEL: "Sensor",
-            # No CONF_HUB_ENTRY_ID
+            # No CONF_RECEIVER_ENTRY_ID
         },
     )
     device.add_to_hass(hass)
@@ -1533,7 +1533,7 @@ async def test_migrate_entry_v1_device_rehomes_registry_devices(hass):
             CONF_HOST: "h",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
         },
     )
     child = MockConfigEntry(
@@ -1542,7 +1542,7 @@ async def test_migrate_entry_v1_device_rehomes_registry_devices(hass):
         version=1,
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_id,
+            CONF_RECEIVER_ENTRY_ID: hub_id,
             CONF_DEVICE_KEY: key_a,
             CONF_MODEL: "Acurite-606TX",
         },
@@ -1578,7 +1578,7 @@ async def test_migrate_entry_v1_device_rehomes_registry_devices(hass):
 
 
 async def test_rehome_device_objects_skips_when_same_entry(hass, hub_entry_builder):
-    """When hub_entry_id == device_entry.entry_id nothing changes."""
+    """When receiver_entry_id == device_entry.entry_id nothing changes."""
     hub = hub_entry_builder(availability_timeout=600)
     hub.add_to_hass(hass)
 
@@ -1593,7 +1593,7 @@ async def test_rehome_device_objects_skips_when_same_entry(hass, hub_entry_build
 
 
 async def test_rehome_device_objects_moves_devices_to_hub(hass):
-    """Devices owned by source entry are re-homed to hub_entry_id."""
+    """Devices owned by source entry are re-homed to receiver_entry_id."""
     hub_id = "hub-entry"
     source_id = "child-entry"
 
@@ -1606,7 +1606,7 @@ async def test_rehome_device_objects_moves_devices_to_hub(hass):
     )
     source.add_to_hass(hass)
 
-    # Also need a hub entry so the hub_entry_id is valid
+    # Also need a hub entry so the receiver_entry_id is valid
     hub = MockConfigEntry(
         domain=DOMAIN,
         title="hub",
@@ -1634,7 +1634,7 @@ async def test_rehome_device_objects_moves_devices_to_hub(hass):
 async def test_rehome_device_objects_idempotent_for_devices(hass):
     """Calling _rehome_device_objects twice is safe (idempotent for devices).
 
-    After re-homing, the device already belongs to hub_entry_id, so the source
+    After re-homing, the device already belongs to receiver_entry_id, so the source
     entry's device list is empty and the second call finds nothing to move.
     """
     hub_id = "hub-id-001"
@@ -1799,7 +1799,7 @@ async def test_migrate_hub_entry_preserves_clear_delay(hass):
             CONF_HOST: "h",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
         },
     )
     child = MockConfigEntry(
@@ -1808,7 +1808,7 @@ async def test_migrate_hub_entry_preserves_clear_delay(hass):
         version=1,
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_id,
+            CONF_RECEIVER_ENTRY_ID: hub_id,
             CONF_DEVICE_KEY: key_c,
             CONF_MODEL: "MotionSensor",
         },

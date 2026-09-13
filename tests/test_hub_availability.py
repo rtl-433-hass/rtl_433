@@ -4,7 +4,7 @@ The per-device availability model infers "is this radio still there?" from
 silence, which only means anything while the integration is actually listening.
 Once the hub's WebSocket is down the integration hears nothing at all, so no
 device's cached state can be trusted — the same thing an MQTT availability topic
-covers with an LWT. ``Rtl433Coordinator.hub_available`` is that second gate, and
+covers with an LWT. ``Rtl433Coordinator.receiver_available`` is that second gate, and
 it follows the socket with no grace window: the moment the connection drops,
 *every* device behind the hub is unavailable whatever its own timeout says.
 
@@ -33,8 +33,8 @@ from custom_components.rtl_433.const import (
     CONF_MODEL,
     DEVICE_FIELDS,
     DOMAIN,
-    signal_hub_availability,
-    signal_hub_update,
+    signal_receiver_availability,
+    signal_receiver_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.core import State
@@ -104,7 +104,7 @@ def _availability_signals(dispatch, entry_id: str) -> list:
     return [
         call
         for call in dispatch.call_args_list
-        if call.args[1] == signal_hub_availability(entry_id)
+        if call.args[1] == signal_receiver_availability(entry_id)
     ]
 
 
@@ -124,16 +124,18 @@ def test_there_is_no_grace_window():
 
 def test_availability_signal_is_scoped_per_hub():
     """The repaint signal is per hub entry, so two hubs never repaint each other."""
-    assert signal_hub_availability("hub-a") == "rtl_433_hub_availability_hub-a"
-    assert signal_hub_availability("hub-a") != signal_hub_availability("hub-b")
+    assert signal_receiver_availability("hub-a") == "rtl_433_hub_availability_hub-a"
+    assert signal_receiver_availability("hub-a") != signal_receiver_availability(
+        "hub-b"
+    )
 
 
 # --------------------------------------------------------------------------- #
-# hub_available: the gate itself                                               #
+# receiver_available: the gate itself                                               #
 # --------------------------------------------------------------------------- #
 def test_hub_available_while_connected(hass, coordinator):
     """An open socket is available, with no outage clock running."""
-    assert coordinator.hub_available is True
+    assert coordinator.receiver_available is True
     assert coordinator.disconnected_since is None
 
 
@@ -147,7 +149,7 @@ async def test_hub_unavailable_before_start(hass, hub_entry_builder):
     entry.add_to_hass(hass)
     coord = Rtl433Coordinator(hass, entry, host="rtl433.local")
     assert coord.connected is False
-    assert coord.hub_available is False
+    assert coord.receiver_available is False
 
 
 def test_drop_closes_the_gate_immediately(hass, coordinator):
@@ -155,12 +157,12 @@ def test_drop_closes_the_gate_immediately(hass, coordinator):
     start = dt_util.utcnow()
     with freeze_time(start):
         _drop(coordinator)
-        assert coordinator.hub_available is False
+        assert coordinator.receiver_available is False
         assert coordinator.disconnected_since == start
 
     # And it stays closed for as long as the outage lasts.
     with freeze_time(start + timedelta(seconds=600)):
-        assert coordinator.hub_available is False
+        assert coordinator.receiver_available is False
 
 
 def test_reconnect_reopens_the_gate(hass, coordinator):
@@ -170,9 +172,9 @@ def test_reconnect_reopens_the_gate(hass, coordinator):
         _drop(coordinator)
 
     with freeze_time(start + timedelta(seconds=600)):
-        assert coordinator.hub_available is False
+        assert coordinator.receiver_available is False
         _connect(coordinator)
-        assert coordinator.hub_available is True
+        assert coordinator.receiver_available is True
         assert coordinator.disconnected_since is None
 
 
@@ -186,10 +188,10 @@ def test_a_flapping_socket_is_reported_honestly(hass, coordinator):
     for offset in (0, 20, 40):
         with freeze_time(start + timedelta(seconds=offset)):
             _drop(coordinator)
-            assert coordinator.hub_available is False
+            assert coordinator.receiver_available is False
         with freeze_time(start + timedelta(seconds=offset + 1)):
             _connect(coordinator)
-            assert coordinator.hub_available is True
+            assert coordinator.receiver_available is True
 
 
 async def test_start_leaves_the_hub_unavailable_until_it_connects(
@@ -207,7 +209,7 @@ async def test_start_leaves_the_hub_unavailable_until_it_connects(
     start = dt_util.utcnow()
     with freeze_time(start), patch.object(coord._client, "start"):
         await coord.async_start()
-        assert coord.hub_available is False
+        assert coord.receiver_available is False
         assert coord.disconnected_since == start
 
     await coord.async_stop()
@@ -483,7 +485,7 @@ async def test_removal_unsubscribes_from_both_signals(hass, hub_entry_builder):
     assert entity._unsub_dispatcher is None
 
     with patch.object(entity, "async_write_ha_state") as write:
-        async_dispatcher_send(hass, signal_hub_availability(hub.entry_id))
+        async_dispatcher_send(hass, signal_receiver_availability(hub.entry_id))
         _feed(
             _coordinator(hass, hub),
             {"model": "EnergyMeter-2000", "id": 1234, "power_W": 6.0},
@@ -554,7 +556,7 @@ async def test_offline_hub_takes_the_hub_diagnostic_sensors_unavailable(
 async def test_hub_entity_repaints_on_the_availability_signal(hass, hub_entry_builder):
     """Hub entities subscribe to the gate's own signal, not just ``hub_update``.
 
-    ``signal_hub_update`` fires on the connect/disconnect edges but *not* when the
+    ``signal_receiver_update`` fires on the connect/disconnect edges but *not* when the
     connection drops, which is the moment a gated hub entity's ``available``
     changes. Asserted by dispatching the signal directly: a subscription bound to
     the wrong name (or missing) leaves the entity unpainted, which the end-to-end
@@ -569,13 +571,13 @@ async def test_hub_entity_repaints_on_the_availability_signal(hass, hub_entry_bu
     assert entity is not None
 
     with patch.object(entity, "async_write_ha_state") as write:
-        async_dispatcher_send(hass, signal_hub_availability(hub.entry_id))
+        async_dispatcher_send(hass, signal_receiver_availability(hub.entry_id))
         await hass.async_block_till_done()
         write.assert_called_once()
 
     # A different hub's flip must not repaint this one.
     with patch.object(entity, "async_write_ha_state") as write:
-        async_dispatcher_send(hass, signal_hub_availability("some-other-hub"))
+        async_dispatcher_send(hass, signal_receiver_availability("some-other-hub"))
         await hass.async_block_till_done()
         write.assert_not_called()
 
@@ -618,8 +620,8 @@ async def test_hub_entity_removal_unsubscribes_from_both_signals(
     assert entity._unsub_hub_availability is None
 
     with patch.object(entity, "async_write_ha_state") as write:
-        async_dispatcher_send(hass, signal_hub_availability(hub.entry_id))
-        async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+        async_dispatcher_send(hass, signal_receiver_availability(hub.entry_id))
+        async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
         await hass.async_block_till_done()
         write.assert_not_called()
 
@@ -727,7 +729,7 @@ async def test_diagnostics_report_the_gate(hass, hub_entry_builder):
     await hass.async_block_till_done()
 
     diag = await async_get_config_entry_diagnostics(hass, hub)
-    assert diag["hub_available"] is True
+    assert diag["receiver_available"] is True
     assert diag["disconnected_since"] is None
 
     start = dt_util.utcnow()
@@ -739,7 +741,7 @@ async def test_diagnostics_report_the_gate(hass, hub_entry_builder):
         await hass.async_block_till_done()
         _drop(coordinator)
         diag = await async_get_config_entry_diagnostics(hass, hub)
-    assert diag["hub_available"] is False
+    assert diag["receiver_available"] is False
     assert diag["disconnected_since"] == start.isoformat()
 
     # The per-device table must agree with what the entities report: the gate
