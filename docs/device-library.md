@@ -152,9 +152,8 @@ list with a top-level `skip_keys:` sequence.
 existing entities**.
 
 Two attributes change how an entity *behaves* in Home Assistant rather than just
-how it looks, so they are documented on this page rather than only upstream:
-`clear_delay` ([Motion / occupancy](#motion-occupancy)) and `event_driven`
-([Availability classification](#availability-classification)).
+how it looks: `clear_delay` ([Motion / occupancy](#motion-occupancy)) and
+`event_driven` ([Availability classification](#availability-classification)).
 
 ### Motion / occupancy
 
