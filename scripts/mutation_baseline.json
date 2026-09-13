@@ -66,8 +66,8 @@
       "total": 131
     },
     "custom_components/rtl_433/entity.py": {
-      "killed": 331,
-      "score": 0.877984,
+      "killed": 332,
+      "score": 0.880637,
       "total": 377
     },
     "custom_components/rtl_433/event.py": {
@@ -670,9 +670,9 @@
         "total": 12
       },
       "custom_components.rtl_433.entity.x_async_setup_hub_platform": {
-        "killed": 133,
-        "score": 0.863636,
-        "survived": 21,
+        "killed": 134,
+        "score": 0.87013,
+        "survived": 20,
         "total": 154
       },
       "custom_components.rtl_433.entity.x_async_upsert_device": {
