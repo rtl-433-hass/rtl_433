@@ -33,7 +33,7 @@
 //
 // Stages (STAGE env var):
 //   add      - log in, add the rtl_433 receiver via the config flow (host=wsbridge).
-//              Nothing is added to Home Assistant automatically: the heard
+//              Nothing is added to Home Assistant automatically: the received
 //              devices sit on the coordinator's in-memory pending list until
 //              somebody clicks Add, so the run captures the panel, ignores the
 //              leak detector to capture the ignored section, then un-ignores it
@@ -161,7 +161,7 @@ async function addReceiverAndCapture(page) {
   // the reason the panel exists.
   await capturePanel(page);
 
-  // --- Approve the heard devices -------------------------------------------
+  // --- Approve the received devices -------------------------------------------
   // Nothing is added automatically: every device the server decodes lands on the
   // coordinator's in-memory pending list and reaches Home Assistant only when a
   // person adds it. This drives the cards, captures the ignored-devices section,
@@ -448,7 +448,7 @@ async function readPanel(page) {
 
 // Capture the discovery panel with a genuinely populated grid:
 //
-//   17-discovery-panel.png  the live pending list, one card per heard device
+//   17-discovery-panel.png  the live pending list, one card per received device
 //                           with its sighting count, signal level, its latest
 //                           readings named as Home Assistant entities, an area
 //                           picker and per-card Add / Ignore buttons
@@ -540,12 +540,12 @@ async function capturePanel(page) {
   await page.waitForTimeout(2000);
 }
 
-// Add the heard devices from their cards, and capture the ignored section:
+// Add the received devices from their cards, and capture the ignored section:
 //
 //   16-ignored-devices.png  the ignored device, with the control that undoes it
 //
 // Nothing reaches the Home Assistant device registry without this stage: the
-// coordinator records every device it hears into an in-memory pending list, and
+// coordinator records every device it receives into an in-memory pending list, and
 // a person clicking Add is the only route out of it. The stage ignores the leak
 // detector first so the ignored section has something real to show, captures it,
 // then un-ignores and adds it -- the documented round trip -- leaving the receiver
@@ -759,7 +759,7 @@ async function enableAndCaptureDiagnostics(page) {
 // The timeout is lowered to SHORT_TIMEOUT as a side effect, which is what makes
 // the later unavailable stage finish in under a minute instead of ten. It lives
 // on the location page now: it is one answer for every device here, whichever
-// receiver hears it, which is exactly why it is no longer on the same form as
+// receiver receives it, which is exactly why it is no longer on the same form as
 // the per-receiver manage-radio toggle.
 async function captureLocationSettings(page) {
   await openPanel(page, { cards: 0 });
@@ -828,10 +828,10 @@ async function captureReceiverSettings(page) {
   );
 }
 
-// Capture the signal-coverage page: which receiver hears each merged device.
+// Capture the signal-coverage page: which receiver receives each merged device.
 //
 //   18-coverage.png  one card per adopted device, one row per receiver, with
-//                    the level and the age each one last heard it at
+//                    the level and the age each one last received it at
 //
 // The page the union is legible from, and the reason it exists at all: a merged
 // device reports one temperature however many receivers decoded it, and `rssi`

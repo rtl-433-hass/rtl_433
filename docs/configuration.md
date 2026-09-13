@@ -1,7 +1,7 @@
 # Configuration
 
 A **receiver** is a computer running rtl_433; it contains a **radio**, the SDR
-dongle that hears the airwaves. Home Assistant holds receivers in a
+dongle that receives the airwaves. Home Assistant holds receivers in a
 **location**: one integration entry per place, with one receiver inside it for
 every rtl_433 server that can hear the same sensors.
 
@@ -61,8 +61,8 @@ Services → rtl_433**, use the location's **Add a receiver** control and fill i
 the same connection fields as above.
 
 Do that and the two servers stop being two copies of your house. Every sensor
-both of them hear becomes **one** Home Assistant device with **one** set of
-entities, fed by whichever receiver hears each transmission — see
+both of them receive becomes **one** Home Assistant device with **one** set of
+entities, fed by whichever receiver receives each transmission — see
 [Availability](availability.md#receivers-in-one-location) for what that does to
 availability, and [Device Discovery](device-discovery.md) for the single
 add-device page it produces.
@@ -153,7 +153,7 @@ or, on the command line, `-M time:iso:usec:tz`. A sub-second stamp also lets the
 integration separate two transmissions from the same device inside one second.
 
 With **more than one receiver in a location**, those timestamps are also what
-tell one transmission heard twice from two transmissions. Each receiver stamps
+tell one transmission received twice from two transmissions. Each receiver stamps
 the frame with its *own* host's clock, so the integration treats frames for the
 same device and field that land within about three seconds of each other as the
 same transmission and keeps the first one. That tolerates the usual few hundred
@@ -163,7 +163,7 @@ hosts minutes apart will make one receiver's frames look like an old backlog and
 get them rejected.
 
 A frame with no readable timestamp is applied rather than guessed at, so with
-`time:off` the same transmission heard by two receivers is written twice (and an
+`time:off` the same transmission received by two receivers is written twice (and an
 event entity fires twice). That is the safe direction — a rejected frame would
 lose a real reading for good — but it is another reason to leave timestamps on.
 
@@ -179,7 +179,7 @@ topology: a setting about *sensors* belongs to the location, and a setting about
 *one radio* belongs to its receiver.
 
 - **Location settings**: the default availability timeout for every device here,
-  whichever receiver hears it.
+  whichever receiver receives it.
 - **Receiver settings**: one receiver's **Manage this receiver's radio** toggle.
   Each receiver has its own row and its own answer.
 - **Device settings**: one device's availability timeout, motion clear delay,
@@ -217,7 +217,7 @@ only once a commodity is chosen.
 ![The Device settings page with the device picker, availability timeout override, and meter commodity selector](images/08-device-settings.png)
 
 **Signal coverage** is not a settings page: it reports how well each receiver
-hears each added device, so a second receiver's worth can be read off before any
+receives each added device, so a second receiver's worth can be read off before any
 diagnostic entity is enabled. See
 [Device Discovery](device-discovery.md#signal-coverage).
 

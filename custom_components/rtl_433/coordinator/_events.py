@@ -54,7 +54,7 @@ from homeassistant.util import dt as dt_util
 from ..const import LOGGER
 
 # Hard cap on how many candidates are held at once. "One entry per device the
-# receiver hears" is not self-limiting: 433 MHz is a shared band that produces
+# receiver receives" is not self-limiting: 433 MHz is a shared band that produces
 # spurious decodes with arbitrary ids, and several real protocols roll their id
 # on a battery change, so an uncapped list grows for the life of the config
 # entry -- and every entry in it is rendered into the payload pushed to every
@@ -83,16 +83,16 @@ MAX_PENDING_CANDIDATES = 512
 
 @dataclass(slots=True)
 class PendingDevice:
-    """One device heard but not yet adopted into Home Assistant.
+    """One device received but not yet adopted into Home Assistant.
 
     Held in memory only: the pending list is rebuilt from live traffic after
     every restart or reload by design, so an unwanted device never outlives the
-    session that heard it. ``event`` is the most recent frame, kept so adoption
+    session that received it. ``event`` is the most recent frame, kept so adoption
     can seed the device's entities from real data instead of leaving them
     unavailable until the next transmission, and so the approval UI can show what
     the device actually reports before the user commits to it. ``count`` and the
     two timestamps are the discriminators the user judges by: a real sensor
-    checks in repeatedly, a bad decode is heard once.
+    checks in repeatedly, a bad decode is received once.
     """
 
     key: str
@@ -101,7 +101,7 @@ class PendingDevice:
     count: int
     first_seen: datetime
     last_seen: datetime
-    # Every field this device has reported since it was first heard, newest
+    # Every field this device has reported since it was first received, newest
     # value winning. This is wider than ``event.fields``, which holds only the
     # latest frame: a weather station spreads its readings over several
     # transmissions (an Acurite-5n1 sends wind and temperature in one message
@@ -205,11 +205,11 @@ class _EventProcessingMixin:
             LOGGER.debug("rtl_433 device %s back online", key)
 
     def _evict_cold_candidates(self) -> None:
-        """Drop the least recently heard candidates until back under the cap.
+        """Drop the least recently received candidates until back under the cap.
 
-        ``pending`` is kept in least-recently-heard order (a repeat sighting
+        ``pending`` is kept in least-recently-received order (a repeat sighting
         moves its key to the fresh end), so this drops from the cold end: the
-        keys heard once and never again, which is exactly the spurious-decode
+        keys received once and never again, which is exactly the spurious-decode
         population the cap exists for. A device that keeps transmitting keeps
         moving away from the chopping block.
 
@@ -298,7 +298,7 @@ class _EventProcessingMixin:
                 fields=dict(normalized.fields),
             )
             LOGGER.info(
-                "rtl_433 heard a new device %s (model %s); add it from the receiver's "
+                "rtl_433 received a new device %s (model %s); add it from the receiver's "
                 "options to create it in Home Assistant",
                 key,
                 normalized.model,

@@ -157,7 +157,7 @@
       },
       "add_devices": {
         "title": "Add discovered devices",
-        "description": "These devices have been seen since Home Assistant last started and are ready to add. Ignoring one hides it until you un-ignore it under \"Ignored devices\". Anything you leave unselected stays in this list and is offered again next time it is seen. Each entry shows how many times the device has been heard, its signal level when it reports one, and how long ago it last transmitted. A device heard once, weakly, is usually a bad decode or a neighbour's sensor.",
+        "description": "These devices have been seen since Home Assistant last started and are ready to add. Ignoring one hides it until you un-ignore it under \"Ignored devices\". Anything you leave unselected stays in this list and is offered again next time it is seen. Each entry shows how many times the device has been received, its signal level when it reports one, and how long ago it last transmitted. A device received once, weakly, is usually a bad decode or a neighbour's sensor.",
         "data": {
           "add": "Add these devices",
           "ignore": "Ignore these devices"
@@ -244,7 +244,7 @@
       },
       "replace_target": {
         "title": "Replace device",
-        "description": "Pick the newly seen device that is really the same hardware as {device}. Devices you have not added are listed too, marked \"not added yet\" with how often they have been heard. After a battery change the replacement is usually one of those. Any duplicate entities are removed and the device you kept takes over its id. Devices of the same model are listed first.",
+        "description": "Pick the newly seen device that is really the same hardware as {device}. Devices you have not added are listed too, marked \"not added yet\" with how often they have been received. After a battery change the replacement is usually one of those. Any duplicate entities are removed and the device you kept takes over its id. Devices of the same model are listed first.",
         "data": {
           "device": "New device"
         },
@@ -258,7 +258,7 @@
       "no_pending_devices": "No new devices are waiting to be added. Devices appear here as they transmit, and the list starts empty after every restart, so a sensor that reports infrequently can take a while to show up.",
       "no_ignored_devices": "No devices are ignored.",
       "no_devices": "No devices have been discovered yet.",
-      "no_replacement_candidates": "There is no other device to replace this one with. Wait until the replacement has been heard from at least once, then try again."
+      "no_replacement_candidates": "There is no other device to replace this one with. Wait until the replacement has been received at least once, then try again."
     },
     "error": {
       "add_and_ignore_conflict": "The same device cannot be both added and ignored. Remove it from one of the two lists, then submit again.",
@@ -334,7 +334,7 @@
     },
     "history_merged_on_consolidation": {
       "title": "Duplicate history dropped when merging {dropped}",
-      "description": "You moved **{dropped}** into the same location as **{kept}**, and both had been recording the same {count} entities. Home Assistant allows only one entity per sensor reading, so the merged location keeps the entity belonging to the receiver that was added first ({kept}) and the duplicate copies from {dropped} were removed along with their recorded history.\n\nThe readings themselves are not lost: the surviving entities now record whichever receiver hears the sensor. Only the second, duplicate copy of the history is gone.\n\nRemoved: {entities}"
+      "description": "You moved **{dropped}** into the same location as **{kept}**, and both had been recording the same {count} entities. Home Assistant allows only one entity per sensor reading, so the merged location keeps the entity belonging to the receiver that was added first ({kept}) and the duplicate copies from {dropped} were removed along with their recorded history.\n\nThe readings themselves are not lost: the surviving entities now record whichever receiver receives the sensor. Only the second, duplicate copy of the history is gone.\n\nRemoved: {entities}"
     }
   },
   "config_panel": {
@@ -376,7 +376,7 @@
       },
       "add_device": "Add or replace device",
       "coverage": "Signal coverage",
-      "coverage_description": "Which of this location's receivers hear each device, and how well",
+      "coverage_description": "Which of this location's receivers receive each device, and how well",
       "receivers": "Receivers",
       "receiver_supporting": "{host}:{port} — {status}",
       "receiver_connected": "Connected",
@@ -389,7 +389,7 @@
     "discovered": {
       "searching": "Searching for rtl_433 devices…",
       "hint": "Devices will show up here once discovered.",
-      "union": "Every receiver at this location feeds this one list: a sensor two of them hear is a single card showing whichever heard it last, and adding or ignoring it applies to the whole location.",
+      "union": "Every receiver at this location feeds this one list: a sensor two of them receive is a single card showing whichever received it last, and adding or ignoring it applies to the whole location.",
       "show_ignored": "Show ignored devices ({count})",
       "hide_ignored": "Hide ignored devices ({count})",
       "clear": "Clear discovered devices",
@@ -403,8 +403,8 @@
       "signal": "Signal",
       "signal_value": "{value} dB",
       "last_seen": "Last seen",
-      "heard_by": "Heard by",
-      "heard_by_receiver": "{receiver} ({signal})",
+      "received_by": "Received by",
+      "received_by_receiver": "{receiver} ({signal})",
       "seen_tooltip": "First seen {first}\nLast seen {last}",
       "open_device": "Open device",
       "area": "Area",
@@ -414,11 +414,11 @@
       "unignore": "Un-ignore"
     },
     "coverage": {
-      "intro": "How well each receiver hears each device at this location, read from the receivers themselves — no diagnostic entity has to be enabled to see it.",
+      "intro": "How well each receiver receives each device at this location, read from the receivers themselves — no diagnostic entity has to be enabled to see it.",
       "empty": "No devices have been added yet. Add one from the discovered devices page, and its coverage will appear here.",
       "available": "Available",
       "unavailable": "Unavailable",
-      "never_heard": "Never heard it",
+      "never_received": "Never received it",
       "offline": "This receiver is not connected.",
       "snr_tooltip": "Signal-to-noise ratio {value} dB",
       "unknown_receiver": "Unknown receiver"
@@ -445,7 +445,7 @@
     },
     "settings": {
       "saved": "Settings saved.",
-      "location_intro": "Settings for every device at this location, whichever receiver hears it. Individual devices can override the timeout.",
+      "location_intro": "Settings for every device at this location, whichever receiver receives it. Individual devices can override the timeout.",
       "receiver_intro": "Settings for one receiver's own radio. Every other receiver at this location keeps its own answer.",
       "device_intro": "Overrides for one device. Blank means “use the location's setting”.",
       "device_empty": "No devices have been added yet. Add one from this page first, and its settings will appear here.",
@@ -471,7 +471,7 @@
         "mappings": "Overrides"
       },
       "data_description": {
-        "availability_mode": "How long a device may go unheard before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
+        "availability_mode": "How long a device may go without being received before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
         "availability_timeout": "Applies to every device at this location without an override of its own.",
         "manage_settings": "Adds frequency, gain and sample-rate entities for this receiver's radio.",
         "timeout_override": "Blank uses the location's timeout. 0 means never expire.",

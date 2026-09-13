@@ -942,7 +942,7 @@ async def test_effective_timeout_resolver_int_coercion(hass, receiver_entry_buil
 async def test_new_device_callback_dispatches_signal(
     hass, receiver_entry_builder, events
 ):
-    """Adopting a heard device dispatches the receiver-level new-device signal."""
+    """Adopting a received device dispatches the receiver-level new-device signal."""
     from custom_components.rtl_433.const import signal_new_device
 
     power_event = _live(events("power_sensor.json")[0])
