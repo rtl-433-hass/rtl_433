@@ -73,10 +73,11 @@ name: Mutation
 # *test* is never narrowed, because a weakened test can free a mutant anywhere
 # in the module it exercises.
 #
-# A narrowed shard is gated per function rather than per file: the functions it
-# did not mutate come back "not checked", which counts as survived, so the
-# file's score is a partial measurement. See the `Enforce the mutation gate`
-# step.
+# A narrowed run is gated per function rather than per file: the functions its
+# filter did not select come back "not checked", which counts as survived, so
+# those files' scores are partial measurements. `--mode functions` reads which
+# functions were actually measured out of the stats payload, so the scope step
+# never has to hand the gate a list. See the `Enforce the mutation gate` step.
 #
 # The one thing the shards DO share is mutmut's stats profile
 # (`mutants/mutmut-stats.json`): the function -> covering-tests map and per-test
@@ -278,12 +279,11 @@ jobs:
               --restrict-functions ${{ steps.scope.outputs.functions }} > shard.txt
           else
             # Scoped run with nothing in scope (e.g. a docs-only PR): no work.
-            printf '\n\n\n' > shard.txt
+            printf '\n\n' > shard.txt
           fi
           {
             echo "patterns=$(sed -n '1p' shard.txt)"
             echo "paths=$(sed -n '2p' shard.txt)"
-            echo "functions=$(sed -n '3p' shard.txt)"
           } >> "$GITHUB_OUTPUT"
           cat shard.txt
 
@@ -304,24 +304,26 @@ jobs:
         run: |
           test -s mutants/mutmut-stats.json
           uv run mutmut run ${{ steps.shard.outputs.patterns }}
-          if [ -n "${{ steps.shard.outputs.functions }}" ]; then
-            uv run mutmut-ratchet stats \
-              --paths ${{ steps.shard.outputs.paths }} \
-              --functions ${{ steps.shard.outputs.functions }} > mutation-stats.json
-          else
-            uv run mutmut-ratchet stats --paths ${{ steps.shard.outputs.paths }} > mutation-stats.json
-          fi
+          uv run mutmut-ratchet stats --paths ${{ steps.shard.outputs.paths }} > mutation-stats.json
 
-      # A function-narrowed shard cannot be gated per file: the functions it did
-      # not mutate come back "not checked", which the exporter counts as
-      # survived, so the file's score is a partial measurement. Each mutated
+      # A narrowed run cannot be gated per file: the functions its filter did
+      # not select come back "not checked", which the exporter counts as
+      # survived, so those files' scores are partial measurements. Each measured
       # function's score is complete, so the gate moves to those -- failing on
       # survivors a function did not have before, and on a new function that
-      # misses the floor. A shard that was not narrowed keeps the per-file floor.
+      # misses the floor. `--mode functions` works out which functions were
+      # measured from the stats payload itself, so nothing has to be threaded
+      # through from the scope step.
+      #
+      # The choice is made once for the whole matrix rather than per shard: on a
+      # narrowed PR a shard may hold both narrowed and whole modules, and gating
+      # a whole module per function is valid (every one of its functions was
+      # measured) and slightly stricter, where gating a narrowed one per file is
+      # simply wrong.
       - name: Enforce the mutation gate vs baseline
         if: steps.shard.outputs.patterns != ''
         run: |
-          if [ -n "${{ steps.shard.outputs.functions }}" ]; then
+          if [ -n "${{ steps.scope.outputs.functions }}" ]; then
             uv run mutmut-ratchet ratchet --mode functions --stats mutation-stats.json
           else
             uv run mutmut-ratchet ratchet --mode floor --stats mutation-stats.json
