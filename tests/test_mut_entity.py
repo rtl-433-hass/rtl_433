@@ -2522,3 +2522,37 @@ async def test_a_receiver_agnostic_extra_is_added_once_for_the_location(hass):
     await hass.async_block_till_done()
 
     assert [entity.object_suffix for entity in added].count("extra") == 1
+
+
+async def test_an_extra_entity_with_no_unique_id_is_not_added(
+    hass, receiver_entry_builder
+):
+    """The optional per-device extra is only added when it can be deduped.
+
+    Its whole job is to appear once on a merged device however many receivers
+    contribute one, and the ``unique_id`` is what decides that; an entity without
+    one would be added again by every receiver's pass and land on the device
+    several times over.
+    """
+    device_key = "Acurite-606TX-42"
+    receiver = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+
+    added: list = []
+    await _built(
+        hass,
+        receiver,
+        added,
+        per_device_factory=lambda *args: SimpleNamespace(unique_id=None),
+    )
+    await hass.async_block_till_done()
+
+    assert [entity.object_suffix for entity in added] == ["T"]
