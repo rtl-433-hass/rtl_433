@@ -41,7 +41,7 @@ PLATFORMS: Final[list[Platform]] = [
 # devices, so setup no longer branches on this. ``migration.py`` still reads
 # ENTRY_TYPE_DEVICE to re-home those legacy per-device entries onto the hub.
 CONF_ENTRY_TYPE: Final = "entry_type"
-ENTRY_TYPE_HUB: Final = "hub"
+ENTRY_TYPE_RECEIVER: Final = "hub"
 ENTRY_TYPE_DEVICE: Final = "device"
 
 # --- Hub config-entry keys --------------------------------------------------
@@ -83,7 +83,7 @@ CONF_EVENT_TIME_DISMISSED: Final = "event_time_advisory_dismissed"
 # --- Per-device config-entry keys ------------------------------------------
 # entry id of the parent hub entry; enables cascade removal when a hub is
 # deleted (a device entry records which hub it belongs to).
-CONF_HUB_ENTRY_ID: Final = "hub_entry_id"
+CONF_RECEIVER_ENTRY_ID: Final = "hub_entry_id"
 # Deterministic device identity derived from ``model`` plus the present subset
 # of identity fields (id / channel / subtype). Used to scope unique_ids and
 # dispatcher signals.
@@ -270,16 +270,18 @@ def sdr_store_key(entry_id: str) -> str:
 # Template for the per-device dispatcher signal. The coordinator sends and the
 # entities subscribe using the same formatted key so updates fan out only to
 # the device they belong to. Use ``signal_device_update(...)`` to format it.
-SIGNAL_DEVICE_UPDATE: Final = "rtl_433_device_update_{hub_entry_id}_{device_key}"
+SIGNAL_DEVICE_UPDATE: Final = "rtl_433_device_update_{receiver_entry_id}_{device_key}"
 
 
-def signal_device_update(hub_entry_id: str, device_key: str) -> str:
+def signal_device_update(receiver_entry_id: str, device_key: str) -> str:
     """Return the dispatcher signal name for one device under one hub.
 
     Coordinator and entities must agree on this key, so both call this helper
     rather than formatting the template independently.
     """
-    return SIGNAL_DEVICE_UPDATE.format(hub_entry_id=hub_entry_id, device_key=device_key)
+    return SIGNAL_DEVICE_UPDATE.format(
+        receiver_entry_id=receiver_entry_id, device_key=device_key
+    )
 
 
 # Hub-level "an adopted device needs building" signal. The coordinator's
@@ -288,24 +290,24 @@ def signal_device_update(hub_entry_id: str, device_key: str) -> str:
 # is adopted from the options flow -- and the entity platforms subscribe to it to
 # create the nested device and its entities at runtime (the ``dynamic-devices``
 # Quality Scale rule). Carries ``(device_key, model)``.
-SIGNAL_NEW_DEVICE: Final = "rtl_433_new_device_{hub_entry_id}"
+SIGNAL_NEW_DEVICE: Final = "rtl_433_new_device_{receiver_entry_id}"
 
 
-def signal_new_device(hub_entry_id: str) -> str:
+def signal_new_device(receiver_entry_id: str) -> str:
     """Return the hub-level new-device dispatcher signal for one hub."""
-    return SIGNAL_NEW_DEVICE.format(hub_entry_id=hub_entry_id)
+    return SIGNAL_NEW_DEVICE.format(receiver_entry_id=receiver_entry_id)
 
 
 # Hub-level "connectivity / SDR meta / server stats changed" signal. The
 # coordinator dispatches this (no payload) whenever the hub's connection state,
 # meta/SDR configuration, or server stats change; the statically-registered hub
 # entities subscribe and re-read the coordinator's hub state.
-SIGNAL_HUB_UPDATE: Final = "rtl_433_hub_update_{hub_entry_id}"
+SIGNAL_RECEIVER_UPDATE: Final = "rtl_433_hub_update_{receiver_entry_id}"
 
 
-def signal_hub_update(hub_entry_id: str) -> str:
+def signal_receiver_update(receiver_entry_id: str) -> str:
     """Return the hub-level update dispatcher signal for one hub."""
-    return SIGNAL_HUB_UPDATE.format(hub_entry_id=hub_entry_id)
+    return SIGNAL_RECEIVER_UPDATE.format(receiver_entry_id=receiver_entry_id)
 
 
 # Hub-level "the connection-backed availability gate flipped" signal. The
@@ -313,14 +315,14 @@ def signal_hub_update(hub_entry_id: str) -> str:
 # (every device behind the hub becomes unavailable) and when it comes back. Every
 # *device* entity subscribes, so one dispatch repaints the whole hub. Kept
 # separate from
-# :data:`SIGNAL_HUB_UPDATE` — which also fires on every meta/stats refresh — so
+# :data:`SIGNAL_RECEIVER_UPDATE` — which also fires on every meta/stats refresh — so
 # a routine hub poll never writes state for hundreds of device entities.
-SIGNAL_HUB_AVAILABILITY: Final = "rtl_433_hub_availability_{hub_entry_id}"
+SIGNAL_RECEIVER_AVAILABILITY: Final = "rtl_433_hub_availability_{receiver_entry_id}"
 
 
-def signal_hub_availability(hub_entry_id: str) -> str:
+def signal_receiver_availability(receiver_entry_id: str) -> str:
     """Return the hub-level availability-gate dispatcher signal for one hub."""
-    return SIGNAL_HUB_AVAILABILITY.format(hub_entry_id=hub_entry_id)
+    return SIGNAL_RECEIVER_AVAILABILITY.format(receiver_entry_id=receiver_entry_id)
 
 
 # Hub-level "the pending-device list changed" signal. Fired when the *membership*
@@ -336,9 +338,9 @@ def signal_hub_availability(hub_entry_id: str) -> str:
 # *websocket layer* re-sends on a slow timer and only when the rendered payload
 # actually differs (see ``websocket_api.py``). Keeping that coalescing there
 # leaves the coordinator a pure state holder with no idea a UI exists.
-SIGNAL_PENDING_UPDATE: Final = "rtl_433_pending_update_{hub_entry_id}"
+SIGNAL_PENDING_UPDATE: Final = "rtl_433_pending_update_{receiver_entry_id}"
 
 
-def signal_pending_update(hub_entry_id: str) -> str:
+def signal_pending_update(receiver_entry_id: str) -> str:
     """Return the hub-level pending-list-changed dispatcher signal for one hub."""
-    return SIGNAL_PENDING_UPDATE.format(hub_entry_id=hub_entry_id)
+    return SIGNAL_PENDING_UPDATE.format(receiver_entry_id=receiver_entry_id)

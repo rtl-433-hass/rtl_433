@@ -93,7 +93,7 @@ def test_init_wires_coordinator_and_setting_and_hub_id():
     assert ent._coordinator is coord
     # setting wired (super arg 3 -> None / dropped mutant)
     assert ent._setting is _setting(KEY_PPM_ERROR)
-    # hub_entry_id flows into unique_id (super arg 2 -> None mutant)
+    # receiver_entry_id flows into unique_id (super arg 2 -> None mutant)
     assert "hubXYZ" in ent.unique_id
     assert ent.unique_id == f"hubXYZ:hub:{_setting(KEY_PPM_ERROR).object_suffix}"
 

@@ -13,9 +13,9 @@ desired/actual state are integers, so it maps both ways through the registry's
 ``conversion_label_to_val`` / ``conversion_val_to_label`` helpers.
 
 Optimistic-then-confirmed state: ``async_select_option`` writes the mapped int
-via ``coordinator.set_sdr`` (persist + send + read-back + ``signal_hub_update``).
+via ``coordinator.set_sdr`` (persist + send + read-back + ``signal_receiver_update``).
 Until the read-back arrives ``current_option`` shows the just-selected desired
-label (optimistic); the inherited ``signal_hub_update`` subscription then
+label (optimistic); the inherited ``signal_receiver_update`` subscription then
 repaints the control with the server's confirmed value.
 """
 
@@ -28,7 +28,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import Rtl433HubControl, async_setup_hub_controls
+from .entity import Rtl433ReceiverControl, async_setup_hub_controls
 from .sdr_settings import conversion_label_to_val, conversion_val_to_label
 
 if TYPE_CHECKING:
@@ -39,17 +39,17 @@ if TYPE_CHECKING:
 PLATFORM = "select"
 
 
-class Rtl433SelectControl(Rtl433HubControl, SelectEntity):
+class Rtl433SelectControl(Rtl433ReceiverControl, SelectEntity):
     """A managed enumerated SDR setting exposed as a hub-device Select entity."""
 
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Initialize select-specific options from the setting."""
-        super().__init__(coordinator, hub_entry_id, setting)
+        super().__init__(coordinator, receiver_entry_id, setting)
         self._attr_options = list(setting.options or ())
 
     @property

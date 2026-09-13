@@ -13,7 +13,7 @@ the class default, and the watchdog tick itself.
 listening. Once the WebSocket to the rtl_433 server is down the integration
 hears nothing at all, so no device's cached state can be trusted — the same
 situation an MQTT availability topic covers with an LWT, and the same gate
-``zwave_js`` applies when its driver connection drops. :meth:`hub_available` is
+``zwave_js`` applies when its driver connection drops. :meth:`receiver_available` is
 that gate, and like every Home Assistant integration that gates on a live
 connection flag it flips **immediately**: ``True`` exactly while the socket is
 open. With it closed, *every* device behind the hub reads unavailable regardless
@@ -37,7 +37,7 @@ replay is flagged ``is_replay`` and ``Rtl433Event`` drops it before firing (see
 The gate is evaluated lazily by the entities (like the silence gate), so it is
 always correct. The coordinator only has to *repaint*: ``base.py`` calls
 :meth:`_async_sync_hub_availability` on both connection edges and the watchdog
-tick calls it as a backstop. That method dispatches ``signal_hub_availability``
+tick calls it as a backstop. That method dispatches ``signal_receiver_availability``
 exactly once per flip.
 
 :class:`_AvailabilityMixin` is mixed into ``Rtl433Coordinator`` (see ``base.py``).
@@ -64,7 +64,7 @@ from ..const import (
     DEVICE_FIELDS,
     LOGGER,
     class_default_timeout,
-    signal_hub_availability,
+    signal_receiver_availability,
 )
 
 # How often the availability watchdog evaluates last-seen vs effective timeout.
@@ -78,7 +78,7 @@ class _AvailabilityMixin:
     # Hub-connection availability gate                                   #
     # ------------------------------------------------------------------ #
     @property
-    def hub_available(self) -> bool:
+    def receiver_available(self) -> bool:
         """Whether the integration can currently hear this hub at all.
 
         Exactly the socket state: no grace window, no debounce. While the
@@ -138,7 +138,7 @@ class _AvailabilityMixin:
         and returns without a dispatch when nothing changed, so both connection
         edges and every watchdog tick can call it freely.
         """
-        offline = not self.hub_available
+        offline = not self.receiver_available
         if offline == self._devices_offline:
             return
         self._devices_offline = offline
@@ -148,7 +148,9 @@ class _AvailabilityMixin:
                 "available again as they report in",
                 self.ws_url,
             )
-        async_dispatcher_send(self.hass, signal_hub_availability(self.entry.entry_id))
+        async_dispatcher_send(
+            self.hass, signal_receiver_availability(self.entry.entry_id)
+        )
 
     def _gated_device_count(self) -> int:
         """How many devices the gate actually takes unavailable.

@@ -15,8 +15,8 @@ simply is not sent.
 
 Optimistic-then-confirmed state: ``async_turn_on`` / ``async_turn_off`` write the
 ``gain_auto`` desired value via ``coordinator.set_sdr`` (persist + send +
-read-back + ``signal_hub_update``). Until the read-back arrives ``is_on`` shows
-the just-set desired value (optimistic); the inherited ``signal_hub_update``
+read-back + ``signal_receiver_update``). Until the read-back arrives ``is_on`` shows
+the just-set desired value (optimistic); the inherited ``signal_receiver_update``
 subscription then repaints the control with the server's confirmed value.
 """
 
@@ -29,7 +29,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import Rtl433HubControl, async_setup_hub_controls
+from .entity import Rtl433ReceiverControl, async_setup_hub_controls
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
@@ -39,17 +39,17 @@ if TYPE_CHECKING:
 PLATFORM = "switch"
 
 
-class Rtl433SwitchControl(Rtl433HubControl, SwitchEntity):
+class Rtl433SwitchControl(Rtl433ReceiverControl, SwitchEntity):
     """A managed boolean SDR setting (Auto gain) as a hub-device Switch entity."""
 
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Initialize the switch control from the setting."""
-        super().__init__(coordinator, hub_entry_id, setting)
+        super().__init__(coordinator, receiver_entry_id, setting)
 
     @property
     def is_on(self) -> bool | None:

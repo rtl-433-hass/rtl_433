@@ -33,7 +33,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_IGNORED_DEVICES
 from .entity import async_upsert_device
-from .hub_settings import _hub_ignored_devices
+from .receiver_settings import _hub_ignored_devices
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry

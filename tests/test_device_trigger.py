@@ -70,10 +70,10 @@ async def _setup_button_hub(hass, hub_entry_builder):
     return hub
 
 
-def _resolve_device_id(hass: HomeAssistant, hub_entry_id: str) -> str:
+def _resolve_device_id(hass: HomeAssistant, receiver_entry_id: str) -> str:
     """Resolve the nested RF device's HA ``device_id`` from its identifiers."""
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{hub_entry_id}:{DEVICE_KEY}"), hub_entry_id
+        (DOMAIN, f"{receiver_entry_id}:{DEVICE_KEY}"), receiver_entry_id
     )
     assert device is not None
     return device.id

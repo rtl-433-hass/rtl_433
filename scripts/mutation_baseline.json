@@ -75,7 +75,7 @@
       "score": 0.913043,
       "total": 69
     },
-    "custom_components/rtl_433/hub_settings.py": {
+    "custom_components/rtl_433/receiver_settings.py": {
       "killed": 47,
       "score": 0.94,
       "total": 50

@@ -35,7 +35,7 @@ from custom_components.rtl_433.const import (
     CONF_MANAGE_SETTINGS,
     DOMAIN,
     sdr_store_key,
-    signal_hub_update,
+    signal_receiver_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
@@ -657,14 +657,14 @@ async def test_center_and_hop_availability_track_frequencies(hass, hub_entry_bui
 
     # Single frequency -> center frequency available, hop interval hidden.
     coordinator._client.meta = dict(_META_SINGLE)
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
     assert num_state("center_frequency") != STATE_UNAVAILABLE
     assert num_state("hop_interval") == STATE_UNAVAILABLE
 
     # Hopping -> hop interval available, center frequency hidden.
     coordinator._client.meta = dict(_META_HOPPING)
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
     assert num_state("hop_interval") != STATE_UNAVAILABLE
     assert num_state("center_frequency") == STATE_UNAVAILABLE
