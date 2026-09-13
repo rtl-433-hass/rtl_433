@@ -72,7 +72,7 @@ def _coord(*, devices: dict | None = None, last_seen: dict | None = None) -> Mag
     coordinator = MagicMock()
     coordinator.devices = devices if devices is not None else {}
     coordinator.last_seen = last_seen if last_seen is not None else {}
-    coordinator.hub_available = True
+    coordinator.receiver_available = True
     coordinator.hass = MagicMock()
     coordinator.is_event_driven_device = MagicMock(return_value=False)
     coordinator.effective_clear_delay_resolver = None
