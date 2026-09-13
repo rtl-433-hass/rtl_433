@@ -1,4 +1,4 @@
-"""Push coordinator for one rtl_433 server (hub config entry).
+"""Push coordinator for one rtl_433 server (receiver config entry).
 
 This module is the Home Assistant adapter over :class:`pyrtl_433.Rtl433Client`.
 The client owns the transport — the WebSocket connect/reconnect loop, JSON frame
@@ -7,7 +7,7 @@ getters/setters — while this coordinator owns the *framework policy* the libra
 deliberately leaves out: injecting Home Assistant's shared aiohttp session,
 fanning normalized events out over HA's dispatcher keyed by device, adopting and
 enforcing the managed SDR settings on every (re)connect, running the availability
-watchdog, and refreshing the hub device-registry identity.
+watchdog, and refreshing the receiver device-registry identity.
 
 The coordinator is one class, ``Rtl433Coordinator``, assembled here from three
 policy mixins so each concern lives in its own file and ``__init__`` stays the
@@ -24,8 +24,8 @@ single place every runtime attribute is declared:
 
 The client's callbacks are wired into this coordinator: ``on_event`` ->
 :meth:`._events._EventProcessingMixin._on_client_event` (HA-side dispatch), and
-``on_hub_update`` -> :meth:`_emit_hub_update` (connect/disconnect edge handling,
-hub-identity refresh, and the ``signal_hub_update`` dispatch). The library client
+``on_hub_update`` -> :meth:`_emit_receiver_update` (connect/disconnect edge handling,
+receiver-identity refresh, and the ``signal_receiver_update`` dispatch). The library client
 does not own the managed-SDR policy or the availability watchdog, so those are
 driven here off the connect edge and a HA time-interval respectively.
 
@@ -43,14 +43,14 @@ accepts the pieces it needs as injectable attributes:
   The integration setup wires this to the new-device dispatch; the coordinator
   never imports the entity platforms.
 - ``effective_timeout_resolver`` — called with ``device_key`` to resolve the
-  per-device availability timeout (override → hub default). The integration setup
-  wires this; the fallback is the hub default.
+  per-device availability timeout (override → receiver default). The integration setup
+  wires this; the fallback is the receiver default.
 - ``effective_clear_delay_resolver`` — called with ``device_key`` to resolve the
   per-device motion clear-delay (override → default). The integration setup wires
   this; the binary_sensor reads it. The fallback is the motion default.
-- ``hub_info_callback`` — called (no args) when the SDR device identity
+- ``receiver_info_callback`` — called (no args) when the SDR device identity
   (``dev_info``/``dev_query``, learned by the client on each connect) is first
-  seen or changes. The integration setup wires this to refresh the hub
+  seen or changes. The integration setup wires this to refresh the receiver
   device-registry entry's model/manufacturer/serial; the coordinator never
   touches the device registry itself.
 """
@@ -66,7 +66,7 @@ from typing import Any
 from pyrtl_433 import CannotConnect as CannotConnect, Rtl433Client, TimePrecision
 from pyrtl_433.normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -79,10 +79,11 @@ from ..const import (
     DEFAULT_PORT,
     LOGGER,
     SDR_STORE_VERSION,
+    receiver_identity,
     sdr_store_key,
     signal_device_update,
-    signal_hub_update,
     signal_pending_update,
+    signal_receiver_update,
 )
 from ._events import PendingDevice, _EventProcessingMixin
 from ._sdr import _SdrSettingsMixin, _SdrStore
@@ -94,9 +95,12 @@ from ._watchdog import _WATCHDOG_INTERVAL, _AvailabilityMixin
 
 
 class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityMixin):
-    """HA adapter that owns and drives a :class:`pyrtl_433.Rtl433Client` for one hub.
+    """HA adapter that owns and drives a :class:`pyrtl_433.Rtl433Client` for one receiver.
 
-    All state is scoped to a single config entry, so multiple hubs coexist.
+    All state is scoped to a single **receiver config subentry**, so the several
+    receivers of one location coexist inside one config entry. ``receiver_id``
+    (the subentry id) is that scope: dispatcher signals, the desired-state Store
+    and the receiver's device identity are all keyed by it.
     Behavior is grouped into the mixins listed in the module docstring; every
     runtime attribute those mixins read is declared in :meth:`__init__` below.
 
@@ -108,29 +112,36 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         ``skip_keys``: ``set[str]`` of keys excluded from measurement fields.
         ``event_driven_keys``: ``frozenset[str]`` of rtl_433 field keys that mark
             a device as event-driven (never-expire availability default).
-        ``manage_settings``: ``bool`` per-hub toggle for adopting + enforcing the
+        ``manage_settings``: ``bool`` per-receiver toggle for adopting + enforcing the
             managed SDR settings. When ``True`` the coordinator adopts the
             server's current settings on first connect, persists the desired
             state to a ``Store``, and replays it on every reconnect; when
             ``False`` the desired-state ``Store`` is wiped on load and the
-            receiver's settings are left untouched.
+            radio's settings are left untouched.
         ``new_device_callback``: ``Callable[[str, str, bool], None] | None``.
         ``effective_timeout_resolver``: ``Callable[[str], int | None] | None``.
             Returns the device's explicit timeout (per-device override → explicit
-            hub default), or ``None`` when neither is set so the coordinator
+            receiver default), or ``None`` when neither is set so the coordinator
             applies the device-class default from the device's latest payload.
         ``effective_clear_delay_resolver``: ``Callable[[str], int] | None``.
 
     Observation vs adoption (a device is only ever created in Home Assistant
-    once the user approves it from the options flow):
+    once the user approves it, and the approval is the **location's**, not this
+    receiver's — see :mod:`~custom_components.rtl_433.adoption`):
         ``adopted``: ``set[str]`` device keys the user has approved. Seeded from
-            ``entry.data[CONF_DEVICES]`` at construction and extended by
-            :meth:`adopt_device`. Only these keys reach the runtime state below.
+            the location's ``entry.data[CONF_DEVICES]`` at construction and
+            extended by :meth:`adopt_device` / :meth:`mark_adopted`. Only these
+            keys reach the runtime state below.
         ``ignored``: ``set[str]`` device keys the user never wants to see.
-            Seeded from ``entry.data[CONF_IGNORED_DEVICES]``.
-        ``pending``: ``dict[str, PendingDevice]`` devices heard this session that
-            are neither adopted nor ignored. In-memory only, so it is empty again
-            after a restart or reload.
+            Seeded from the location's ``entry.data[CONF_IGNORED_DEVICES]``.
+        ``pending``: ``dict[str, PendingDevice]`` devices *this receiver* has
+            received this session that are neither adopted nor ignored. In-memory
+            only, so it is empty again after a restart or reload. The location's
+            candidate list is the merge of every receiver's map
+            (``aggregator.merged_candidates``).
+        ``pending_listeners``: ``list[Callable[[], None]]`` run before each
+            announcement that this receiver's candidate list changed membership
+            (the location aggregator registers its merged-cap enforcement here).
 
     Runtime state, describing adopted devices only (read by ``diagnostics.py``):
         ``devices``: ``dict[str, NormalizedEvent]`` last event per device key.
@@ -140,14 +151,14 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         ``device_fields``: ``dict[str, set[str]]`` field keys seen per device.
         ``connected``: ``bool`` whether the client's socket is currently open
             (delegates to the client).
-        ``hub_available``: ``bool`` whether the integration can hear this hub —
+        ``receiver_available``: ``bool`` whether the integration can hear this receiver —
             the socket state, with no grace window, which takes every device
-            behind the hub unavailable the moment it drops (see ``_watchdog.py``).
+            behind the receiver unavailable the moment it drops (see ``_watchdog.py``).
         ``meta``: ``dict[str, Any]`` latest SDR/meta configuration (client-sourced).
         ``stats``: ``dict[str, Any]`` latest server-stats payload (client-sourced).
 
     Managed-SDR desired state (restart-surviving, persisted to a ``Store`` keyed
-    by ``sdr_store_key(entry_id)``):
+    by ``sdr_store_key(receiver_id)``):
         ``_desired``: ``dict[str, Any]`` desired value per managed registry key
             (gain is two keys: ``gain`` dB float + ``gain_auto`` bool).
         ``_managed``: ``set[str]`` registry keys Home Assistant is managing.
@@ -160,6 +171,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self,
         hass: HomeAssistant,
         entry: ConfigEntry,
+        subentry: ConfigSubentry,
         *,
         host: str,
         port: int = DEFAULT_PORT,
@@ -175,14 +187,24 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
     ) -> None:
         """Initialize the coordinator with connection params and runtime state."""
         self.hass = hass
+        # The location config entry this receiver belongs to, and the receiver
+        # config subentry that *is* this receiver. The entry owns the devices
+        # map, the ignore list and the user mappings (they describe sensors, not
+        # servers); the subentry owns the connection target and the radio
+        # settings. ``receiver_id`` is the subentry id -- the scope every
+        # dispatcher signal, the desired-state Store and this receiver's device
+        # identity are keyed by, so two receivers in one location never collide.
         self.entry = entry
+        self.subentry = subentry
+        self.receiver_id = subentry.subentry_id
+        self.receiver_identity = receiver_identity(entry.entry_id, self.receiver_id)
 
         self.host = host
         self.port = port
         self.path = path
         self.secure = secure
 
-        # --- Per-hub configuration (may be updated by the options flow) -------
+        # --- Per-receiver configuration (may be updated by the options flow) -------
         # Default ``True`` so every existing construction site (including tests
         # and pre-Task-3 wiring) keeps adopting + enforcing the SDR settings.
         self.manage_settings = manage_settings
@@ -220,20 +242,20 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.known_field_keys: frozenset[str] = frozenset()
         # Called (no args) when the SDR device identity (``dev_info``/``dev_query``)
         # is first learned or changes on a (re)connect, so the setup layer can
-        # refresh the hub device-registry entry's model/manufacturer/serial.
-        self.hub_info_callback: Callable[[], None] | None = None
+        # refresh the receiver device-registry entry's model/manufacturer/serial.
+        self.receiver_info_callback: Callable[[], None] | None = None
 
         # Per-device calibration snapshot captured at setup (analogous to
         # ``manage_settings``): ``{device_key: {commodity, unit, scale}}`` for
         # every device with a calibration. ``_async_update_listener`` reloads the
-        # hub only when the live calibration map differs from this snapshot, so a
+        # receiver only when the live calibration map differs from this snapshot, so a
         # routine devices-map upsert (which leaves calibrations untouched) never
         # triggers a reload. Wired by the integration setup in ``__init__.py``.
         self.calibration_snapshot: dict[str, dict[str, Any]] = {}
 
-        # Per-hub user mappings snapshot captured at setup (analogous to
+        # Per-receiver user mappings snapshot captured at setup (analogous to
         # ``calibration_snapshot``): the stored ``entry.data[CONF_USER_MAPPINGS]``
-        # override object. ``_async_update_listener`` reloads the hub only when the
+        # override object. ``_async_update_listener`` reloads the receiver only when the
         # live mappings differ from this snapshot, so a routine devices-map upsert
         # never triggers a reload. Wired by the integration setup in ``__init__.py``.
         self.user_mappings_snapshot: dict[str, Any] = {}
@@ -243,7 +265,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # rebind flows write a new target into ``entry.data`` without reloading the
         # entry themselves (Home Assistant forbids combining an update listener
         # with the reloading config-flow helpers), so ``_async_update_listener``
-        # compares the live value against this snapshot and reloads the hub when it
+        # compares the live value against this snapshot and reloads the receiver when it
         # differs. Wired by the integration setup in ``__init__.py``.
         self.connection_snapshot: tuple[Any, ...] = ()
 
@@ -255,20 +277,43 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.device_removers: list[Callable[[str], None]] = []
 
         # --- Observation vs adoption -----------------------------------------
-        # ``adopted`` is the in-memory mirror of ``entry.data[CONF_DEVICES]``,
-        # the restart-safe record of every device the user has approved. It is
-        # the gate on the event path: only an adopted key reaches the runtime
-        # state below, so nothing the user has not asked for ever becomes a Home
-        # Assistant device. ``ignored`` mirrors ``entry.data[CONF_IGNORED_DEVICES]``
-        # and drops a key outright. ``pending`` is everything else heard since
-        # this coordinator started — deliberately *not* persisted, so an unwanted
-        # device never outlives the session that heard it.
+        # All three sets are **location-scoped decisions held per receiver**. A
+        # user approves a *sensor*, not a sensor-at-a-receiver, so what is
+        # adopted and what is ignored belongs to the location entry; each
+        # coordinator keeps a mirror of it because the gate has to be applied on
+        # this receiver's own event path, frame by frame, with no lookup.
+        #
+        # ``adopted`` mirrors ``entry.data[CONF_DEVICES]`` — the restart-safe
+        # record of every device the user has approved — and is the gate itself:
+        # only an adopted key reaches the runtime state below, so nothing the
+        # user has not asked for ever becomes a Home Assistant device.
+        # ``ignored`` mirrors ``entry.data[CONF_IGNORED_DEVICES]`` and drops a
+        # key outright. Both are written across *every* receiver of the location
+        # by :mod:`~custom_components.rtl_433.adoption`, which is what makes one
+        # click apply to all of them.
+        #
+        # ``pending`` is everything else this receiver has received since it
+        # started — deliberately *not* persisted, so an unwanted device never
+        # outlives the session that received it. It stays per receiver because it
+        # is an ingestion buffer, not a decision: the replay / backlog gate that
+        # fills it is a statement about *this* receiver's connection. The list
+        # the user is actually offered is the merge of every receiver's map
+        # (``aggregator.merged_candidates``), which is also where the cap is
+        # enforced.
         self.adopted: set[str] = set(adopted_keys or ())
         self.ignored: set[str] = set(ignored_keys or ())
-        # Least-recently-heard first, so the cap in ``_events`` can drop from
+        # Least-recently-received first, so the cap in ``_events`` can drop from
         # the cold end. An ``OrderedDict`` is a ``dict``, so readers are
         # unaffected.
         self.pending: OrderedDict[str, PendingDevice] = OrderedDict()
+        # Callbacks run *before* each announcement that this receiver's
+        # candidate list changed membership. The location aggregator registers
+        # one (its merged-cap enforcement) the same way the entity platforms
+        # register ``device_removers``, so the coordinator never has to import
+        # the location layer that sits above it -- and so the list announced is
+        # the merged list as it now stands rather than one entry longer than it
+        # will ever be.
+        self.pending_listeners: list[Callable[[], None]] = []
         # The last model decoded for each ignored key, so an approval surface can
         # name the thing it is offering to un-ignore. The persisted ignore list
         # is bare keys -- it has always been, because ignoring is a decision
@@ -301,7 +346,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
         # UTC time of the current successful connection (``None`` while
         # disconnected). Set on the connect edge and cleared on drop in
-        # :meth:`_emit_hub_update`; it anchors the pre-connection-backlog gate that
+        # :meth:`_emit_receiver_update`; it anchors the pre-connection-backlog gate that
         # :meth:`._events._EventProcessingMixin._on_client_event` re-derives (the
         # library owns the replay classification but does not carry ``is_backlog``
         # on the event object). The library also keeps its own connection anchor
@@ -309,24 +354,24 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # edge, so the two agree to within the callback latency (well inside the
         # ``DISCOVERY_BACKLOG_GRACE`` window).
         self._connection_time: datetime | None = None
-        # Previous client-connected state, so :meth:`_emit_hub_update` can detect
+        # Previous client-connected state, so :meth:`_emit_receiver_update` can detect
         # the connect/disconnect edge (the client's ``on_hub_update`` also fires on
         # every meta/stats refresh, where connectivity is unchanged).
         self._was_connected = False
-        # --- Hub-connection availability gate (see ``_watchdog.py``) ---------
+        # --- Receiver-connection availability gate (see ``_watchdog.py``) ---------
         # UTC time the socket last dropped, or ``None`` while connected. The gate
         # itself reads the socket directly and flips instantly, so this is purely
         # reporting: the outage duration in the reconnect log line, and
         # ``disconnected_since`` in a diagnostics dump.
         self._disconnected_since: datetime | None = None
-        # Last gate state dispatched on ``signal_hub_availability``, so the
+        # Last gate state dispatched on ``signal_receiver_availability``, so the
         # repaint fires once per flip rather than on every check.
         self._devices_offline = False
         # Whether a connection has ever succeeded, so the first connect logs as a
         # connect rather than as a recovery from the startup outage clock.
         self._ever_connected = False
-        # Last hub identity seen, so :meth:`_emit_hub_update` fires
-        # ``hub_info_callback`` only when ``dev_info``/``dev_query`` actually change
+        # Last receiver identity seen, so :meth:`_emit_receiver_update` fires
+        # ``receiver_info_callback`` only when ``dev_info``/``dev_query`` actually change
         # (the client's ``refresh_dev_info`` fires ``on_hub_update`` on change, but
         # the callback that refreshes the device-registry entry is HA-side policy).
         self._seen_dev_info: dict[str, Any] = {}
@@ -341,7 +386,8 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # --- Managed-SDR desired state (restart-surviving) -------------------
         # ``_desired`` maps a registry key -> the desired value HA wants applied;
         # ``_managed`` is the subset of registry keys HA is actively managing.
-        # Both are persisted to a per-hub ``Store`` keyed by ``entry_id`` so a
+        # Both are persisted to a per-receiver ``Store`` keyed by the receiver's
+        # subentry id so a
         # value change never churns the config entry, and loaded once at start.
         # All ``/cmd`` issuance is serialized inside the client (its own ``/cmd``
         # lock) so a user write and a reconnect replay can never interleave.
@@ -354,14 +400,14 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # re-applies after the user later changes the frequency via the control.
         self._initial_freq_seeded: bool = False
         self._store: _SdrStore = _SdrStore(
-            hass, SDR_STORE_VERSION, sdr_store_key(entry.entry_id)
+            hass, SDR_STORE_VERSION, sdr_store_key(self.receiver_id)
         )
 
         # --- The transport client (owns the WS/HTTP transport) ---------------
         # The injected HA shared session means the client will NOT close it on
         # ``stop()`` (Home Assistant owns the session lifecycle). Events flow to
-        # ``_on_client_event`` (HA-side dispatch) and hub-state changes to
-        # ``_emit_hub_update``. No ``clock`` is injected: the coordinator has no
+        # ``_on_client_event`` (HA-side dispatch) and receiver-state changes to
+        # ``_emit_receiver_update``. No ``clock`` is injected: the coordinator has no
         # deterministic time source of its own, so the client defaults to
         # ``datetime.now(UTC)`` — the same wall clock ``dt_util.utcnow`` reads.
         # ``event_tz`` is HA's configured zone, so an offset-less rtl_433 ``time``
@@ -376,7 +422,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             session=async_get_clientsession(hass),
             skip_keys=self.skip_keys,
             on_event=self._on_client_event,
-            on_hub_update=self._emit_hub_update,
+            on_hub_update=self._emit_receiver_update,
             event_tz=dt_util.get_default_time_zone(),
         )
 
@@ -389,7 +435,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
     # ------------------------------------------------------------------ #
     @property
     def ws_url(self) -> str:
-        """Return the configured WebSocket URL for this hub."""
+        """Return the configured WebSocket URL for this receiver."""
         return self._client.ws_url
 
     @property
@@ -422,7 +468,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
     def time_precision(self) -> TimePrecision | None:
         """Resolution of the server's event ``time`` stamps, as seen on the wire.
 
-        ``None`` until the first event frame is classified. Hub state rather than
+        ``None`` until the first event frame is classified. Receiver state rather than
         per-device: it follows the server's ``report_meta time:...`` setting, and
         the client fires ``on_hub_update`` when it changes.
         """
@@ -440,7 +486,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
     @property
     def noise_level(self) -> float | None:
-        """Estimated receiver noise level in dB (client-parsed "Auto Level" logs).
+        """Estimated radio noise level in dB (client-parsed "Auto Level" logs).
 
         Socket-sourced: rtl_433 surfaces its noise floor only as "Auto Level"
         log frames (requires ``-Y autolevel`` and/or ``-M noise`` server-side);
@@ -456,7 +502,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         Carried only by the ``-Y autolevel`` *adjustment* log line, never by the
         ``-M noise`` periodic report, so this trails :attr:`noise_level`: it
         stays ``None`` until the server actually re-adjusts the threshold, which
-        a receiver whose noise floor has settled may never do.
+        a radio whose noise floor has settled may never do.
         """
         return self._client.min_level
 
@@ -469,7 +515,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             return
         self._started = True
         # Stamp the outage clock before the client can connect: until the first
-        # successful connect the hub *is* disconnected, so a server that is down
+        # successful connect the receiver *is* disconnected, so a server that is down
         # at startup shows its devices unavailable rather than leaving restored
         # states looking current. The connect edge clears it, normally at once.
         self._async_note_disconnected()
@@ -482,12 +528,12 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             self.hass,
             self._async_watchdog,
             _WATCHDOG_INTERVAL,
-            name=f"rtl_433 watchdog {self.entry.entry_id}",
+            name=f"rtl_433 watchdog {self.receiver_id}",
         )
         LOGGER.debug("rtl_433 coordinator started for %s", self.ws_url)
 
     def forget_device(self, device_key: str) -> None:
-        """Un-adopt a device, dropping it back to "heard but not approved".
+        """Un-adopt a device, dropping it back to "received but not approved".
 
         Called when a device is removed from its device page
         (``async_remove_config_entry_device``).
@@ -545,7 +591,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.devices[device_key] = event
         self.last_seen[device_key] = record.last_seen
         self.available[device_key] = True
-        # Every field seen since this candidate was first heard, not just the
+        # Every field seen since this candidate was first received, not just the
         # ones in the last frame. A weather station splits its readings across
         # frames -- wind in one, rain in the next -- so seeding from the last
         # frame alone built half the device's entities and left the rest missing
@@ -558,6 +604,29 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         if self.new_device_callback is not None:
             self.new_device_callback(device_key, event.model, False)
         return record
+
+    @callback
+    def mark_adopted(self, device_key: str) -> None:
+        """Adopt a key this receiver has never received, because the location has.
+
+        Adoption is a decision about a *sensor*, so it applies to every receiver
+        in the location -- including the ones out of range of it, which have no
+        candidate to promote. Without this, a receiver that was deaf to the
+        sensor at approval time would treat its first frame as a brand-new
+        sighting and re-queue the device the user has already added.
+
+        Deliberately seeds **no** runtime state and fires no registration: this
+        receiver genuinely has not received the device, and writing another
+        receiver's ``last_seen`` here would let it vouch for a sensor it cannot
+        hear (see :func:`~custom_components.rtl_433.aggregator.receiver_vouches`).
+        It fills its own maps on its first real frame, exactly as it does for a
+        device adopted in an earlier session and restored from ``entry.data``.
+
+        The candidate map needs no clearing here: this is only ever reached
+        after :meth:`adopt_device` answered ``None``, which is exactly the case
+        of a receiver with nothing pending for the key.
+        """
+        self.adopted.add(device_key)
 
     @callback
     def ignore_device(self, device_key: str) -> None:
@@ -596,29 +665,29 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # A deliberate stop (unload/reload) is not an outage. Closing the socket
         # above fires the client's ``on_hub_update``, so reset the gate's
         # reporting state *after* it has run: the ``_started`` guard in
-        # :meth:`_emit_hub_update` keeps that teardown edge from logging a loss.
+        # :meth:`_emit_receiver_update` keeps that teardown edge from logging a loss.
         self._disconnected_since = None
         self._devices_offline = False
         self._ever_connected = False
         LOGGER.debug("rtl_433 coordinator stopped for %s", self.ws_url)
 
     # ------------------------------------------------------------------ #
-    # Client callbacks: hub-state fan-out + connect-edge policy          #
+    # Client callbacks: receiver-state fan-out + connect-edge policy          #
     # ------------------------------------------------------------------ #
-    def _emit_hub_update(self) -> None:
+    def _emit_receiver_update(self) -> None:
         """Handle the client's ``on_hub_update``: edges, identity, dispatch.
 
         Wired as the client's ``on_hub_update`` callback, so it runs on every
         connectivity change and every meta/stats/dev_info refresh. It (1) detects
         the connect/disconnect edge to anchor the backlog gate and drive the
-        managed-SDR adoption the library does not own, (2) refreshes the hub
-        device-registry identity when it changes, and (3) fans the hub update out
-        to the hub entities over the dispatcher — exactly as before.
+        managed-SDR adoption the library does not own, (2) refreshes the receiver
+        device-registry identity when it changes, and (3) fans the receiver update out
+        to the receiver entities over the dispatcher — exactly as before.
         """
         connected = self._client.connected
         if connected and not self._was_connected:
             # (Re)connect edge: anchor the HA-side backlog gate, reopen the
-            # hub-offline gate (repainting the devices the outage had taken
+            # receiver-offline gate (repainting the devices the outage had taken
             # unavailable), and adopt/enforce the managed SDR settings. The
             # library client refreshes meta/stats/dev_info on connect but owns
             # none of the managed-SDR policy.
@@ -629,20 +698,20 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
                 self.entry.async_create_background_task(
                     self.hass,
                     self._on_connect(),
-                    name=f"rtl_433 sdr adopt {self.entry.entry_id}",
+                    name=f"rtl_433 sdr adopt {self.receiver_id}",
                 )
         elif not connected and self._was_connected:
             # Disconnect edge: stamp the outage clock, log the loss, and repaint
-            # every device behind the hub as unavailable. Skipped once stopped,
+            # every device behind the receiver as unavailable. Skipped once stopped,
             # so the socket close that ``async_stop`` itself performs is not
-            # reported as an outage of a hub that is going away.
+            # reported as an outage of a receiver that is going away.
             self._was_connected = False
             self._connection_time = None
             if self._started:
                 self._async_note_disconnected()
 
-        self._maybe_refresh_hub_identity()
-        async_dispatcher_send(self.hass, signal_hub_update(self.entry.entry_id))
+        self._maybe_refresh_receiver_identity()
+        async_dispatcher_send(self.hass, signal_receiver_update(self.receiver_id))
 
     async def _on_connect(self) -> None:
         """Adopt + enforce the managed SDR settings on a (re)connect.
@@ -671,12 +740,12 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
                 "rtl_433 SDR adopt/enforce failed for %s: %s", self.ws_url, err
             )
 
-    def _maybe_refresh_hub_identity(self) -> None:
-        """Refresh the hub device-registry entry when the SDR identity changes.
+    def _maybe_refresh_receiver_identity(self) -> None:
+        """Refresh the receiver device-registry entry when the SDR identity changes.
 
         The client learns ``dev_info``/``dev_query`` on each (re)connect and fires
-        ``on_hub_update`` when they change, but mapping the identity onto the hub
-        device registry entry is HA-side policy. Fire ``hub_info_callback`` only on
+        ``on_hub_update`` when they change, but mapping the identity onto the receiver
+        device registry entry is HA-side policy. Fire ``receiver_info_callback`` only on
         an actual change (the client only ever advances these to non-empty values),
         guarded so a registry hiccup can never break the connection.
         """
@@ -686,11 +755,11 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             return
         self._seen_dev_info = info
         self._seen_dev_query = query
-        if self.hub_info_callback is not None:
+        if self.receiver_info_callback is not None:
             try:
-                self.hub_info_callback()
+                self.receiver_info_callback()
             except Exception as err:  # noqa: BLE001 - never kill the loop
-                LOGGER.debug("rtl_433 hub_info_callback failed: %s", err)
+                LOGGER.debug("rtl_433 receiver_info_callback failed: %s", err)
 
     @callback
     def emit_pending_update(self) -> None:
@@ -700,7 +769,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         in this integration that knows the signal's name -- so the discovery
         panel's WebSocket subscription has exactly one thing to listen to. Public
         because the callers are not all in this class: the coordinator announces
-        the changes it *originates* (a candidate first heard in
+        the changes it *originates* (a candidate first received in
         ``_record_pending``, a device un-adopted from its device page via
         :meth:`forget_device`), while a batch the user submits is announced once,
         by :mod:`~custom_components.rtl_433.adoption`, after both the runtime sets
@@ -719,49 +788,23 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         open socket so one count could tick up. Keeping the freshening of those
         counts in the websocket layer (a slow, change-detecting re-send) leaves
         this class a pure state holder that never learns a UI exists.
+
+        The signal is **location-scoped**: a sensor both receivers receive is one
+        candidate row, so there is one list to announce however many receivers
+        decoded the transmission. ``pending_listeners`` run first, because the
+        location's merged-cap enforcement is registered there and the announced
+        list has to be the one a subscriber will actually render.
         """
+        for listener in list(self.pending_listeners):
+            listener()
         async_dispatcher_send(self.hass, signal_pending_update(self.entry.entry_id))
 
-    @callback
-    def pending_candidates(self) -> list[PendingDevice]:
-        """Return the pending candidates, most recently *discovered* first.
-
-        The order a user is offered candidates in is one decision, so it is made
-        here rather than separately by each surface: the options form's picker
-        and the WebSocket payload both render this list, and a long list worked
-        from the top has to put the same device first in both.
-
-        Ordering by ``first_seen`` rather than ``last_seen`` puts the device the
-        user just triggered at the top -- it has only just been discovered -- and,
-        unlike ``last_seen``, it does not move afterwards. The panel draws a card
-        per candidate and refreshes them every few seconds, so a most-recently-
-        *heard* order would have cards swapping places under the cursor as
-        devices transmitted. The key breaks a tie, so two devices first heard in
-        the same instant keep a stable order too.
-        """
-        return sorted(
-            self.pending.values(),
-            key=lambda r: (r.first_seen, r.key),
-            reverse=True,
-        )
-
-    @callback
-    def clear_pending(self) -> int:
-        """Forget every pending candidate, and return how many there were.
-
-        A candidate is only ever a working set: the pending map is memory-only
-        and rebuilt from live traffic, so clearing it discards nothing the user
-        decided. Adopting and ignoring are the decisions, and they have their own
-        methods.
-
-        Lives here with the other verbs that write ``pending`` so the map has one
-        owner. Clearing does announce -- an emptied list is a membership change
-        every open panel needs at once.
-        """
-        cleared = len(self.pending)
-        self.pending.clear()
-        self.emit_pending_update()
-        return cleared
+    # Rendering the candidate list and clearing it are **location** verbs, and
+    # live in ``aggregator.py`` (``merged_candidates`` / ``clear_pending``): a
+    # sensor several receivers receive is one row to offer and one row to clear, so
+    # answering from a single receiver's map would show the same device twice
+    # and clear only half of it. This class keeps only the state and the
+    # per-receiver writes.
 
     def _dispatch(
         self,
@@ -802,7 +845,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             )
         async_dispatcher_send(
             self.hass,
-            signal_device_update(self.entry.entry_id, device_key),
+            signal_device_update(self.receiver_id, device_key),
             normalized,
         )
 
@@ -825,7 +868,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         """Re-fetch the SDR/meta configuration via the client into ``self.meta``.
 
         Delegates to the client's ``refresh_meta`` (which fires ``on_hub_update``
-        when the values change, repainting the hub entities). Used by the SDR
+        when the values change, repainting the receiver entities). Used by the SDR
         write path to reconcile ``self.meta`` after a setter send.
         """
         await self._client.refresh_meta()

@@ -21,15 +21,20 @@ import { dirname, resolve } from "node:path";
 globalThis.HTMLElement = class {};
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const { backAction, viewFor, pushedAfter } = await import(
+const { backAction, viewFor, pushedAfter, VIEWS, receiverFor } = await import(
   resolve(HERE, "../../custom_components/rtl_433/frontend/rtl_433-panel.js")
 );
+
+/** Every subview the panel can be on, swept from the real table. */
+const SUBVIEWS = Object.keys(VIEWS).filter(Boolean);
 
 test("a subview reached from the overview unwinds its own push", () => {
   // The regression. Anything but "unwind" here leaves the overview stacked on
   // top of the subview, which is what trapped the user in the panel.
   assert.equal(backAction("discovered", true, 5), "unwind");
   assert.equal(backAction("options", true, 3), "unwind");
+  assert.equal(backAction("receiver", true, 4), "unwind");
+  assert.equal(backAction("coverage", true, 6), "unwind");
   assert.equal(backAction("device-settings", true, 2), "unwind");
   assert.equal(backAction("mappings", true, 9), "unwind");
 });
@@ -53,13 +58,9 @@ test("the overview with no history behind it exits to the integration page", () 
 
 test("going up from a subview never pushes another entry", () => {
   // The property the bug violated, stated once over every subview: whatever the
-  // rule decides, it is never an action that grows the history.
-  for (const segment of [
-    "discovered",
-    "options",
-    "device-settings",
-    "mappings",
-  ]) {
+  // rule decides, it is never an action that grows the history. Swept from the
+  // real table, so a view added later is covered without anyone remembering.
+  for (const segment of SUBVIEWS) {
     for (const pushed of [true, false]) {
       for (const length of [1, 2, 5]) {
         const action = backAction(segment, pushed, length);
@@ -91,9 +92,43 @@ test("the overview never resolves to a within-panel move", () => {
 test("a known path segment picks its own view", () => {
   assert.equal(viewFor("").view, "overview");
   assert.equal(viewFor("discovered").view, "discovered");
-  assert.equal(viewFor("options").form, "hub");
+  assert.equal(viewFor("coverage").view, "coverage");
+  assert.equal(viewFor("options").form, "location");
+  assert.equal(viewFor("receiver").form, "receiver");
   assert.equal(viewFor("device-settings").form, "device");
   assert.equal(viewFor("mappings").form, "mappings");
+});
+
+test("only the radio page is addressed by a receiver as well", () => {
+  // The split the whole location model rests on: the availability timeout is
+  // one answer for every device at a location, and the manage-radio toggle is
+  // one answer per receiver. A page marked `receiver` carries a second id in
+  // its URL and saves through `rtl_433/settings/receiver`; every other page
+  // names a location alone. Marking the wrong one renders fine and saves the
+  // wrong scope, which is why this is asserted over the whole table.
+  assert.equal(viewFor("receiver").receiver, true);
+  for (const [segment, view] of Object.entries(VIEWS)) {
+    if (segment === "receiver") {
+      continue;
+    }
+    assert.ok(!view.receiver, `view "${segment}" claims a receiver`);
+  }
+});
+
+test("the four settings pages are four distinct forms", () => {
+  // One form per page, and no two pages sharing one: the location and receiver
+  // forms were a single form until the settings split, and collapsing them
+  // again would quietly put a radio toggle back on a location-wide page.
+  const forms = Object.values(VIEWS)
+    .map((view) => view.form)
+    .filter(Boolean);
+  assert.deepEqual(forms.slice().sort(), [
+    "device",
+    "location",
+    "mappings",
+    "receiver",
+  ]);
+  assert.equal(new Set(forms).size, forms.length);
 });
 
 test("an unknown path segment falls back to the overview", () => {
@@ -110,6 +145,40 @@ test("a segment that names something on Object.prototype is still unknown", () =
   for (const segment of ["toString", "constructor", "valueOf", "__proto__"]) {
     assert.equal(viewFor(segment).view, "overview", segment);
   }
+});
+
+// -- Which receiver the radio page is editing --------------------------------
+
+/** Two receivers of one location, as `rtl_433/receivers` reports them. */
+const RECEIVERS = [
+  { receiver_id: "attic", title: "rtl_433 (attic.local)" },
+  { receiver_id: "garage", title: "rtl_433 (garage.local)" },
+];
+
+test("the receiver named in the URL is the one being edited", () => {
+  // The page is reached from a row on the receivers card, which puts the id in
+  // the path -- and a bookmark of that path has to come back to the same radio.
+  assert.equal(receiverFor(RECEIVERS, "garage").receiver_id, "garage");
+  assert.equal(receiverFor(RECEIVERS, "attic").receiver_id, "attic");
+});
+
+test("a link naming no receiver falls back to the first", () => {
+  // A page that resolved to nothing would render a toggle with no id behind it
+  // and fail on save; the first receiver is a real one to configure.
+  assert.equal(receiverFor(RECEIVERS, null).receiver_id, "attic");
+  assert.equal(receiverFor(RECEIVERS, undefined).receiver_id, "attic");
+  assert.equal(receiverFor(RECEIVERS, "").receiver_id, "attic");
+});
+
+test("a link naming a receiver that is gone falls back rather than failing", () => {
+  // A receiver removed since the link was made, or a link from another
+  // location's page. Either way the save would land on nothing.
+  assert.equal(receiverFor(RECEIVERS, "shed").receiver_id, "attic");
+});
+
+test("a location with no receivers has nothing to edit", () => {
+  assert.equal(receiverFor([], "attic"), null);
+  assert.equal(receiverFor(undefined, "attic"), null);
 });
 
 // -- Whether the back arrow still owes an unwind -----------------------------

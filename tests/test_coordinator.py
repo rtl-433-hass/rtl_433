@@ -31,8 +31,9 @@ import pytest
 
 from custom_components.rtl_433.const import signal_device_update, signal_pending_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
-from custom_components.rtl_433.coordinator._events import _MAX_PENDING_CANDIDATES
+from custom_components.rtl_433.coordinator._events import MAX_PENDING_CANDIDATES
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_subentry
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
 _TRACE_LOGGER = "custom_components.rtl_433"
@@ -58,8 +59,8 @@ def _run(hass, coro):
 
 
 @pytest.fixture
-async def coordinator(hass, hub_entry_builder):
-    """Build a coordinator wired to a hub entry, with a 600s timeout.
+async def coordinator(hass, receiver_entry_builder):
+    """Build a coordinator wired to a receiver entry, with a 600s timeout.
 
     Async so construction runs inside the event loop: the coordinator now builds
     its :class:`pyrtl_433.Rtl433Client` in ``__init__`` (injecting HA's shared
@@ -70,11 +71,12 @@ async def coordinator(hass, hub_entry_builder):
     watchdog, dispatch. A device the user has not adopted never reaches any of
     that; it lands in the pending list instead, which is a separate contract.
     """
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     return Rtl433Coordinator(
         hass,
         entry,
+        receiver_subentry(entry),
         host="rtl433.local",
         availability_timeout=600,
         skip_keys={"model", "id", "channel", "subtype", "time", "mic"},
@@ -128,7 +130,7 @@ def test_live_event_records_state_and_dispatches(hass, coordinator):
 
     dispatch.assert_called_once()
     assert dispatch.call_args.args[1] == signal_device_update(
-        coordinator.entry.entry_id, key
+        coordinator.receiver_id, key
     )
     assert dispatch.call_args.args[2].is_replay is False
 
@@ -277,8 +279,8 @@ def test_watchdog_flips_unavailable_then_recovers(hass, coordinator):
     assert coordinator.available[key] is True
 
 
-def test_per_device_override_beats_hub_default(hass, coordinator):
-    """The effective timeout uses the per-device resolver over the hub default."""
+def test_per_device_override_beats_receiver_default(hass, coordinator):
+    """The effective timeout uses the per-device resolver over the receiver default."""
     key = "Acurite-606TX-42"
     coordinator.effective_timeout_resolver = lambda dk: 60 if dk == key else 600
     assert coordinator._effective_timeout(key) == 60
@@ -287,14 +289,14 @@ def test_per_device_override_beats_hub_default(hass, coordinator):
     with freeze_time(start), patch(DISPATCH):
         coordinator._on_client_event(_event())
 
-    # 90s of silence exceeds the 60s override (but not the 600s hub default).
+    # 90s of silence exceeds the 60s override (but not the 600s receiver default).
     with freeze_time(start + timedelta(seconds=90)), patch(DISPATCH):
         _run(hass, coordinator._async_watchdog(dt_util.utcnow()))
     assert coordinator.available[key] is False
 
 
 def test_effective_timeout_falls_back_on_resolver_error(hass, coordinator):
-    """A throwing resolver falls back to the hub default instead of crashing."""
+    """A throwing resolver falls back to the receiver default instead of crashing."""
 
     def boom(_dk: str) -> int:
         raise RuntimeError("resolver exploded")
@@ -408,7 +410,7 @@ def test_validate_connection_delegates_to_client(hass):
 # --------------------------------------------------------------------------- #
 # The client is given HA's configured zone for naive-timestamp classification. #
 # --------------------------------------------------------------------------- #
-async def test_client_receives_ha_configured_event_tz(hass, hub_entry_builder):
+async def test_client_receives_ha_configured_event_tz(hass, receiver_entry_builder):
     """The coordinator passes HA's configured zone as the client's event_tz.
 
     Regression guard: an offset-less rtl_433 ``time`` stamp must be classified in
@@ -418,11 +420,15 @@ async def test_client_receives_ha_configured_event_tz(hass, hub_entry_builder):
     """
     await hass.config.async_set_time_zone("America/New_York")
     configured = dt_util.get_default_time_zone()
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
 
     coordinator = Rtl433Coordinator(
-        hass, entry, host="rtl433.local", availability_timeout=600
+        hass,
+        entry,
+        receiver_subentry(entry),
+        host="rtl433.local",
+        availability_timeout=600,
     )
 
     assert coordinator._client._event_tz == configured
@@ -436,10 +442,10 @@ def test_pending_candidate_cap_is_the_documented_value():
     """The ceiling is a deliberate number, not an incidental one.
 
     Pinned explicitly so a change to it is a change to this test: it is sized far
-    above what a busy receiver hears, and the whole point is that it is generous
+    above what a busy receiver receives, and the whole point is that it is generous
     enough never to touch a real install.
     """
-    assert _MAX_PENDING_CANDIDATES == 512
+    assert MAX_PENDING_CANDIDATES == 512
 
 
 def _assert_nothing_tracks(coordinator, key):
@@ -450,7 +456,7 @@ def _assert_nothing_tracks(coordinator, key):
     seventh added later is covered by this without anyone remembering to.
 
     ``calibration_snapshot`` and ``user_mappings_snapshot`` are excluded: they
-    mirror the user's stored options rather than what the radio has been heard
+    mirror the user's stored options rather than what the radio has been received
     saying, and deleting a device is not meant to discard its configuration.
     """
     config_mirrors = {"calibration_snapshot", "user_mappings_snapshot"}
@@ -478,21 +484,21 @@ def test_spurious_decodes_do_not_grow_the_list_without_bound(hass, coordinator):
     every one would be rendered into the payload pushed to every open panel.
     """
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES + 10)
+        _flood(coordinator, MAX_PENDING_CANDIDATES + 10)
 
     # Exactly at the cap: dropping further would discard candidates nothing
     # asked us to discard.
-    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert len(coordinator.pending) == MAX_PENDING_CANDIDATES
     assert "Noise-0" not in coordinator.pending
-    assert f"Noise-{_MAX_PENDING_CANDIDATES + 9}" in coordinator.pending
+    assert f"Noise-{MAX_PENDING_CANDIDATES + 9}" in coordinator.pending
 
 
 def test_nothing_is_dropped_at_exactly_the_cap(hass, coordinator):
     """The ceiling is a maximum to stay at, not one to fall below."""
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES)
+        _flood(coordinator, MAX_PENDING_CANDIDATES)
 
-    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert len(coordinator.pending) == MAX_PENDING_CANDIDATES
     assert "Noise-0" in coordinator.pending
 
 
@@ -504,7 +510,7 @@ def test_a_candidate_heard_again_is_no_longer_the_coldest(hass, coordinator):
     of one that stopped long ago.
     """
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES)
+        _flood(coordinator, MAX_PENDING_CANDIDATES)
         # The oldest key transmits again, so the *second* oldest is now coldest.
         coordinator._on_client_event(_event(key="Noise-0", model="Noise"))
         coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
@@ -521,12 +527,12 @@ def test_the_candidate_just_heard_is_never_the_one_dropped(hass, coordinator):
     most likely waiting to see.
     """
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES)
+        _flood(coordinator, MAX_PENDING_CANDIDATES)
         coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
 
     assert "Noise-fresh" in coordinator.pending
     assert "Noise-0" not in coordinator.pending
-    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert len(coordinator.pending) == MAX_PENDING_CANDIDATES
 
 
 def test_a_dropped_candidate_leaves_nothing_behind(hass, coordinator):
@@ -536,7 +542,7 @@ def test_a_dropped_candidate_leaves_nothing_behind(hass, coordinator):
     only ever supposed to exist in ``pending``, and this is what says so.
     """
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES + 1)
+        _flood(coordinator, MAX_PENDING_CANDIDATES + 1)
 
     _assert_nothing_tracks(coordinator, "Noise-0")
 
@@ -545,12 +551,12 @@ def test_dropping_a_candidate_logs_the_key_and_the_cap(hass, coordinator, caplog
     """The DEBUG line names what went and why, or it explains nothing."""
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES + 1)
+        _flood(coordinator, MAX_PENDING_CANDIDATES + 1)
 
     lines = [m for m in caplog.messages if m.startswith("rtl_433 dropping the coldest")]
     assert len(lines) == 1
     assert "Noise-0" in lines[0]
-    assert str(_MAX_PENDING_CANDIDATES) in lines[0]
+    assert str(MAX_PENDING_CANDIDATES) in lines[0]
 
 
 def test_adopted_devices_are_out_of_the_caps_reach(hass, coordinator):
@@ -567,12 +573,12 @@ def test_adopted_devices_are_out_of_the_caps_reach(hass, coordinator):
 
     with patch(DISPATCH):
         coordinator._on_client_event(_event(key=adopted_key))
-        _flood(coordinator, _MAX_PENDING_CANDIDATES + 10)
+        _flood(coordinator, MAX_PENDING_CANDIDATES + 10)
 
     assert adopted_key in coordinator.devices
     assert adopted_key in coordinator.last_seen
     assert adopted_key not in coordinator.pending
-    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert len(coordinator.pending) == MAX_PENDING_CANDIDATES
 
 
 def test_forget_device_clears_the_log_once_memos(hass, coordinator):
@@ -585,7 +591,7 @@ def test_forget_device_clears_the_log_once_memos(hass, coordinator):
     key = "Acurite-606TX-42"
     with patch(DISPATCH):
         coordinator._on_client_event(_event(key=key, fields={"made_up_field": 1}))
-    coordinator._log_timeout_change(key, 600, "hub")
+    coordinator._log_timeout_change(key, 600, "receiver")
     assert coordinator._logged_unmapped.get(key)
     assert key in coordinator._logged_timeouts
 

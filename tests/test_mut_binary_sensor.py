@@ -46,6 +46,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_id
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -73,27 +74,27 @@ def _no_socket():
         yield
 
 
-def _coordinator(hass: HomeAssistant, hub) -> Rtl433Coordinator:
-    return hass.data[DOMAIN][hub.entry_id]
+def _coordinator(hass: HomeAssistant, receiver) -> Rtl433Coordinator:
+    return hass.data[DOMAIN][receiver_id(receiver)]
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
     coordinator._client._process_event(event)
 
 
-async def _setup_hub(hass, hub_entry_builder, *, devices=None, **kwargs):
-    """Set up a hub entry; the coordinator is left connected.
+async def _setup_receiver(hass, receiver_entry_builder, *, devices=None, **kwargs):
+    """Set up a receiver entry; the coordinator is left connected.
 
-    The autouse ``hub_connected_by_default`` fixture does the marking; without it
+    The autouse ``receiver_connected_by_default`` fixture does the marking; without it
     the connection-backed availability gate reads the socket-less test run as an
     outage and takes every device behind it unavailable.
     """
     kwargs.setdefault("availability_timeout", 600)
-    hub = hub_entry_builder(devices=devices, **kwargs)
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(devices=devices, **kwargs)
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
-    return hub
+    return receiver
 
 
 def _motion_devices(**record):
@@ -104,19 +105,19 @@ def _door_devices():
     return {_DOOR_KEY: {CONF_MODEL: _DOOR_MODEL, DEVICE_FIELDS: ["closed"]}}
 
 
-def _motion_eid(hass, hub):
+def _motion_eid(hass, receiver):
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{hub.entry_id}:{_DEVICE_KEY}:motion"
+        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DEVICE_KEY}:motion"
     )
     assert eid is not None, "Motion entity not found"
     return eid
 
 
-def _door_eid(hass, hub):
+def _door_eid(hass, receiver):
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{hub.entry_id}:{_DOOR_KEY}:opening"
+        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DOOR_KEY}:opening"
     )
     assert eid is not None, "Door opening entity not found"
     return eid
@@ -134,13 +135,15 @@ async def _advance_to(hass, start, seconds):
 # ===========================================================================
 
 
-async def test_init_model_passed_to_super(hass, hub_entry_builder):
+async def test_init_model_passed_to_super(hass, receiver_entry_builder):
     """Binary sensor device info carries the real model string, not None."""
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_door_devices())
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_door_devices()
+    )
     dev_reg = dr.async_get(hass)
-    prefix = f"{hub.entry_id}:{_DOOR_KEY}"
+    prefix = f"{receiver.entry_id}:{_DOOR_KEY}"
     device_entry = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, prefix), hub.entry_id
+        (DOMAIN, prefix), receiver.entry_id
     )
     assert device_entry is not None
     # If None was passed as model, device_entry.model would be None.
@@ -154,13 +157,15 @@ async def test_init_model_passed_to_super(hass, hub_entry_builder):
 # ===========================================================================
 
 
-async def test_init_force_update_door_sensor(hass, hub_entry_builder):
+async def test_init_force_update_door_sensor(hass, receiver_entry_builder):
     """Door sensor has force_update=True from its descriptor, not None."""
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_door_devices())
-    eid = _door_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_door_devices()
+    )
+    eid = _door_eid(hass, receiver)
 
     # Feed an event and confirm we can read the state (entity is alive).
-    _feed(_coordinator(hass, hub), _DOOR_EVENT_OPEN)
+    _feed(_coordinator(hass, receiver), _DOOR_EVENT_OPEN)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
@@ -173,11 +178,13 @@ async def test_init_force_update_door_sensor(hass, hub_entry_builder):
     assert state.attributes.get("device_class") == "opening"
 
 
-async def test_init_force_update_motion_sensor(hass, hub_entry_builder):
+async def test_init_force_update_motion_sensor(hass, receiver_entry_builder):
     """Motion sensor descriptor force_update=False is set (not None)."""
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    eid = _motion_eid(hass, hub)
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    eid = _motion_eid(hass, receiver)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     state = hass.states.get(eid)
     assert state is not None
@@ -203,7 +210,7 @@ async def test_init_force_update_motion_sensor(hass, hub_entry_builder):
 
 
 async def test_init_seeds_from_coordinator_devices_on_dynamic_add(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Dynamically-created entity seeds is_on from coordinator.devices immediately.
 
@@ -212,8 +219,8 @@ async def test_init_seeds_from_coordinator_devices_on_dynamic_add(
     the state after creation is unknown instead of on.
     """
     # No pre-seeded devices; the device is adopted below.
-    hub = await _setup_hub(hass, hub_entry_builder)
-    coord = _coordinator(hass, hub)
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+    coord = _coordinator(hass, receiver)
 
     # Feed motion event and adopt the device -> entity created dynamically.
     # At entity creation time, coordinator.devices[_DEVICE_KEY] is already set.
@@ -221,7 +228,7 @@ async def test_init_seeds_from_coordinator_devices_on_dynamic_add(
     coord.adopt_device(_DEVICE_KEY)
     await hass.async_block_till_done()
 
-    eid = _motion_eid(hass, hub)
+    eid = _motion_eid(hass, receiver)
     state = hass.states.get(eid)
     assert state is not None
     # Seeded from coordinator.devices -> is_on=True -> state "on".
@@ -232,41 +239,41 @@ async def test_init_seeds_from_coordinator_devices_on_dynamic_add(
     assert state.state == "on"
 
 
-async def test_init_seeding_uses_correct_device_key(hass, hub_entry_builder):
+async def test_init_seeding_uses_correct_device_key(hass, receiver_entry_builder):
     """Two different devices: each entity seeds from its own device_key's data."""
     # Seed both a motion and door device via pre-defined devices.
     # Then feed events for both and confirm each entity has correct state.
-    hub = await _setup_hub(
+    receiver = await _setup_receiver(
         hass,
-        hub_entry_builder,
+        receiver_entry_builder,
         devices={
             _DEVICE_KEY: {CONF_MODEL: _MODEL, DEVICE_FIELDS: ["motion"]},
             _DOOR_KEY: {CONF_MODEL: _DOOR_MODEL, DEVICE_FIELDS: ["closed"]},
         },
     )
-    coord = _coordinator(hass, hub)
+    coord = _coordinator(hass, receiver)
 
     # Feed motion on and door open.
     _feed(coord, _MOTION_EVENT)
     _feed(coord, _DOOR_EVENT_OPEN)
     await hass.async_block_till_done()
 
-    eid_motion = _motion_eid(hass, hub)
-    eid_door = _door_eid(hass, hub)
+    eid_motion = _motion_eid(hass, receiver)
+    eid_door = _door_eid(hass, receiver)
     assert hass.states.get(eid_motion).state == "on"
     assert hass.states.get(eid_door).state == "on"
 
 
-async def test_init_does_not_seed_when_field_absent(hass, hub_entry_builder):
+async def test_init_does_not_seed_when_field_absent(hass, receiver_entry_builder):
     """Entity does not seed when the field_key is absent from last_event.fields."""
     # Pre-seed the device with a different field only.
-    hub = await _setup_hub(
+    receiver = await _setup_receiver(
         hass,
-        hub_entry_builder,
+        receiver_entry_builder,
         devices={_DOOR_KEY: {CONF_MODEL: _DOOR_MODEL, DEVICE_FIELDS: ["closed"]}},
     )
     # No event fed; coordinator.devices[_DOOR_KEY] is not set.
-    eid_door = _door_eid(hass, hub)
+    eid_door = _door_eid(hass, receiver)
     state = hass.states.get(eid_door)
     # No event in coordinator.devices -> no seeding -> unknown
     assert state.state == "unknown"
@@ -285,16 +292,18 @@ async def test_init_does_not_seed_when_field_absent(hass, hub_entry_builder):
 # ===========================================================================
 
 
-async def test_apply_value_door_on_no_auto_off(hass, hub_entry_builder):
+async def test_apply_value_door_on_no_auto_off(hass, receiver_entry_builder):
     """Door sensor (no clear_delay) has no auto-off timer when set to on.
 
     Kills mutmut_7: if "or" replaces "and", even door sensor would get timer.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_door_devices())
-    eid = _door_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_door_devices()
+    )
+    eid = _door_eid(hass, receiver)
 
     start = dt_util.utcnow()
-    _feed(_coordinator(hass, hub), _DOOR_EVENT_OPEN)
+    _feed(_coordinator(hass, receiver), _DOOR_EVENT_OPEN)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
@@ -303,18 +312,20 @@ async def test_apply_value_door_on_no_auto_off(hass, hub_entry_builder):
     assert hass.states.get(eid).state == "on"
 
 
-async def test_apply_value_motion_none_no_extra_timer(hass, hub_entry_builder):
+async def test_apply_value_motion_none_no_extra_timer(hass, receiver_entry_builder):
     """Motion=0 produces is_on=None; no new clear timer is started.
 
     Kills mutmut_6: 'or hass is not None' would schedule a clear even when
     is_on is None, causing a spurious off after the delay.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    eid = _motion_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    eid = _motion_eid(hass, receiver)
 
     # First set on (starts timer with DEFAULT_MOTION_CLEAR_DELAY).
     start = dt_util.utcnow()
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
@@ -323,7 +334,7 @@ async def test_apply_value_motion_none_no_extra_timer(hass, hub_entry_builder):
     # With the original code: no new timer; the OLD timer still runs.
     with freeze_time(start) as frozen:
         frozen.move_to(start + timedelta(seconds=2))
-        _feed(_coordinator(hass, hub), {"model": _MODEL, "id": 5, "motion": 0})
+        _feed(_coordinator(hass, receiver), {"model": _MODEL, "id": 5, "motion": 0})
         await hass.async_block_till_done()
         # is_on=None -> state "unknown"
         assert hass.states.get(eid).state == "unknown"
@@ -340,16 +351,18 @@ async def test_apply_value_motion_none_no_extra_timer(hass, hub_entry_builder):
         assert hass.states.get(eid).state == "unknown"
 
 
-async def test_apply_value_motion_true_timer_fires(hass, hub_entry_builder):
+async def test_apply_value_motion_true_timer_fires(hass, receiver_entry_builder):
     """Motion=1 (is_on=True) + clear_delay set + hass set -> timer fires.
 
     Confirms the AND condition: all three must be True for the timer to schedule.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    eid = _motion_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    eid = _motion_eid(hass, receiver)
 
     start = dt_util.utcnow()
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
@@ -370,7 +383,7 @@ async def test_apply_value_motion_true_timer_fires(hass, hub_entry_builder):
 # ===========================================================================
 
 
-async def test_added_to_hass_starts_timer_when_seeded_on(hass, hub_entry_builder):
+async def test_added_to_hass_starts_timer_when_seeded_on(hass, receiver_entry_builder):
     """async_added_to_hass starts clear timer when seeded on via coordinator.
 
     Kills mutmut_2 (clear_delay is None): timer would NOT start for motion.
@@ -380,8 +393,8 @@ async def test_added_to_hass_starts_timer_when_seeded_on(hass, hub_entry_builder
     # Dynamic add: no pre-seeded devices. Feed motion and adopt -> entity created
     # with is_on=True seeded from coordinator.devices. async_added_to_hass
     # must then start the clear timer.
-    hub = await _setup_hub(hass, hub_entry_builder)
-    coord = _coordinator(hass, hub)
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+    coord = _coordinator(hass, receiver)
 
     start = dt_util.utcnow()
     with freeze_time(start) as frozen:
@@ -389,7 +402,7 @@ async def test_added_to_hass_starts_timer_when_seeded_on(hass, hub_entry_builder
         coord.adopt_device(_DEVICE_KEY)
         await hass.async_block_till_done()
 
-        eid = _motion_eid(hass, hub)
+        eid = _motion_eid(hass, receiver)
         assert hass.states.get(eid).state == "on"
 
         # The timer must have been started in async_added_to_hass.
@@ -400,15 +413,17 @@ async def test_added_to_hass_starts_timer_when_seeded_on(hass, hub_entry_builder
         assert hass.states.get(eid).state == "off"
 
 
-async def test_added_to_hass_no_timer_when_seeded_unknown(hass, hub_entry_builder):
+async def test_added_to_hass_no_timer_when_seeded_unknown(hass, receiver_entry_builder):
     """async_added_to_hass does NOT start timer when is_on is None (unknown).
 
     Kills mutmut_3 (is_on is not True -> fires for None too).
     Kills mutmut_1 (or -> fires when clear_delay is not None regardless of is_on).
     """
     # Pre-seeded motion device, no event -> is_on=None.
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    eid = _motion_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    eid = _motion_eid(hass, receiver)
 
     state = hass.states.get(eid)
     assert state.state == "unknown"
@@ -421,7 +436,7 @@ async def test_added_to_hass_no_timer_when_seeded_unknown(hass, hub_entry_builde
 
 
 async def test_added_to_hass_no_timer_for_door_sensor_seeded_on(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """async_added_to_hass does NOT start timer for door sensor (no clear_delay).
 
@@ -429,21 +444,23 @@ async def test_added_to_hass_no_timer_for_door_sensor_seeded_on(
     Kills mutmut_2 (clear_delay is None -> would fire for clear_delay=None).
     """
     # Feed door event so it's seeded on, then reload and confirm no auto-off.
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_door_devices())
-    coord = _coordinator(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_door_devices()
+    )
+    coord = _coordinator(hass, receiver)
     _feed(coord, _DOOR_EVENT_OPEN)
     await hass.async_block_till_done()
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     assert hass.states.get(eid).state == "on"
 
     # Reload: entity is re-added. is_on might be restored from restore_cache
     # but door has no clear_delay so async_added_to_hass must NOT start a timer.
     # We set mock_restore_cache to "on" to ensure the entity is seeded.
     mock_restore_cache(hass, (State(eid, "on"),))
-    assert await hass.config_entries.async_reload(hub.entry_id)
+    assert await hass.config_entries.async_reload(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid2 = _door_eid(hass, hub)
+    eid2 = _door_eid(hass, receiver)
     assert hass.states.get(eid2).state == "on"
 
     start = dt_util.utcnow()
@@ -453,7 +470,7 @@ async def test_added_to_hass_no_timer_for_door_sensor_seeded_on(
 
 
 # Pre-computed entity_ids based on HA's slugification of the model and device key.
-# These do NOT depend on the hub entry_id (which is the unique_id prefix, not
+# These do NOT depend on the receiver entry_id (which is the unique_id prefix, not
 # the entity_id). The device name is "{model} {id-suffix}" (the model is not
 # duplicated), so the slug is "<model>_<id>_<field>". Verified from test run logs.
 _DOOR_ENTITY_ID = "binary_sensor.genericdoor_x1_88_opening"
@@ -467,7 +484,7 @@ _MOTION_ENTITY_ID = "binary_sensor.genericpir_z1_5_motion"
 # ===========================================================================
 
 
-async def test_restore_state_skipped_for_motion_sensor(hass, hub_entry_builder):
+async def test_restore_state_skipped_for_motion_sensor(hass, receiver_entry_builder):
     """Motion sensor (clear_delay set) does NOT restore stale on state.
 
     Kills mutmut_1: if guard is inverted, door sensor would skip instead of motion.
@@ -475,47 +492,49 @@ async def test_restore_state_skipped_for_motion_sensor(hass, hub_entry_builder):
     # Set restore cache to "on" BEFORE setup so it's in place when entity adds.
     mock_restore_cache(hass, (State(_MOTION_ENTITY_ID, "on"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_motion_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(
+        availability_timeout=600, devices=_motion_devices()
+    )
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _motion_eid(hass, hub)
+    eid = _motion_eid(hass, receiver)
     state = hass.states.get(eid)
     # Motion sensor: clear_delay is not None -> early return -> not restored.
     # State must NOT be "on".
     assert state.state == "unknown"
 
 
-async def test_restore_state_applied_for_door_sensor_on(hass, hub_entry_builder):
+async def test_restore_state_applied_for_door_sensor_on(hass, receiver_entry_builder):
     """Door sensor (no clear_delay) restores its prior 'on' state.
 
     Kills mutmut_1: if guard is inverted, door sensor would skip restore.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "on"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     assert hass.states.get(eid).state == "on"
 
 
-async def test_restore_state_applied_for_door_sensor_off(hass, hub_entry_builder):
+async def test_restore_state_applied_for_door_sensor_off(hass, receiver_entry_builder):
     """Door sensor (no clear_delay) restores its prior 'off' state.
 
     Additional coverage to distinguish 'on' from 'off' restore.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "off"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     assert hass.states.get(eid).state == "off"
 
 
@@ -528,25 +547,25 @@ async def test_restore_state_applied_for_door_sensor_off(hass, hub_entry_builder
 # ===========================================================================
 
 
-async def test_restore_state_applied_when_not_seeded(hass, hub_entry_builder):
+async def test_restore_state_applied_when_not_seeded(hass, receiver_entry_builder):
     """When is_on is None (not seeded), restore IS applied.
 
     Kills mutmut_2: if guard inverted, restore would be skipped when is_on=None.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "on"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     # is_on was None -> not guarded -> restore applied -> "on"
     assert hass.states.get(eid).state == "on"
 
 
 async def test_restore_state_skipped_when_seeded_from_coordinator(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """When is_on is already set (seeded from coordinator), restore cache is NOT applied.
 
@@ -559,8 +578,8 @@ async def test_restore_state_skipped_when_seeded_from_coordinator(
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "off"),))
 
     # No pre-seeded devices: the device arrives through adoption.
-    hub = await _setup_hub(hass, hub_entry_builder)
-    coord = _coordinator(hass, hub)
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+    coord = _coordinator(hass, receiver)
 
     # Feed door open event and adopt -> entity created dynamically.
     # In __init__, coordinator.devices[_DOOR_KEY].fields["closed"] = 0 -> is_on=True.
@@ -570,7 +589,7 @@ async def test_restore_state_skipped_when_seeded_from_coordinator(
     coord.adopt_device(_DOOR_KEY)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     state = hass.states.get(eid)
     assert state is not None
     # Seeded "on" wins over restore "off" because is_on was already set.
@@ -584,19 +603,19 @@ async def test_restore_state_skipped_when_seeded_from_coordinator(
 # ===========================================================================
 
 
-async def test_restore_state_uses_get_last_state(hass, hub_entry_builder):
+async def test_restore_state_uses_get_last_state(hass, receiver_entry_builder):
     """last_state is fetched from RestoreEntity.async_get_last_state, not None.
 
     Kills mutmut_12: if last_state=None hardcoded, restore always returns early.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "on"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     # last_state was fetched (not None) -> "on" restored.
     assert hass.states.get(eid).state == "on"
     assert hass.states.get(eid).state != "unknown"
@@ -610,38 +629,38 @@ async def test_restore_state_uses_get_last_state(hass, hub_entry_builder):
 # ===========================================================================
 
 
-async def test_restore_state_valid_on_not_guarded(hass, hub_entry_builder):
+async def test_restore_state_valid_on_not_guarded(hass, receiver_entry_builder):
     """Restored 'on' does not match guard -> is_on is set to True.
 
     Kills mutmut_15: 'not in' would skip restore for valid states.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "on"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    assert hass.states.get(_door_eid(hass, hub)).state == "on"
+    assert hass.states.get(_door_eid(hass, receiver)).state == "on"
 
 
-async def test_restore_state_guard_skips_unknown(hass, hub_entry_builder):
+async def test_restore_state_guard_skips_unknown(hass, receiver_entry_builder):
     """Restored 'unknown' triggers the guard -> is_on remains None (unknown).
 
     Kills mutmut_15: 'not in' would skip restore for 'unknown' but apply for 'on'.
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "unknown"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
     # "unknown" triggers the guard -> early return -> is_on=None -> "unknown"
-    assert hass.states.get(_door_eid(hass, hub)).state == "unknown"
+    assert hass.states.get(_door_eid(hass, receiver)).state == "unknown"
 
 
-async def test_restore_state_guard_skips_unavailable(hass, hub_entry_builder):
+async def test_restore_state_guard_skips_unavailable(hass, receiver_entry_builder):
     """Restored 'unavailable' triggers the guard -> state stays unknown.
 
     Kills mutmut_15: 'not in' would incorrectly apply an unavailable state.
@@ -649,12 +668,12 @@ async def test_restore_state_guard_skips_unavailable(hass, hub_entry_builder):
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "unavailable"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     # "unavailable" triggers the guard -> is_on stays None -> "unknown"
     assert hass.states.get(eid).state in ("unknown", "unavailable")
 
@@ -668,7 +687,7 @@ async def test_restore_state_guard_skips_unavailable(hass, hub_entry_builder):
 # ===========================================================================
 
 
-async def test_restore_state_unknown_exact_match(hass, hub_entry_builder):
+async def test_restore_state_unknown_exact_match(hass, receiver_entry_builder):
     """Only exact lowercase 'unknown' triggers guard; wrong string does not.
 
     Kills mutmut_16 (XXunknownXX) and mutmut_17 (UNKNOWN): if string is wrong,
@@ -676,12 +695,12 @@ async def test_restore_state_unknown_exact_match(hass, hub_entry_builder):
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "unknown"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     state = hass.states.get(eid)
     # Guard fires for "unknown" -> early return -> is_on=None -> state "unknown"
     # If guard didn't fire: is_on = ("unknown" == "on") = False -> "off"
@@ -696,7 +715,7 @@ async def test_restore_state_unknown_exact_match(hass, hub_entry_builder):
 # ===========================================================================
 
 
-async def test_restore_state_unavailable_exact_match(hass, hub_entry_builder):
+async def test_restore_state_unavailable_exact_match(hass, receiver_entry_builder):
     """Only exact lowercase 'unavailable' triggers guard.
 
     Kills mutmut_19 (UNAVAILABLE): if uppercase, 'unavailable' state slips through
@@ -704,12 +723,12 @@ async def test_restore_state_unavailable_exact_match(hass, hub_entry_builder):
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "unavailable"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     state = hass.states.get(eid)
     # Guard fires for "unavailable" -> early return -> is_on=None -> "unknown"
     # If guard didn't fire: is_on = ("unavailable" == "on") = False -> "off"
@@ -729,7 +748,7 @@ async def test_restore_state_unavailable_exact_match(hass, hub_entry_builder):
 # ===========================================================================
 
 
-async def test_restore_state_on_produces_is_on_true(hass, hub_entry_builder):
+async def test_restore_state_on_produces_is_on_true(hass, receiver_entry_builder):
     """Restored 'on' state -> is_on=True -> state 'on'.
 
     Kills mutmut_20 (None -> unknown), mutmut_21 (!= -> False -> 'off'),
@@ -737,19 +756,19 @@ async def test_restore_state_on_produces_is_on_true(hass, hub_entry_builder):
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "on"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     state = hass.states.get(eid)
     assert state.state == "on"
     assert state.state != "off"
     assert state.state != "unknown"
 
 
-async def test_restore_state_off_produces_is_on_false(hass, hub_entry_builder):
+async def test_restore_state_off_produces_is_on_false(hass, receiver_entry_builder):
     """Restored 'off' state -> is_on=False -> state 'off'.
 
     Kills mutmut_21 (!= 'on' -> True -> 'on'), mutmut_20 (None -> 'unknown'),
@@ -757,12 +776,12 @@ async def test_restore_state_off_produces_is_on_false(hass, hub_entry_builder):
     """
     mock_restore_cache(hass, (State(_DOOR_ENTITY_ID, "off"),))
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    eid = _door_eid(hass, hub)
+    eid = _door_eid(hass, receiver)
     state = hass.states.get(eid)
     # "off" == "on" -> False -> state "off"
     # mutmut_21: "off" != "on" -> True -> state "on"  [kills it]
@@ -791,7 +810,7 @@ async def test_restore_state_off_produces_is_on_false(hass, hub_entry_builder):
 
 
 async def test_restore_state_extra_data_beats_unavailable_persisted_state(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A restart during an outage restores 'on' from the extra data alone.
 
@@ -811,15 +830,17 @@ async def test_restore_state_extra_data_beats_unavailable_persisted_state(
         ),
     )
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    assert hass.states.get(_door_eid(hass, hub)).state == "on"
+    assert hass.states.get(_door_eid(hass, receiver)).state == "on"
 
 
-async def test_restore_state_extra_data_beats_persisted_state(hass, hub_entry_builder):
+async def test_restore_state_extra_data_beats_persisted_state(
+    hass, receiver_entry_builder
+):
     """Extra data wins over a usable persisted state, and carries False.
 
     The extra data says off while the persisted state says on, so falling
@@ -837,12 +858,12 @@ async def test_restore_state_extra_data_beats_persisted_state(hass, hub_entry_bu
         ),
     )
 
-    hub = hub_entry_builder(availability_timeout=600, devices=_door_devices())
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver = receiver_entry_builder(availability_timeout=600, devices=_door_devices())
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    assert hass.states.get(_door_eid(hass, hub)).state == "off"
+    assert hass.states.get(_door_eid(hass, receiver)).state == "off"
 
 
 # ===========================================================================
@@ -853,37 +874,43 @@ async def test_restore_state_extra_data_beats_persisted_state(hass, hub_entry_bu
 # ===========================================================================
 
 
-async def test_cancel_clear_resets_unsub_to_none(hass, hub_entry_builder):
+async def test_cancel_clear_resets_unsub_to_none(hass, receiver_entry_builder):
     """_cancel_clear sets _clear_unsub=None after cancelling; prevents double-call.
 
     Kills mutmut_2: if set to '' instead of None, the second cancel would
     try to call '' as a function -> TypeError or similar.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    eid = _motion_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    eid = _motion_eid(hass, receiver)
 
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
     # Re-trigger motion: this calls _schedule_clear -> _cancel_clear (cancels old)
     # then arms a new one. If _clear_unsub were "" after first cancel, the second
     # _cancel_clear in _schedule_clear would try to call "" and raise.
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
 
-async def test_cancel_clear_remove_then_timer_no_resurrect(hass, hub_entry_builder):
+async def test_cancel_clear_remove_then_timer_no_resurrect(
+    hass, receiver_entry_builder
+):
     """Removing entity cancels timer; late time-fire does not resurrect entity.
 
     Additional coverage for _cancel_clear correctness.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    eid = _motion_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    eid = _motion_eid(hass, receiver)
 
     start = dt_util.utcnow()
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
@@ -896,13 +923,15 @@ async def test_cancel_clear_remove_then_timer_no_resurrect(hass, hub_entry_build
     assert hass.states.get(eid) is None
 
 
-async def test_cancel_clear_noop_when_no_timer_armed(hass, hub_entry_builder):
+async def test_cancel_clear_noop_when_no_timer_armed(hass, receiver_entry_builder):
     """Removing entity with no timer armed does not raise.
 
     If _clear_unsub is None, _cancel_clear is a no-op.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    eid = _motion_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    eid = _motion_eid(hass, receiver)
     # No event fed: no timer armed.
 
     ent_reg = er.async_get(hass)
@@ -920,22 +949,24 @@ async def test_cancel_clear_noop_when_no_timer_armed(hass, hub_entry_builder):
 
 
 async def test_effective_clear_delay_exception_falls_back_to_descriptor(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Resolver exception falls back to descriptor default delay.
 
     Kills mutmut_5: if resolved="" after exception, return "" not the descriptor.
     With correct code, resolver raises -> resolved=None -> descriptor default used.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    coord = _coordinator(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    coord = _coordinator(hass, receiver)
 
     def _raising_resolver(device_key):
         raise RuntimeError("simulated error")
 
     coord.effective_clear_delay_resolver = _raising_resolver
 
-    eid = _motion_eid(hass, hub)
+    eid = _motion_eid(hass, receiver)
     start = dt_util.utcnow()
     _feed(coord, _MOTION_EVENT)
     await hass.async_block_till_done()
@@ -951,18 +982,20 @@ async def test_effective_clear_delay_exception_falls_back_to_descriptor(
 
 
 async def test_effective_clear_delay_resolver_none_uses_descriptor(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Resolver returns None -> descriptor default used.
 
     Confirms the 'resolved is not None' guard after exception path.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    coord = _coordinator(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    coord = _coordinator(hass, receiver)
 
     coord.effective_clear_delay_resolver = lambda device_key: None
 
-    eid = _motion_eid(hass, hub)
+    eid = _motion_eid(hass, receiver)
     start = dt_util.utcnow()
     _feed(coord, _MOTION_EVENT)
     await hass.async_block_till_done()
@@ -976,22 +1009,22 @@ async def test_effective_clear_delay_resolver_none_uses_descriptor(
 
 
 async def test_effective_clear_delay_override_wins_over_descriptor(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Resolver returning a value overrides the descriptor default.
 
     Confirms the 'if resolved is not None: return resolved' branch.
     """
     override = 20
-    hub = await _setup_hub(
+    receiver = await _setup_receiver(
         hass,
-        hub_entry_builder,
+        receiver_entry_builder,
         devices=_motion_devices(**{DEVICE_MOTION_CLEAR_DELAY: override}),
     )
-    eid = _motion_eid(hass, hub)
+    eid = _motion_eid(hass, receiver)
 
     start = dt_util.utcnow()
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 

@@ -16,7 +16,7 @@ captures documentation screenshots with Playwright.
 ## What it proves
 
 A single `rtl_433` process replays a real Acurite capture continuously; the
-integration connects over a WebSocket, holds every device it hears as a pending
+integration connects over a WebSocket, holds every device it receives as a pending
 candidate, creates entities with correct device classes/units for the ones the
 run adds from the panel, and flips them to `unavailable` when the stream
 stops. Playwright captures these screenshots (see `../../screenshots/`):
@@ -24,20 +24,34 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | File | Shows |
 | --- | --- |
 | `02-device-page.png` | The device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
-| `17-discovery-panel.png` | The **discovered devices** page (`/rtl_433/discovered`): one card per heard device with its sighting count, signal level, latest readings and per-card Replace / Ignore / Add buttons |
+| `17-discovery-panel.png` | The **discovered devices** page (`/rtl_433/discovered`): the location's union of candidates, one card per received device — however many receivers received it — with its sighting count, signal level, the receivers that received it, latest readings and per-card Replace / Ignore / Add buttons |
 | `16-ignored-devices.png` | The same page with the ignored section revealed, showing the ignored leak detector and its Un-ignore button |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
-| `05-mapping-overrides.png` | The **Device mappings** page: the YAML editor pre-filled with an example per-hub override |
+| `05-mapping-overrides.png` | The **Device mappings** page: the YAML editor pre-filled with an example per-location override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
-| `07-hub-settings.png` | The **Receiver settings** page (the availability-timeout choice, managed settings) |
+| `07-location-settings.png` | The **Location settings** page: the availability-timeout choice every device at the location starts from |
+| `07-receiver-settings.png` | One receiver's **Receiver settings** page: the manage-radio toggle, headed by the receiver it belongs to |
+| `18-coverage.png` | The **Signal coverage** page: one card per merged device, one row per receiver, with the level and age each one last received it at |
 | `08-device-settings.png` | The **Device settings** page for the SCMplus meter: the picker, the timeout override, the commodity pre-filled to `gas`, and the base unit + scale it reveals |
-| `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
+| `09-home-hero.png` | The integration overview: a location with its receiver and nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
 | `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
-| `14-hub-noise.png` | The hub device's **Diagnostic** card with the receiver-noise sensors (Noise level / Minimum detection level) populated from real "Auto Level" log frames |
+| `14-receiver-noise.png` | One receiver device's **Diagnostic** card with the radio-noise sensors (Noise level / Minimum detection level) populated from real "Auto Level" log frames |
 
 Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
 `screenshots/` output directory itself is gitignored.
+
+> **The harness runs ONE receiver, and the shots show one.** There is a single
+> `rtl_433` container and a single `ws-bridge`, so every capture is of a location
+> holding one receiver: the **Receivers** card has one row, the discovered cards
+> name one receiver under *Received by*, **Signal coverage** has one row per device,
+> and each device carries one set of `RSSI` / `SNR` / `Last seen` entities. That
+> is a faithful picture of the common install, and it is what the docs' alt text
+> describes — but it does **not** exercise the union, the dedup debounce, or the
+> merged-availability OR. Those are covered by the Python unit tests, not here.
+> Adding a second bridge + decoder pair to `docker-compose.yml` and a second
+> receiver subentry to the `add` stage would let the shots show the merge; it has
+> not been done.
 
 The doorbell / energy meter / SCMplus gas meter / door / leak devices in the richer shots come from
 `ws-bridge.mjs` replaying the project fixtures in `tests/fixtures/` (configured
@@ -49,10 +63,10 @@ pending candidate — a whole round emitted at once would leave only its first
 device visible.
 
 Nothing is added to Home Assistant automatically, so the `shots` stage works the
-approval flow for real: it captures the page with every heard device still
+approval flow for real: it captures the page with every received device still
 pending, ignores the leak detector and captures the ignored section, then
 un-ignores it and adds every device — which is why the later shots have a full
-hub to work with.
+receiver to work with.
 
 **Order matters for the panel shot.** It is captured *before* the approval runs,
 because that adds all six replayed devices and would leave the page with no cards
@@ -118,8 +132,8 @@ cd tests/integration
 # or step by step:
 ./run-harness.sh up        # start containers, poll WS-JSON + HA API readiness
 ./run-harness.sh onboard   # seed HA owner + token via the onboarding REST API
-./run-harness.sh shots     # add the hub, capture the panel and its pages
-./run-harness.sh hubnoise  # restart the decoder, capture the hub noise sensors
+./run-harness.sh shots     # add the receiver, capture the panel and its pages
+./run-harness.sh receivernoise  # restart the decoder, capture the receiver noise sensors
 ./run-harness.sh unavailable  # stop replay, wait out the timeout, capture, resume
 ./run-harness.sh down      # tear everything down (removes the shared volume)
 ```
@@ -148,17 +162,17 @@ stream — alive (plan Clarification #13), `rtl433-entrypoint.sh`:
    exists, then loops `cat <capture>.cu8 >&3; cat silence.cu8 >&3; sleep 1`
    forever. Holding fd 3 open across passes means the decoder never sees EOF, so
    it stays alive and keeps decoding the same capture on repeat. The silence is
-   1 MB of cu8 zero-amplitude samples (~2 s at 250k) — see "Receiver noise"
+   1 MB of cu8 zero-amplitude samples (~2 s at 250k) — see "Radio noise"
    below for why the gap is there.
 
 The ordering matters: opening the FIFO for write *before* the reader exists
 deadlocks (a FIFO write-open blocks until a reader connects). Reader-first,
 writer-second is the working pattern.
 
-## Receiver noise ("Auto Level") data
+## Radio noise ("Auto Level") data
 
-The hub's **Noise level** and **Minimum detection level** sensors have no getter
-in rtl_433's API: the receiver's noise floor surfaces only as pulse-detector log
+The receiver's **Noise level** and **Minimum detection level** sensors have no getter
+in rtl_433's API: the radio's noise floor surfaces only as pulse-detector log
 messages (log source `Auto Level`), which a real `-F http` server forwards to
 every WebSocket client as `{"time","src","lvl","msg"}` frames. The harness
 reproduces that end to end, with no synthesized values:
@@ -171,22 +185,22 @@ reproduces that end to end, with no synthesized values:
   the structured log frame the HTTP server would push. The plain-text log drops
   the numeric level, so it is restored per source (`Auto Level` is `LOG_WARNING`).
 - The writer loop feeds ~2 s of RF silence between capture passes. Back-to-back
-  passes keep the receiver permanently "loud": the noise estimate creeps up to
+  passes keep the radio permanently "loud": the noise estimate creeps up to
   the replayed burst level and settles, so `-Y autolevel` never sees a shift over
   1 dB and never logs an adjustment — leaving **Minimum detection level**
   `unknown`. The silence gap makes the noise floor genuinely move, so both
   message forms are emitted from real measurements.
 
-The other hub sensors (center frequency, sample rate, decoded events, …) are
+The other receiver sensors (center frequency, sample rate, decoded events, …) are
 fetched over HTTP `/cmd`, which the bridge does not serve, so they read
-`unknown` in `14-hub-noise.png`. That is the documented WebSocket-only-proxy
+`unknown` in `14-receiver-noise.png`. That is the documented WebSocket-only-proxy
 behaviour rather than a defect; populating them would mean inventing server
 state, so the harness leaves them alone.
 
 ## Why every stage drives the panel
 
 The panel is registered with `config_panel_domain`, so Home Assistant turns the
-hub's Configure control into a link to it and **nothing opens the options flow**.
+location's Configure control into a link to it and **nothing opens the options flow**.
 That is deliberate now, but it was first discovered by accident: for one commit
 it was set while the settings still lived only in the flow, and every one of
 those steps lost its only entry point for real users while passing every Python
@@ -261,6 +275,6 @@ battery indicator in one device.
 | `ws-probe.mjs` | Bounded readiness probe: connects to `/ws`, exits 0 on a decoded event |
 | `ha-config/configuration.yaml` | Minimal HA seed config (debug logging for the integration) |
 | `ha-onboard.mjs` | Seeds HA onboarding (owner + token) via the REST API |
-| `screenshot.mjs` | Playwright driver: login, add hub, capture the documentation screenshots |
+| `screenshot.mjs` | Playwright driver: login, add the location and its receiver, capture the documentation screenshots |
 | `run-harness.sh` | Orchestrator with background+poll readiness gating |
 | `rtl_433_tests/` | Pinned, sparse git submodule with the `.cu8` captures (not vendored) |

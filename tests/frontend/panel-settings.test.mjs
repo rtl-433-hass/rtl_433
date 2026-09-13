@@ -1,12 +1,15 @@
 // Node's own test runner (`node --test`), no dependencies and no build step --
 // the same constraint the panel itself is written under.
 //
-// What is under test is the hub form's availability-timeout rule. The stored
-// timeout has three states and only one of them is a number, so the form asks
-// which of the three you mean and sends a value to match. Getting the mapping
-// wrong is invisible on screen -- the page renders, the save succeeds, and a
-// doorbell quietly starts going unavailable ten minutes after it last rang. So
-// the mapping is a pair of pure functions and this checks them directly.
+// What is under test is the *location* form's availability-timeout rule -- one
+// answer for every device at a location, whichever of its receivers receives it,
+// which is why it is a page of its own now and the manage-radio toggle is a
+// second one. The stored timeout has three states and only one of them is a
+// number, so the form asks which of the three you mean and sends a value to
+// match. Getting the mapping wrong is invisible on screen -- the page renders,
+// the save succeeds, and a doorbell quietly starts going unavailable ten
+// minutes after it last rang. So the mapping is a pair of pure functions and
+// this checks them directly.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -36,7 +39,7 @@ test("nothing stored opens on the per-device-type defaults", () => {
 
 test("a stored zero opens on never-expire", () => {
   // 0 is falsy, and every "is it set?" test that reaches for truthiness reads
-  // this as unset -- which flips a receiver the user told never to expire back
+  // this as unset -- which flips a location the user told never to expire back
   // onto timeouts.
   assert.equal(timeoutMode(0), "never");
 });
@@ -78,8 +81,8 @@ test("the custom mode sends the seconds beside it", () => {
 
 test("a custom timeout with no number falls back to the defaults", () => {
   // A cleared field is mid-edit, not a choice. Falling back to a number of its
-  // own would pin a timeout onto every device on the receiver without anyone
-  // asking for one; falling back to null leaves the hub as it was.
+  // own would pin a timeout onto every device at the location without anyone
+  // asking for one; falling back to null leaves the location as it was.
   assert.equal(timeoutValue("custom", null), null);
   assert.equal(timeoutValue("custom", undefined), null);
   assert.equal(timeoutValue("custom", Number.NaN), null);
@@ -97,8 +100,8 @@ test("an unknown mode is read as the defaults, never as a timeout", () => {
 
 test("opening the form and saving it untouched stores what was there", () => {
   // The property that matters on every one of these pages: a user who opens
-  // Receiver settings to flip the manage-settings toggle, and touches nothing
-  // else, must not change the availability behaviour by doing so.
+  // Location settings to read the timeout, and touches nothing else, must not
+  // change the availability behaviour by saving it.
   for (const stored of [null, 0, 1, 30, PLAIN_DEFAULT, 3600]) {
     const mode = timeoutMode(stored);
     const seconds = mode === "custom" ? stored : PLAIN_DEFAULT;

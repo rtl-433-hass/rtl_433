@@ -1,6 +1,6 @@
-"""Number control platform for the rtl_433 hub config entry.
+"""Number control platform for the rtl_433 receiver config entry.
 
-``async_setup_entry`` runs once for the hub config entry. When the hub's
+``async_setup_entry`` runs once for the receiver config entry. When the receiver's
 ``manage_settings`` toggle is off it creates **no** entities and returns
 immediately, so the integration only ever forwards to a platform that has
 something to register. When management is on it statically registers one
@@ -11,9 +11,9 @@ correction (ppm), gain (dB), and hop interval.
 
 Optimistic-then-confirmed state: ``async_set_native_value`` writes the desired
 value via ``coordinator.set_sdr`` (which persists, sends the ``/cmd``, then
-reads the server back and emits ``signal_hub_update``). Until that read-back
+reads the server back and emits ``signal_receiver_update``). Until that read-back
 arrives ``native_value`` shows the just-set desired value (optimistic); the
-inherited ``signal_hub_update`` subscription then repaints the control with the
+inherited ``signal_receiver_update`` subscription then repaints the control with the
 server's confirmed value.
 """
 
@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .entity import Rtl433HubControl, async_setup_hub_controls
+from .entity import Rtl433ReceiverControl, async_setup_receiver_controls
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
@@ -36,17 +36,16 @@ if TYPE_CHECKING:
 PLATFORM = "number"
 
 
-class Rtl433NumberControl(Rtl433HubControl, NumberEntity):
-    """A managed numeric SDR setting exposed as a hub-device Number entity."""
+class Rtl433NumberControl(Rtl433ReceiverControl, NumberEntity):
+    """A managed numeric SDR setting exposed as a receiver-device Number entity."""
 
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Initialize number-specific description fields from the setting."""
-        super().__init__(coordinator, hub_entry_id, setting)
+        super().__init__(coordinator, setting)
         self._attr_native_min_value = setting.native_min
         self._attr_native_max_value = setting.native_max
         self._attr_native_step = setting.native_step
@@ -70,9 +69,9 @@ class Rtl433NumberControl(Rtl433HubControl, NumberEntity):
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Register the hub's managed Number controls (only when managing)."""
-    await async_setup_hub_controls(
+    """Register every receiver's managed Number controls (only when managing)."""
+    await async_setup_receiver_controls(
         hass, entry, async_add_entities, PLATFORM, Rtl433NumberControl
     )

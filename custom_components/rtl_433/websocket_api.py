@@ -1,35 +1,50 @@
 """WebSocket API for the rtl_433 discovery panel.
 
 Admin-gated commands that expose the pending-device list, the three things a
-user can do with it, and the hub's settings. They are the panel's data source, but they are not
-*only* that: the same commands are the scriptable, UI-free way to see what a
-receiver is hearing and to approve it, and they are testable without loading any
-JavaScript at all.
+user can do with it, and the settings of a location and its receivers. They are
+the panel's data source, but they are not *only* that: the same commands are the
+scriptable, UI-free way to see what a location is hearing and to approve it, and
+they are testable without loading any JavaScript at all.
 
-- ``rtl_433/hubs`` — the configured hubs, so a caller can address one.
-- ``rtl_433/devices/pending`` — one hub's candidates, plus its ignore list.
+- ``rtl_433/receivers`` — every configured location and the receivers inside
+  it, so a caller can address one of each.
+- ``rtl_433/devices/pending`` — the location's merged candidates (one row per
+  sensor, however many of its receivers received it, each naming the receivers
+  that received it and how well), plus its ignore list.
 - ``rtl_433/devices/add`` / ``.../ignore`` / ``.../unignore`` — the three
   actions, each delegating to :mod:`.adoption` so they do exactly what the
   options flow does.
 - ``rtl_433/devices/subscribe`` — the same payload as ``.../pending``, pushed
   when it changes.
-- ``rtl_433/settings/get`` and ``.../hub`` / ``.../device`` / ``.../mappings`` —
-  the hub's own settings, one device's settings, and the device-library
-  overrides. These are the panel's half of the same forms the options flow
-  renders; both sides build their dicts with :mod:`.settings`, so what a form
-  stores does not depend on which form was used.
+- ``rtl_433/devices/coverage`` — per-receiver signal detail for the devices the
+  location has already adopted, read straight from the aggregator.
+- ``rtl_433/settings/get`` and ``.../location`` / ``.../receiver`` /
+  ``.../device`` / ``.../mappings`` — everything the settings pages render, then
+  the location's own defaults, one receiver's radio settings, one device's
+  settings, and the device-library overrides. These are the panel's half of the
+  same forms the options flow renders; both sides build their dicts with
+  :mod:`.settings`, so what a form stores does not depend on which form was used.
 
-Every command names a hub by ``entry_id`` and resolves it through
-:func:`_async_get_coordinator`, which answers a bad id with a WebSocket error
-rather than an exception. A panel left open across a hub reload will send
-commands for an entry that is momentarily not loaded, and that is a normal
-condition to report, not a crash to log.
+**Every command names a location by ``entry_id``**, resolved through
+:func:`_async_get_location`, which answers a bad id with a WebSocket error
+rather than an exception. A panel left open across a reload will send commands
+for an entry that is momentarily not loaded, and that is a normal condition to
+report, not a crash to log.
+
+The scoping is the model, not a convention: a *location* owns the sensors, so
+adoption, the ignore list, the per-device settings, the mapping overrides and
+the availability default are all addressed by the location entry alone. A
+*receiver* owns a radio, so the one command that configures a radio
+(``rtl_433/settings/receiver``) additionally names it by ``receiver_id`` — its
+config **subentry** id, which is what :func:`_async_get_receiver` resolves.
 
 **Pushes to an open subscription are rate-limited**, and come in two kinds.
 
 A *membership* change (:data:`~.const.SIGNAL_PENDING_UPDATE`: a candidate
-appeared, or one was adopted, ignored, or un-ignored) is pushed immediately,
-because it answers "is there something new for me?".
+appeared on any of the location's receivers, or one was adopted, ignored, or
+un-ignored across them) is pushed immediately, because it answers "is there
+something new for me?". That signal is location-scoped, so two receivers
+decoding the same new sensor announce one changed list, not two.
 
 A *repeat sighting* only ages the count and last-seen columns of a row already
 on screen, so it is not pushed directly. A slow :data:`_REFRESH_INTERVAL` timer
@@ -65,7 +80,7 @@ import voluptuous as vol
 import yaml
 
 from homeassistant.components import websocket_api
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
@@ -79,6 +94,12 @@ from .adoption import (
     async_ignore_devices,
     async_unignore_devices,
 )
+from .aggregator import (
+    ReceiverCoverage,
+    clear_pending,
+    location_aggregator,
+    merged_candidates,
+)
 from .calibration import COMMODITY_UNITS, normalize_calibration
 from .const import (
     CALIBRATION_COMMODITIES,
@@ -88,8 +109,10 @@ from .const import (
     COMMODITY_NONE,
     CONF_AVAILABILITY_TIMEOUT,
     CONF_DEVICES,
+    CONF_HOST,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
+    CONF_PORT,
     CONF_USER_MAPPINGS,
     DATA_ENTITY_META,
     DEFAULT_AVAILABILITY_TIMEOUT,
@@ -99,19 +122,23 @@ from .const import (
     DOMAIN,
     signal_pending_update,
 )
-from .coordinator import Rtl433Coordinator
 from .device_replace import DeviceReplaceError, async_replace_device
 from .entity import resolve_event_type
-from .hub_settings import _hub_ignored_devices
+from .receiver_settings import (
+    _receiver_ignored_devices,
+    _receiver_manage_settings,
+    receiver_coordinators,
+    receiver_subentries,
+)
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,
     build_device_options,
-    build_hub_options,
+    build_location_options,
     build_mappings_data,
     device_defaults,
     entry_registry,
-    hub_defaults,
+    location_defaults,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -123,15 +150,15 @@ _LOGGER = logging.getLogger(__name__)
 # changes do not wait for this -- they push at once.
 _REFRESH_INTERVAL: Final = timedelta(seconds=5)
 
-# Error code for a hub whose entry exists but is not set up. Distinct from
-# ``ERR_NOT_FOUND`` (no such entry) so the caller can tell a hub that is
+# Error code for a location whose entry exists but is not set up. Distinct from
+# ``ERR_NOT_FOUND`` (no such entry) so the caller can tell a location that is
 # temporarily unavailable from an entry id that does not exist.
 ERR_NOT_LOADED: Final = "not_loaded"
 # A replace the user asked for that the helper refused: an unknown survivor, or
 # the same key on both sides. Its own code rather than ``not_loaded`` so a script
-# can tell "your hub is mid-reload, retry" from "that request cannot work".
+# can tell "your location is mid-reload, retry" from "that request cannot work".
 ERR_REPLACE_FAILED: Final = "replace_failed"
-# Mapping overrides the user submitted that this hub will not store: YAML that
+# Mapping overrides the user submitted that this location will not store: YAML that
 # does not parse, or a document that parses but breaks the override schema. Its own code so
 # the caller can render the problems in the editor rather than as a generic
 # failure, and the message carries them joined for a client that cannot.
@@ -142,44 +169,51 @@ ERR_INVALID_MAPPINGS: Final = "invalid_mappings"
 def async_register_commands(hass: HomeAssistant) -> None:
     """Register the discovery commands.
 
-    Called from every hub's ``async_setup_entry`` because this integration is
-    entry-only. Command names are global and registration is really per Home
+    Called from every location's ``async_setup_entry`` because this integration
+    is entry-only. Command names are global and registration is really per Home
     Assistant *run*, but it needs no guard of its own:
     ``async_register_command`` is a dict assignment keyed by command name, so a
-    second hub -- or the same hub reloading -- rewrites the same entries with the
-    same handlers. Registering is idempotent, so the simplest thing that works is
-    to just register.
+    second location -- or the same location reloading -- rewrites the same
+    entries with the same handlers. Registering is idempotent, so the simplest
+    thing that works is to just register.
     """
-    websocket_api.async_register_command(hass, ws_hubs)
+    websocket_api.async_register_command(hass, ws_receivers)
     websocket_api.async_register_command(hass, ws_pending_devices)
     websocket_api.async_register_command(hass, ws_add_devices)
     websocket_api.async_register_command(hass, ws_ignore_devices)
     websocket_api.async_register_command(hass, ws_unignore_devices)
     websocket_api.async_register_command(hass, ws_replace_device)
     websocket_api.async_register_command(hass, ws_clear_devices)
+    websocket_api.async_register_command(hass, ws_device_coverage)
     websocket_api.async_register_command(hass, ws_subscribe_devices)
     websocket_api.async_register_command(hass, ws_get_settings)
-    websocket_api.async_register_command(hass, ws_set_hub_settings)
+    websocket_api.async_register_command(hass, ws_set_location_settings)
+    websocket_api.async_register_command(hass, ws_set_receiver_settings)
     websocket_api.async_register_command(hass, ws_set_device_settings)
     websocket_api.async_register_command(hass, ws_set_mappings)
 
 
 @callback
-def _async_get_coordinator(
+def _async_get_location(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
-) -> tuple[ConfigEntry, Rtl433Coordinator] | None:
-    """Resolve ``msg["entry_id"]`` to a hub, or answer with an error.
+) -> ConfigEntry | None:
+    """Resolve ``msg["entry_id"]`` to a location entry, or answer with an error.
 
     Returns ``None`` after sending the error, so every handler's first line can
     be a bail-out and a bad ``entry_id`` never escapes as an exception. Two
     distinct failures are worth distinguishing to the caller: an id that names no
     entry of this integration at all (a stale panel bookmark, or a typo in a
-    script) and one whose entry exists but is not set up (a hub mid-reload, or one
-    whose server is unreachable). The pending list lives only in the
-    coordinator's memory, so the second case has nothing to answer with either --
+    script) and one whose entry exists but is not set up (a location mid-reload,
+    or one whose servers are unreachable). The candidate list lives only in the
+    coordinators' memory, so the second case has nothing to answer with either --
     but it is a wait, not a mistake.
+
+    It resolves the **location**, never a receiver. Everything these commands act
+    on -- the candidates, the ignore list, the adopted devices, the mappings --
+    belongs to the location; the one setting that does not is named separately,
+    by :func:`_async_get_receiver`.
     """
     entry_id: str = msg["entry_id"]
     entry = hass.config_entries.async_get_entry(entry_id)
@@ -187,20 +221,104 @@ def _async_get_coordinator(
         connection.send_error(
             msg["id"],
             websocket_api.const.ERR_NOT_FOUND,
-            f"Unknown rtl_433 hub {entry_id}",
+            f"Unknown rtl_433 location {entry_id}",
         )
         return None
 
-    coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
-    if coordinator is None or entry.state is not ConfigEntryState.LOADED:
+    if entry.state is not ConfigEntryState.LOADED:
         connection.send_error(
             msg["id"],
             ERR_NOT_LOADED,
-            f"rtl_433 hub {entry.title} is not loaded",
+            f"rtl_433 location {entry.title} is not loaded",
         )
         return None
 
-    return entry, coordinator
+    return entry
+
+
+@callback
+def _async_get_receiver(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> tuple[ConfigEntry, ConfigSubentry] | None:
+    """Resolve ``entry_id`` + ``receiver_id`` to one receiver, or send an error.
+
+    The receiver-scoped half of the pair. ``receiver_id`` is a **config subentry**
+    id, and it is always resolved *through* the location that owns it: that is
+    what keeps one location's command from reaching into another's radio, and
+    what makes an id copied from the wrong location a plain ``not_found`` rather
+    than a cross-location write.
+    """
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
+        return None
+
+    receiver_id: str = msg["receiver_id"]
+    for subentry in receiver_subentries(entry):
+        if subentry.subentry_id == receiver_id:
+            return entry, subentry
+
+    connection.send_error(
+        msg["id"],
+        websocket_api.const.ERR_NOT_FOUND,
+        f"Unknown rtl_433 receiver {receiver_id} in {entry.title}",
+    )
+    return None
+
+
+@callback
+def _receiver_row(
+    hass: HomeAssistant, entry: ConfigEntry, subentry: ConfigSubentry
+) -> dict[str, Any]:
+    """Describe one receiver: what it is, where it dials, and how it is doing.
+
+    One row shape for both commands that list receivers, rather than a lean one
+    for the picker and a fat one for the settings page. The difference between
+    them was never worth two renderers -- it is a handful of scalars, and a
+    caller that only wants the title ignores the rest.
+
+    ``connected`` is the live socket, read from the running coordinator, and is
+    ``False`` for a receiver whose location is not loaded. That is the honest
+    answer rather than a missing one: a receiver Home Assistant is not running is
+    a receiver that is not hearing anything.
+    """
+    coordinator = receiver_coordinators(hass, entry).get(subentry.subentry_id)
+    return {
+        "receiver_id": subentry.subentry_id,
+        "title": subentry.title,
+        "host": subentry.data.get(CONF_HOST),
+        "port": subentry.data.get(CONF_PORT),
+        "connected": coordinator is not None and coordinator.connected,
+        CONF_MANAGE_SETTINGS: _receiver_manage_settings(entry, subentry),
+    }
+
+
+@callback
+def _coverage_row(coverage: ReceiverCoverage) -> dict[str, Any]:
+    """Render one receiver's view of one device as JSON.
+
+    The shape a panel draws *"received by Attic (-62 dB) / Garage (-89 dB)"* from,
+    and the reason it can draw it at all: ``rssi`` and ``snr`` are mapped with
+    ``enabled_by_default: false`` and stay that way, so a coverage display that
+    waited for entities would show nothing on a default install. These values
+    come from aggregator state instead, which keeps them per receiver precisely
+    because the union throws them away.
+
+    ``last_seen`` goes out as an ISO string because JSON has no datetime, and is
+    ``null`` for a receiver that has never received the device -- itself a coverage
+    answer, and why such a receiver is listed rather than omitted.
+    """
+    return {
+        "receiver_id": coverage.receiver_id,
+        "connected": coverage.connected,
+        "vouches": coverage.vouches,
+        "last_seen": (
+            coverage.last_seen.isoformat() if coverage.last_seen is not None else None
+        ),
+        "rssi": coverage.rssi,
+        "snr": coverage.snr,
+    }
 
 
 async def async_preload_entity_metadata(hass: HomeAssistant) -> None:
@@ -213,12 +331,12 @@ async def async_preload_entity_metadata(hass: HomeAssistant) -> None:
     them is what lets this payload promise "these are the entities you are
     about to get" rather than an approximation of them.
 
-    Loaded once during hub setup because both accessors do file I/O on first
+    Loaded once during location setup because both accessors do file I/O on first
     use, and cached so ``_pending_payload`` -- a sync ``@callback`` -- can
     resolve without awaiting. Failure is not fatal: the preview degrades to
-    un-iconed, un-translated rows rather than failing a hub's setup.
+    un-iconed, un-translated rows rather than failing a location's setup.
 
-    The strings are fetched for the language configured *now*. A hub reload
+    The strings are fetched for the language configured *now*. A location reload
     picks up a language change; nothing else does.
     """
     domain_data = hass.data.setdefault(DOMAIN, {})
@@ -340,7 +458,7 @@ def _reading_name(descriptor: FieldDescriptor, meta: _EntityMeta) -> str:
 
     That derivation is a *lookup*, not a spelling rule -- core's table says
     ``pm25`` is "PM2.5" and ``aqi`` is "Air quality index", which no amount of
-    underscore-replacing produces -- and it is translated, so a German hub
+    underscore-replacing produces -- and it is translated, so a German receiver
     previews the same word its device page will show.
 
     A field with neither a name nor a device class core knows is titled after
@@ -461,26 +579,29 @@ def _readings(
 
 
 @callback
-def _pending_payload(
-    hass: HomeAssistant, entry: ConfigEntry, coordinator: Rtl433Coordinator
-) -> dict[str, Any]:
-    """Render one hub's approval state: the candidates and the ignore list.
+def _pending_payload(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
+    """Render the location's approval state: the candidates and the ignore list.
 
     One payload rather than two commands so the panel has a single renderer and a
     single source of truth for a screen that shows both -- and so an un-ignore,
     which changes only the second half, still reaches an open panel through the
     same push.
 
-    Candidates are ordered by
-    :meth:`~.coordinator.Rtl433Coordinator.pending_candidates`, which is also
-    what the options form renders, so the two surfaces cannot put a different
-    device at the top of the same list. Timestamps go out as ISO
-    strings because JSON has no datetime and the panel wants to format them in the
-    viewer's locale anyway.
+    Candidates are the location's **merged** list
+    (:func:`~.aggregator.merged_candidates`), which is also what the options form
+    renders, so the two surfaces cannot put a different device at the top of the
+    same list -- and a sensor two receivers both hear is one row showing whichever
+    of them received it last, carrying ``receivers`` so the page can say who did,
+    how recently, and how well. That per-receiver detail is the candidate's own
+    (:class:`~.aggregator.MergedCandidate`), not the aggregator's coverage map: a
+    *pending* device dispatches nothing, so there is nothing in that map to read
+    until it is adopted -- which is what ``rtl_433/devices/coverage`` is for.
+    Timestamps go out as ISO strings because JSON has no datetime and the panel
+    wants to format them in the viewer's locale anyway.
 
     The ignore list carries a model wherever one can be found. There is rarely a
     *stored* record -- a device is usually ignored while pending, long before it
-    has one -- so the coordinator's memory of what it last decoded for that key
+    has one -- so the receivers' memory of what they last decoded for that key
     fills in, which covers both the device just ignored and the one still
     transmitting after a restart. Only a key that has neither goes out unnamed.
     """
@@ -491,35 +612,56 @@ def _pending_payload(
     # the preview shows "no readings" rather than a guess.
     registry = entry_registry(hass, entry)
     meta: _EntityMeta = hass.data.get(DOMAIN, {}).get(DATA_ENTITY_META, _EMPTY_META)
+    coordinators = receiver_coordinators(hass, entry)
+    # One lookup for the whole render: the last model each receiver decoded for
+    # an ignored key, merged in receiver order so any receiver that can still
+    # name the device does.
+    ignored_models: dict[str, str] = {}
+    for coordinator in coordinators.values():
+        ignored_models.update(coordinator.ignored_models)
     return {
-        # Whether the hub's socket to the rtl_433 server is up -- the same fact
-        # the hub's Connectivity binary sensor reports. The panel cannot work
-        # this out for itself: its own subscription stays healthy while the
-        # receiver's connection is down, so a page that inferred it from "am I
-        # receiving payloads?" would say Online through an outage.
-        "connected": coordinator.connected,
+        # Whether the location can currently hear anything -- true while *any* of
+        # its receivers has its socket to an rtl_433 server up, the same fact
+        # those receivers' Connectivity binary sensors report one at a time. The
+        # panel cannot work this out for itself: its own subscription stays
+        # healthy while a receiver's connection is down, so a page that inferred
+        # it from "am I receiving payloads?" would say Online through an outage.
+        "connected": any(
+            coordinator.connected for coordinator in coordinators.values()
+        ),
         "pending": [
             {
-                "key": record.key,
-                "model": record.model,
-                "count": record.count,
-                "signal": record.signal,
-                "first_seen": record.first_seen.isoformat(),
-                "last_seen": record.last_seen.isoformat(),
-                "readings": _readings(record.fields, record.model, registry, meta),
+                "key": candidate.key,
+                "model": candidate.record.model,
+                "count": candidate.record.count,
+                "signal": candidate.record.signal,
+                "first_seen": candidate.record.first_seen.isoformat(),
+                "last_seen": candidate.record.last_seen.isoformat(),
+                # Which receivers have received this candidate, in receiver order,
+                # and how well, so the page can show coverage before the user
+                # adds anything. ``vouches`` is always false here -- vouching is
+                # about an adopted device's availability, and a candidate has
+                # none -- but the row keeps the shape ``.../coverage`` uses so a
+                # panel renders both lists with one function.
+                "receivers": [
+                    _coverage_row(coverage) for coverage in candidate.coverage
+                ],
+                "readings": _readings(
+                    candidate.record.fields, candidate.record.model, registry, meta
+                ),
             }
-            for record in coordinator.pending_candidates()
+            for candidate in merged_candidates(hass, entry)
         ],
         "ignored": [
             {
                 "key": device_key,
                 "model": stored.get(device_key, {}).get(CONF_MODEL)
-                or coordinator.ignored_models.get(device_key, ""),
+                or ignored_models.get(device_key, ""),
             }
-            for device_key in sorted(_hub_ignored_devices(entry))
+            for device_key in sorted(_receiver_ignored_devices(entry))
         ],
-        # The devices this hub already has, offered as the thing a candidate can
-        # replace. Sent with the candidates rather than fetched when the
+        # The devices this location already has, offered as the thing a candidate
+        # can replace. Sent with the candidates rather than fetched when the
         # dialog opens, so the candidate and the devices it could replace always
         # come from the same snapshot and cannot disagree.
         "devices": [
@@ -529,10 +671,11 @@ def _pending_payload(
     }
 
 
-# The parameters every action command takes. Spread into each command's schema
-# rather than repeated, so ``entry_id`` and ``device_keys`` cannot come to mean
-# something subtly different on one of the three. The ``type`` is added per
-# command because ``websocket_command`` reads the command name out of it.
+# The parameters every action command takes: a **location** and the device keys
+# to act on. Spread into each command's schema rather than repeated, so
+# ``entry_id`` and ``device_keys`` cannot come to mean something subtly
+# different on one of the three. The ``type`` is added per command because
+# ``websocket_command`` reads the command name out of it.
 _ACTION_PARAMS: Final[dict[Any, Any]] = {
     vol.Required("entry_id"): str,
     vol.Required("device_keys"): [str],
@@ -544,11 +687,11 @@ async def _async_run_action(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
     action: Callable[
-        [HomeAssistant, ConfigEntry, Rtl433Coordinator, list[str]],
+        [HomeAssistant, ConfigEntry, list[str]],
         Awaitable[AdoptionResult],
     ],
 ) -> None:
-    """Resolve the hub, run one :mod:`.adoption` verb, and reply with the result.
+    """Resolve the location, run one :mod:`.adoption` verb, and reply with the result.
 
     The three action commands differ only in which verb they call: each resolves
     the same ``entry_id``, hands the same ``device_keys`` to its function, and
@@ -560,39 +703,50 @@ async def _async_run_action(
     never has to guard a missing key to find out that everything it asked for
     went through.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
         return
-    entry, coordinator = resolved
-    result = await action(hass, entry, coordinator, msg["device_keys"])
+    result = await action(hass, entry, msg["device_keys"])
     connection.send_result(
         msg["id"], {"applied": result.applied, "skipped": result.skipped}
     )
 
 
-@websocket_api.websocket_command({vol.Required("type"): "rtl_433/hubs"})
+@websocket_api.websocket_command({vol.Required("type"): "rtl_433/receivers"})
 @websocket_api.require_admin
 @callback
-def ws_hubs(
+def ws_receivers(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """List this integration's hubs so a caller can pick one to address.
+    """List the locations and the receivers in each, so a caller can address one.
 
-    Every other command needs an ``entry_id``, and a panel opened from the
-    sidebar has no way to know one. Hubs that are not loaded are listed too,
-    flagged rather than hidden: a user with an unreachable receiver should see it
-    named and explained, not silently absent while they wonder where it went.
+    Every other command needs an ``entry_id``, and the receiver-scoped one needs
+    a ``receiver_id`` as well; a panel opened from the sidebar knows neither. The
+    two travel together because they are one question -- *what is configured?* --
+    and because a flat list of receivers would hide the grouping that is the
+    whole model: two receivers of one location union their devices, two receivers
+    of two locations deliberately do not.
+
+    Locations that are not loaded are listed too, flagged rather than hidden: a
+    user with an unreachable server should see it named and explained, not
+    silently absent while they wonder where it went. Their receivers still come
+    from the stored subentries, so an unloaded location is a named thing with
+    named parts rather than an empty shell.
     """
     connection.send_result(
         msg["id"],
         {
-            "hubs": [
+            "locations": [
                 {
                     "entry_id": entry.entry_id,
                     "title": entry.title,
                     "loaded": entry.state is ConfigEntryState.LOADED,
+                    "receivers": [
+                        _receiver_row(hass, entry, subentry)
+                        for subentry in receiver_subentries(entry)
+                    ],
                 }
                 for entry in hass.config_entries.async_entries(DOMAIN)
             ]
@@ -613,17 +767,16 @@ def ws_pending_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Return one hub's pending candidates and its ignore list.
+    """Return the location's merged pending candidates and its ignore list.
 
     The one-shot form of what ``rtl_433/devices/subscribe`` pushes, for a caller
     that wants an answer rather than a stream -- a script, a diagnostic, or a
     panel confirming what it just did.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
         return
-    entry, coordinator = resolved
-    connection.send_result(msg["id"], _pending_payload(hass, entry, coordinator))
+    connection.send_result(msg["id"], _pending_payload(hass, entry))
 
 
 @websocket_api.websocket_command(
@@ -678,7 +831,11 @@ def ws_clear_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Forget every candidate heard so far, so the list can refill from scratch.
+    """Forget every candidate received so far, so the list can refill from scratch.
+
+    Cleared across every receiver of the location, because the list the user is
+    looking at is the merge of all of them: leaving one receiver's copy would put
+    the rows straight back.
 
     A receiver in a busy neighbourhood can accumulate hundreds of candidates,
     burying the one device the user actually wants. After clearing, only devices
@@ -693,11 +850,86 @@ def ws_clear_devices(
     Devices the user has explicitly ignored stay ignored. That list is stored on
     disk and records a choice they made; un-ignore is how it is undone.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
         return
-    _entry, coordinator = resolved
-    connection.send_result(msg["id"], {"cleared": coordinator.clear_pending()})
+    connection.send_result(msg["id"], {"cleared": clear_pending(hass, entry)})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rtl_433/devices/coverage",
+        vol.Required("entry_id"): str,
+        vol.Optional("device_keys"): [str],
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_device_coverage(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Report how well each receiver receives each of the location's devices.
+
+    The A-vs-B detail the union deliberately hides. A merged device shows one
+    temperature however many receivers decoded it, which is the point -- but
+    *which* receiver receives it, how strongly, and how recently is the question a
+    second receiver was bought to answer, so it is served here from
+    :meth:`~.aggregator.Rtl433LocationAggregator.coverage` rather than from
+    entities: ``rssi`` and ``snr`` are mapped ``enabled_by_default: false`` and
+    stay that way, and a location would otherwise pay *sensors x receivers x 2*
+    disabled entities for a detail most users only glance at.
+
+    Deliberately **not** folded into the pending payload, even though it would
+    ride the open subscription for free. Coverage moves on every frame, so a
+    subscription carrying it would push on the refresh timer for as long as
+    anything is transmitting -- exactly the per-frame chatter the two-speed
+    design exists to prevent, and worst on the settled install where the pending
+    list is empty and the panel currently costs nothing at all. A one-shot
+    command puts the cost on the page that is actually displaying it.
+
+    ``device_keys`` names the devices to report on, in the caller's own order; it
+    defaults to every device the location has adopted, sorted, which is what a
+    page listing them all wants. A key that was never adopted is answered rather
+    than refused -- every receiver present, all values ``null`` -- because
+    "nothing has received that" is the true answer and a panel racing an adoption
+    should not get an error for it.
+    """
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
+        return
+
+    aggregator = location_aggregator(hass, entry.entry_id)
+    device_keys: list[str] = msg.get(
+        "device_keys", sorted(entry.data.get(CONF_DEVICES, {}))
+    )
+    connection.send_result(
+        msg["id"],
+        {
+            "devices": [
+                {
+                    "key": device_key,
+                    # Merged availability, the same OR-over-receivers the merged
+                    # device's entities apply, so a page can explain an
+                    # unavailable device with the very rows beneath it.
+                    "available": (
+                        aggregator is not None
+                        and aggregator.device_available(device_key)
+                    ),
+                    "receivers": (
+                        []
+                        if aggregator is None
+                        else [
+                            _coverage_row(coverage)
+                            for coverage in aggregator.coverage(device_key)
+                        ]
+                    ),
+                }
+                for device_key in device_keys
+            ]
+        },
+    )
 
 
 @websocket_api.websocket_command(
@@ -735,10 +967,9 @@ async def ws_replace_device(
     longer there -- so it comes back as a WebSocket error the panel renders in
     its banner, not as a traceback in the log.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
         return
-    entry, _coordinator = resolved
     try:
         await async_replace_device(
             hass, entry, old_key=msg["replaces"], new_key=msg["device_key"]
@@ -783,18 +1014,18 @@ def ws_subscribe_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Push one hub's approval state whenever it changes.
+    """Push the location's approval state whenever it changes.
 
     The pending list changes continuously by design -- that is what makes a
     config-flow form the wrong shape for it -- so the panel subscribes rather
-    than polling, and a device heard while the page is open appears without a
+    than polling, and a device received while the page is open appears without a
     reload.
 
     Two triggers, deliberately unequal (see the module docstring). The dispatcher
     signal fires only on a *membership* change and pushes at once. The
     :data:`_REFRESH_INTERVAL` timer covers what fires no signal -- a repeat
     sighting ageing a row's count and last-seen -- and sends only when the
-    rendered payload differs from the last one sent, so an idle hub costs nothing
+    rendered payload differs from the last one sent, so an idle receiver costs nothing
     and a busy one costs at most one message per interval.
 
     The comparison against ``last_sent`` guards the immediate path too. It is
@@ -807,23 +1038,22 @@ def ws_subscribe_devices(
     timer down with the listener and never leaves an orphaned interval firing
     against a dead connection.
 
-    The **coordinator is re-resolved on every render**, never captured. A hub
-    reload replaces the object in ``hass.data`` while the subscription lives on
-    (the config entry, and so the dispatcher signal, survive the reload), so a
+    The **coordinators are re-resolved on every render**, never captured. A
+    reload replaces those objects in ``hass.data`` while the subscription lives
+    on (the config entry, and so the dispatcher signal, survive the reload), so a
     captured coordinator would be a stopped one whose pending map never changes
     again -- the panel would sit on a frozen list for the rest of the session
-    without ever reporting an error. Re-reading it means the first render after
-    the new coordinator lands shows what the running hub is actually hearing.
-    While the entry is mid-reload there is briefly no coordinator at all; that is
+    without ever reporting an error. Re-reading them means the first render after
+    the new coordinators land shows what the running receivers are actually
+    hearing. While the entry is mid-reload there is briefly none at all; that is
     a gap of milliseconds with nothing truthful to say, so the render is skipped
-    and the last payload stands until the hub is back.
+    and the last payload stands until the location is back.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
         return
-    entry, coordinator = resolved
 
-    last_sent: dict[str, Any] = _pending_payload(hass, entry, coordinator)
+    last_sent: dict[str, Any] = _pending_payload(hass, entry)
 
     @callback
     def _push_if_changed(_now: Any = None) -> None:
@@ -834,10 +1064,9 @@ def ws_subscribe_devices(
         rather than absorbed by a second wrapper per trigger.
         """
         nonlocal last_sent
-        live: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-        if live is None:
+        if not receiver_coordinators(hass, entry):
             return
-        payload = _pending_payload(hass, entry, live)
+        payload = _pending_payload(hass, entry)
         if payload == last_sent:
             return
         last_sent = payload
@@ -871,17 +1100,24 @@ def ws_subscribe_devices(
 # --------------------------------------------------------------------------- #
 # Settings.                                                                    #
 #                                                                              #
-# The hub's own options, one device's overrides, and the device-library         #
-# mapping overrides -- the three forms that used to be reachable only through   #
-# the options flow, and are now the panel's dialogs as well. Every rule about   #
-# what a submitted value *means* lives in ``settings.py``; these commands are   #
-# transport only. They apply no rules of their own, so they cannot disagree   #
-# with the options flow about what a saved value means.                        #
+# The location's own defaults, one receiver's radio settings, one device's     #
+# overrides, and the device-library mapping overrides -- the forms that used to #
+# be reachable only through the options flow, and are now the panel's dialogs   #
+# as well. Every rule about what a submitted value *means* lives in            #
+# ``settings.py``; these commands are transport only. They apply no rules of    #
+# their own, so they cannot disagree with the options flow about what a saved   #
+# value means.                                                                  #
+#                                                                              #
+# The split between them is the model, not a filing convention. The            #
+# availability default, the per-device overrides and the mapping overrides are  #
+# statements about *sensors*, which belong to the location however many servers #
+# decode them. The manage-radio toggle is a statement about *one radio*, so it  #
+# is the only one that names a receiver.                                       #
 # --------------------------------------------------------------------------- #
 
 
 def _mappings_yaml(entry: ConfigEntry) -> str:
-    """Render this hub's mapping overrides as the YAML a user would type.
+    """Render this location's mapping overrides as the YAML a user would type.
 
     The overrides are stored as a plain nested mapping, and YAML is how the
     documentation writes them and how the options flow's editor showed them --
@@ -889,8 +1125,8 @@ def _mappings_yaml(entry: ConfigEntry) -> str:
     would have to translate in their head.
 
     An empty override set renders as the empty string rather than ``{}``, so a
-    hub that has never overridden anything opens an empty editor instead of one
-    holding a token the user has to delete before typing.
+    location that has never overridden anything opens an empty editor instead of
+    one holding a token the user has to delete before typing.
 
     ``allow_unicode=True`` matters more here than it looks. Units are exactly
     where non-ASCII characters live -- degrees, cubic metres, micrograms -- and
@@ -919,25 +1155,29 @@ def ws_get_settings(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Answer with everything the three settings forms need to render.
+    """Answer with everything the settings forms need to render.
 
-    One command rather than three because they are one screenful: the panel
-    opens all three dialogs from the same page and would otherwise make three
-    round trips to fill controls the user may never look at. The payload is
-    small -- a couple of scalars, one row per adopted device, and the override
+    One command rather than four because they are one screenful: the panel opens
+    every dialog from the same page and would otherwise make a round trip each to
+    fill controls the user may never look at. The payload is small -- a couple of
+    scalars, one row per receiver, one per adopted device, and the override
     document.
+
+    ``location`` and ``receivers`` are separate keys because they are written by
+    separate commands: everything under ``location`` is submitted to
+    ``rtl_433/settings/location`` and each row of ``receivers`` to
+    ``rtl_433/settings/receiver`` with its own ``receiver_id``. A form that read
+    them from one merged block could not know which write to make.
 
     The commodity tables travel with it rather than being hard-coded in the
     panel. Which units Home Assistant will accept for a gas meter is not a fact
     about this panel, it is a fact about :mod:`.calibration`, and a panel that
     carried its own copy would offer a unit the entity build then rejects.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
         return
-    entry, _coordinator = resolved
 
-    hub = hub_defaults(entry)
     devices = [
         device_defaults(hass, entry, device_key)
         for device_key in sorted(entry.data.get(CONF_DEVICES, {}))
@@ -945,7 +1185,11 @@ def ws_get_settings(
     connection.send_result(
         msg["id"],
         {
-            "hub": hub,
+            "location": location_defaults(entry),
+            "receivers": [
+                _receiver_row(hass, entry, subentry)
+                for subentry in receiver_subentries(entry)
+            ],
             "defaults": {
                 CONF_AVAILABILITY_TIMEOUT: DEFAULT_AVAILABILITY_TIMEOUT,
                 DEVICE_MOTION_CLEAR_DELAY: DEFAULT_MOTION_CLEAR_DELAY,
@@ -963,43 +1207,113 @@ def ws_get_settings(
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "rtl_433/settings/hub",
+        vol.Required("type"): "rtl_433/settings/location",
         vol.Required("entry_id"): str,
         # `None` is "use the per-device-type defaults", which is a choice the
         # panel offers outright rather than encoding as a magic number -- see
-        # `build_hub_options`.
+        # `build_location_options`.
         vol.Required(CONF_AVAILABILITY_TIMEOUT): vol.Any(
             None, vol.All(int, vol.Range(min=0))
         ),
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_set_location_settings(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Persist the location-level options.
+
+    The availability default is a statement about how long a *sensor* may go
+    quiet before it is called unavailable, which has nothing to do with which
+    server decoded it -- so it is set once for the location and every receiver's
+    watchdog reads the same number.
+
+    ``async_update_entry`` is the whole write: it fires the update listener,
+    which pushes the changed timeout into every running coordinator live.
+    Nothing is reloaded here, for the same reason the config flow does not --
+    one writer, one listener, one reload.
+    """
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
+        return
+    hass.config_entries.async_update_entry(
+        entry,
+        options=build_location_options(entry, msg[CONF_AVAILABILITY_TIMEOUT]),
+    )
+    connection.send_result(msg["id"], location_defaults(entry))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "rtl_433/settings/receiver",
+        vol.Required("entry_id"): str,
+        vol.Required("receiver_id"): str,
         vol.Required(CONF_MANAGE_SETTINGS): bool,
     }
 )
 @websocket_api.require_admin
 @callback
-def ws_set_hub_settings(
+def ws_set_receiver_settings(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Persist the hub-level options.
+    """Persist one receiver's radio settings.
 
-    ``async_update_entry`` is the whole write: it fires the update listener,
-    which pushes a changed timeout into the running coordinator live and reloads
-    the hub only if the manage-settings toggle moved. Nothing is reloaded here
-    for the same reason the config flow does not -- one writer, one listener, one
-    reload.
+    The manage-radio toggle decides whether *that* radio's frequency, gain and
+    sample rate are adopted into Home Assistant and enforced on reconnect, so it
+    belongs to the receiver and is stored on its subentry -- which is where the
+    add and reconfigure flows already write it. A location with an attic receiver
+    whose radio is hers and a garage receiver shared with a neighbour can now say
+    so; one toggle for the pair could not.
+
+    **The write also retires the location-wide override.** Older entries carry a
+    single ``manage_settings`` in ``entry.options`` that shadows every subentry
+    (:func:`~.receiver_settings._receiver_manage_settings`), and the options flow
+    still writes it; leaving it in place would make this command store a value
+    that is never read. It is dropped, and first written down onto any receiver
+    that had no value of its own, so every *other* receiver's effective setting
+    is exactly what it was a moment ago and only the named one changes.
+
+    Each write fires the update listener, which reloads the location when a
+    toggle actually moved -- the radio control entities appear or disappear, so
+    there is nothing lighter that would be correct. A save that changes nothing
+    writes nothing: ``async_update_subentry`` compares before it fires.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
+    resolved = _async_get_receiver(hass, connection, msg)
     if resolved is None:
         return
-    entry, _coordinator = resolved
-    hass.config_entries.async_update_entry(
+    entry, subentry = resolved
+
+    if CONF_MANAGE_SETTINGS in entry.options:
+        inherited = bool(entry.options[CONF_MANAGE_SETTINGS])
+        for other in receiver_subentries(entry):
+            if other.subentry_id == subentry.subentry_id:
+                continue
+            if CONF_MANAGE_SETTINGS not in other.data:
+                hass.config_entries.async_update_subentry(
+                    entry,
+                    other,
+                    data={**other.data, CONF_MANAGE_SETTINGS: inherited},
+                )
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                key: value
+                for key, value in entry.options.items()
+                if key != CONF_MANAGE_SETTINGS
+            },
+        )
+
+    hass.config_entries.async_update_subentry(
         entry,
-        options=build_hub_options(
-            entry, msg[CONF_AVAILABILITY_TIMEOUT], msg[CONF_MANAGE_SETTINGS]
-        ),
+        subentry,
+        data={**subentry.data, CONF_MANAGE_SETTINGS: msg[CONF_MANAGE_SETTINGS]},
     )
-    connection.send_result(msg["id"], hub_defaults(entry))
+    connection.send_result(msg["id"], _receiver_row(hass, entry, subentry))
 
 
 @websocket_api.websocket_command(
@@ -1048,10 +1362,9 @@ def ws_set_device_settings(
     re-render from what was actually stored rather than from what it sent; the
     two differ precisely when the user built one that does not add up.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
         return
-    entry, _coordinator = resolved
 
     device_key: str = msg["device_key"]
     if device_key not in entry.data.get(CONF_DEVICES, {}):
@@ -1100,7 +1413,7 @@ def ws_set_mappings(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Validate and store this hub's device-library mapping overrides.
+    """Validate and store this location's device-library mapping overrides.
 
     The document arrives as text and is parsed here rather than in the panel,
     which has no YAML parser and should not grow one. ``yaml.safe_load`` and not
@@ -1112,10 +1425,9 @@ def ws_set_mappings(
     document. They arrive as one error carrying every problem found, because a
     user fixing a mapping file wants the whole list, not the first line of it.
     """
-    resolved = _async_get_coordinator(hass, connection, msg)
-    if resolved is None:
+    entry = _async_get_location(hass, connection, msg)
+    if entry is None:
         return
-    entry, _coordinator = resolved
 
     text: str = msg["yaml"]
     try:

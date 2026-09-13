@@ -1,13 +1,13 @@
 """Diagnostics export for the rtl_433 integration.
 
-``async_get_config_entry_diagnostics`` returns a redacted snapshot of the hub's
+``async_get_config_entry_diagnostics`` returns a redacted snapshot of the receiver's
 runtime state for support and — crucially — for *contributors* extending the
 device library: the ``unmatched_field_keys`` list surfaces exactly which fields
-the hub has observed that have no mapping descriptor yet (and are not on the
+the receiver has observed that have no mapping descriptor yet (and are not on the
 skip-list), so adding library coverage is a matter of reading the diagnostics
 rather than packet-sniffing.
 
-Every config entry is a hub entry that owns the coordinator and its runtime
+Every config entry is a receiver entry that owns the coordinator and its runtime
 state; the nested RF devices are device-registry devices, not config entries.
 """
 
@@ -23,6 +23,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_HOST, CONF_PATH, CONF_PORT, DATA_ENTRY_LIBRARY, DOMAIN
 from .coordinator import Rtl433Coordinator
+from .receiver_settings import receiver_coordinator, receiver_subentries
 
 # Keys redacted from the exported connection params. The host can reveal a
 # private network address / hostname, so it is redacted; port/path are benign.
@@ -32,11 +33,13 @@ TO_REDACT = {CONF_HOST}
 def _resolve_coordinator(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> Rtl433Coordinator | None:
-    """Return the coordinator that owns ``entry``'s runtime state, if loaded.
+    """Return the coordinator of this location's first receiver, if loaded.
 
-    Every config entry is a hub entry that is its own coordinator.
+    A location may hold several receivers; this dump still describes one, which
+    is the honest answer for the single-receiver install every existing dump
+    comes from. The per-receiver breakdown lands with the aggregator.
     """
-    return hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    return receiver_coordinator(hass, entry)
 
 
 def _unmatched_field_keys(
@@ -48,7 +51,7 @@ def _unmatched_field_keys(
 
     A field is "matched" if :func:`pyrtl_433.library.lookup` resolves it against the
     merged registry; a field is intentionally dropped if it is in ``skip_keys``.
-    Everything else the hub has seen is a candidate for new library coverage.
+    Everything else the receiver has seen is a candidate for new library coverage.
     The check is model-agnostic (``model=None``): ``seen_fields`` is a flat set
     of field keys across all devices, so a field counts as matched if any
     global descriptor exists for it.
@@ -79,10 +82,23 @@ async def async_get_config_entry_diagnostics(
             "data": async_redact_data(dict(entry.data), TO_REDACT),
             "options": dict(entry.options),
         },
+        # The location's receivers, as stored. The connection block further down
+        # still describes one running coordinator; this is what says how many
+        # there are and where each points, which is the first question a
+        # multi-receiver report raises.
+        "receivers": [
+            {
+                "receiver_id": subentry.subentry_id,
+                "title": subentry.title,
+                "unique_id": subentry.unique_id,
+                "data": async_redact_data(dict(subentry.data), TO_REDACT),
+            }
+            for subentry in receiver_subentries(entry)
+        ],
     }
 
     if coordinator is None:
-        # Hub not loaded yet: nothing more to report than the (redacted) static
+        # Receiver not loaded yet: nothing more to report than the (redacted) static
         # entry data.
         diagnostics["coordinator_loaded"] = False
         return diagnostics
@@ -100,10 +116,10 @@ async def async_get_config_entry_diagnostics(
         TO_REDACT | {"ws_url"},
     )
     diagnostics["connected"] = coordinator.connected
-    # The connection-backed availability gate: ``hub_available`` follows the
+    # The connection-backed availability gate: ``receiver_available`` follows the
     # socket with no grace window, and is what takes every device unavailable
     # irrespective of the per-device silence verdicts below.
-    diagnostics["hub_available"] = coordinator.hub_available
+    diagnostics["receiver_available"] = coordinator.receiver_available
     diagnostics["disconnected_since"] = (
         since.isoformat()
         if (since := coordinator.disconnected_since) is not None
@@ -126,11 +142,11 @@ async def async_get_config_entry_diagnostics(
             "identity": normalized.identity,
             "fields": sorted(coordinator.device_fields.get(device_key, set())),
             # What the entities actually report: the watchdog's per-device
-            # silence verdict *and* the hub gate, which short-circuits it. Both
+            # silence verdict *and* the receiver gate, which short-circuits it. Both
             # legs are kept separately so a dump distinguishes "the device fell
-            # silent" from "the hub went away and took everything with it".
+            # silent" from "the receiver went away and took everything with it".
             "available": (
-                coordinator.hub_available
+                coordinator.receiver_available
                 and bool(coordinator.available.get(device_key))
             ),
             "silence_available": coordinator.available.get(device_key),

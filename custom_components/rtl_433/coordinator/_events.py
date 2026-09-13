@@ -23,7 +23,7 @@ library does not carry on the event object is ``is_backlog`` (the
 pre-connection-backlog flag that keeps a reconnect re-broadcast out of the
 pending list), so it is re-derived here from the event's ``event_time`` and the
 time this connection came up (``_connection_time``, recorded in ``base.py``'s
-``_emit_hub_update``) using the same :data:`DISCOVERY_BACKLOG_GRACE` boundary the
+``_emit_receiver_update``) using the same :data:`DISCOVERY_BACKLOG_GRACE` boundary the
 library applied.
 
 :class:`_EventProcessingMixin` is mixed into ``Rtl433Coordinator`` (see
@@ -53,12 +53,21 @@ from homeassistant.util import dt as dt_util
 
 from ..const import LOGGER
 
-# Hard cap on how many candidates one hub holds at once. "One entry per device
-# the receiver hears" is not self-limiting: 433 MHz is a shared band that
-# produces spurious decodes with arbitrary ids, and several real protocols roll
-# their id on a battery change, so an uncapped list grows for the life of the
-# config entry -- and every entry in it is rendered into the payload pushed to
-# every open panel.
+# Hard cap on how many candidates are held at once. "One entry per device the
+# receiver receives" is not self-limiting: 433 MHz is a shared band that produces
+# spurious decodes with arbitrary ids, and several real protocols roll their id
+# on a battery change, so an uncapped list grows for the life of the config
+# entry -- and every entry in it is rendered into the payload pushed to every
+# open panel.
+#
+# The cap that actually binds is applied to the location's **merged** candidate
+# list (``aggregator.enforce_pending_cap``), so a location cannot hold N x this
+# many candidates by having N receivers: the same 512 covers all of them. This
+# module keeps applying it per receiver as well, which is what bounds a
+# coordinator running before its location's aggregator has started (or one
+# driven on its own by a test). Since every receiver's map is a subset of the
+# merged list, the merged enforcement is the one that fires first in a running
+# location and the per-receiver pass is the floor underneath it.
 #
 # Only candidates are capped. A device the user has adopted has entities behind
 # it and keeps its state for as long as it exists in Home Assistant; it is never
@@ -69,21 +78,21 @@ from ..const import LOGGER
 # Distinct from ``pyrtl_433.client._MAX_TRACKED_DEVICES``, the identically-sized
 # cap the library puts on its own replay bookkeeping for the same reason.
 # Raising one does not raise the other.
-_MAX_PENDING_CANDIDATES = 512
+MAX_PENDING_CANDIDATES = 512
 
 
 @dataclass(slots=True)
 class PendingDevice:
-    """One device heard but not yet adopted into Home Assistant.
+    """One device received but not yet adopted into Home Assistant.
 
     Held in memory only: the pending list is rebuilt from live traffic after
     every restart or reload by design, so an unwanted device never outlives the
-    session that heard it. ``event`` is the most recent frame, kept so adoption
+    session that received it. ``event`` is the most recent frame, kept so adoption
     can seed the device's entities from real data instead of leaving them
     unavailable until the next transmission, and so the approval UI can show what
     the device actually reports before the user commits to it. ``count`` and the
     two timestamps are the discriminators the user judges by: a real sensor
-    checks in repeatedly, a bad decode is heard once.
+    checks in repeatedly, a bad decode is received once.
     """
 
     key: str
@@ -92,7 +101,7 @@ class PendingDevice:
     count: int
     first_seen: datetime
     last_seen: datetime
-    # Every field this device has reported since it was first heard, newest
+    # Every field this device has reported since it was first received, newest
     # value winning. This is wider than ``event.fields``, which holds only the
     # latest frame: a weather station spreads its readings over several
     # transmissions (an Acurite-5n1 sends wind and temperature in one message
@@ -149,7 +158,7 @@ class _EventProcessingMixin:
         # replays when a connection comes up. The event object does not carry
         # that flag, so re-derive it from the event's timestamp and
         # ``_connection_time`` -- the time this connection was established,
-        # recorded in ``_emit_hub_update`` -- using the same cut-off the library
+        # recorded in ``_emit_receiver_update`` -- using the same cut-off the library
         # uses. ``_connection_time`` is ``None`` while disconnected; that case,
         # and a frame with no usable ``event_time``, both leave ``is_backlog``
         # False, so a frame we cannot place is treated as live rather than
@@ -196,11 +205,11 @@ class _EventProcessingMixin:
             LOGGER.debug("rtl_433 device %s back online", key)
 
     def _evict_cold_candidates(self) -> None:
-        """Drop the least recently heard candidates until back under the cap.
+        """Drop the least recently received candidates until back under the cap.
 
-        ``pending`` is kept in least-recently-heard order (a repeat sighting
+        ``pending`` is kept in least-recently-received order (a repeat sighting
         moves its key to the fresh end), so this drops from the cold end: the
-        keys heard once and never again, which is exactly the spurious-decode
+        keys received once and never again, which is exactly the spurious-decode
         population the cap exists for. A device that keeps transmitting keeps
         moving away from the chopping block.
 
@@ -212,12 +221,12 @@ class _EventProcessingMixin:
         The frame just taken is safe by construction: it has just been moved to
         the fresh end, and the cap is far above one.
         """
-        while len(self.pending) > _MAX_PENDING_CANDIDATES:
+        while len(self.pending) > MAX_PENDING_CANDIDATES:
             key, _record = self.pending.popitem(last=False)
             LOGGER.debug(
                 "rtl_433 dropping the coldest candidate %s (over the %d key cap)",
                 key,
-                _MAX_PENDING_CANDIDATES,
+                MAX_PENDING_CANDIDATES,
             )
 
     def _trace_unmapped_fields(self, key: str, field_keys: set[str]) -> None:
@@ -260,7 +269,7 @@ class _EventProcessingMixin:
         Replays and pre-connection backlog frames are re-broadcasts of already
         transmitted events, never a device's first live transmission, so they
         must not create a candidate -- otherwise every reconnect would repopulate
-        the list with stale entries. A key on the hub's ignore list is dropped
+        the list with stale entries. A key on the receiver's ignore list is dropped
         outright; that is what makes ignoring a neighbour's sensor stick.
         """
         if is_replay or is_backlog:
@@ -271,7 +280,9 @@ class _EventProcessingMixin:
             # the ignore list name a device that was ignored before a restart.
             if normalized.model:
                 self.ignored_models[key] = normalized.model
-            LOGGER.debug("rtl_433 ignoring device %s (on the hub's ignore list)", key)
+            LOGGER.debug(
+                "rtl_433 ignoring device %s (on the receiver's ignore list)", key
+            )
             return
 
         now = dt_util.utcnow()
@@ -287,7 +298,7 @@ class _EventProcessingMixin:
                 fields=dict(normalized.fields),
             )
             LOGGER.info(
-                "rtl_433 heard a new device %s (model %s); add it from the hub's "
+                "rtl_433 received a new device %s (model %s); add it from the receiver's "
                 "options to create it in Home Assistant",
                 key,
                 normalized.model,

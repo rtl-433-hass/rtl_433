@@ -1,10 +1,10 @@
-"""Event platform for the rtl_433 hub config entry.
+"""Event platform for the rtl_433 receiver config entry.
 
-``async_setup_entry`` runs once for the hub config entry and delegates to the
-shared :func:`~custom_components.rtl_433.entity.async_setup_hub_platform`
-helper, which resolves the hub coordinator, builds a :class:`Rtl433Event` for
+``async_setup_entry`` runs once for the receiver config entry and delegates to the
+shared :func:`~custom_components.rtl_433.entity.async_setup_receiver_platform`
+helper, which resolves the receiver coordinator, builds a :class:`Rtl433Event` for
 every device's observed mapped fields whose descriptor ``platform == "event"``,
-adds new devices/fields at runtime, and keeps the hub's devices map current.
+adds new devices/fields at runtime, and keeps the receiver's devices map current.
 
 Each :class:`Rtl433Event` fires a Home Assistant event once per genuine
 transmission, with the field value resolved to an ``event_type`` and no extra
@@ -19,7 +19,7 @@ always advertises ``DoorbellEventType.RING`` to satisfy Home Assistant's
 doorbell standard.
 
 Availability is the shared :class:`~custom_components.rtl_433.entity.Rtl433Entity`
-gate, unmodified: the hub connection *and* the per-device silence timeout. That
+gate, unmodified: the receiver connection *and* the per-device silence timeout. That
 matches what zigbee2mqtt publishes for its own event entities (their discovery
 payload carries both the bridge-state and the per-device availability topics,
 ``availability_mode: all``) and what core integrations do (Shelly's event
@@ -40,13 +40,13 @@ from homeassistant.components.event import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_DEVICES, DEVICE_EVENT_TYPES, LOGGER
 from .entity import (
     Rtl433Entity,
-    async_setup_hub_platform,
+    async_setup_receiver_platform,
     async_upsert_event_types,
     resolve_event_type,
 )
@@ -79,13 +79,13 @@ class Rtl433Event(Rtl433Entity, EventEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         device_key: str,
         model: str,
         descriptor: FieldDescriptor,
     ) -> None:
         """Initialize event-specific description fields from persisted state."""
-        super().__init__(coordinator, hub_entry_id, device_key, model, descriptor)
+        super().__init__(coordinator, receiver_entry_id, device_key, model, descriptor)
         # ``EventEntity.device_class`` accepts the plain string from the
         # descriptor (an ``EventDeviceClass`` member value or ``None``).
         self._attr_device_class = descriptor.device_class
@@ -240,9 +240,9 @@ class Rtl433Event(Rtl433Entity, EventEntity):
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up rtl_433 event entities for every device under the hub entry."""
-    await async_setup_hub_platform(
+    """Set up rtl_433 event entities for every device of every receiver."""
+    await async_setup_receiver_platform(
         hass, entry, async_add_entities, PLATFORM, Rtl433Event
     )

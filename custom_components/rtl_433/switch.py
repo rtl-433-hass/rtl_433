@@ -1,6 +1,6 @@
-"""Switch control platform for the rtl_433 hub config entry.
+"""Switch control platform for the rtl_433 receiver config entry.
 
-``async_setup_entry`` runs once for the hub config entry. When the hub's
+``async_setup_entry`` runs once for the receiver config entry. When the receiver's
 ``manage_settings`` toggle is off it creates **no** entities and returns
 immediately; when management is on it statically registers one
 :class:`Rtl433SwitchControl` per ``switch``-platform field in the
@@ -15,8 +15,8 @@ simply is not sent.
 
 Optimistic-then-confirmed state: ``async_turn_on`` / ``async_turn_off`` write the
 ``gain_auto`` desired value via ``coordinator.set_sdr`` (persist + send +
-read-back + ``signal_hub_update``). Until the read-back arrives ``is_on`` shows
-the just-set desired value (optimistic); the inherited ``signal_hub_update``
+read-back + ``signal_receiver_update``). Until the read-back arrives ``is_on`` shows
+the just-set desired value (optimistic); the inherited ``signal_receiver_update``
 subscription then repaints the control with the server's confirmed value.
 """
 
@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .entity import Rtl433HubControl, async_setup_hub_controls
+from .entity import Rtl433ReceiverControl, async_setup_receiver_controls
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
@@ -39,17 +39,16 @@ if TYPE_CHECKING:
 PLATFORM = "switch"
 
 
-class Rtl433SwitchControl(Rtl433HubControl, SwitchEntity):
-    """A managed boolean SDR setting (Auto gain) as a hub-device Switch entity."""
+class Rtl433SwitchControl(Rtl433ReceiverControl, SwitchEntity):
+    """A managed boolean SDR setting (Auto gain) as a receiver-device Switch entity."""
 
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Initialize the switch control from the setting."""
-        super().__init__(coordinator, hub_entry_id, setting)
+        super().__init__(coordinator, setting)
 
     @property
     def is_on(self) -> bool | None:
@@ -78,9 +77,9 @@ class Rtl433SwitchControl(Rtl433HubControl, SwitchEntity):
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Register the hub's managed Switch controls (only when managing)."""
-    await async_setup_hub_controls(
+    """Register every receiver's managed Switch controls (only when managing)."""
+    await async_setup_receiver_controls(
         hass, entry, async_add_entities, PLATFORM, Rtl433SwitchControl
     )

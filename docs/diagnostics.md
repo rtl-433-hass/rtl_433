@@ -7,14 +7,21 @@ frequency, RSSI, SNR, and noise. The integration maps these to diagnostic sensor
 on the RF device:
 
 - **Frequency** in MHz.
-- **RSSI** in dB.
-- **SNR** in dB.
+- **RSSI** in dB — one per receiver, named with the receiver.
+- **SNR** in dB — one per receiver, named with the receiver.
 - **Noise** in dB.
+
+**RSSI** and **SNR** measure the link between one receiver and the sensor, so a
+location with two receivers gives the device two of each, named `RSSI Attic` and
+`RSSI Garage`. **Frequency** and **Noise** are unioned like any other field, and
+stay one entity. To compare receivers without enabling anything, use the panel's
+**Signal coverage** page — see
+[Per-Receiver Signal Detail](availability.md#per-receiver-signal-detail).
 
 These entities are disabled by default. Enable the ones you want from the device
 page or entity settings to chart reception quality and antenna placement.
 
-![An rtl_433 device page with the enabled signal diagnostics in its Diagnostic card: Frequency 434.00 MHz, Last seen, Noise -39.13 dB, RSSI 0.62 dB, and SNR 39.13 dB](images/10-diagnostics.png)
+![An rtl_433 device page with the enabled signal diagnostics in its Diagnostic card: Frequency 434.00 MHz, Last seen, RSSI and SNR each named with the receiver that reported them, Noise -42.14 dB, RSSI 0.62 dB, and SNR 42.14 dB](images/10-diagnostics.png)
 
 Level fields are only present when rtl_433 emits them. The rtl_433 Home Assistant
 add-on reports levels automatically. When running rtl_433 yourself, start it with
@@ -25,9 +32,10 @@ processing is unaffected.
 
 ## Downloadable Diagnostics
 
-Home Assistant diagnostics include the fields each hub has seen but could not map
-to entities. Download diagnostics from **Settings → Devices & Services → rtl_433
-→ ⋮ → Download diagnostics** and inspect `unmatched_field_keys`.
+Home Assistant diagnostics include the fields each of a location's receivers has
+seen but could not map to entities. Download diagnostics from **Settings →
+Devices & Services → rtl_433 → ⋮ → Download diagnostics** and inspect
+`unmatched_field_keys`.
 
 Each unmatched key is either a candidate for a one-line device-library mapping or
 noise/identity data that belongs in `_skip_keys.yaml`. See the

@@ -1,57 +1,82 @@
 """The rtl_433 integration.
 
-This module wires the integration's config-entry lifecycle. There is one kind of
-config entry: a **hub** entry that owns one rtl_433 server's WebSocket
-connection. Setting one up loads the shipped mapping library (cached once on
-``hass.data[DOMAIN][DATA_LIBRARY]``), merges this hub's stored
+This module wires the integration's config-entry lifecycle. A config entry is a
+**location**: a user-named grouping that holds one **receiver config subentry**
+per rtl_433 server. Setting one up loads the shipped mapping library (cached once
+on ``hass.data[DOMAIN][DATA_LIBRARY]``), merges the location's stored
 ``entry.data[CONF_USER_MAPPINGS]`` over it and caches the per-entry merged
 ``(registry, skip_keys)`` on ``hass.data[DOMAIN][DATA_ENTRY_LIBRARY][entry_id]``
-so the entity platforms reuse it, instantiates the push
-:class:`~custom_components.rtl_433.coordinator.Rtl433Coordinator`, injects the
-skip-keys, the effective-timeout resolver, and the new-device callback, registers
-the hub device, starts the coordinator, registers an options-update listener so a
-changed availability timeout takes effect live, and forwards the
-``sensor`` / ``binary_sensor`` platforms once on the hub entry.
+so the entity platforms reuse it, registers the **location device** (the root of
+the entry's device tree, and what every merged RF device links to with
+``via_device_id``), then walks the receiver subentries: each gets a
+receiver device, a push
+:class:`~custom_components.rtl_433.coordinator.Rtl433Coordinator` (the WebSocket
+transport is per endpoint, so one per receiver) with the skip-keys, the
+effective-timeout resolver and the new-device callback injected, and its own
+reachability watchers. Each coordinator is stored on ``hass.data[DOMAIN]`` under
+its **receiver id** (the subentry id). A **location aggregator**
+(:mod:`.aggregator`) is then started over those coordinators: it dedupes the
+frames several receivers decode from one transmission and re-emits them on a
+single location-scoped signal, which is what lets one physical sensor carry one
+merged device and one entity per field. Finally an options-update listener is
+registered so a changed availability timeout takes effect live, and the entity
+platforms are forwarded **once**, on the location entry.
 
-RF devices are represented as **device-registry devices nested under the hub
+Subentry ownership is deliberate and load-bearing. A device belongs to exactly
+one config entry and one subentry, and adding entities from two subentries that
+share a device silently moves it today and raises in HA Core 2027.8. So the
+**receiver** device -- and everything that hangs off it: the radio controls, the
+noise sensors, the connectivity sensor -- is registered under its receiver's
+``config_subentry_id``, while every **RF device** and its entities are added with
+no ``config_subentry_id`` at all, leaving them owned by the location entry so a
+later merge across receivers is legal.
+
+RF devices are represented as **device-registry devices nested under the location
 entry** (rfxtrx-style), not as their own config entries. They are recreated on
 startup from ``entry.data[CONF_DEVICES]`` — the restart-safe record of the
 devices the user has adopted — and added at runtime via the new-device
-dispatcher signal when the user approves one from the coordinator's pending
-list. A device the user has not adopted is only ever *heard*; it never reaches
+dispatcher signal when the user approves one from a coordinator's pending
+list. A device the user has not adopted is only ever *received*; it never reaches
 the device registry. A single nested device can be removed from its device page
 via :func:`async_remove_config_entry_device`, which returns it to the pending
-list; deleting the hub entry removes all nested devices and entities
-automatically.
+list; deleting the location entry removes all nested devices and entities
+automatically, and deleting a receiver subentry removes that receiver's own
+device (and, via :func:`_async_purge_removed_receiver_entities`, its
+per-receiver signal entities on the merged devices) while every merged device
+and its history survive.
 
-Setting up the first hub also registers the discovery WebSocket commands
+Setting up the first location also registers the discovery WebSocket commands
 (:mod:`.websocket_api`), which back the approval panel and are equally usable
 from a script, and the **discovery panel** itself — the shipped
 ``frontend/rtl_433-panel.js`` served as a static path and registered with
 ``panel_custom``. Both are per Home Assistant *run*, not per entry, so both are
-guarded to happen once rather than once per hub.
+guarded to happen once rather than once per location.
 
-The library loading lives in :mod:`.library`, the hub-setting resolvers in
-:mod:`.hub_settings`, the shared adopt / ignore / un-ignore service in
+The library loading lives in :mod:`.library`, the location/receiver topology
+helpers and setting resolvers in
+:mod:`.receiver_settings`, the shared adopt / ignore / un-ignore service in
 :mod:`.adoption`, and the config-entry migration / one-time legacy cleanups in
 :mod:`.migration`; this module keeps only the steady-state lifecycle.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
-from pyrtl_433.library import event_driven_field_keys
+from pyrtl_433.library import Registry, event_driven_field_keys
 
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from . import repairs
+from .aggregator import Rtl433LocationAggregator
 from .const import (
     CONF_DEVICES,
     CONF_HOST,
@@ -59,6 +84,7 @@ from .const import (
     CONF_PATH,
     CONF_PORT,
     CONF_USER_MAPPINGS,
+    DATA_AGGREGATOR,
     DATA_ENTRY_LIBRARY,
     DEFAULT_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
@@ -66,23 +92,29 @@ from .const import (
     LOGGER,
     MANUFACTURER,
     PLATFORMS,
+    is_reserved_device_key,
+    receiver_identity,
     signal_new_device,
 )
 from .coordinator import Rtl433Coordinator
-from .hub_settings import (
-    _calibration_map,
-    _explicit_hub_timeout,
-    _hub_availability_timeout,
-    _hub_connection,
-    _hub_ignored_devices,
-    _hub_manage_settings,
-    _hub_secure,
-)
 from .library import _async_load_library, _merge_entry_library
 from .migration import (
     _cleanup_phantom_unknown_device,
     _migrate_motion_event_to_binary_sensor,
     async_migrate_entry,
+)
+from .receiver_settings import (
+    _calibration_map,
+    _explicit_receiver_timeout,
+    _location_adopted_devices,
+    _receiver_availability_timeout,
+    _receiver_connection,
+    _receiver_ignored_devices,
+    _receiver_manage_settings,
+    _receiver_secure,
+    receiver_coordinators,
+    receiver_subentries,
+    running_coordinators,
 )
 from .settings import device_clear_delay
 from .websocket_api import async_preload_entity_metadata, async_register_commands
@@ -101,7 +133,7 @@ PANEL_URL_BASE = "/rtl_433_panel"
 PANEL_ELEMENT_NAME = "rtl-433-panel"
 PANEL_MODULE_NAME = "rtl_433-panel.js"
 
-# Key under ``hass.data[DOMAIN]`` claimed synchronously by whichever hub setup
+# Key under ``hass.data[DOMAIN]`` claimed synchronously by whichever location setup
 # gets to the panel registration first. An "is the panel already there?" check
 # is not enough: the registration awaits (the static-path helper hops to the
 # executor), and Home Assistant sets a domain's config entries up with
@@ -125,7 +157,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     the registration below awaits before the panel exists, so an "is it already
     registered?" check would be passed by both receivers and the second would
     die on ``Overwriting panel``. A flag taken before the first await is what
-    survives that, and it covers the sequential cases (a hub added later, an
+    survives that, and it covers the sequential cases (a receiver added later, an
     entry reloading) as well.
 
     ``config_panel_domain`` puts the panel behind this integration's entry in
@@ -155,8 +187,8 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     domain_data[DATA_PANEL_CLAIMED] = True
 
     # The claim is released again if registration fails, so Home Assistant's
-    # retry of a hub that went ``ConfigEntryNotReady`` here (or the user's next
-    # receiver) tries once more rather than quietly setting up a hub whose panel
+    # retry of a receiver that went ``ConfigEntryNotReady`` here (or the user's next
+    # receiver) tries once more rather than quietly setting up a receiver whose panel
     # nobody can reach.
     try:
         await hass.http.async_register_static_paths(
@@ -182,27 +214,194 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         raise
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up an rtl_433 hub config entry.
+async def _async_setup_receiver(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    subentry: ConfigSubentry,
+    *,
+    device_registry: dr.DeviceRegistry,
+    entry_registry: Registry,
+    entry_skip_keys: set[str],
+    entry_event_driven_keys: frozenset[str],
+    effective_timeout_resolver: Callable[[str], int | None],
+    effective_clear_delay_resolver: Callable[[str], int],
+    location_device_id: str,
+) -> Rtl433Coordinator:
+    """Register one receiver's device and build + start its coordinator.
 
-    Loads the library, registers the hub device, builds and starts the
-    coordinator, wires the reachability watcher and options-update listener, and
-    forwards the entity platforms once on the hub entry.
+    One receiver subentry, one coordinator: the WebSocket transport is per
+    endpoint, so a location with two servers dials two sockets. Everything the
+    coordinator reads that describes *sensors* (the devices map, the ignore
+    list, the merged library, the availability defaults) comes from the location
+    entry and is therefore shared; everything that describes *this server* (the
+    connection target, the managed-radio toggle, the initial frequency) comes
+    from the subentry.
+
+    The receiver device is created **under the subentry**
+    (``config_subentry_id``), which is what makes it disappear with the receiver
+    when the user deletes one. Its nested RF devices deliberately are not: they
+    belong to the location entry alone, because a device may end up shared
+    between receivers and Home Assistant gives a device exactly one owning
+    subentry -- adding entities from two subentries that share a device silently
+    moves it today and raises in HA Core 2027.8.
+    """
+    receiver_id = subentry.subentry_id
+    identity = receiver_identity(entry.entry_id, receiver_id)
+
+    def new_device_callback(device_key: str, model: str, is_replay: bool) -> None:
+        """Dispatch the receiver-level new-device signal for an adopted device.
+
+        The coordinator invokes this only for devices the user has adopted --
+        either on an adopted device's first frame this process, or from
+        ``adopt_device`` the moment the user approves a pending one -- so the
+        platform listeners can add the nested device + its entities directly.
+        There is no notification: a device now exists in Home Assistant only
+        because the user asked for it, so there is nothing to alert them to.
+
+        ``is_replay`` flags that the frame the entities are seeding from is a
+        reconnect re-broadcast rather than a live transmission; it is passed
+        through to the platform listeners unchanged.
+        """
+        async_dispatcher_send(hass, signal_new_device(receiver_id), device_key, model)
+
+    # Register the receiver device, hung off the location device. The
+    # manufacturer/model start generic and are refined to the real SDR's
+    # vendor/product/serial once the coordinator connects
+    # (``receiver_info_callback``). Nested RF devices link to the *location*, not
+    # here: a merged device may be fed by several receivers, so a link to one of
+    # them would claim the sensor sits behind that server alone.
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        config_subentry_id=receiver_id,
+        identifiers={(DOMAIN, identity)},
+        manufacturer=MANUFACTURER,
+        name=subentry.title,
+        model="rtl_433 server",
+        via_device_id=location_device_id,
+    )
+
+    coordinator = Rtl433Coordinator(
+        hass,
+        entry,
+        subentry,
+        host=subentry.data[CONF_HOST],
+        port=subentry.data[CONF_PORT],
+        path=subentry.data[CONF_PATH],
+        secure=_receiver_secure(subentry),
+        manage_settings=_receiver_manage_settings(entry, subentry),
+        availability_timeout=_receiver_availability_timeout(entry),
+        initial_center_frequency=subentry.data.get(CONF_INITIAL_FREQUENCY),
+        skip_keys=entry_skip_keys,
+        event_driven_keys=entry_event_driven_keys,
+        # The location's persisted devices map is the restart-safe record of
+        # what the user has approved, so it is what tells the coordinator which
+        # frames may reach Home Assistant; everything else is received into the
+        # pending list. Both sets are the *location's*, so every receiver under
+        # it starts from the same approvals -- and a key on both lists resolves
+        # to ignored (see :func:`_location_adopted_devices`).
+        adopted_keys=_location_adopted_devices(entry),
+        ignored_keys=set(_receiver_ignored_devices(entry)),
+    )
+
+    @callback
+    def receiver_info_callback() -> None:
+        """Refresh the receiver device's identity from the SDR's ``dev_info``.
+
+        ``coordinator.dev_info`` is the librtlsdr USB label
+        (``{"vendor", "product", "serial"}``); map it onto the receiver device so
+        the device page shows which physical dongle this receiver is, instead of
+        the generic ``rtl_433`` / ``rtl_433 server`` placeholders. Absent fields
+        (e.g. ``-D manual`` with no SDR open) leave the existing values untouched.
+        """
+        info = coordinator.dev_info
+        updates: dict[str, str] = {}
+        if info.get("vendor"):
+            updates["manufacturer"] = info["vendor"]
+        if info.get("product"):
+            updates["model"] = info["product"]
+        if info.get("serial"):
+            updates["serial_number"] = info["serial"]
+        if not updates:
+            return
+        device = device_registry.async_get_device_by_identifier(
+            (DOMAIN, identity), entry.entry_id
+        )
+        if device is not None:
+            device_registry.async_update_device(device.id, **updates)
+
+    coordinator.new_device_callback = new_device_callback
+    coordinator.receiver_info_callback = receiver_info_callback
+    coordinator.effective_timeout_resolver = effective_timeout_resolver
+    coordinator.effective_clear_delay_resolver = effective_clear_delay_resolver
+    # Global descriptor keys from the merged library, so the coordinator can flag
+    # observed fields with no mapping at DEBUG (matches the diagnostics
+    # ``unmatched_field_keys`` semantics, which resolve against the flat table).
+    coordinator.known_field_keys = frozenset(entry_registry.flat)
+    # Snapshot the per-device calibration so the update listener can detect a
+    # real calibration change (and reload) while ignoring routine devices-map
+    # upserts -- the same change-vs-snapshot pattern as ``manage_settings``.
+    coordinator.calibration_snapshot = _calibration_map(entry)
+    # Snapshot the stored user mappings so the update listener can detect a real
+    # mappings change (and reload to rebuild the merged library + entities) while
+    # ignoring routine devices-map upserts.
+    coordinator.user_mappings_snapshot = entry.data.get(CONF_USER_MAPPINGS) or {}
+    # Snapshot the connection target + stable identity so the update listener can
+    # reload the location when a reconfigure / discovery / rebind re-points this
+    # receiver: those flows write the new target into the subentry and leave the
+    # reload to this listener (see ``_async_update_listener``).
+    coordinator.connection_snapshot = _receiver_connection(subentry)
+
+    hass.data[DOMAIN][receiver_id] = coordinator
+    await coordinator.async_start()
+
+    # Watch reachability and surface / clear a repair issue accordingly.
+    entry.async_on_unload(
+        repairs.async_track_receiver_reachability(hass, entry, coordinator)
+    )
+    # Advise when a single high-band frequency is left at the default sample rate.
+    entry.async_on_unload(repairs.async_track_sample_rate(hass, entry, coordinator))
+    # Advise when the server stamps events in a form that cannot be parsed, which
+    # leaves the library's reconnect-replay suppression switched off.
+    entry.async_on_unload(
+        repairs.async_track_event_time_precision(hass, entry, coordinator)
+    )
+    return coordinator
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up an rtl_433 **location** config entry.
+
+    Loads the library once for the location, then walks the location's receiver
+    subentries: each gets its receiver device, its coordinator and its
+    reachability watchers. The entity platforms are forwarded **once**, on the
+    location entry, and each platform fans out over the same subentries -- that
+    is what lets one device carry entities fed by several receivers.
+
+    A location with no receiver subentry cannot be created by any flow, so one
+    here is a config entry written by an older schema. It is refused loudly
+    rather than set up as an empty shell.
     """
     hass.data.setdefault(DOMAIN, {})
     # Command names are global and registration is per Home Assistant run, not
     # per entry -- but this integration is entry-only (no ``async_setup``), so the
-    # call is made from every hub's setup and made idempotent inside. A user with
-    # two receivers must not lose the second entry to a duplicate registration.
+    # call is made from every location's setup and made idempotent inside. A user
+    # with two locations must not lose the second entry to a duplicate registration.
     async_register_commands(hass)
     # Core's own icon and string tables, read once so the discovery payload can
     # preview a field's entity without file I/O on the event loop.
     await async_preload_entity_metadata(hass)
     # Same story for the panel: per-run, called from per-entry setup, idempotent
     # inside. It is awaited before anything else because a failure here is a
-    # failure to set the hub up at all, and that should be loud rather than a
-    # working hub with a panel nobody can reach.
+    # failure to set the location up at all, and that should be loud rather than a
+    # working location with a panel nobody can reach.
     await _async_register_panel(hass)
+
+    subentries = receiver_subentries(entry)
+    if not subentries:
+        raise ConfigEntryError(
+            f"{entry.title} has no receiver: it predates the location/receiver "
+            "model and has not been migrated"
+        )
 
     shipped_registry, shipped_skip_keys = await _async_load_library(hass)
     entry_registry, entry_skip_keys = _merge_entry_library(
@@ -223,10 +422,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         Resolution order for the two explicit tiers handled here:
         per-device ``timeout_override`` (``entry.data[CONF_DEVICES][device_key]``)
-        → explicit hub default (only when ``CONF_AVAILABILITY_TIMEOUT`` is actually
-        present in the entry's options/data). Returns ``None`` when neither is set,
-        signalling the coordinator to apply the device-class default from the
-        device's latest payload. An explicit ``0`` at either tier means
+        -> explicit location default (only when ``CONF_AVAILABILITY_TIMEOUT`` is
+        actually present in the entry's options/data). Returns ``None`` when neither
+        is set, signalling the coordinator to apply the device-class default from
+        the device's latest payload. An explicit ``0`` at either tier means
         never-expire and is returned as ``0`` (never falls through).
         """
         override = (
@@ -236,7 +435,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         if override is not None:
             return int(override)
-        return _explicit_hub_timeout(entry)
+        return _explicit_receiver_timeout(entry)
 
     def effective_clear_delay_resolver(device_key: str) -> int:
         """Resolve a device's effective motion clear-delay (override > default).
@@ -260,119 +459,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return override
         return DEFAULT_MOTION_CLEAR_DELAY
 
-    def new_device_callback(device_key: str, model: str, is_replay: bool) -> None:
-        """Dispatch the hub-level new-device signal for an adopted device.
-
-        The coordinator invokes this only for devices the user has adopted —
-        either on an adopted device's first frame this process, or from
-        ``adopt_device`` the moment the user approves a pending one — so the
-        platform listeners can add the nested device + its entities directly.
-        There is no notification: a device now exists in Home Assistant only
-        because the user asked for it, so there is nothing to alert them to.
-
-        ``is_replay`` flags that the frame the entities are seeding from is a
-        reconnect re-broadcast rather than a live transmission; it is passed
-        through to the platform listeners unchanged.
-        """
-        async_dispatcher_send(
-            hass, signal_new_device(entry.entry_id), device_key, model
-        )
-
-    # Register the hub device so nested devices can link to it by ``via_device_id``.
-    # The manufacturer/model start generic and are refined to the real SDR's
-    # vendor/product/serial once the coordinator connects (``hub_info_callback``).
     device_registry = dr.async_get(hass)
-    device_registry.async_get_or_create(
+    _cleanup_phantom_unknown_device(hass, entry, device_registry)
+    _migrate_motion_event_to_binary_sensor(hass, entry, er.async_get(hass))
+
+    # The location device: the root of this entry's device tree and the target
+    # every merged RF device links to with ``via_device_id``. Registered before
+    # the receivers so both that link and the receivers' own resolve on the first
+    # pass. It is owned by the entry with **no** ``config_subentry_id`` -- it
+    # describes the location, which outlives any one receiver in it.
+    location_device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, entry.entry_id)},
         manufacturer=MANUFACTURER,
         name=entry.title,
-        model="rtl_433 server",
-    )
-    _cleanup_phantom_unknown_device(hass, entry, device_registry)
-    _migrate_motion_event_to_binary_sensor(hass, entry, er.async_get(hass))
-
-    coordinator = Rtl433Coordinator(
-        hass,
-        entry,
-        host=entry.data[CONF_HOST],
-        port=entry.data[CONF_PORT],
-        path=entry.data[CONF_PATH],
-        secure=_hub_secure(entry),
-        manage_settings=_hub_manage_settings(entry),
-        availability_timeout=_hub_availability_timeout(entry),
-        initial_center_frequency=entry.data.get(CONF_INITIAL_FREQUENCY),
-        skip_keys=entry_skip_keys,
-        event_driven_keys=entry_event_driven_keys,
-        # The persisted devices map is the restart-safe record of what the user
-        # has approved, so it is what tells the coordinator which frames may
-        # reach Home Assistant; everything else is heard into the pending list.
-        adopted_keys=set(entry.data.get(CONF_DEVICES, {})),
-        ignored_keys=set(_hub_ignored_devices(entry)),
+        model="rtl_433 location",
+        entry_type=dr.DeviceEntryType.SERVICE,
     )
 
-    @callback
-    def hub_info_callback() -> None:
-        """Refresh the hub device's identity from the SDR's ``dev_info``.
-
-        ``coordinator.dev_info`` is the librtlsdr USB label
-        (``{"vendor", "product", "serial"}``); map it onto the hub device so the
-        device page shows which physical dongle this hub is, instead of the
-        generic ``rtl_433`` / ``rtl_433 server`` placeholders. Absent fields (e.g.
-        ``-D manual`` with no SDR open) leave the existing values untouched.
-        """
-        info = coordinator.dev_info
-        updates: dict[str, str] = {}
-        if info.get("vendor"):
-            updates["manufacturer"] = info["vendor"]
-        if info.get("product"):
-            updates["model"] = info["product"]
-        if info.get("serial"):
-            updates["serial_number"] = info["serial"]
-        if not updates:
-            return
-        device = device_registry.async_get_device_by_identifier(
-            (DOMAIN, entry.entry_id), entry.entry_id
+    for subentry in subentries:
+        await _async_setup_receiver(
+            hass,
+            entry,
+            subentry,
+            device_registry=device_registry,
+            entry_registry=entry_registry,
+            entry_skip_keys=entry_skip_keys,
+            entry_event_driven_keys=entry_event_driven_keys,
+            effective_timeout_resolver=effective_timeout_resolver,
+            effective_clear_delay_resolver=effective_clear_delay_resolver,
+            location_device_id=location_device.id,
         )
-        if device is not None:
-            device_registry.async_update_device(device.id, **updates)
 
-    coordinator.new_device_callback = new_device_callback
-    coordinator.hub_info_callback = hub_info_callback
-    coordinator.effective_timeout_resolver = effective_timeout_resolver
-    coordinator.effective_clear_delay_resolver = effective_clear_delay_resolver
-    # Global descriptor keys from the merged library, so the coordinator can flag
-    # observed fields with no mapping at DEBUG (matches the diagnostics
-    # ``unmatched_field_keys`` semantics, which resolve against the flat table).
-    coordinator.known_field_keys = frozenset(entry_registry.flat)
-    # Snapshot the per-device calibration so the update listener can detect a
-    # real calibration change (and reload) while ignoring routine devices-map
-    # upserts — the same change-vs-snapshot pattern as ``manage_settings``.
-    coordinator.calibration_snapshot = _calibration_map(entry)
-    # Snapshot the stored user mappings so the update listener can detect a real
-    # mappings change (and reload to rebuild the merged library + entities) while
-    # ignoring routine devices-map upserts.
-    coordinator.user_mappings_snapshot = entry.data.get(CONF_USER_MAPPINGS) or {}
-    # Snapshot the connection target + stable identity so the update listener can
-    # reload the hub when a reconfigure / discovery / rebind re-points the entry:
-    # those flows write the new target into entry.data and leave the reload to
-    # this listener (see ``_async_update_listener``).
-    coordinator.connection_snapshot = _hub_connection(entry)
-
-    hass.data[DOMAIN][entry.entry_id] = coordinator
-    await coordinator.async_start()
-
-    # Watch reachability and surface / clear a repair issue accordingly.
-    entry.async_on_unload(
-        repairs.async_track_hub_reachability(hass, entry, coordinator)
-    )
-    # Advise when a single high-band frequency is left at the default sample rate.
-    entry.async_on_unload(repairs.async_track_sample_rate(hass, entry, coordinator))
-    # Advise when the server stamps events in a form that cannot be parsed, which
-    # leaves the library's reconnect-replay suppression switched off.
-    entry.async_on_unload(
-        repairs.async_track_event_time_precision(hass, entry, coordinator)
-    )
+    # The union's fan-in. Started once every receiver's coordinator exists (it
+    # subscribes to each of them) and before the platforms are forwarded, so the
+    # merged devices' entities find a live location-scoped stream the moment they
+    # subscribe to it.
+    aggregator = Rtl433LocationAggregator(hass, entry)
+    aggregator.async_start()
+    hass.data[DOMAIN].setdefault(DATA_AGGREGATOR, {})[entry.entry_id] = aggregator
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -381,11 +506,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Push changed hub options into the running coordinator.
+    """Push changed location / receiver options into the running coordinators.
 
-    The manage-settings toggle changes the entity set (the SDR control entities
+    The receiver set itself is checked first: adding, removing or re-pointing a
+    receiver subentry all change what ``_receiver_connection`` reports, and every
+    one of them needs the location reloaded -- a receiver that has just been
+    added has no coordinator and no entities until setup runs again, and a
+    re-pointed one is still dialling the old endpoint (the socket is built at
+    setup). The reconfigure / Supervisor-discovery / rebind flows deliberately
+    only *write* the new target, because Home Assistant forbids an integration
+    from combining a config-entry update listener with the reloading config-flow
+    helpers -- that pair double-reloads and races -- so this listener is the
+    single place that reloads.
+
+    The manage-settings toggle changes the entity set (the radio control entities
     appear / disappear) and the coordinator's adoption/enforcement behaviour, so
-    a change there requires a full reload to rebuild everything. The running
+    a change there requires a full reload to rebuild everything. Each running
     coordinator holds the *previous* effective value as
     ``coordinator.manage_settings``; comparing it against the new effective value
     detects the change without persisting extra bookkeeping.
@@ -394,91 +530,157 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     step writes the calibration into ``entry.data[CONF_DEVICES]`` (firing this
     listener), and a consumption sensor's ``device_class`` / unit / ``state_class``
     are construction-time, so the affected entity must be rebuilt by reloading the
-    hub. The new calibration map is compared against ``coordinator.calibration_
+    location. The new calibration map is compared against ``coordinator.calibration_
     snapshot`` (captured at setup) so the *frequent* idempotent devices-map upserts
     (``async_upsert_device`` / ``async_upsert_event_types``), which leave the
     calibration sub-record untouched, never trigger a reload.
 
-    A changed connection target (host / port / path / secure) or stable radio
-    unique_id is detected the same way, against ``coordinator.connection_
-    snapshot``. Home Assistant forbids an integration from combining a
-    config-entry update listener with the reloading config-flow helpers
-    (``async_update_reload_and_abort`` / ``_abort_if_unique_id_configured(
-    reload_on_update=True)``) — that pair double-reloads and races — so the
-    reconfigure, Supervisor-discovery and rebind paths only *write* the new
-    target and this listener is the single place that reloads the hub.
-
-    An availability-timeout change is applied live instead (the coordinator
+    An availability-timeout change is applied live instead (each coordinator
     reads ``availability_timeout`` on every watchdog tick), so no reload is
-    required for it and we avoid the disruption of tearing the socket down.
+    required for it and we avoid the disruption of tearing the sockets down.
 
-    The hub's ignore list is applied live too, and *first*: ignoring or
+    The location's ignore list is applied live too, and *first*: ignoring or
     un-ignoring a device changes nothing about the devices and entities that
-    exist, so tearing the WebSocket down for it would be gratuitous. Pushing it
+    exist, so tearing the WebSockets down for it would be gratuitous. Pushing it
     before the reload comparisons also means the options flow's ignore-only write
     can never fall through to one of them, and a change that does reload simply
     re-seeds the set from ``entry.data`` at setup.
     """
-    coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
-        entry.entry_id
-    )
-    if coordinator is None:
+    # A location whose last receiver has just been deleted can never be set up
+    # again -- ``async_setup_entry`` refuses a receiver-less entry -- so it goes
+    # with the receiver rather than lingering as an unloadable shell. Home
+    # Assistant offers no hook to *refuse* a subentry removal
+    # (``async_remove_subentry`` is a plain callback with no veto), so the
+    # nearest thing to blocking it is to let the location follow. Scheduled
+    # rather than awaited: this listener runs inside the config-entry update it
+    # is reacting to, and removing the entry re-enters that machinery.
+    if not receiver_subentries(entry):
+        hass.async_create_task(hass.config_entries.async_remove(entry.entry_id))
+        return
+
+    coordinators = running_coordinators(hass, entry)
+    if not coordinators:
         return
 
     # Applied first, and unconditionally: ignoring a device must take effect on
     # its very next transmission, and it is the one change here that never needs
     # a reload, so it must not sit behind an early return below.
-    coordinator.ignored = set(_hub_ignored_devices(entry))
+    ignored = set(_receiver_ignored_devices(entry))
+    for coordinator in coordinators.values():
+        coordinator.ignored = set(ignored)
+        # Ignored wins a conflict, live as well as at setup: a key that has
+        # landed on both lists (only a deliberate consolidation can do that --
+        # see ``_location_adopted_devices``) must stop reaching Home Assistant
+        # now, not at the next restart.
+        coordinator.adopted -= ignored
 
-    if _hub_connection(entry) != coordinator.connection_snapshot:
-        # A reconfigure / re-advertised discovery / rebind re-pointed the hub at a
-        # new server (or a new stable radio id); the socket is built at setup, so
-        # reload to reconnect against the new target.
+    stored = {subentry.subentry_id for subentry in receiver_subentries(entry)}
+    if set(coordinators) != stored or any(
+        _receiver_connection(coordinator.subentry) != coordinator.connection_snapshot
+        for coordinator in coordinators.values()
+    ):
+        # A receiver was added or removed, or a reconfigure / re-advertised
+        # discovery / rebind re-pointed one at a new server (or a new stable
+        # radio id). Either way the running set no longer matches the stored one.
+        _async_purge_removed_receiver_entities(hass, entry, set(coordinators) - stored)
         await hass.config_entries.async_reload(entry.entry_id)
         return
 
-    new_manage = _hub_manage_settings(entry)
-    if new_manage != coordinator.manage_settings:
-        # The entity set changes (SDR controls appear / disappear) and the
+    if any(
+        _receiver_manage_settings(entry, coordinator.subentry)
+        != coordinator.manage_settings
+        for coordinator in coordinators.values()
+    ):
+        # The entity set changes (radio controls appear / disappear) and the
         # coordinator's adoption/enforcement flips, so reload to rebuild.
         await hass.config_entries.async_reload(entry.entry_id)
         return
 
-    if _calibration_map(entry) != coordinator.calibration_snapshot:
-        # A consumption sensor's device_class / unit / state_class are
-        # construction-time, so rebuild the affected entity by reloading the hub.
-        await hass.config_entries.async_reload(entry.entry_id)
-        return
+    calibration = _calibration_map(entry)
+    user_mappings = entry.data.get(CONF_USER_MAPPINGS) or {}
+    for coordinator in coordinators.values():
+        if calibration != coordinator.calibration_snapshot:
+            # A consumption sensor's device_class / unit / state_class are
+            # construction-time, so rebuild the affected entity by reloading.
+            await hass.config_entries.async_reload(entry.entry_id)
+            return
+        if user_mappings != coordinator.user_mappings_snapshot:
+            # The user mappings drive the merged library (descriptors +
+            # skip_keys), which is consumed at construction time, so reload to
+            # rebuild the merged library and the affected entities.
+            await hass.config_entries.async_reload(entry.entry_id)
+            return
 
-    if (entry.data.get(CONF_USER_MAPPINGS) or {}) != coordinator.user_mappings_snapshot:
-        # The user mappings drive the merged library (descriptors + skip_keys),
-        # which is consumed at construction time, so reload to rebuild the merged
-        # library and the affected entities.
-        await hass.config_entries.async_reload(entry.entry_id)
-        return
-
-    coordinator.availability_timeout = _hub_availability_timeout(entry)
+    timeout = _receiver_availability_timeout(entry)
+    for coordinator in coordinators.values():
+        coordinator.availability_timeout = timeout
     LOGGER.debug(
-        "rtl_433 hub %s options updated (timeout=%ss)",
+        "rtl_433 location %s options updated (timeout=%ss, receivers=%s)",
         entry.title,
-        coordinator.availability_timeout,
+        timeout,
+        len(coordinators),
     )
+
+
+@callback
+def _async_purge_removed_receiver_entities(
+    hass: HomeAssistant, entry: ConfigEntry, removed: set[str]
+) -> None:
+    """Remove a deleted receiver's per-receiver signal entities.
+
+    Deleting a receiver subentry is mostly Home Assistant's job: it clears the
+    subentry off the registries, which takes the **receiver** device with
+    everything on it — the radio controls, the noise sensors, the connectivity
+    sensor — because all of those are owned by that subentry.
+
+    It cannot take the one set of entities that describes the receiver but does
+    **not** live on its device: the per-receiver ``rssi`` / ``snr`` / ``last_seen``
+    entities on every merged device. Those are added with no
+    ``config_subentry_id`` on purpose (a merged device fed by two receivers may
+    not hold entities from two subentries), so the subentry sweep does not see
+    them and they would survive as permanently-unavailable orphans of a server
+    that is gone. They are found here by their identity instead: the four-segment
+    ``{location_entry_id}:{device_key}:{receiver_subentry_id}:{object_suffix}``,
+    matched on the removed receiver's id in the third segment.
+
+    What deliberately does **not** happen: the merged devices themselves and
+    their unioned entities are left completely alone, history included. A sensor
+    only the removed receiver ever received keeps its device and its recorded
+    history and simply goes unavailable once no remaining receiver vouches for it
+    — deleting it stays an explicit user action, the same as any other RF device.
+
+    Runs before the reload so the rebuild does not re-add an entity for a
+    receiver that no longer exists; a no-op when nothing was removed (the same
+    branch also fires for a receiver *added* or re-pointed).
+    """
+    if not removed:
+        return
+    entity_registry = er.async_get(hass)
+    for ent in list(er.async_entries_for_config_entry(entity_registry, entry.entry_id)):
+        parts = ent.unique_id.split(":")
+        if len(parts) == 4 and parts[0] == entry.entry_id and parts[2] in removed:
+            entity_registry.async_remove(ent.entity_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload the hub config entry.
+    """Unload a location config entry and every receiver in it.
 
-    Stops the coordinator, drops its runtime state, clears any reachability
-    repair issue, and unloads the forwarded entity platforms.
+    Stops each receiver's coordinator, drops its runtime state, clears its
+    reachability repair issue, tears down the location aggregator, and unloads
+    the entity platforms that were forwarded once on the location.
     """
-    coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
-        entry.entry_id
+    aggregator = (
+        hass.data.get(DOMAIN, {}).get(DATA_AGGREGATOR, {}).pop(entry.entry_id, None)
     )
-    if coordinator is not None:
+    if aggregator is not None:
+        aggregator.async_stop()
+    # Driven from what is *running*, not from what is stored, so a receiver whose
+    # subentry was deleted still has its socket closed and its card cleared.
+    for receiver_id, coordinator in running_coordinators(hass, entry).items():
         await coordinator.async_stop()
-    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        hass.data.get(DOMAIN, {}).pop(receiver_id, None)
+        repairs.async_clear_receiver_unreachable(hass, entry, receiver_id)
     hass.data.get(DOMAIN, {}).get(DATA_ENTRY_LIBRARY, {}).pop(entry.entry_id, None)
-    repairs.async_clear_hub_unreachable(hass, entry)
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
@@ -487,23 +689,43 @@ async def async_remove_config_entry_device(
 ) -> bool:
     """Allow removing a single nested RF device from its device page.
 
-    Refuses to remove the hub device itself (identifier
-    ``(DOMAIN, entry.entry_id)``) so the hub cannot be deleted out from under its
-    config entry. For a nested device, drops it from the hub's devices map and
-    un-adopts its ``device_key`` in the coordinator, so the device's next
-    transmission makes it a pending candidate the user can choose to add again
-    rather than silently re-creating the device they just deleted.
-    """
-    if (DOMAIN, config_entry.entry_id) in device_entry.identifiers:
-        return False
+    Refuses to remove the **location** device (identifier ``(DOMAIN, entry_id)``,
+    one segment) and a **receiver** device, so neither can be deleted out from
+    under the entry it structures: removing a receiver is subentry surgery
+    (delete the receiver) and removing the location is deleting the entry,
+    not the "forget this RF device" this handler implements. A receiver's
+    identifier is the three-segment
+    ``f"{location_entry_id}:receiver:{receiver_subentry_id}"``, recognised by the
+    reserved ``receiver`` marker rather than by guessing at which ids are entry
+    ids, so it is never decoded into a bogus ``device_key``.
 
-    # Find this device's device_key from its identifier
-    # ``(DOMAIN, f"{entry_id}:{device_key}")``.
+    For a merged RF device -- identifier
+    ``(DOMAIN, f"{location_entry_id}:{device_key}")``, where ``device_key`` never
+    contains a colon (``pyrtl_433.naming.safe_token``) -- the key is dropped from
+    the location's devices map and un-adopted in every receiver's coordinator, so
+    the device's next transmission from *any* receiver makes it a pending
+    candidate the user can choose to add again rather than silently re-creating
+    the device they just deleted.
+    """
+    coordinators = receiver_coordinators(hass, config_entry)
+
     device_key: str | None = None
     for domain, ident in device_entry.identifiers:
-        if domain == DOMAIN and ident.startswith(f"{config_entry.entry_id}:"):
-            device_key = ident.split(":", 1)[1]
-            break
+        if domain != DOMAIN:
+            continue
+        if ident == config_entry.entry_id:
+            # The location device itself.
+            return False
+        parts = ident.split(":")
+        if len(parts) == 3 and is_reserved_device_key(parts[1]):
+            # A receiver device.
+            return False
+        if len(parts) != 2 or parts[0] != config_entry.entry_id:
+            continue
+        if is_reserved_device_key(parts[1]):
+            return False
+        device_key = parts[1]
+        break
 
     if device_key is not None:
         devices = {
@@ -514,10 +736,7 @@ async def async_remove_config_entry_device(
         hass.config_entries.async_update_entry(
             config_entry, data={**config_entry.data, CONF_DEVICES: devices}
         )
-        coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
-            config_entry.entry_id
-        )
-        if coordinator is not None:
+        for coordinator in coordinators.values():
             coordinator.forget_device(device_key)
             # Drop the entity platforms' per-device dedup cache and field
             # listeners so the device re-appears cleanly if the user later adds

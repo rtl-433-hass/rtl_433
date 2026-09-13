@@ -1,25 +1,35 @@
 """The one implementation of adopting, ignoring, and un-ignoring a device.
 
-Two surfaces put the same three questions to the user — the hub's options flow
-(``options_flow.py``, universally available) and the discovery panel's WebSocket
-API (``websocket_api.py``, admin-only and dependent on a JS module loading).
-Both must create exactly the same device: if the panel and the options form
-adopted a device differently, someone who used both would end up with an
+Two surfaces put the same three questions to the user — the location's options
+flow (``options_flow.py``, universally available) and the discovery panel's
+WebSocket API (``websocket_api.py``, admin-only and dependent on a JS module
+loading). Both must create exactly the same device: if the panel and the options
+form adopted a device differently, someone who used both would end up with an
 inconsistent set of devices. So the actual work lives here, and both surfaces
 are thin presentation over it.
 
-Every function takes ``(hass, entry, coordinator, device_keys)`` and returns an
-:class:`AdoptionResult` naming what actually happened. The options flow could
-afford to drop a key that was no longer actionable — the form closes and the
-list re-renders from live state next time. The WebSocket caller cannot: a person
-is watching a row they just clicked, and "nothing happened" has to be
-distinguishable from "done". Reporting skips rather than silently discarding
-them is what lets the panel say which of the two it was.
+**Every verb is scoped to the location, not to a receiver.** A user approves a
+*sensor*; which of the location's servers happened to decode it is an accident
+of radio range, and a second receiver in range must not queue the same sensor a
+second time or ask for the same approval again. So each function takes
+``(hass, entry, device_keys)`` — the location entry, no coordinator — and fans
+the decision out over every receiver in it: the candidate adopted is the
+**merged** one (:func:`~.aggregator.merged_candidate`, built from whichever
+receiver received it last), and the key lands in every receiver's ``adopted`` or
+``ignored`` set, including the receivers that have never received the device and so
+had no candidate of their own.
 
-These functions keep the same split the coordinator already uses. Its in-memory
-sets (``adopted`` / ``ignored`` / ``pending``) are what makes a change take
-effect on a device's *very next transmission*; ``entry.data`` is what makes it
-survive a restart. Both are written here, in that order, for exactly that
+Each returns an :class:`AdoptionResult` naming what actually happened. The
+options flow could afford to drop a key that was no longer actionable — the form
+closes and the list re-renders from live state next time. The WebSocket caller
+cannot: a person is watching a row they just clicked, and "nothing happened" has
+to be distinguishable from "done". Reporting skips rather than silently
+discarding them is what lets the panel say which of the two it was.
+
+These functions keep the same split the coordinators already use. Their
+in-memory sets (``adopted`` / ``ignored`` / ``pending``) are what makes a change
+take effect on a device's *very next transmission*; ``entry.data`` is what makes
+it survive a restart. Both are written here, in that order, for exactly that
 reason.
 """
 
@@ -31,14 +41,13 @@ from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
 
+from .aggregator import async_emit_pending_update, location_adopted, merged_candidate
 from .const import CONF_IGNORED_DEVICES
 from .entity import async_upsert_device
-from .hub_settings import _hub_ignored_devices
+from .receiver_settings import _receiver_ignored_devices, receiver_coordinators
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
-
-    from .coordinator import Rtl433Coordinator
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,64 +69,83 @@ class AdoptionResult:
 async def async_adopt_devices(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    coordinator: Rtl433Coordinator,
     device_keys: Iterable[str],
 ) -> AdoptionResult:
-    """Adopt each pending device and persist it, reporting what was applied.
+    """Adopt each pending device into the location, reporting what was applied.
 
-    Adoption goes through the coordinator so the device is built by the same
-    ``new_device_callback`` seam a live first sighting used -- one registration
-    path, not two -- and is then written into ``entry.data[CONF_DEVICES]`` with
+    One approval, every receiver. The record adopted is the location's **merged**
+    candidate (:func:`~.aggregator.merged_candidate`), so a sensor two servers
+    both hear is added once, from the frame that arrived most recently, carrying
+    every field *either* of them has seen it report -- a weather station whose
+    wind frame only reached the attic and whose rain frame only reached the
+    garage still arrives with all of its entities.
+
+    Adoption then goes through each receiver's coordinator so the device is built
+    by the same ``new_device_callback`` seam a live first sighting used -- one
+    registration path, not two; the entity platforms share their created-id
+    bookkeeping across a location's receivers, so the second receiver's pass
+    finds every merged entity already built rather than minting a duplicate. A
+    receiver that never received the device has no candidate to promote and is told
+    :meth:`~.coordinator.Rtl433Coordinator.mark_adopted` instead, which is what
+    keeps it from re-queueing the device as new the first time it does hear it.
+
+    The device is finally written into ``entry.data[CONF_DEVICES]`` with
     :func:`~.entity.async_upsert_device`, the same idempotent union-write the
     entity platforms use, so an adopted device's record has exactly the shape
     every other write path produces and the device is rebuilt after a restart.
 
-    A key that is no longer pending yields ``None`` from
-    :meth:`~.coordinator.Rtl433Coordinator.adopt_device` -- it stopped being a
-    candidate between the render and the call, or a second caller already took it
-    -- and is reported as skipped rather than storing a record for a device the
-    coordinator knows nothing about.
+    A key no receiver is offering is reported as skipped rather than storing a
+    record for a device nothing knows anything about: it stopped being a
+    candidate between the render and the call, or a second caller already took
+    it.
 
-    The one announcement is made here, after the loop, rather than by
-    ``adopt_device`` per key: a batch is one user action, and until each device's
-    record is written it is only half adopted. Announcing per key would push a
-    full list down every open socket once per device -- forty pushes to adopt
-    forty candidates, thirty-nine of them immediately superseded.
+    The one announcement is made here, after the loop, rather than per key: a
+    batch is one user action, and until each device's record is written it is
+    only half adopted. Announcing per key would push a full list down every open
+    socket once per device -- forty pushes to adopt forty candidates,
+    thirty-nine of them immediately superseded.
     """
     result = AdoptionResult()
+    coordinators = receiver_coordinators(hass, entry)
 
     for device_key in device_keys:
-        record = coordinator.adopt_device(device_key)
-        if record is None:
+        candidate = merged_candidate(hass, entry, device_key)
+        if candidate is None:
             result.skipped.append(device_key)
             continue
+        for coordinator in coordinators.values():
+            if coordinator.adopt_device(device_key) is None:
+                coordinator.mark_adopted(device_key)
         await async_upsert_device(
             hass,
             entry,
             device_key,
-            model=record.model,
-            fields=set(record.fields),
+            model=candidate.record.model,
+            fields=set(candidate.record.fields),
         )
         result.applied.append(device_key)
 
     if result.applied:
-        coordinator.emit_pending_update()
+        async_emit_pending_update(hass, entry)
     return result
 
 
 async def async_ignore_devices(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    coordinator: Rtl433Coordinator,
     device_keys: Iterable[str],
 ) -> AdoptionResult:
-    """Stop offering each device as a candidate, for good.
+    """Stop offering each device as a candidate, for good, across the location.
 
-    The coordinator's ``ignored`` set is updated key by key first, which is what
-    makes the very next transmission drop; ``entry.data[CONF_IGNORED_DEVICES]``
-    is what makes that survive a restart. The persisted list is written in a
-    single call because it is a single value -- one entry update for a whole
-    batch, not one per device.
+    Every receiver's ``ignored`` set is updated key by key first, which is what
+    makes the very next transmission drop -- from *any* of them, which is the
+    whole point: "I do not want my neighbour's sensor" is not a statement about
+    which of my servers can hear it, and one receiver still offering the row
+    would put it straight back on the merged list.
+    ``entry.data[CONF_IGNORED_DEVICES]`` is what makes that survive a restart,
+    and it lives on the location for the same reason. The persisted list is
+    written in a single call because it is a single value -- one entry update for
+    a whole batch, not one per device.
 
     A key already on the stored list is reported as skipped: the coordinator is
     still told about it (harmless, and it repairs a mirror that has drifted from
@@ -125,7 +153,8 @@ async def async_ignore_devices(
     tell the user the device was already ignored. An empty request short-circuits
     before touching the entry at all, so "ignore nothing" never writes.
 
-    An *adopted* key is skipped without being touched at all. Ignoring only ever
+    An *adopted* key -- adopted anywhere in the location -- is skipped without
+    being touched at all. Ignoring only ever
     means "stop offering this as a candidate", and an adopted device is not a
     candidate -- the event path checks ``adopted`` first, so adding the key to
     ``ignored`` would change nothing about the device while leaving it listed as
@@ -146,12 +175,15 @@ async def async_ignore_devices(
     if not keys:
         return result
 
-    ignored = _hub_ignored_devices(entry)
+    coordinators = receiver_coordinators(hass, entry)
+    adopted = location_adopted(hass, entry)
+    ignored = _receiver_ignored_devices(entry)
     for device_key in keys:
-        if device_key in coordinator.adopted:
+        if device_key in adopted:
             result.skipped.append(device_key)
             continue
-        coordinator.ignore_device(device_key)
+        for coordinator in coordinators.values():
+            coordinator.ignore_device(device_key)
         if device_key in ignored:
             result.skipped.append(device_key)
             continue
@@ -161,14 +193,13 @@ async def async_ignore_devices(
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_IGNORED_DEVICES: ignored}
     )
-    coordinator.emit_pending_update()
+    async_emit_pending_update(hass, entry)
     return result
 
 
 async def async_unignore_devices(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    coordinator: Rtl433Coordinator,
     device_keys: Iterable[str],
 ) -> AdoptionResult:
     """Un-ignore devices so they are offered for adding again.
@@ -179,10 +210,12 @@ async def async_unignore_devices(
     that reports every few minutes that is a short wait; for a door sensor it
     takes a door.
 
-    ``entry.data`` is the source of truth here (the coordinator's ``ignored`` set
-    mirrors it), but the coordinator's copy is still discarded from directly:
+    ``entry.data`` is the source of truth here (each coordinator's ``ignored``
+    set mirrors it), but every receiver's copy is still discarded from directly:
     that is what un-ignores the device on its next transmission instead of only
-    after a reload. A key that is not on the stored list is reported as skipped.
+    after a reload, and missing one would leave the device hidden from whichever
+    receiver receives it best. A key that is not on the stored list is reported as
+    skipped.
 
     The pending map's membership does not change here -- but every subscriber's
     view of the *ignored* list just did, and that list is part of what the
@@ -198,14 +231,16 @@ async def async_unignore_devices(
     if not keys:
         return result
 
-    ignored = _hub_ignored_devices(entry)
+    coordinators = receiver_coordinators(hass, entry)
+    ignored = _receiver_ignored_devices(entry)
     selected = set(keys)
     for device_key in keys:
-        coordinator.ignored.discard(device_key)
-        # No longer ignored, so nothing is left to name: dropping the
-        # remembered model keeps the map from growing for the life of the
-        # process with devices that are back on the pending list.
-        coordinator.ignored_models.pop(device_key, None)
+        for coordinator in coordinators.values():
+            coordinator.ignored.discard(device_key)
+            # No longer ignored, so nothing is left to name: dropping the
+            # remembered model keeps the map from growing for the life of the
+            # process with devices that are back on the pending list.
+            coordinator.ignored_models.pop(device_key, None)
         if device_key in ignored:
             result.applied.append(device_key)
         else:
@@ -218,5 +253,5 @@ async def async_unignore_devices(
             CONF_IGNORED_DEVICES: [key for key in ignored if key not in selected],
         },
     )
-    coordinator.emit_pending_update()
+    async_emit_pending_update(hass, entry)
     return result

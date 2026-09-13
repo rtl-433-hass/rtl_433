@@ -2,9 +2,9 @@
 
 Provides the ``enable_custom_integrations`` plumbing the
 ``pytest-homeassistant-custom-component`` plugin needs to discover the
-``custom_components/rtl_433`` package, plus a builder for the single hub config
-entry (optionally pre-seeded with a per-device map at ``data["devices"]``) and a
-loader for the project-authored JSON event fixtures.
+``custom_components/rtl_433`` package, plus a builder for a **location** config
+entry and its receiver subentries (optionally pre-seeded with a per-device map at
+``data["devices"]``) and a loader for the project-authored JSON event fixtures.
 """
 
 from __future__ import annotations
@@ -23,13 +23,18 @@ from custom_components.rtl_433.const import (
     CONF_DEVICES,
     CONF_HOST,
     CONF_IGNORED_DEVICES,
+    CONF_INITIAL_FREQUENCY,
+    CONF_MANAGE_SETTINGS,
     CONF_PATH,
     CONF_PORT,
     DEFAULT_PATH,
     DEFAULT_PORT,
     DOMAIN,
+    SUBENTRY_TYPE_RECEIVER,
+    receiver_identity,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
+from homeassistant.config_entries import ConfigSubentryData
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -38,8 +43,8 @@ def pytest_configure(config):
     """Register the suite's own markers."""
     config.addinivalue_line(
         "markers",
-        "hub_disconnected: do not auto-connect coordinators (see "
-        "hub_connected_by_default)",
+        "receiver_disconnected: do not auto-connect coordinators (see "
+        "receiver_connected_by_default)",
     )
 
 
@@ -64,36 +69,73 @@ def events():
     return load_events
 
 
-def build_hub_entry(
+def build_receiver_subentry(
     *,
     host: str = "rtl433.local",
     port: int = DEFAULT_PORT,
     path: str = DEFAULT_PATH,
     secure: bool = False,
-    availability_timeout: int | None = None,
-    devices: dict[str, Any] | None = None,
-    ignored_devices: list[str] | None = None,
-    options: dict[str, Any] | None = None,
-    entry_id: str | None = None,
-    version: int = 2,
-) -> MockConfigEntry:
-    """Build a hub ``MockConfigEntry`` with sensible defaults for tests.
-
-    ``devices`` (when given) is placed at ``data["devices"]`` — the single source
-    of truth for nested-device state, keyed by ``device_key`` with each value
-    carrying ``model`` / ``fields`` / optional ``timeout_override``.
-    ``ignored_devices`` (when given) is placed at ``data["ignored_devices"]`` --
-    the persistent hub ignore list the coordinator seeds ``ignored`` from, so a
-    test can start with devices already hidden from the approval step. The entry
-    defaults to ``version=2`` so normal lifecycle setup does not trigger the
-    1 -> 2 migration; the migration test builds its v1 entries directly.
-    """
+    manage_settings: bool | None = None,
+    initial_frequency: float | None = None,
+    unique_id: str | None = None,
+) -> ConfigSubentryData:
+    """Build one receiver subentry's data, as the config flow would write it."""
     data: dict[str, Any] = {
         CONF_HOST: host,
         CONF_PORT: port,
         CONF_PATH: path,
         "secure": secure,
     }
+    if manage_settings is not None:
+        data[CONF_MANAGE_SETTINGS] = manage_settings
+    if initial_frequency is not None:
+        data[CONF_INITIAL_FREQUENCY] = initial_frequency
+    return ConfigSubentryData(
+        data=data,
+        subentry_type=SUBENTRY_TYPE_RECEIVER,
+        title=f"rtl_433 ({host})",
+        unique_id=f"hub:{host}:{port}" if unique_id is None else unique_id,
+    )
+
+
+def build_receiver_entry(
+    *,
+    host: str = "rtl433.local",
+    port: int = DEFAULT_PORT,
+    path: str = DEFAULT_PATH,
+    secure: bool = False,
+    manage_settings: bool | None = None,
+    initial_frequency: float | None = None,
+    receiver_unique_id: str | None = None,
+    receivers: list[ConfigSubentryData] | None = None,
+    availability_timeout: int | None = None,
+    devices: dict[str, Any] | None = None,
+    ignored_devices: list[str] | None = None,
+    options: dict[str, Any] | None = None,
+    entry_id: str | None = None,
+    version: int = 2,
+    minor_version: int = 1,
+) -> MockConfigEntry:
+    """Build a **location** ``MockConfigEntry`` with one receiver subentry.
+
+    The location entry owns everything that describes sensors and the receiver
+    subentry owns everything that describes the server, which is exactly the split
+    the config flow writes:
+
+    ``devices`` (when given) is placed at ``data["devices"]`` — the single source
+    of truth for nested-device state, keyed by ``device_key`` with each value
+    carrying ``model`` / ``fields`` / optional ``timeout_override``.
+    ``ignored_devices`` (when given) is placed at ``data["ignored_devices"]`` --
+    the persistent ignore list the coordinators seed ``ignored`` from, so a test
+    can start with devices already hidden from the approval step. The
+    host/port/path/secure arguments describe the entry's single receiver.
+
+    Pass ``receivers`` to build a multi-receiver location instead, using
+    :func:`build_receiver_subentry` for each one. The entry defaults to
+    ``version=2`` so normal lifecycle setup does not trigger the 1 -> 2 migration;
+    the migration test builds its v1 entries directly.
+    """
+    data: dict[str, Any] = {}
     if availability_timeout is not None:
         data[CONF_AVAILABILITY_TIMEOUT] = availability_timeout
     if devices is not None:
@@ -101,34 +143,128 @@ def build_hub_entry(
     if ignored_devices is not None:
         data[CONF_IGNORED_DEVICES] = ignored_devices
 
+    if receivers is None:
+        receivers = [
+            build_receiver_subentry(
+                host=host,
+                port=port,
+                path=path,
+                secure=secure,
+                manage_settings=manage_settings,
+                initial_frequency=initial_frequency,
+                unique_id=receiver_unique_id,
+            )
+        ]
+
     kwargs: dict[str, Any] = {
         "domain": DOMAIN,
         "title": f"rtl_433 ({host})",
         "data": data,
         "options": options or {},
-        "unique_id": f"hub:{host}:{port}",
+        # A location has no intrinsic hardware identity; its receivers carry the
+        # host:port / stable-radio unique_ids.
+        "unique_id": None,
         "version": version,
+        "minor_version": minor_version,
+        "subentries_data": receivers,
     }
     if entry_id is not None:
         kwargs["entry_id"] = entry_id
     return MockConfigEntry(**kwargs)
 
 
+def build_location_entry(
+    *,
+    receiver_data: dict[str, Any],
+    receiver_unique_id: str | None = None,
+    receiver_title: str = "rtl_433 (rtl433.local)",
+    title: str = "rtl_433 (rtl433.local)",
+    data: dict[str, Any] | None = None,
+    options: dict[str, Any] | None = None,
+    entry_id: str | None = None,
+    version: int = 2,
+) -> MockConfigEntry:
+    """Build a location entry whose single receiver carries ``receiver_data`` as-is.
+
+    The looser sibling of :func:`build_receiver_entry`, for tests that need a
+    receiver with a *deliberately* incomplete connection record (no host, no
+    port) to exercise a form's fallbacks.
+    """
+    kwargs: dict[str, Any] = {
+        "domain": DOMAIN,
+        "title": title,
+        "data": data or {},
+        "options": options or {},
+        "unique_id": None,
+        "version": version,
+        "subentries_data": [
+            ConfigSubentryData(
+                data=receiver_data,
+                subentry_type=SUBENTRY_TYPE_RECEIVER,
+                title=receiver_title,
+                unique_id=receiver_unique_id,
+            )
+        ],
+    }
+    if entry_id is not None:
+        kwargs["entry_id"] = entry_id
+    return MockConfigEntry(**kwargs)
+
+
+def receiver_subentry(entry: MockConfigEntry, index: int = 0):
+    """Return one of a location entry's receiver subentries, in creation order."""
+    return [
+        subentry
+        for subentry in entry.subentries.values()
+        if subentry.subentry_type == SUBENTRY_TYPE_RECEIVER
+    ][index]
+
+
+def receiver_id(entry: MockConfigEntry, index: int = 0) -> str:
+    """Return a location entry's receiver id -- the scope of its identities."""
+    return receiver_subentry(entry, index).subentry_id
+
+
+def receiver_scope(entry: MockConfigEntry, index: int = 0) -> str:
+    """Return a receiver's identity root: ``{entry_id}:receiver:{subentry_id}``."""
+    return receiver_identity(entry.entry_id, receiver_id(entry, index))
+
+
+def link_unique_id(
+    entry: MockConfigEntry, device_key: str, object_suffix: str, index: int = 0
+) -> str:
+    """Return a per-receiver link entity's four-segment ``unique_id``.
+
+    ``rssi`` / ``snr`` / ``last_seen`` are excluded from the union -- they measure
+    one receiver's link to the sensor, not the sensor -- so each yields one entity
+    per (device x receiver) on the merged device, discriminated by the receiver's
+    subentry id: ``{entry_id}:{device_key}:{receiver_id}:{object_suffix}``. A
+    unioned field keeps the receiver-agnostic three-segment id.
+    """
+    return f"{entry.entry_id}:{device_key}:{receiver_id(entry, index)}:{object_suffix}"
+
+
+def build_coordinator(hass, entry: MockConfigEntry, **kwargs: Any) -> Rtl433Coordinator:
+    """Build a coordinator for a location entry's first receiver."""
+    kwargs.setdefault("host", "rtl433.local")
+    return Rtl433Coordinator(hass, entry, receiver_subentry(entry), **kwargs)
+
+
 @pytest.fixture
-def hub_entry_builder():
-    """Expose :func:`build_hub_entry` as a fixture."""
-    return build_hub_entry
+def receiver_entry_builder():
+    """Expose :func:`build_receiver_entry` as a fixture."""
+    return build_receiver_entry
 
 
-def mark_hub_connected(coordinator: Any) -> None:
-    """Put a coordinator in the state a live hub connection leaves behind.
+def mark_receiver_connected(coordinator: Any) -> None:
+    """Put a coordinator in the state a live receiver connection leaves behind.
 
     Tests inject events straight into the client's frame handler instead of over
     a real socket, so the client's ``connected`` flag stays False and the
     coordinator's connection-backed availability gate reads the whole run as one
-    long outage: every device behind the hub is unavailable whatever its own
+    long outage: every device behind the receiver is unavailable whatever its own
     silence timeout says (see ``coordinator/_watchdog.py``). Any test that feeds
-    events is implicitly assuming the hub is connected, so it has to say so —
+    events is implicitly assuming the receiver is connected, so it has to say so —
     this is that statement.
 
     Sets the connect-edge state directly rather than firing the client callback:
@@ -141,22 +277,22 @@ def mark_hub_connected(coordinator: Any) -> None:
     coordinator._was_connected = True
     coordinator._ever_connected = True
     coordinator._disconnected_since = None
-    coordinator._async_sync_hub_availability()
+    coordinator._async_sync_receiver_availability()
 
 
 @pytest.fixture
-def hub_connected():
-    """Expose :func:`mark_hub_connected` as a fixture."""
-    return mark_hub_connected
+def receiver_connected():
+    """Expose :func:`mark_receiver_connected` as a fixture."""
+    return mark_receiver_connected
 
 
 @pytest.fixture(autouse=True)
-def hub_connected_by_default(request):
+def receiver_connected_by_default(request):
     """Leave every coordinator a test starts in the connected state.
 
-    A connected hub is what almost every test means, so it is the default rather
+    A connected receiver is what almost every test means, so it is the default rather
     than an opt-in each setup site has to remember: forgetting it does not fail
-    where the hub is set up, it fails much later as an unrelated-looking device
+    where the receiver is set up, it fails much later as an unrelated-looking device
     timeout as soon as the test looks at an entity's state.
 
     Marking connected once at startup is not enough on its own: the real setup
@@ -167,9 +303,9 @@ def hub_connected_by_default(request):
     default" silently stops holding as soon as a test lets the event loop run.
 
     Tests that exercise the outage side opt out with
-    ``@pytest.mark.hub_disconnected`` and drive the edges themselves.
+    ``@pytest.mark.receiver_disconnected`` and drive the edges themselves.
     """
-    if "hub_disconnected" in request.keywords:
+    if "receiver_disconnected" in request.keywords:
         yield
         return
 
@@ -177,7 +313,7 @@ def hub_connected_by_default(request):
 
     async def _async_start(self: Rtl433Coordinator) -> None:
         await original(self)
-        mark_hub_connected(self)
+        mark_receiver_connected(self)
 
     with (
         patch.object(Rtl433Client, "start", new=AsyncMock()),
@@ -191,17 +327,17 @@ def hub_connected_by_default(request):
 def no_socket():
     """Stub the transport's connect loop so no real WebSocket is ever opened.
 
-    Opt-in (not autouse): only the tests that drive a hub entry through the real
+    Opt-in (not autouse): only the tests that drive a receiver entry through the real
     ``async_setup_entry`` need it. ``Rtl433Client.start`` is the single place the
     socket is opened, so a no-op keeps ``coordinator.async_start`` intact while
     leaving setup — and any later ``async_reload`` — offline. ``test_lifecycle``
     keeps its own module-scoped copy; this one exists for the flow-level modules
     that reload an entry mid-test.
 
-    ``hub_connected_by_default`` above already stubs the same method for every
+    ``receiver_connected_by_default`` above already stubs the same method for every
     test that does not opt out, so requesting this fixture is now a statement of
     intent rather than the thing keeping the socket shut. It still matters for a
-    ``@pytest.mark.hub_disconnected`` test, which gets no stub of its own.
+    ``@pytest.mark.receiver_disconnected`` test, which gets no stub of its own.
     """
 
     async def _noop(self) -> None:

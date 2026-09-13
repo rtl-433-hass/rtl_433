@@ -1,8 +1,19 @@
 /**
- * rtl_433 panel: a live view of what the receiver is hearing, as one card per
+ * rtl_433 panel: a live view of what a **location** is hearing, as one card per
  * candidate device with Add, Ignore and Replace on the card itself -- and the
- * receiver's own settings, since this page *is* the integration's configuration
+ * location's own settings, since this page *is* the integration's configuration
  * page and there is nowhere else for them to be.
+ *
+ * The model the whole page is shaped around: a *location* is a place with
+ * sensors in it, a *receiver* is one rtl_433 server listening on its behalf,
+ * and a *radio* is the SDR that receiver drives. Several receivers in one
+ * location hear the same transmissions, so the integration unions them into one
+ * device with one set of entities -- and this page is where that union is made
+ * legible. There is one add-device list for the location, not one per receiver;
+ * a sensor two receivers both hear is a single card naming both of them; and
+ * the two settings that differ in scope are two pages, because the availability
+ * timeout is one answer for every device here and the manage-radio toggle is
+ * one answer per receiver.
  *
  * This file is deliberately plain. It is one custom element in one ES module
  * with **no imports at all**, and there is no build step anywhere in this
@@ -30,21 +41,29 @@
  *   file, that is a decision to take deliberately rather than to drift into.
  *
  * The backend contract lives in `custom_components/rtl_433/websocket_api.py`:
- * `rtl_433/hubs` names the receivers, `rtl_433/devices/subscribe` pushes one
- * hub's `{pending, ignored}` state whenever it changes, and
+ * `rtl_433/receivers` names every location and the receivers inside it,
+ * `rtl_433/devices/subscribe` pushes one location's merged
+ * `{pending, ignored}` state whenever it changes,
  * `rtl_433/devices/add` / `.../ignore` / `.../unignore` are the three actions,
- * and `rtl_433/devices/replace` re-points an existing device onto a candidate.
+ * `rtl_433/devices/replace` re-points an existing device onto a candidate, and
+ * `rtl_433/devices/coverage` answers the one question the union necessarily
+ * hides -- which receiver receives a device, how strongly, how recently.
  * None of the adopt/ignore/replace *logic* is reimplemented here; every button
  * is one command call, so this panel cannot drift from what the integration
- * does. The same holds for the three settings pages: `rtl_433/settings/get`
+ * does. The same holds for the four settings pages: `rtl_433/settings/get`
  * answers with everything they render -- including which units are valid for
- * which commodity -- and `.../hub`, `.../device` and `.../mappings` store it.
- * A form here knows how to lay a control out and nothing about what a value
- * means, which is why the panel cannot store a setting the integration would
- * refuse.
+ * which commodity -- and `.../location`, `.../receiver`, `.../device` and
+ * `.../mappings` store it. A form here knows how to lay a control out and
+ * nothing about what a value means, which is why the panel cannot store a
+ * setting the integration would refuse.
+ *
+ * Every command but `rtl_433/receivers` names a location by `entry_id`, and the
+ * one that configures a radio names a receiver by `receiver_id` as well -- so
+ * every page of this panel carries its location in the URL, and the radio page
+ * carries both.
  *
  * **Why cards rather than a table.** A candidate is judged on evidence that is
- * not columnar: how often it has been heard, how strong it was, and above all
+ * not columnar: how often it has been received, how strong it was, and above all
  * *what it reports*. A row can hold one truncated line of that; a card holds
  * the readings laid out the way the device's own page will lay them out after
  * adoption, which is the actual question ("is this the sensor on my patio?").
@@ -55,23 +74,26 @@
 /**
  * How often the rendered relative timestamps ("12s ago") are recomputed.
  *
- * The subscription only pushes when the payload changes, so on an idle hub
+ * The subscription only pushes when the payload changes, so on an idle location
  * "2s ago" would otherwise stay on screen indefinitely and quietly lie about
- * how long it has been since anything was heard. Re-rendering is cheap because
+ * how long it has been since anything was received. Re-rendering is cheap because
  * rendering reconciles the existing cards rather than rebuilding them.
+ *
+ * It is also the interval on which the two things nothing pushes are re-asked:
+ * a receiver's own connection state and a device's coverage. See `_tick`.
  */
 const CLOCK_INTERVAL_MS = 15000;
 
 /**
- * How long to keep waiting for a hub that is mid-reload, and how often to look.
+ * How long to keep waiting for a location that is mid-reload, and how often to look.
  *
- * Saving a calibration, a mapping override or the manage-settings toggle
- * reloads the hub, and for a moment afterwards it is genuinely not loaded --
- * the subscription this page depends on cannot be opened against it. That is a
- * wait, not a failure, and reporting it as one would put an error banner in
+ * Saving a calibration, a mapping override or a receiver's manage-radio toggle
+ * reloads the location, and for a moment afterwards it is genuinely not loaded
+ * -- the subscription this page depends on cannot be opened against it. That is
+ * a wait, not a failure, and reporting it as one would put an error banner in
  * front of the user at the exact moment their save succeeded. Ten seconds is
- * far longer than a reload takes and still short enough that a hub which is
- * really unreachable says so rather than spinning.
+ * far longer than a reload takes and still short enough that a location which
+ * is really unreachable says so rather than spinning.
  */
 const RELOAD_RETRY_MS = 1000;
 const RELOAD_RETRY_LIMIT = 10;
@@ -127,7 +149,9 @@ const TRANSLATION_PREFIX = `component.${DOMAIN}.${TRANSLATION_CATEGORY}.`;
 export const STRINGS = {
   title: "rtl_433",
   "view.discovered": "Discovered devices",
-  "view.hub_settings": "Receiver settings",
+  "view.coverage": "Signal coverage",
+  "view.location_settings": "Location settings",
+  "view.receiver_settings": "Receiver settings",
   "view.device_settings": "Device settings",
   "view.mappings": "Device mappings",
   "common.back": "Back",
@@ -136,8 +160,8 @@ export const STRINGS = {
   "common.loading": "Loading…",
   "common.unknown_model": "Unknown model",
   "common.unknown_error": "Unknown error",
-  "status.no_hubs": "No rtl_433 hubs are configured.",
-  "status.waiting_for_reload": "Waiting for the receiver to reload…",
+  "status.no_receivers": "No rtl_433 receivers are configured.",
+  "status.waiting_for_reload": "Waiting for the location to reload…",
   "status.online": "Online",
   "status.connecting": "Connecting…",
   "status.problem": "Problem",
@@ -149,14 +173,25 @@ export const STRINGS = {
   "overview.entity_count.one": "{count} entity",
   "overview.entity_count.other": "{count} entities",
   "overview.add_device": "Add or replace device",
-  "overview.hub_settings_description":
-    "Availability timeout and whether Home Assistant manages the receiver",
+  "overview.coverage": "Signal coverage",
+  "overview.coverage_description":
+    "Which of this location's receivers receive each device, and how well",
+  "overview.receivers": "Receivers",
+  "overview.receiver_supporting": "{host}:{port} — {status}",
+  "overview.receiver_connected": "Connected",
+  "overview.receiver_disconnected": "Not connected",
+  "overview.location_settings_description":
+    "The availability timeout every device at this location starts from",
+  "overview.receiver_settings_description":
+    "Whether Home Assistant manages this receiver's own radio",
   "overview.device_settings_description":
     "Per-device timeout overrides and utility-meter calibration",
   "overview.mappings_description":
     "YAML overrides for how fields become entities",
   "discovered.searching": "Searching for rtl_433 devices…",
   "discovered.hint": "Devices will show up here once discovered.",
+  "discovered.union":
+    "Every receiver at this location feeds this one list: a sensor two of them receive is a single card showing whichever received it last, and adding or ignoring it applies to the whole location.",
   "discovered.show_ignored": "Show ignored devices ({count})",
   "discovered.hide_ignored": "Hide ignored devices ({count})",
   "discovered.clear": "Clear discovered devices",
@@ -168,6 +203,8 @@ export const STRINGS = {
   "card.signal": "Signal",
   "card.signal_value": "{value} dB",
   "card.last_seen": "Last seen",
+  "card.received_by": "Received by",
+  "card.received_by_receiver": "{receiver} ({signal})",
   "card.seen_tooltip": "First seen {first}\nLast seen {last}",
   "card.open_device": "Open device",
   "card.area": "Area",
@@ -175,6 +212,16 @@ export const STRINGS = {
   "card.ignore": "Ignore",
   "card.replace": "Replace",
   "card.unignore": "Un-ignore",
+  "coverage.intro":
+    "How well each receiver receives each device at this location, read from the receivers themselves — no diagnostic entity has to be enabled to see it.",
+  "coverage.empty":
+    "No devices have been added yet. Add one from the discovered devices page, and its coverage will appear here.",
+  "coverage.available": "Available",
+  "coverage.unavailable": "Unavailable",
+  "coverage.never_received": "Never received it",
+  "coverage.offline": "This receiver is not connected.",
+  "coverage.snr_tooltip": "Signal-to-noise ratio {value} dB",
+  "coverage.unknown_receiver": "Unknown receiver",
   "age.seconds": "{count}s ago",
   "age.minutes": "{count}m ago",
   "age.hours": "{count}h ago",
@@ -194,14 +241,16 @@ export const STRINGS = {
   "replace.intro":
     "{device} ({key}) is new to Home Assistant. If it is a device you already have — the same sensor after a battery change, say — pick it below. Its history, settings and entity ids move across to the new transmitter id, and the candidate is merged into it.",
   "settings.saved": "Settings saved.",
-  "settings.hub_intro":
-    "Settings for this receiver as a whole. Individual devices can override the timeout.",
+  "settings.location_intro":
+    "Settings for every device at this location, whichever receiver receives it. Individual devices can override the timeout.",
+  "settings.receiver_intro":
+    "Settings for one receiver's own radio. Every other receiver at this location keeps its own answer.",
   "settings.device_intro":
-    "Overrides for one device. Blank means “use the receiver's setting”.",
+    "Overrides for one device. Blank means “use the location's setting”.",
   "settings.device_empty":
     "No devices have been added yet. Add one from this page first, and its settings will appear here.",
   "settings.mappings_intro":
-    "YAML overrides for how this receiver's fields become entities. Clearing the editor removes them all.",
+    "YAML overrides for how this location's fields become entities. Clearing the editor removes them all.",
   "settings.documentation": "Documentation",
   "settings.seconds": "seconds",
   "settings.label_with_unit": "{label} ({unit})",
@@ -210,7 +259,7 @@ export const STRINGS = {
   "settings.timeout_mode.custom": "A fixed timeout",
   "settings.data.availability_mode": "Availability timeout",
   "settings.data.availability_timeout": "Timeout",
-  "settings.data.manage_settings": "Manage the receiver's own settings",
+  "settings.data.manage_settings": "Manage this receiver's radio",
   "settings.data.device_key": "Device",
   "settings.data.timeout_override": "Availability timeout override",
   "settings.data.motion_clear_delay": "Motion clear delay",
@@ -219,13 +268,13 @@ export const STRINGS = {
   "settings.data.scale": "Scale",
   "settings.data.mappings": "Overrides",
   "settings.data_description.availability_mode":
-    "How long a device may go unheard before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
+    "How long a device may go without being received before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
   "settings.data_description.availability_timeout":
-    "Applies to every device without an override of its own.",
+    "Applies to every device at this location without an override of its own.",
   "settings.data_description.manage_settings":
-    "Adds frequency, gain and sample-rate entities to this receiver's device page.",
+    "Adds frequency, gain and sample-rate entities for this receiver's radio.",
   "settings.data_description.timeout_override":
-    "Blank uses the receiver's timeout. 0 means never expire.",
+    "Blank uses the location's timeout. 0 means never expire.",
   "settings.data_description.motion_clear_delay":
     "How long after a detection this device is reported clear. Blank uses {motion_clear_delay} seconds.",
   "settings.data_description.commodity":
@@ -379,7 +428,21 @@ function pluralCandidates(key, args, language) {
 export const VIEWS = {
   "": { view: "overview", title: "title" },
   discovered: { view: "discovered", title: "view.discovered" },
-  options: { view: "settings", title: "view.hub_settings", form: "hub" },
+  coverage: { view: "coverage", title: "view.coverage" },
+  options: {
+    view: "settings",
+    title: "view.location_settings",
+    form: "location",
+  },
+  // The one page addressed by a *receiver* rather than by the location alone,
+  // because the radio it configures belongs to one receiver and the location's
+  // other receivers keep their own answer. Its path carries both ids.
+  receiver: {
+    view: "settings",
+    title: "view.receiver_settings",
+    form: "receiver",
+    receiver: true,
+  },
   "device-settings": {
     view: "settings",
     title: "view.device_settings",
@@ -442,11 +505,23 @@ const ICON_DEVICE_SETTINGS =
 const ICON_MAPPINGS =
   "M8 3a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2H3v2h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h2v-2H8v-5a2 2 0 0 0-1-1.73V13a2 2 0 0 0 1-1.73V5h2V3H8m8 0a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1v2h-1a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-2v-2h2v-5a2 2 0 0 1 1-1.73V13a2 2 0 0 1-1-1.73V5h-2V3h2Z";
 
+/**
+ * An antenna and a bar chart: the receivers card's rows, and the coverage row.
+ *
+ * Drawn here rather than named as `mdi*` constants like the five above, because
+ * these two are this file's own shapes: an aerial radiating on both sides for a
+ * receiver, and ascending bars for how well it receives. Both are plain path data
+ * with no dependency on which icon set the frontend happens to ship.
+ */
+const ICON_RECEIVER_ROW =
+  "M12 6a3 3 0 0 1 3 3c0 1.3-.84 2.4-2 2.82V22h-2v-10.18A3 3 0 0 1 9 9a3 3 0 0 1 3-3m0 2a1 1 0 0 0-1 1 1 1 0 0 0 1 1 1 1 0 0 0 1-1 1 1 0 0 0-1-1M7.05 3.05l1.41 1.41A5 5 0 0 0 7 9a5 5 0 0 0 1.46 3.54l-1.41 1.41A7 7 0 0 1 5 9a7 7 0 0 1 2.05-5.95m9.9 0A7 7 0 0 1 19 9a7 7 0 0 1-2.05 4.95l-1.41-1.41A5 5 0 0 0 17 9a5 5 0 0 0-1.46-3.54l1.41-1.41Z";
+const ICON_COVERAGE = "M3 21h3v-6H3v6m5 0h3V9H8v12m5 0h3V3h-3v18m5 0h3v-9h-3v9Z";
+
 /** mdiPlus, for the floating action button. */
 const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
 
 /**
- * How the hub's availability timeout is chosen, as three named choices.
+ * How the location's availability timeout is chosen, as three named choices.
  *
  * The timeout has three states and only one of them is a number: "let each
  * device type decide", "never expire", and a count of seconds. A bare number
@@ -464,7 +539,7 @@ const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
 export const TIMEOUT_MODES = ["defaults", "never", "custom"];
 
 /**
- * Which of `TIMEOUT_MODES` a stored hub timeout is in.
+ * Which of `TIMEOUT_MODES` a stored location timeout is in.
  *
  * `null` is "nothing stored", which is what leaves the per-device-type defaults
  * in charge; `0` is the stored value that means never-expire. Every other number
@@ -482,8 +557,9 @@ export function timeoutMode(explicit) {
  * What to send for a mode and the seconds beside it: `null`, `0`, or a count.
  *
  * A blank or unparseable custom field falls back to `null` rather than to a
- * number of its own: "defaults" is the state the hub was in before anyone opened
- * the form, so an empty field cannot silently pin a timeout onto every device.
+ * number of its own: "defaults" is the state the location was in before anyone
+ * opened the form, so an empty field cannot silently pin a timeout onto every
+ * device.
  */
 export function timeoutValue(mode, seconds) {
   if (mode === "never") {
@@ -567,11 +643,101 @@ export function formatAge(t, iso, now) {
 }
 
 /**
+ * Format a signal level, or an em dash when there is none.
+ *
+ * The number and its unit are joined by a translated template rather than here,
+ * because where a unit goes relative to its number is a fact about a language.
+ *
+ * Pure and exported for the same reason as `formatAge`: it is called from two
+ * places that mean different things by it -- a candidate's headline level and
+ * one receiver's view of an adopted device -- and "no level at all" is an
+ * ordinary answer on both, since not every decoder emits one and a server
+ * started without `-M level` emits none.
+ */
+export function formatSignal(t, value) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return t("card.signal_value", { value: value.toFixed(1) });
+}
+
+/**
+ * *"Attic (-62 dB) / Garage (-89 dB)"*: who received this, and how well.
+ *
+ * The union's one visible seam. A sensor two receivers both hear is a single
+ * row on the add-device page, so without this line there is nothing on the page
+ * to say that the garage received it too -- or that the garage received it at -89 dB
+ * while the attic received it at -62.
+ *
+ * A receiver that reported no level is named on its own rather than beside an
+ * em dash, which reads as a measurement of nothing rather than as an absence of
+ * one. `titleFor` resolves a receiver id to its title, because the coverage
+ * rows carry only the id.
+ *
+ * Pure and exported: this is the sentence Clarification #23 is about, and it
+ * has to be right with one receiver, with three, and with a level missing from
+ * any of them.
+ */
+export function formatReceivedBy(t, receivers, titleFor) {
+  return receivers
+    .map((coverage) => {
+      const receiver = titleFor(coverage.receiver_id);
+      if (coverage.rssi === null || coverage.rssi === undefined) {
+        return receiver;
+      }
+      return t("card.received_by_receiver", {
+        receiver,
+        signal: formatSignal(t, coverage.rssi),
+      });
+    })
+    .join(" / ");
+}
+
+/**
+ * When a receiver last received a device, or that it never has.
+ *
+ * `last_seen` is `null` for a receiver that has never decoded this device, and
+ * `rtl_433/devices/coverage` lists such a receiver rather than omitting it:
+ * *"the garage does not hear it"* is as much a coverage answer as a weak signal
+ * is, and it is usually the answer someone comparing two receivers is looking
+ * for. So the absence gets words rather than an em dash.
+ */
+export function coverageAge(t, coverage, now) {
+  if (coverage.last_seen === null || coverage.last_seen === undefined) {
+    return t("coverage.never_received");
+  }
+  return formatAge(t, coverage.last_seen, now);
+}
+
+/**
+ * Which receiver a radio-settings page is editing.
+ *
+ * The URL wins when it names a receiver that still belongs to the page's
+ * location. Anything else -- a link written before that receiver was removed, a
+ * link that named none at all -- falls back to the location's first receiver,
+ * so the page configures something real instead of rendering a form that can
+ * only fail on save. A location with no receivers at all answers `null`, which
+ * is the one case where there is nothing to configure.
+ *
+ * Pure and exported because getting it wrong is invisible: the page renders,
+ * the toggle moves, and the save lands on another receiver's radio.
+ */
+export function receiverFor(receivers, receiverId) {
+  if (!receivers || !receivers.length) {
+    return null;
+  }
+  return (
+    receivers.find((receiver) => receiver.receiver_id === receiverId) ||
+    receivers[0]
+  );
+}
+
+/**
  * Formatter for the exact timestamps in a card's tooltip.
  *
  * Built once at module scope rather than per call. `toLocaleString()`
  * constructs a fresh `Intl.DateTimeFormat` every time it runs, and this is
- * called for every card of every render -- on a hub with dozens of candidates
+ * called for every card of every render -- on a location with dozens of candidates
  * that is a lot of formatter construction to produce a string nobody may ever
  * hover over.
  */
@@ -700,7 +866,12 @@ class Rtl433Panel extends HTMLElement {
     // handed to the module-scope formatters without allocating per call.
     this._t = this._t.bind(this);
 
-    this._hubs = [];
+    // Every configured location and the receivers inside each, from
+    // `rtl_433/receivers`. A location is what a device belongs to; a receiver
+    // is one rtl_433 server listening on its behalf.
+    this._locations = [];
+    // The location this page is showing: the one it subscribes to, adopts
+    // into, and counts devices for.
     this._entryId = null;
     // Whether this panel pushed a history entry to reach the view it is on,
     // and therefore owes an unwind when it goes back up.
@@ -713,12 +884,14 @@ class Rtl433Panel extends HTMLElement {
     // The path segment this panel is showing, from `route`. Empty is the
     // overview.
     this._segment = "";
-    // The receiver a settings path names, when it names one.
+    // The location a subview path names, when it names one.
     this._segmentEntry = null;
-    // Which receiver the cached settings payload belongs to, so a page for a
-    // different one refetches rather than showing the wrong hub's values.
+    // The receiver the radio-settings path names, when it names one.
+    this._segmentReceiver = null;
+    // Which location the cached settings payload belongs to, so a page for a
+    // different one refetches rather than showing the wrong location's values.
     this._settingsFor = null;
-    // The form + receiver whose payload has been asked for, so a repaint does
+    // The form + location whose payload has been asked for, so a repaint does
     // not ask again (see `_openSettings`).
     this._settingsAttempt = null;
     this._narrow = false;
@@ -728,7 +901,7 @@ class Rtl433Panel extends HTMLElement {
     this._data = null;
     this._unsubscribe = null;
     this._clock = null;
-    // A scheduled re-attempt at subscribing to a hub that was mid-reload, and
+    // A scheduled re-attempt at subscribing to a location that was mid-reload, and
     // how many have been made. Both are reset by every deliberate subscribe.
     this._retry = null;
     this._retries = 0;
@@ -771,7 +944,7 @@ class Rtl433Panel extends HTMLElement {
 
     // `key -> area_id` for adds whose area has not been applied yet.
     //
-    // Adoption writes the hub's device map; the device *registry* entry only
+    // Adoption writes the location's device map; the device *registry* entry only
     // appears once the platforms have built the entities, which is a later turn
     // of the event loop. Rather than poll for it, these are drained whenever a
     // new `hass` arrives (see the setter) -- the registry landing is itself one
@@ -783,6 +956,16 @@ class Rtl433Panel extends HTMLElement {
     // throw away focus, an open area dropdown, and the page's scroll position.
     this._deviceCards = new Map();
     this._ignoredCards = new Map();
+    this._coverageCards = new Map();
+
+    // The last `rtl_433/devices/coverage` reply, the location it describes, and
+    // whether a request is in flight. Coverage is deliberately *not* on the
+    // subscription -- it moves on every frame, and pushing it would cost a
+    // message per refresh for as long as anything is transmitting -- so the
+    // page that displays it asks for it when it opens and again on the clock.
+    this._coverage = null;
+    this._coverageFor = null;
+    this._coverageBusy = false;
 
     // The `hass.areas` object the pickers were last handed. The frontend
     // replaces it only when the registry changes, so comparing by identity is
@@ -838,16 +1021,19 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * Split a panel path into the view and, for the settings pages, its receiver.
+   * Split a panel path into the view, its location, and its receiver.
    *
-   * A settings page names the receiver it configures -- `options/<entry_id>` --
-   * because with more than one receiver the page is otherwise ambiguous: a
-   * reload or a bookmark would land on whichever hub happened to resolve first
-   * and quietly configure the wrong radio. The id is optional, so links written
-   * before this still work and fall back to the selected receiver.
+   * A settings page names the location it configures -- `options/<entry_id>` --
+   * because with more than one location the page is otherwise ambiguous: a
+   * reload or a bookmark would land on whichever location happened to resolve
+   * first and quietly configure the wrong one. The radio page names a receiver
+   * as well (`receiver/<entry_id>/<receiver_id>`), because the toggle on it
+   * belongs to one receiver and the location's others keep their own answer.
+   * Both ids are optional, so a link written without them falls back to the
+   * selected location and its first receiver.
    */
   _readPath(path) {
-    const [segment, entry] = path.split("/");
+    const [segment, entry, receiver] = path.split("/");
     const next = segment || "";
     // Whether the back arrow should unwind a history entry or replace one is a
     // fact about how we got here, so it is decided on every route change rather
@@ -863,30 +1049,62 @@ class Rtl433Panel extends HTMLElement {
     this._routeSeen = true;
     this._segment = next;
     this._segmentEntry = entry || null;
+    this._segmentReceiver = receiver || null;
   }
 
   /** The current path, as `route` reports it back. */
   _path() {
-    return this._segmentEntry
-      ? `${this._segment}/${this._segmentEntry}`
-      : this._segment || "";
+    const parts = [this._segment];
+    if (this._segmentEntry) {
+      parts.push(this._segmentEntry);
+      if (this._segmentReceiver) {
+        parts.push(this._segmentReceiver);
+      }
+    }
+    return parts.filter(Boolean).join("/");
   }
 
   /**
-   * The receiver a settings page is for.
+   * The location a settings page is for.
    *
    * The URL wins when it names one that exists; a stale id -- an entry removed
    * since the link was made -- falls back rather than showing a page that can
    * only fail on save.
    */
   _settingsEntryId() {
-    if (
-      this._segmentEntry &&
-      this._hubs.some((hub) => hub.entry_id === this._segmentEntry)
-    ) {
+    if (this._segmentEntry && this._location(this._segmentEntry)) {
       return this._segmentEntry;
     }
     return this._entryId;
+  }
+
+  /** One location by entry id, or `null` when nothing is configured under it. */
+  _location(entryId) {
+    return (
+      this._locations.find((location) => location.entry_id === entryId) || null
+    );
+  }
+
+  /** The receivers of one location, or an empty list while none are known. */
+  _receiversOf(entryId) {
+    const location = this._location(entryId);
+    return location && location.receivers ? location.receivers : [];
+  }
+
+  /** The receiver the radio-settings page is editing; see `receiverFor`. */
+  _settingsReceiver() {
+    return receiverFor(
+      this._receiversOf(this._settingsEntryId()),
+      this._segmentReceiver
+    );
+  }
+
+  /** One receiver's title, wherever a coverage row only carries its id. */
+  _receiverTitle(receiverId) {
+    const receiver = this._receiversOf(this._entryId).find(
+      (candidate) => candidate.receiver_id === receiverId
+    );
+    return receiver ? receiver.title : this._t("coverage.unknown_receiver");
   }
 
   /** Narrow is handed down for the elements that lay themselves out by it. */
@@ -907,8 +1125,8 @@ class Rtl433Panel extends HTMLElement {
    * trip, so a frontend that stops re-assigning `route` still navigates -- the
    * URL and the view are kept in step by whichever of the two arrives.
    */
-  _navigate(segment, { replace = false, entry = null } = {}) {
-    const tail = entry ? `${segment}/${entry}` : segment;
+  _navigate(segment, { replace = false, entry = null, receiver = null } = {}) {
+    const tail = [segment, entry, entry && receiver].filter(Boolean).join("/");
     const path = segment ? `/${DOMAIN}/${tail}` : `/${DOMAIN}`;
     if (window.location.pathname !== path) {
       if (replace) {
@@ -927,6 +1145,7 @@ class Rtl433Panel extends HTMLElement {
     }
     this._segment = segment;
     this._segmentEntry = entry;
+    this._segmentReceiver = entry ? receiver : null;
     this._render();
   }
 
@@ -1030,12 +1249,12 @@ class Rtl433Panel extends HTMLElement {
    * re-attach begin again from the top.
    */
   async _begin() {
-    // The strings and the hub list are independent round trips, so they are
+    // The strings and the location list are independent round trips, so they are
     // asked for together rather than one behind the other: what the page says
     // and what it has to show have nothing to do with each other, and waiting
     // out the first before sending the second would put a whole extra round
     // trip between opening the panel and seeing a device.
-    const hubs = settled(this._call({ type: "rtl_433/hubs" }));
+    const locations = settled(this._call({ type: "rtl_433/receivers" }));
     await this._loadStrings();
     if (!this.isConnected) {
       this._started = false;
@@ -1045,7 +1264,7 @@ class Rtl433Panel extends HTMLElement {
     this._status = this._t("common.loading");
     this._render();
     this._startClock();
-    this._loadHubs(hubs);
+    this._loadLocations(locations);
     this._loadBrandLogo();
   }
 
@@ -1136,27 +1355,43 @@ class Rtl433Panel extends HTMLElement {
     return String(error);
   }
 
-  /**
-   * Format a signal level for a card, or an em dash when there is none.
-   *
-   * The number and its unit are joined by a translated template rather than
-   * here, because where a unit goes relative to its number is a fact about a
-   * language.
-   */
+  /** Format a signal level for a card, or an em dash when there is none. */
   _formatSignal(value) {
-    if (value === null || value === undefined) {
-      return "—";
-    }
-    return this._t("card.signal_value", { value: value.toFixed(1) });
+    return formatSignal(this._t, value);
   }
 
   _startClock() {
     if (this._clock === null) {
-      this._clock = window.setInterval(() => {
-        if (this._data) {
-          this._render();
-        }
-      }, CLOCK_INTERVAL_MS);
+      this._clock = window.setInterval(() => this._tick(), CLOCK_INTERVAL_MS);
+    }
+  }
+
+  /**
+   * One clock tick: re-age the timestamps, and re-ask for what nothing pushes.
+   *
+   * Two of the three things this page shows are pushed and need no polling --
+   * the candidates and the ignore list arrive on the subscription. The other
+   * two deliberately do not: a receiver's own connection state, which the
+   * subscription only carries merged across the location, and coverage, which
+   * moves on every frame and would turn an idle panel into a message per
+   * refresh. Each is re-asked only while the view that shows it is on screen,
+   * so a user sitting on the discovered page costs nothing extra.
+   */
+  _tick() {
+    // The clock is started by `connectedCallback`, which can run before the
+    // strings have loaded and the tree has been built -- and everything below
+    // draws into that tree.
+    if (!this._el) {
+      return;
+    }
+    const view = this._viewFor().view;
+    if (view === "overview" && this._locations.length) {
+      this._refreshLocations();
+    } else if (view === "coverage") {
+      this._loadCoverage({ force: true });
+    }
+    if (this._data) {
+      this._render();
     }
   }
 
@@ -1178,25 +1413,54 @@ class Rtl433Panel extends HTMLElement {
     this._render();
   }
 
-  async _loadHubs(pending) {
+  async _loadLocations(pending) {
     const { value: result, error } = await pending;
     if (error) {
       this._status = "";
       this._setBanner(this._describeError(error), "error");
       return;
     }
-    this._hubs = result.hubs || [];
-    if (!this._hubs.length) {
-      this._status = this._t("status.no_hubs");
+    this._locations = result.locations || [];
+    if (!this._locations.length) {
+      this._status = this._t("status.no_receivers");
       this._render();
       return;
     }
-    // Prefer a loaded hub: with one healthy receiver and one mid-reload, the
-    // healthy one is the one worth opening on.
-    const initial = this._hubs.find((hub) => hub.loaded) || this._hubs[0];
+    // Prefer a loaded location: with one healthy location and one mid-reload,
+    // the healthy one is the one worth opening on.
+    const initial =
+      this._locations.find((location) => location.loaded) || this._locations[0];
     this._entryId = initial.entry_id;
-    this._renderSettingsCards(this._el.root);
+    this._renderLocationCards(this._el.root);
     this._subscribe();
+  }
+
+  /**
+   * Re-read the location list, for the per-receiver state on the overview.
+   *
+   * `connected` on a receiver row is the live socket to its rtl_433 server, and
+   * nothing pushes it: the device subscription carries the location's *merged*
+   * answer (`any(receiver.connected)`), which is exactly the fact a page with
+   * two receivers is trying to take apart. So the overview re-asks on the same
+   * clock that ages its timestamps -- one small command every fifteen seconds,
+   * and only while the overview is the view on screen.
+   *
+   * Failure is silent. The rows keep the last answer, which is a stale status
+   * rather than an error banner over a page that is otherwise fine.
+   */
+  async _refreshLocations() {
+    let result;
+    try {
+      result = await this._call({ type: "rtl_433/receivers" });
+    } catch (error) {
+      return;
+    }
+    if (!this.isConnected || !result.locations) {
+      return;
+    }
+    this._locations = result.locations;
+    this._renderLocationCards(this._el.root);
+    this._render();
   }
 
   _teardownSubscription() {
@@ -1221,31 +1485,36 @@ class Rtl433Panel extends HTMLElement {
     this._retries = 0;
     this._data = null;
     this._banner = null;
-    // The green cards describe adoptions made against *this* hub, so they are
-    // meaningless once the panel is pointed at another one.
+    // The green cards describe adoptions made against *this* location, so they
+    // are meaningless once the panel is pointed at another one.
     this._added.clear();
     // Left behind, a queued key can never drain: `_deviceFor` builds its
-    // identifier from the *current* entry, so an entry from the old hub would
+    // identifier from the *current* entry, so an entry from the old location would
     // never match, and the `hass` setter would scan the whole device registry
     // on every state change in the instance for the life of the page.
     this._pendingAreas.clear();
-    // The settings payload describes *a* hub, and every device key in it
+    // The settings payload describes *a* location, and every device key in it
     // belongs to that one. Carried across a switch it would offer the previous
-    // receiver's devices under this receiver's name.
+    // location's devices under this location's name.
     this._settings = null;
     this._settingsDevice = "";
+    // Coverage is per location too, and its rows name receivers by id -- which
+    // resolve to titles in whichever location is selected. Carried across, they
+    // would resolve to nothing.
+    this._coverage = null;
+    this._coverageFor = null;
     this._status = this._t("common.loading");
     this._render();
     await this._openSubscription();
   }
 
   /**
-   * Open the subscription, waiting out a hub that is mid-reload.
+   * Open the subscription, waiting out a location that is mid-reload.
    *
    * Split from `_subscribe` so a retry re-attempts only the *connection*. The
-   * resets above describe "the user pointed this page at a hub", which happens
-   * once; this can happen several times for that one intent, and clearing the
-   * status on each attempt would flicker the page while it waits.
+   * resets above describe "the user pointed this page at a location", which
+   * happens once; this can happen several times for that one intent, and
+   * clearing the status on each attempt would flicker the page while it waits.
    */
   async _openSubscription() {
     const entryId = this._entryId;
@@ -1254,8 +1523,8 @@ class Rtl433Panel extends HTMLElement {
     try {
       unsubscribe = await this._hass.connection.subscribeMessage(
         (payload) => {
-          // A push from a hub the user has since switched away from must not
-          // paint over the hub they are now looking at.
+          // A push from a location the user has since switched away from must
+          // not paint over the location they are now looking at.
           if (this._entryId !== entryId) {
             return;
           }
@@ -1269,8 +1538,8 @@ class Rtl433Panel extends HTMLElement {
       if (this._entryId !== entryId) {
         return;
       }
-      // A `not_loaded` error means the hub is reloading, so retry rather than
-      // report it. It is the expected answer for a second or so after saving a
+      // A `not_loaded` error means the location is reloading, so retry rather
+      // than report it. It is the expected answer for a second or so after saving a
       // setting that requires a reload -- exactly when an error banner would be
       // most confusing, since the save actually worked.
       if (error && error.code === "not_loaded" && this._retries < RELOAD_RETRY_LIMIT) {
@@ -1290,7 +1559,7 @@ class Rtl433Panel extends HTMLElement {
       return;
     }
 
-    // Awaiting gave the user time to switch hubs or navigate away; either way
+    // Awaiting gave the user time to switch locations or navigate away; either way
     // this subscription is already unwanted, so close it instead of storing it.
     if (this._entryId !== entryId || !this.isConnected) {
       Promise.resolve()
@@ -1307,7 +1576,7 @@ class Rtl433Panel extends HTMLElement {
    * The device registry entry adoption created for `key`, or `null`.
    *
    * Matched on the identifier the entities are built with
-   * (`entity.py`: `(DOMAIN, f"{hub_entry_id}:{device_key}")`), which is the only
+   * (`entity.py`: `(DOMAIN, f"{location_entry_id}:{device_key}")`), which is the only
    * stable join between a pending candidate and the device it becomes.
    *
    * `hass.devices` is read defensively: it is a documented part of the frontend
@@ -1376,7 +1645,7 @@ class Rtl433Panel extends HTMLElement {
    * Run one action against one device key.
    *
    * The buttons are disabled while the call is in flight and re-enabled
-   * whatever happens, so a slow hub cannot be double-clicked into two adoptions
+   * whatever happens, so a slow location cannot be double-clicked into two adoptions
    * and a failure never leaves a dead control on screen.
    *
    * `onApplied` runs only when the backend confirms this key was one it acted
@@ -1465,7 +1734,7 @@ class Rtl433Panel extends HTMLElement {
         return delta;
       }
       // A stable tiebreak on the key stops cards swapping places under the
-      // cursor when two devices are first heard in the same millisecond.
+      // cursor when two devices are first received in the same millisecond.
       return left.key < right.key ? -1 : left.key > right.key ? 1 : 0;
     });
   }
@@ -1704,11 +1973,14 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * The receiver's status, as core's integration pages lead with it.
+   * The location's status, as core's integration pages lead with it.
    *
    * The connection state is the one fact worth the top of the page: everything
-   * below it is meaningless while the receiver is unreachable, and "is it
-   * connected?" is the first question anyone opens this page with.
+   * below it is meaningless while nothing is listening, and "is it connected?"
+   * is the first question anyone opens this page with. It is the location's
+   * *merged* answer -- true while any one of its receivers has its socket up --
+   * because that is the condition under which the location can still receive a
+   * sensor. Which of them is up is a row on the receivers card below.
    */
   _buildStatusCard(slot) {
     const card = haControl("ha-card", () => document.createElement("div"));
@@ -1787,13 +2059,15 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * The overview's two lists: what this receiver has, and what can be changed.
+   * The overview's lists: what this location has, and what can be changed.
    *
    * Devices and entities link out to the registry pages filtered to this
    * integration, which is where Home Assistant already lists them -- there is
-   * nothing this panel could add by drawing that list again. There is no
-   * groups row because rtl_433 has no grouping, and no map because a receiver
-   * has no topology to draw.
+   * nothing this panel could add by drawing that list again. Signal coverage is
+   * the exception and stays here: it is the one thing about a location's
+   * devices that Home Assistant has nowhere to show, because the union throws
+   * the per-receiver detail away on purpose and the entities that would carry
+   * it ship disabled.
    */
   _buildOverview(root) {
     const made = {};
@@ -1812,46 +2086,96 @@ class Rtl433Panel extends HTMLElement {
       supporting: "",
       onClick: () => this._openConfigPage("entities"),
     });
+    made.rowCoverage = this._navRow({
+      className: "nav-coverage",
+      icon: ICON_COVERAGE,
+      headline: this._t("overview.coverage"),
+      supporting: this._t("overview.coverage_description"),
+      onClick: () =>
+        this._navigate("coverage", { entry: this._entryId || undefined }),
+    });
     this._buildCard(
       root.querySelector(".network-slot"),
       "network-card",
-      [made.rowDevices, made.rowEntities],
+      [made.rowDevices, made.rowEntities, made.rowCoverage],
       this._t("overview.network")
     );
     made.fab = this._buildFab(root.querySelector(".fab-slot"), {
       label: this._t("overview.add_device"),
       icon: ICON_PLUS,
-      onClick: () => this._navigate("discovered"),
+      // The location goes in the URL for the same reason it does on every other
+      // row: the page it opens is that location's candidate list, and a link to
+      // it has to say which.
+      onClick: () =>
+        this._navigate("discovered", { entry: this._entryId || undefined }),
     });
 
     return made;
   }
 
   /**
-   * One settings card per receiver, rebuilt when the hub list changes.
+   * Each location's receivers and settings pages, rebuilt when either moves.
    *
-   * Built here rather than in the skeleton because the receivers are not known
-   * until `rtl_433/hubs` answers. With one receiver the card is unheaded and
-   * reads exactly as before; with several, each is headed by its own hub title,
-   * which is what says *which* radio a row configures -- so the pages
-   * themselves do not have to repeat it.
+   * Built here rather than in the skeleton because neither is known until
+   * `rtl_433/receivers` answers. A location gets two cards: the receivers
+   * listening on its behalf -- each row naming where it dials and whether it is
+   * connected, and opening that receiver's own radio settings -- and the pages
+   * that configure the location as a whole. That split *is* the model: the
+   * availability timeout is one answer for every device here, and the
+   * manage-radio toggle is one answer per receiver.
+   *
+   * With one location the cards are unheaded; with several, each group is
+   * headed by its location's title, which is what says which location a row
+   * belongs to -- so the pages themselves do not have to repeat it.
+   *
+   * The cache key carries each receiver's address and connection state as well
+   * as its title, so a receiver going offline redraws its row on the next
+   * clock tick rather than leaving a stale "Connected" on the page.
    */
-  _renderSettingsCards(root) {
-    const key = this._hubs.map((hub) => `${hub.entry_id}:${hub.title}`).join("|");
-    if (key === this._settingsCardsKey) {
+  _renderLocationCards(root) {
+    const key = JSON.stringify(
+      this._locations.map((location) => [
+        location.entry_id,
+        location.title,
+        (location.receivers || []).map((receiver) => [
+          receiver.receiver_id,
+          receiver.title,
+          receiver.host,
+          receiver.port,
+          receiver.connected,
+        ]),
+      ])
+    );
+    if (key === this._locationCardsKey) {
       return;
     }
-    this._settingsCardsKey = key;
+    this._locationCardsKey = key;
     const slot = root.querySelector(".page-actions");
     slot.textContent = "";
-    const several = this._hubs.length > 1;
-    for (const hub of this._hubs) {
+    const several = this._locations.length > 1;
+    for (const location of this._locations) {
+      const group = document.createElement("div");
+      group.className = "location-group";
+      if (several) {
+        const heading = document.createElement("h2");
+        heading.className = "location-title";
+        heading.textContent = location.title;
+        group.append(heading);
+      }
+      this._buildCard(
+        group,
+        "receivers-card",
+        (location.receivers || []).map((receiver) =>
+          this._receiverRow(location, receiver)
+        ),
+        this._t("overview.receivers")
+      );
       const rows = [
         {
-          className: "open-hub-settings",
+          className: "open-location-settings",
           icon: ICON_RECEIVER,
-          headline: this._t("view.hub_settings"),
-          supporting: this._t("overview.hub_settings_description"),
+          headline: this._t("view.location_settings"),
+          supporting: this._t("overview.location_settings_description"),
           segment: "options",
         },
         {
@@ -1874,23 +2198,52 @@ class Rtl433Panel extends HTMLElement {
           icon: row.icon,
           headline: row.headline,
           supporting: row.supporting,
-          // The receiver goes in the URL even with one of them, so a link is
+          // The location goes in the URL even with one of them, so a link is
           // unambiguous the moment a second is added.
           onClick: () =>
-            this._navigate(row.segment, { entry: hub.entry_id }),
+            this._navigate(row.segment, { entry: location.entry_id }),
         })
       );
-      this._buildCard(
-        slot,
-        "settings-card",
-        rows,
-        several ? hub.title : null
-      );
+      this._buildCard(group, "settings-card", rows, null);
+      slot.append(group);
     }
   }
 
   /**
-   * Open one of Home Assistant's own registry pages, scoped to this hub.
+   * One receiver's row: what it is, where it dials, and whether it is up.
+   *
+   * The status is on the row rather than on a card of its own because a
+   * location's receivers are a list, and the question a user opens this page
+   * with -- *which of them is hearing anything?* -- is answered by reading down
+   * it. The row opens that receiver's radio settings, so the thing you can
+   * change about a receiver is one click from the thing you can see about it.
+   */
+  _receiverRow(location, receiver) {
+    return this._navRow({
+      className: receiver.connected
+        ? "open-receiver-settings"
+        : "open-receiver-settings receiver-offline",
+      icon: ICON_RECEIVER_ROW,
+      headline: receiver.title,
+      supporting: this._t("overview.receiver_supporting", {
+        host: receiver.host,
+        port: receiver.port,
+        status: this._t(
+          receiver.connected
+            ? "overview.receiver_connected"
+            : "overview.receiver_disconnected"
+        ),
+      }),
+      onClick: () =>
+        this._navigate("receiver", {
+          entry: location.entry_id,
+          receiver: receiver.receiver_id,
+        }),
+    });
+  }
+
+  /**
+   * Open one of Home Assistant's own registry pages, scoped to this location.
    *
    * The config-entry filter is the same one the integration page's own
    * "N devices" link uses, so this lands on exactly that list.
@@ -1921,13 +2274,6 @@ class Rtl433Panel extends HTMLElement {
     return banner;
   }
 
-  /**
-   * The receiver picker, preferring `ha-select`.
-   *
-   * `ha-select` carries its own floating label, so when it is available the
-   * skeleton's `<span>Receiver</span>` caption is dropped rather than stacked
-   * on top of a second one.
-   */
   /**
    * Build the shadow tree once.
    *
@@ -1963,9 +2309,15 @@ class Rtl433Panel extends HTMLElement {
       title: root.querySelector(".toolbar-title"),
       viewOverview: root.querySelector(".view-overview"),
       viewDiscovered: root.querySelector(".view-discovered"),
+      viewCoverage: root.querySelector(".view-coverage"),
       viewSettings: root.querySelector(".view-settings"),
+      unionHint: root.querySelector(".union-hint"),
+      coverageIntro: root.querySelector(".coverage-intro"),
+      coverageProblem: root.querySelector(".coverage-problem"),
+      coverageEmpty: root.querySelector(".coverage-empty"),
+      coverageGrid: root.querySelector(".coverage-grid"),
       settingsIntro: root.querySelector(".settings-intro"),
-      settingsHub: root.querySelector(".settings-hub"),
+      settingsSubject: root.querySelector(".settings-subject"),
       settingsProblem: root.querySelector(".settings-problem"),
       settingsBody: root.querySelector(".settings-body"),
       settingsActions: null,
@@ -1980,6 +2332,11 @@ class Rtl433Panel extends HTMLElement {
     root.querySelector(".searching-title").textContent =
       this._t("discovered.searching");
     this._el.searchingHint.textContent = this._t("discovered.hint");
+    // Written once for the same reason, and shown only where it says something:
+    // see `_renderDiscovered` for the one-receiver case.
+    this._el.unionHint.textContent = this._t("discovered.union");
+    this._el.coverageIntro.textContent = this._t("coverage.intro");
+    this._el.coverageEmpty.textContent = this._t("coverage.empty");
     this._el.searchingSpinner.append(
       haControl("ha-spinner", () => {
         // No spinner element: the heading already says what is happening, so
@@ -2008,7 +2365,7 @@ class Rtl433Panel extends HTMLElement {
     // The two list actions are built rather than templated so they can be Home
     // Assistant's buttons. They are appended in the order they read on the page,
     // and both start hidden: one has nothing to reveal until there are ignored
-    // devices, the other nothing to clear until something has been heard.
+    // devices, the other nothing to clear until something has been received.
     this._el.ignoredToggle = haButton("", "ghost ignored-toggle");
     this._el.ignoredToggle.hidden = true;
     this._el.clear = haButton(
@@ -2074,19 +2431,21 @@ class Rtl433Panel extends HTMLElement {
     }
     const now = Date.now();
     const view = this._viewFor();
+    this._followRouteLocation();
 
     // One view is on screen at a time, and the toolbar names it -- which is
     // what makes the back arrow read as "up a level" rather than "leave".
     this._el.viewOverview.hidden = view.view !== "overview";
     this._el.viewDiscovered.hidden = view.view !== "discovered";
+    this._el.viewCoverage.hidden = view.view !== "coverage";
     this._el.viewSettings.hidden = view.view !== "settings";
     // Through `_text`, so a render that changed nothing writes nothing: this
-    // runs on every push from the receiver and on the clock tick, and the title
+    // runs on every push from the location and on the clock tick, and the title
     // only moves when the view does.
     this._text(this._el.title, this._t(view.title));
 
     if (view.form) {
-      this._showSettingsHub();
+      this._showSettingsSubject(view);
       // Fetching the payload is asynchronous, so this is fired and forgotten:
       // it re-renders on its own when the form is built.
       this._openSettings(view.form);
@@ -2128,9 +2487,39 @@ class Rtl433Panel extends HTMLElement {
     // skipped here is drawn on arrival.
     if (view.view === "discovered") {
       this._renderDiscovered(now, loaded);
+    } else if (view.view === "coverage") {
+      // Fired and forgotten: the fetch re-renders when it lands, and it is a
+      // no-op for a page that already has this location's coverage.
+      this._loadCoverage();
+      this._renderCoverage(now);
     } else if (view.view === "overview") {
       this._renderOverview();
     }
+  }
+
+  /**
+   * Point the page at the location its URL names, if that is a different one.
+   *
+   * Every subview carries its location, so a bookmark, a shared link or a row
+   * in a second location's card opens *that* location -- not whichever one
+   * happened to resolve first when the panel loaded. Without this the page
+   * would render the selected location's devices under another location's name,
+   * which is the one way a union page can lie outright.
+   *
+   * Guarded on the ids differing, so the common case -- every render of a page
+   * already showing the right location -- costs one comparison, and on the id
+   * being real, so a stale link falls back rather than subscribing to nothing.
+   */
+  _followRouteLocation() {
+    if (
+      !this._segmentEntry ||
+      this._segmentEntry === this._entryId ||
+      !this._location(this._segmentEntry)
+    ) {
+      return;
+    }
+    this._entryId = this._segmentEntry;
+    this._subscribe();
   }
 
   /**
@@ -2148,10 +2537,15 @@ class Rtl433Panel extends HTMLElement {
     const areasChanged = areas !== this._lastAreas;
     this._lastAreas = areas;
 
+    // The union is only worth explaining where there is one: with a single
+    // receiver this page has always been a plain list of candidates, and a
+    // paragraph about merging would describe something that never happens.
+    this._el.unionHint.hidden = this._receiversOf(this._entryId).length < 2;
+
     const cards = this._cards();
     this._el.grid.hidden = !loaded || cards.length === 0;
     // The "Searching for rtl_433 devices…" block stays on screen even after
-    // devices appear, because the receiver really is still listening. Only the
+    // devices appear, because the receivers really are still listening. Only the
     // hint under it is hidden once there are cards, where it would be
     // describing something the user can already see.
     this._el.searchingHint.hidden = cards.length > 0;
@@ -2183,6 +2577,182 @@ class Rtl433Panel extends HTMLElement {
       (row) => this._createIgnoredCard(row),
       (element, row) => this._updateIgnoredCard(element, row)
     );
+  }
+
+  /**
+   * Fetch this location's coverage: who receives what, and how well.
+   *
+   * One command, not a subscription, and that is the whole design. Coverage
+   * moves on *every decoded frame*, so carrying it on the device subscription
+   * would push a message per refresh for as long as anything is transmitting --
+   * worst on the settled install where the candidate list never changes and an
+   * open panel currently costs nothing at all. Putting it behind a page means
+   * the cost falls on the one screen that is displaying it, and stops when the
+   * user leaves.
+   *
+   * Called from two places with different intent: `_render` asks whenever the
+   * page has no coverage for the location it is showing, and the clock asks
+   * with `force` to refresh what it already has. Without that split the render
+   * that the reply triggers would ask again, and again, as fast as the socket
+   * could carry it.
+   */
+  async _loadCoverage({ force = false } = {}) {
+    const entryId = this._entryId;
+    if (!entryId || this._coverageBusy) {
+      return;
+    }
+    if (!force && this._coverageFor === entryId) {
+      return;
+    }
+    this._coverageBusy = true;
+    let result;
+    try {
+      result = await this._call({
+        type: "rtl_433/devices/coverage",
+        entry_id: entryId,
+      });
+    } catch (error) {
+      // Reported on the page rather than in the overview's banner, which is not
+      // where the user is standing -- and left in place, because the clock will
+      // try again and a page that silently cleared its own error would look
+      // like it had simply drawn nothing.
+      if (this._entryId === entryId && this._el) {
+        this._el.coverageProblem.textContent = this._describeError(error);
+        this._el.coverageProblem.hidden = false;
+      }
+      return;
+    } finally {
+      this._coverageBusy = false;
+    }
+    // Awaiting gave the user time to switch locations or navigate away.
+    if (this._entryId !== entryId || !this.isConnected) {
+      return;
+    }
+    this._coverage = result.devices || [];
+    this._coverageFor = entryId;
+    this._el.coverageProblem.hidden = true;
+    this._render();
+  }
+
+  /**
+   * Draw the coverage page: one card per device, one row per receiver.
+   *
+   * The page the union is legible from. A merged device reports one temperature
+   * however many receivers decoded it -- which is the point -- so *which*
+   * receiver receives it, how strongly and how recently has nowhere else to be
+   * shown: `rssi` and `snr` are mapped `enabled_by_default: false` and stay
+   * that way, and a location would otherwise pay *devices x receivers x 2*
+   * disabled entities for a detail most people only glance at.
+   *
+   * The names come from the subscription's own device list rather than from a
+   * second fetch, so a device is called the same thing here as on the card the
+   * user adopted it from.
+   */
+  _renderCoverage(now) {
+    const ready = this._coverageFor === this._entryId && this._coverage !== null;
+    const rows = ready ? this._coverage : [];
+    const models = new Map(
+      ((this._data && this._data.devices) || []).map((device) => [
+        device.key,
+        device.model,
+      ])
+    );
+    // "Loaded, and this location has adopted nothing" is a different thing to
+    // say than "still asking", so the empty line waits for the reply.
+    this._el.coverageEmpty.hidden = !ready || rows.length > 0;
+    this._el.coverageGrid.hidden = rows.length === 0;
+    this._reconcile(
+      this._el.coverageGrid,
+      rows,
+      this._coverageCards,
+      () => this._createCoverageCard(),
+      (element, row) => this._updateCoverageCard(element, row, models, now)
+    );
+  }
+
+  _createCoverageCard() {
+    const element = document.createElement("div");
+    element.className = "device-card coverage-card";
+    element.innerHTML = `
+      <div class="device-head">
+        <div class="device-model"></div>
+        <div class="device-key mono"></div>
+      </div>
+      <div class="device-body">
+        <div class="coverage-state"></div>
+        <div class="coverage-receivers"></div>
+      </div>`;
+    element.parts = {
+      model: element.querySelector(".device-model"),
+      key: element.querySelector(".device-key"),
+      state: element.querySelector(".coverage-state"),
+      receivers: element.querySelector(".coverage-receivers"),
+      // Keyed like the device cards, so the rows reconcile through the same
+      // helper rather than through a second implementation.
+      receiverRows: new Map(),
+    };
+    return element;
+  }
+
+  _updateCoverageCard(element, row, models, now) {
+    const parts = element.parts;
+    this._text(parts.model, models.get(row.key) || this._t("common.unknown_model"));
+    this._text(parts.key, row.key);
+    // Merged availability: the same OR-over-receivers the device's own entities
+    // apply, so the rows underneath explain the word above them.
+    this._text(
+      parts.state,
+      this._t(row.available ? "coverage.available" : "coverage.unavailable")
+    );
+    parts.state.classList.toggle("unavailable", !row.available);
+    element.classList.toggle("unavailable", !row.available);
+    this._reconcile(
+      parts.receivers,
+      (row.receivers || []).map((coverage) => ({
+        ...coverage,
+        key: coverage.receiver_id,
+      })),
+      parts.receiverRows,
+      () => this._createCoverageRow(),
+      (rowEl, coverage) => this._updateCoverageRow(rowEl, coverage, now)
+    );
+  }
+
+  /** One receiver's line on a coverage card: who, how strongly, how recently. */
+  _createCoverageRow() {
+    const row = document.createElement("div");
+    row.className = "coverage-row";
+    row.innerHTML = `<span class="coverage-name"></span><span class="coverage-signal"></span><span class="coverage-age"></span>`;
+    row.nameEl = row.querySelector(".coverage-name");
+    row.signalEl = row.querySelector(".coverage-signal");
+    row.ageEl = row.querySelector(".coverage-age");
+    return row;
+  }
+
+  _updateCoverageRow(row, coverage, now) {
+    this._text(row.nameEl, this._receiverTitle(coverage.receiver_id));
+    // A receiver that has never received this device is listed rather than left
+    // out: "the garage does not hear it" is as much a coverage answer as a weak
+    // signal is, and it is the answer someone comparing two receivers is
+    // usually looking for. It gets words instead of a level (see `coverageAge`)
+    // because there is no level to show beside them.
+    const received = coverage.last_seen !== null && coverage.last_seen !== undefined;
+    this._text(row.signalEl, received ? this._formatSignal(coverage.rssi) : "");
+    this._text(row.ageEl, coverageAge(this._t, coverage, now));
+    row.classList.toggle("never", !received);
+    row.classList.toggle("offline", !coverage.connected);
+    // Two facts that do not deserve a column each: whether the receiver is
+    // reachable at all, and the signal-to-noise ratio behind the level.
+    const notes = [];
+    if (!coverage.connected) {
+      notes.push(this._t("coverage.offline"));
+    }
+    if (coverage.snr !== null && coverage.snr !== undefined) {
+      notes.push(
+        this._t("coverage.snr_tooltip", { value: coverage.snr.toFixed(1) })
+      );
+    }
+    this._title(row, notes.join("\n"));
   }
 
   /**
@@ -2255,6 +2825,10 @@ class Rtl433Panel extends HTMLElement {
             <span class="stat-value stat-age"></span>
           </div>
         </div>
+        <div class="received-by" hidden>
+          <span class="stat-label stat-label-received"></span>
+          <span class="received-by-list"></span>
+        </div>
         <div class="readings"></div>
         <div class="area"></div>
       </div>
@@ -2269,6 +2843,8 @@ class Rtl433Panel extends HTMLElement {
       this._t("card.signal");
     element.querySelector(".stat-label-age").textContent =
       this._t("card.last_seen");
+    element.querySelector(".stat-label-received").textContent =
+      this._t("card.received_by");
     element.querySelector(".device-link").textContent =
       this._t("card.open_device");
     element
@@ -2285,6 +2861,8 @@ class Rtl433Panel extends HTMLElement {
       count: element.querySelector(".stat-count"),
       signal: element.querySelector(".stat-signal"),
       age: element.querySelector(".stat-age"),
+      received: element.querySelector(".received-by"),
+      receivedList: element.querySelector(".received-by-list"),
       readings: element.querySelector(".readings"),
       area: element.querySelector(".area"),
       link: element.querySelector(".device-link"),
@@ -2343,10 +2921,11 @@ class Rtl433Panel extends HTMLElement {
       })
     );
 
+    this._renderReceivedBy(parts, row.receivers || []);
     this._renderReadings(parts, row.readings || []);
 
     // `areasChanged` alone would only ever populate the cards that existed on
-    // the render the area registry last changed on. A candidate heard while the
+    // the render the area registry last changed on. A candidate received while the
     // panel is open -- the whole point of subscribing -- is created on a render
     // where the registry has not moved, so its `<select>` would stay empty and
     // the user could not give the new device an area at all. An empty select is
@@ -2385,12 +2964,38 @@ class Rtl433Panel extends HTMLElement {
     const busy = this._busy.has(card.key);
     parts.add.hidden = card.added;
     parts.ignore.hidden = card.added;
-    // Replace needs something to replace. On a hub whose first device this is,
+    // Replace needs something to replace. On a location whose first device this is,
     // the button would open a dialog with an empty list, so it is not offered.
     parts.replace.hidden = card.added || !this._replaceTargets().length;
     parts.add.disabled = busy;
     parts.ignore.disabled = busy;
     parts.replace.disabled = busy;
+  }
+
+  /**
+   * Name the receivers that received this candidate, and how well each did.
+   *
+   * The detail comes from the candidate's own coverage rows, which ride the
+   * pending payload -- so it costs no extra round trip and no entity: `rssi`
+   * and `snr` ship disabled by default, and a user comparing two receivers
+   * *before adopting anything* has no entity to enable even if they wanted to.
+   *
+   * Hidden outright for a candidate only one receiver received, where "received by
+   * Attic" is a line saying nothing. Only receivers that actually received it are
+   * on the row, so there is no "never received it" case here -- that one belongs
+   * to the coverage page, where every receiver is listed.
+   */
+  _renderReceivedBy(parts, receivers) {
+    parts.received.hidden = receivers.length < 2;
+    if (parts.received.hidden) {
+      return;
+    }
+    this._text(
+      parts.receivedList,
+      formatReceivedBy(this._t, receivers, (receiverId) =>
+        this._receiverTitle(receiverId)
+      )
+    );
   }
 
   /**
@@ -2508,13 +3113,14 @@ class Rtl433Panel extends HTMLElement {
    * subscription is still connecting.
    */
   _renderOverview() {
-    // These open Home Assistant's own pages filtered to a hub, and the FAB
-    // needs one too, so all three wait for a receiver to resolve. The settings
-    // rows do not: they are built per receiver, from a list that only exists
-    // once `rtl_433/hubs` has answered.
+    // These open Home Assistant's own pages filtered to a location, and the FAB
+    // and the coverage page need one too, so all four wait for a location to
+    // resolve. The per-location cards do not: they are built from the list
+    // `rtl_433/receivers` answers with, which is where a location comes from.
     for (const row of [
       this._el.rowDevices,
       this._el.rowEntities,
+      this._el.rowCoverage,
       this._el.fab,
     ]) {
       row.disabled = !this._entryId;
@@ -2527,8 +3133,9 @@ class Rtl433Panel extends HTMLElement {
     const deviceIds = this._entryDeviceIds();
     const devices = deviceIds === null ? null : deviceIds.length;
     const status = this._el.status0;
-    // The receiver's own connection, as the payload reports it -- not
-    // "is my subscription working?", which stays true through an outage.
+    // The location's merged connection, as the payload reports it -- true while
+    // any one of its receivers is up, and not "is my subscription working?",
+    // which stays true through an outage.
     const connected = Boolean(this._data && this._data.connected);
     status.glyph.className = "status-icon";
     if (status.glyph.localName === "ha-svg-icon") {
@@ -2573,15 +3180,17 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * The device ids this hub owns, from the device registry.
+   * The device ids this location owns, from the device registry.
    *
    * `hass.devices` is keyed by device id and each entry names the single config
    * entry that owns it (`config_entry_id`; the older `config_entries` list is
    * deprecated and goes away in Home Assistant 2027.8), so this is a filter
-   * rather than a lookup. The receiver's own device is *included*, because the
-   * row this count sits on opens Home Assistant's device list filtered to this
-   * entry -- and that list includes it. A count that disagreed with what
-   * clicking it shows would read as a bug in the count.
+   * rather than a lookup -- and it is the location entry that owns every one of
+   * them, receiver devices included, because a receiver is a subentry of it.
+   * Those receiver devices are *included* in the count, because the row it sits
+   * on opens Home Assistant's device list filtered to this entry -- and that
+   * list includes them. A count that disagreed with what clicking it shows
+   * would read as a bug in the count.
    */
   _entryDeviceIds() {
     const devices = this._hass && this._hass.devices;
@@ -2595,7 +3204,7 @@ class Rtl433Panel extends HTMLElement {
 
 
   /**
-   * How many entities this hub owns, counted through its devices.
+   * How many entities this location owns, counted through its devices.
    *
    * Deliberately not `entity.config_entry_id`: the registry the frontend hands
    * a panel is the *display* registry, and it carries `device_id`, `platform`
@@ -2679,13 +3288,15 @@ class Rtl433Panel extends HTMLElement {
   // -- Settings ---------------------------------------------------------------
 
   /**
-   * Open one of the three settings forms.
+   * Open one of the four settings forms.
    *
-   * The payload behind all three is fetched once and reused, because the three
-   * pages are one screenful between them and the alternative is a round trip
-   * per visit. It is re-fetched after every save so the next visit shows what
-   * was stored rather than what was typed -- the two differ exactly where the
-   * backend cleared something, which is the case the user most needs to see.
+   * The payload behind all four is fetched once and reused, because the pages
+   * are one screenful between them and the alternative is a round trip per
+   * visit -- `rtl_433/settings/get` answers with the location's own settings,
+   * every receiver's row and every device's, in one reply for that reason. It
+   * is re-fetched after every save so the next visit shows what was stored
+   * rather than what was typed -- the two differ exactly where the backend
+   * cleared something, which is the case the user most needs to see.
    */
   async _openSettings(kind) {
     const entryId = this._settingsEntryId();
@@ -2694,7 +3305,7 @@ class Rtl433Panel extends HTMLElement {
     }
     // Claim this attempt *before* fetching, and leave it claimed even if the
     // fetch fails. `_render` calls this on every repaint -- every push from the
-    // receiver, plus the clock tick -- and without those two rules:
+    // location, plus the clock tick -- and without those two rules:
     //
     //  - claiming only after the form was built let a slow fetch start again on
     //    top of itself; when the second reply landed it rebuilt the form and
@@ -2704,15 +3315,20 @@ class Rtl433Panel extends HTMLElement {
     //
     // Leaving the settings view releases the claim, so going back and reopening
     // the form is how a user retries.
-    const attempt = `${kind}:${entryId}`;
+    // The receiver is part of the claim, not just the location: two receivers
+    // of one location are two radio pages, and a claim that named only the
+    // location would leave the first receiver's toggle on screen while the URL
+    // said the second -- and save it there.
+    const receiver = this._viewFor().receiver ? this._settingsReceiver() : null;
+    const attempt = `${kind}:${entryId}:${receiver ? receiver.receiver_id : ""}`;
     if (this._settingsAttempt === attempt) {
       return;
     }
     this._settingsAttempt = attempt;
     this._el.settingsProblem.hidden = true;
-    // A cached payload belongs to the receiver it was fetched for; opening a
-    // different one has to refetch or the form would show another hub's values
-    // and save them over this one's.
+    // A cached payload belongs to the location it was fetched for; opening a
+    // different one has to refetch or the form would show another location's
+    // values and save them over this one's.
     if (this._settingsFor !== entryId) {
       this._settings = null;
     }
@@ -2801,21 +3417,28 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * Name the receiver a settings page is editing, when there are several.
+   * Name what a settings page is editing, when the name is not obvious.
    *
-   * All three settings pages are per receiver, and the toolbar can only name the
-   * page -- so with two receivers configured, "Receiver settings" was two
-   * identical-looking screens editing different hubs. The receiver is in the
-   * URL, it just was not on the page. One receiver needs no heading: there is
-   * nothing to tell it apart from.
+   * The toolbar can only name the *page*, and two of these pages are ambiguous
+   * without a subject: the radio page always is, because a location's receivers
+   * each have their own toggle and "Receiver settings" would be two
+   * identical-looking screens; the location pages only are once a second
+   * location exists. Both ids are in the URL -- they just were not on the page.
+   * The obvious case gets no heading, because there is nothing to tell it apart
+   * from.
    */
-  _showSettingsHub() {
-    const heading = this._el.settingsHub;
-    const entryId = this._settingsEntryId();
-    const hub = this._hubs.find((entry) => entry.entry_id === entryId);
-    const show = this._hubs.length > 1 && Boolean(hub);
-    heading.textContent = show ? hub.title : "";
-    heading.hidden = !show;
+  _showSettingsSubject(view) {
+    const heading = this._el.settingsSubject;
+    let text = "";
+    if (view.receiver) {
+      const receiver = this._settingsReceiver();
+      text = receiver ? receiver.title : "";
+    } else if (this._locations.length > 1) {
+      const location = this._location(this._settingsEntryId());
+      text = location ? location.title : "";
+    }
+    heading.textContent = text;
+    heading.hidden = !text;
   }
 
   /** The settings row for one device key, from the last fetched payload. */
@@ -2863,7 +3486,7 @@ class Rtl433Panel extends HTMLElement {
 
   _settingsSchema(kind) {
     const settings = this._settings;
-    if (kind === "hub") {
+    if (kind === "location") {
       // The seconds field belongs to one of the three modes, so it appears with
       // it rather than sitting there greyed out -- the same recompute-on-change
       // the device form uses for its unit and scale.
@@ -2884,8 +3507,14 @@ class Rtl433Panel extends HTMLElement {
       if (this._settingsData.availability_mode === "custom") {
         schema.push(this._secondsField("availability_timeout", 0));
       }
-      schema.push({ name: "manage_settings", selector: { boolean: {} } });
       return schema;
+    }
+    if (kind === "receiver") {
+      // One control, and the reason it is a page of its own: the toggle decides
+      // whether *this* receiver's radio is Home Assistant's to drive, and a
+      // location with an attic radio of her own and a garage radio shared with
+      // a neighbour has to be able to answer differently for each.
+      return [{ name: "manage_settings", selector: { boolean: {} } }];
     }
     if (kind === "mappings") {
       // Deliberately not an `object` selector: that one parses the YAML and
@@ -2971,7 +3600,7 @@ class Rtl433Panel extends HTMLElement {
   _settingsCopy(name) {
     return [
       this._t(`settings.data.${name}`) || name,
-      // The hub's defaults *are* the arguments: a description that wants to
+      // The location's defaults *are* the arguments: a description that wants to
       // name one cites it by its own name (`{motion_clear_delay}`), and a new
       // one becomes citable without a line changing here.
       this._t(`settings.data_description.${name}`, this._settings.defaults),
@@ -2981,8 +3610,8 @@ class Rtl433Panel extends HTMLElement {
   /** The values the open form starts from. */
   _settingsDefaults(kind) {
     const settings = this._settings;
-    if (kind === "hub") {
-      const explicit = settings.hub.availability_timeout;
+    if (kind === "location") {
+      const explicit = settings.location.availability_timeout;
       const mode = timeoutMode(explicit);
       return {
         availability_mode: mode,
@@ -2991,7 +3620,22 @@ class Rtl433Panel extends HTMLElement {
         // than an empty box the user has to guess a number into.
         availability_timeout:
           mode === "custom" ? explicit : settings.defaults.availability_timeout,
-        manage_settings: Boolean(settings.hub.manage_settings),
+      };
+    }
+    if (kind === "receiver") {
+      // The row for the receiver the URL names, from the payload rather than
+      // from the location list: both carry the toggle, and this is the one that
+      // was re-read after the last save.
+      const chosen = this._settingsReceiver();
+      const row =
+        (chosen &&
+          settings.receivers.find(
+            (receiver) => receiver.receiver_id === chosen.receiver_id
+          )) ||
+        settings.receivers[0];
+      return {
+        receiver_id: row ? row.receiver_id : null,
+        manage_settings: Boolean(row && row.manage_settings),
       };
     }
     if (kind === "mappings") {
@@ -3042,8 +3686,10 @@ class Rtl433Panel extends HTMLElement {
     this._showSettingsSave(true);
     this._settingsForm = kind;
 
-    if (kind === "hub") {
-      this._el.settingsIntro.textContent = this._t("settings.hub_intro");
+    if (kind === "location") {
+      this._el.settingsIntro.textContent = this._t("settings.location_intro");
+    } else if (kind === "receiver") {
+      this._el.settingsIntro.textContent = this._t("settings.receiver_intro");
     } else if (kind === "device") {
       if (!this._settings.devices.length) {
         this._el.settingsIntro.textContent = this._t("settings.device_empty");
@@ -3066,6 +3712,12 @@ class Rtl433Panel extends HTMLElement {
     }
 
     this._settingsData = this._settingsDefaults(kind);
+    // A radio page with no radio behind it: the location has no receivers, so
+    // there is nothing for Save to address. The toggle would look operable and
+    // do nothing, which is worse than a page that plainly cannot commit.
+    if (kind === "receiver" && !this._settingsData.receiver_id) {
+      this._showSettingsSave(false);
+    }
     this._renderSettingsForm();
   }
 
@@ -3205,7 +3857,7 @@ class Rtl433Panel extends HTMLElement {
   _onSettingsChanged(next) {
     const previous = this._settingsData;
     if (
-      this._settingsForm === "hub" &&
+      this._settingsForm === "location" &&
       next.availability_mode !== previous.availability_mode
     ) {
       // Only "a fixed timeout" has a seconds field, so the schema changes.
@@ -3253,9 +3905,10 @@ class Rtl433Panel extends HTMLElement {
    * overview's banner is not where the user is standing, and navigating away on
    * a refusal would throw away what they typed. On success the payload is
    * dropped so the next visit re-reads it, the panel returns to the overview,
-   * and the subscription is re-established -- a hub
-   * reloads when its calibration, mappings or manage-settings toggle changes,
-   * and the old subscription would then be pushing a replaced coordinator's
+   * and the subscription is re-established -- a location
+   * reloads when a calibration, the mappings or a receiver's manage-radio
+   * toggle changes, and the old subscription would then be pushing a replaced
+   * coordinator's
    * state.
    */
   async _saveSettings() {
@@ -3269,9 +3922,9 @@ class Rtl433Panel extends HTMLElement {
     // is what the backend reads as "clear it".
     const number = (name) => (data[name] === undefined ? null : data[name]);
     let message;
-    if (kind === "hub") {
+    if (kind === "location") {
       message = {
-        type: "rtl_433/settings/hub",
+        type: "rtl_433/settings/location",
         entry_id: this._settingsEntryId(),
         // `null` is "use the per-device-type defaults", which the backend reads
         // as "store nothing". The mode says which of the three this is; the
@@ -3280,6 +3933,20 @@ class Rtl433Panel extends HTMLElement {
           data.availability_mode,
           number("availability_timeout")
         ),
+      };
+    } else if (kind === "receiver") {
+      // The one command addressed to a receiver rather than to a location. The
+      // id comes from the form's own data, which was resolved from the URL when
+      // the page opened -- so a save cannot land on a different receiver than
+      // the one whose title is at the top of the page.
+      const receiverId = data.receiver_id;
+      if (!receiverId) {
+        return;
+      }
+      message = {
+        type: "rtl_433/settings/receiver",
+        entry_id: this._settingsEntryId(),
+        receiver_id: receiverId,
         manage_settings: Boolean(data.manage_settings),
       };
     } else if (kind === "device") {
@@ -3320,8 +3987,8 @@ class Rtl433Panel extends HTMLElement {
 
     this._settings = null;
     this._goUp();
-    // Re-subscribe *before* the banner, not after. A hub reloads when its
-    // calibration, mappings or manage-settings toggle changes, and the old
+    // Re-subscribe *before* the banner, not after. A location reloads when a
+    // calibration, the mappings or a manage-radio toggle changes, and the old
     // subscription would go on pushing a replaced coordinator's state -- but
     // `_subscribe` also clears the banner on its way past, so a "saved" set
     // first is wiped before anyone reads it.
@@ -3334,7 +4001,7 @@ class Rtl433Panel extends HTMLElement {
   /**
    * The devices this candidate could be standing in for.
    *
-   * Everything the hub already has, minus the candidate itself -- a device
+   * Everything the location already has, minus the candidate itself -- a device
    * cannot replace itself, and `async_replace_device` rejects that anyway.
    */
   _replaceTargets(exceptKey) {
@@ -3425,7 +4092,7 @@ class Rtl433Panel extends HTMLElement {
    * The card disappears on its own: the merge reloads the entry, which rebuilds
    * the pending list without this candidate in it, and that arrives as an
    * ordinary push. Nothing is hidden optimistically here -- the panel shows what
-   * the hub says.
+   * the location says.
    */
   async _confirmReplace() {
     const row = this._replaceFor;
@@ -3518,6 +4185,8 @@ const SKELETON = `
       <div class="searching-hint"></div>
     </div>
 
+    <p class="union-hint" hidden></p>
+
     <div class="grid" hidden></div>
 
     <div class="list-actions"></div>
@@ -3525,11 +4194,18 @@ const SKELETON = `
     <div class="grid ignored-grid" hidden></div>
   </div>
 
+  <div class="view view-coverage" hidden>
+    <p class="coverage-intro"></p>
+    <div class="coverage-problem" hidden></div>
+    <p class="coverage-empty" hidden></p>
+    <div class="grid coverage-grid" hidden></div>
+  </div>
+
   <div class="view view-settings" hidden>
     <p class="settings-intro"></p>
     <div class="settings-card-slot">
       <div class="card-content">
-        <h2 class="settings-hub" hidden></h2>
+        <h2 class="settings-subject" hidden></h2>
         <div class="settings-problem" hidden></div>
         <div class="settings-body"></div>
       </div>
@@ -3685,6 +4361,14 @@ const STYLES = `
     gap: 12px;
   }
   .stats { display: flex; flex-wrap: wrap; gap: 16px; }
+  /*
+   * Which receivers received this candidate. A line of its own rather than a
+   * fourth stat: it is a sentence of names, not a number, and on a location
+   * with three receivers it needs the whole width to wrap into.
+   */
+  .received-by { display: flex; flex-direction: column; }
+  .received-by[hidden] { display: none; }
+  .received-by-list { font-size: 14px; overflow-wrap: anywhere; }
   .stat { display: flex; flex-direction: column; }
   .stat-label {
     font-size: 11px;
@@ -3756,6 +4440,69 @@ const STYLES = `
     font-family: var(--ha-font-family-code, ui-monospace, Menlo, Consolas, monospace);
     font-size: 13px;
   }
+
+  /*
+   * The union's explanation, above the cards it explains and shown only where
+   * there is more than one receiver to union. Sized like the settings pages'
+   * intro, because it is the same kind of sentence.
+   */
+  .union-hint {
+    margin: 0 0 16px;
+    max-width: 68ch;
+    color: var(--secondary-text-color, #727272);
+  }
+  .union-hint[hidden] { display: none; }
+
+  /*
+   * The coverage page: one card per merged device, one row per receiver.
+   *
+   * A device page cannot show this and neither can an entity, which is the
+   * whole reason the page exists -- the union deliberately keeps one value per
+   * field however many receivers decoded it, and the per-receiver levels ship
+   * as disabled entities. So the rows are laid out like readings: who on the
+   * left, the numbers ranged right, at the same row height.
+   */
+  .coverage-intro, .coverage-empty {
+    margin: 0 0 16px;
+    max-width: 68ch;
+    color: var(--secondary-text-color, #727272);
+  }
+  .coverage-empty[hidden] { display: none; }
+  .coverage-problem {
+    margin-bottom: 16px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    background: var(--error-color, #db4437);
+    color: var(--text-primary-color, #ffffff);
+    white-space: pre-wrap;
+  }
+  .coverage-problem[hidden] { display: none; }
+  .coverage-card .device-head { background: var(--info-color, #039be5); }
+  .coverage-card.unavailable .device-head {
+    background: var(--disabled-text-color, #bdbdbd);
+  }
+  .coverage-state {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--success-color, #43a047);
+  }
+  .coverage-state.unavailable { color: var(--error-color, #db4437); }
+  .coverage-receivers { display: block; }
+  .coverage-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 32px;
+  }
+  .coverage-name { flex: 1; overflow-wrap: anywhere; }
+  .coverage-signal, .coverage-age {
+    white-space: nowrap;
+    color: var(--secondary-text-color, #727272);
+  }
+  /* A receiver that has never received the device, or is not connected at all. */
+  .coverage-row.never .coverage-age { font-style: italic; }
+  .coverage-row.offline .coverage-name { opacity: 0.6; }
   button {
     font: inherit;
     cursor: pointer;
@@ -3848,10 +4595,10 @@ const STYLES = `
   }
 
   /*
-   * The settings row: the three forms that used to live behind the config
-   * entry's Configure button and now have nowhere else to be, since this panel
-   * *is* that button. Above the discovered devices rather than below them,
-   * because a receiver in a busy neighbourhood puts dozens of cards between the
+   * The settings rows: the forms that used to live behind the config entry's
+   * Configure button and now have nowhere else to be, since this panel *is*
+   * that button. On the overview rather than under the discovered devices,
+   * because a location in a busy neighbourhood puts dozens of cards between the
    * two and a setting nobody can find is a setting nobody has.
    */
 
@@ -3865,8 +4612,8 @@ const STYLES = `
   /*
    * One spacing rule for the whole column, rather than a margin on each thing
    * that happens to sit in it. Every card on the overview is then spaced the
-   * same, including the second and third receiver's settings cards -- which had
-   * no margin of their own and sat flush against each other.
+   * same, including the second and third location's cards -- which had no
+   * margin of their own and sat flush against each other.
    *
    * A margin between siblings rather than a flex gap, deliberately: the views
    * are handed their display by ".view" / ".view[hidden]" further down, and a
@@ -3878,9 +4625,18 @@ const STYLES = `
    * this page keeps step with the Zigbee and Z-Wave ones either side of it.
    */
   .view-overview > * + *,
-  .page-actions > * + * {
+  .page-actions > * + *,
+  .location-group > * + * {
     margin-top: 16px;
   }
+  /*
+   * One location's cards, headed by its name once a second location exists.
+   * The group generates no box of its own beyond that spacing: the cards
+   * inside it are the surfaces, exactly as they are on the rest of the page.
+   */
+  .location-group { display: block; }
+  .location-title { margin: 0; font-size: 20px; font-weight: 400; }
+  .receivers-card { display: block; }
   /*
    * The FAB is fixed to the viewport, so its wrapper only ever sat in the flow
    * to collect a trailing margin. Setting it to display:contents generates no
@@ -3948,7 +4704,7 @@ const STYLES = `
     color: var(--success-color, #43a047);
   }
   /*
-   * A receiver that is not connected is the one thing on this page worth
+   * A location with nothing connected is the one thing on this page worth
    * colouring, so the badge carries the state rather than a line of text
    * needing to be read.
    */
@@ -3992,7 +4748,9 @@ const STYLES = `
    */
   button.nav-devices,
   button.nav-entities,
-  button.open-hub-settings,
+  button.nav-coverage,
+  button.open-receiver-settings,
+  button.open-location-settings,
   button.open-device-settings,
   button.open-mappings {
     display: flex;
@@ -4009,9 +4767,18 @@ const STYLES = `
   }
   button.nav-devices .row-headline,
   button.nav-entities .row-headline,
-  button.open-hub-settings .row-headline,
+  button.nav-coverage .row-headline,
+  button.open-receiver-settings .row-headline,
+  button.open-location-settings .row-headline,
   button.open-device-settings .row-headline,
   button.open-mappings .row-headline { font-size: 16px; }
+
+  /*
+   * A receiver whose socket is down. Only the supporting line is dimmed -- the
+   * title still has to be readable, because that row is how the user gets to
+   * the page where they can do something about it.
+   */
+  .receiver-offline .row-supporting { color: var(--error-color, #db4437); }
 
   /*
    * The search state, shaped like the one core shows while a radio is looking
@@ -4064,16 +4831,16 @@ const STYLES = `
   }
 
   /*
-   * The receiver a settings page is editing, shown only when there is more than
-   * one to confuse it with -- which is the same rule, and the same heading, the
-   * overview's own per-receiver cards use.
+   * What a settings page is editing -- the receiver on the radio page, the
+   * location on the others once there is a second one to confuse it with. Same
+   * heading, and the same rule, the overview's own location groups use.
    */
-  .settings-hub {
+  .settings-subject {
     margin: 0 0 16px;
     font-size: 20px;
     font-weight: 400;
   }
-  .settings-hub[hidden] { display: none; }
+  .settings-subject[hidden] { display: none; }
 
   /*
    * The native fallback's form controls, for a frontend with no ha-form. Sized

@@ -41,6 +41,7 @@ import pytest
 from custom_components.rtl_433.const import signal_pending_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_subentry
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
 _KEY = "Acurite-606TX-42"
@@ -69,7 +70,7 @@ def _dispatched(dispatch) -> list[str]:
 
 
 @pytest.fixture
-def make_coordinator(hass, hub_entry_builder):
+def make_coordinator(hass, receiver_entry_builder):
     """Return a factory for a coordinator with a chosen adopted/ignored state.
 
     A factory rather than a fixture because the whole point of this module is
@@ -80,11 +81,12 @@ def make_coordinator(hass, hub_entry_builder):
     """
 
     def _make(*, adopted: set[str] | None = None, ignored: set[str] | None = None):
-        entry = hub_entry_builder(availability_timeout=600)
+        entry = receiver_entry_builder(availability_timeout=600)
         entry.add_to_hass(hass)
         coordinator = Rtl433Coordinator(
             hass,
             entry,
+            receiver_subentry(entry),
             host="rtl433.local",
             availability_timeout=600,
             skip_keys={"model", "id", "channel", "subtype", "time", "mic"},
@@ -246,7 +248,7 @@ async def test_pending_frame_touches_no_adopted_runtime_state(hass, make_coordin
     assert _dispatched(dispatch) == [signal_pending_update(coordinator.entry.entry_id)]
 
     # Long past any timeout: the watchdog has nothing to say about a device that
-    # was only ever heard.
+    # was only ever received.
     with freeze_time(start + timedelta(seconds=3600)), patch(DISPATCH) as dispatch:
         await coordinator._async_watchdog(dt_util.utcnow())
     assert coordinator.available == {}

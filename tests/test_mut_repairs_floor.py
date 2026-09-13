@@ -29,6 +29,7 @@ from homeassistant.components.repairs import ConfirmRepairFlow
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import issue_registry as ir
+from tests.conftest import build_location_entry, receiver_id, receiver_subentry
 
 VALIDATE = "custom_components.rtl_433.coordinator.Rtl433Coordinator.validate_connection"
 
@@ -120,11 +121,11 @@ class TestSampleRateLooksLow:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow.async_step_confirm — form schema defaults
+# ReceiverRadioReplaceRepairFlow.async_step_confirm — form schema defaults
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowFormDefaults:
+class TestReceiverRadioReplaceFlowFormDefaults:
     """Test that the form schema carries correct defaults from entry data.
 
     The initial form (user_input=None) must echo back the entry's current
@@ -136,12 +137,12 @@ class TestHubRadioReplaceFlowFormDefaults:
     """
 
     async def test_init_form_step_id_is_confirm(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The init step returns a form with step_id='confirm'."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_init()
@@ -149,15 +150,15 @@ class TestHubRadioReplaceFlowFormDefaults:
         assert result["step_id"] == "confirm"
 
     async def test_form_description_placeholders_has_title_key(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The initial form must include a 'title' placeholder (not 'TITLE' or 'XXtitleXX').
 
         Kills mutants 130/131 that rename the key.
         """
-        entry = hub_entry_builder(host="rtl433.local")
+        entry = receiver_entry_builder(host="rtl433.local")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -168,14 +169,16 @@ class TestHubRadioReplaceFlowFormDefaults:
         assert "XXtitleXX" not in placeholders
         assert placeholders["title"] == entry.title
 
-    async def test_form_has_data_schema(self, hass: HomeAssistant, hub_entry_builder):
+    async def test_form_has_data_schema(
+        self, hass: HomeAssistant, receiver_entry_builder
+    ):
         """The initial form must include a data_schema (not None).
 
         Kills mutants 123/126 that set data_schema=None or drop it.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -184,11 +187,11 @@ class TestHubRadioReplaceFlowFormDefaults:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow.async_step_confirm — CannotConnect error path
+# ReceiverRadioReplaceRepairFlow.async_step_confirm — CannotConnect error path
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowCannotConnect:
+class TestReceiverRadioReplaceFlowCannotConnect:
     """Assert exact details of the cannot-connect re-show.
 
     Kills mutants 61/65 (data_schema=None/omitted), 63/67 (description_placeholders),
@@ -196,15 +199,15 @@ class TestHubRadioReplaceFlowCannotConnect:
     """
 
     async def test_cannot_connect_reshows_form_with_schema(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """On CannotConnect the re-shown form must have a data_schema, not None.
 
         Kills mutants 61 and 65.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -222,16 +225,16 @@ class TestHubRadioReplaceFlowCannotConnect:
         assert result.get("data_schema") is not None
 
     async def test_cannot_connect_error_key_and_value(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The cannot-connect form error must use key 'base' / value 'cannot_connect'.
 
         This is tested in the existing suite, but we replicate it here to
         make sure any mutation to those strings is caught redundantly.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -249,15 +252,15 @@ class TestHubRadioReplaceFlowCannotConnect:
         assert errors["base"] == "cannot_connect"
 
     async def test_cannot_connect_description_placeholders_has_title(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The cannot-connect re-show must carry 'title' in description_placeholders.
 
         Kills mutants 63, 67, 74, 75.
         """
-        entry = hub_entry_builder(host="rtl433.local")
+        entry = receiver_entry_builder(host="rtl433.local")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -279,11 +282,11 @@ class TestHubRadioReplaceFlowCannotConnect:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — validate_connection call arguments
+# ReceiverRadioReplaceRepairFlow — validate_connection call arguments
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowValidateArgs:
+class TestReceiverRadioReplaceFlowValidateArgs:
     """Assert validate_connection is called with the exact user-supplied values.
 
     Many mutants replace host/port/path/secure/hass arguments with None.
@@ -292,15 +295,15 @@ class TestHubRadioReplaceFlowValidateArgs:
     """
 
     async def test_validate_called_with_correct_hass(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """validate_connection must receive self.hass as first argument.
 
         Kills mutmut_50 (None) and mutmut_55 (hass dropped).
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -341,15 +344,15 @@ class TestHubRadioReplaceFlowValidateArgs:
         assert call["secure"] is False
 
     async def test_validate_called_with_correct_host(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """validate_connection host arg must not be None or swapped.
 
         Kills mutmut_51 (host=None).
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -376,15 +379,15 @@ class TestHubRadioReplaceFlowValidateArgs:
         assert validate_calls[0]["host"] == "myspecialhost.local"
 
     async def test_validate_called_with_correct_port(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """validate_connection port arg must match user_input.
 
         Kills mutmut_52 (port=None).
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -411,15 +414,15 @@ class TestHubRadioReplaceFlowValidateArgs:
         assert validate_calls[0]["port"] == 9999
 
     async def test_validate_called_with_correct_path(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """validate_connection path arg must match user_input.
 
         Kills mutmut_53 (path=None).
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -446,15 +449,15 @@ class TestHubRadioReplaceFlowValidateArgs:
         assert validate_calls[0]["path"] == "/mypath"
 
     async def test_validate_called_with_correct_secure(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """validate_connection secure kwarg must match user_input.
 
         Kills mutmut_54 (secure=None) and mutmut_59 (secure omitted).
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -482,11 +485,11 @@ class TestHubRadioReplaceFlowValidateArgs:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — new_uid computation
+# ReceiverRadioReplaceRepairFlow — new_uid computation
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowNewUid:
+class TestReceiverRadioReplaceFlowNewUid:
     """Test the new_uid fallback logic.
 
     Kills survivors:
@@ -496,17 +499,19 @@ class TestHubRadioReplaceFlowNewUid:
     """
 
     async def test_empty_radio_id_uses_existing_unique_id(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """An empty CONF_RADIO_ID input must fall back to the current unique_id.
 
         Kills mutmut_81 and mutmut_82.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        hass.config_entries.async_update_entry(entry, unique_id="radio-existing")
+        hass.config_entries.async_update_subentry(
+            entry, receiver_subentry(entry), unique_id="radio-existing"
+        )
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -518,14 +523,16 @@ class TestHubRadioReplaceFlowNewUid:
         }
         rebind_calls = []
 
-        async def _capture_rebind(hass_arg, entry_arg, new_uid, data, *, title):
+        async def _capture_rebind(
+            hass_arg, entry_arg, subentry_arg, new_uid, data, *, title
+        ):
             rebind_calls.append({"new_uid": new_uid})
             return "ok"
 
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(
@@ -538,17 +545,19 @@ class TestHubRadioReplaceFlowNewUid:
         assert rebind_calls[0]["new_uid"] == "radio-existing"
 
     async def test_whitespace_only_radio_id_uses_existing_unique_id(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """Whitespace-only CONF_RADIO_ID must also fall back to current unique_id.
 
         Kills mutmut_80 which changes the empty-string fallback for the strip() result.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        hass.config_entries.async_update_entry(entry, unique_id="radio-kept")
+        hass.config_entries.async_update_subentry(
+            entry, receiver_subentry(entry), unique_id="radio-kept"
+        )
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -560,14 +569,16 @@ class TestHubRadioReplaceFlowNewUid:
         }
         rebind_calls = []
 
-        async def _capture_rebind(hass_arg, entry_arg, new_uid, data, *, title):
+        async def _capture_rebind(
+            hass_arg, entry_arg, subentry_arg, new_uid, data, *, title
+        ):
             rebind_calls.append({"new_uid": new_uid})
             return "ok"
 
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(
@@ -580,14 +591,16 @@ class TestHubRadioReplaceFlowNewUid:
         assert rebind_calls[0]["new_uid"] == "radio-kept"
 
     async def test_provided_radio_id_takes_precedence(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """A provided radio id should be used as-is (stripped)."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        hass.config_entries.async_update_entry(entry, unique_id="radio-old")
+        hass.config_entries.async_update_subentry(
+            entry, receiver_subentry(entry), unique_id="radio-old"
+        )
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -599,14 +612,16 @@ class TestHubRadioReplaceFlowNewUid:
         }
         rebind_calls = []
 
-        async def _capture_rebind(hass_arg, entry_arg, new_uid, data, *, title):
+        async def _capture_rebind(
+            hass_arg, entry_arg, subentry_arg, new_uid, data, *, title
+        ):
             rebind_calls.append({"new_uid": new_uid})
             return "ok"
 
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(
@@ -620,23 +635,23 @@ class TestHubRadioReplaceFlowNewUid:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — rebind title format
+# ReceiverRadioReplaceRepairFlow — rebind title format
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowRebindTitle:
-    """Assert async_rebind_hub is called with the correct title string.
+class TestReceiverRadioReplaceFlowRebindTitle:
+    """Assert async_rebind_receiver is called with the correct title string.
 
     Kills mutmut_88 (title=None) and mutmut_93 (title omitted).
     """
 
     async def test_rebind_title_is_rtl433_with_host(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        """async_rebind_hub title must be 'rtl_433 (<host>)' not None/omitted."""
-        entry = hub_entry_builder()
+        """async_rebind_receiver title must be 'rtl_433 (<host>)' not None/omitted."""
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -648,14 +663,16 @@ class TestHubRadioReplaceFlowRebindTitle:
         }
         rebind_calls = []
 
-        async def _capture_rebind(hass_arg, entry_arg, new_uid, data, *, title):
+        async def _capture_rebind(
+            hass_arg, entry_arg, subentry_arg, new_uid, data, *, title
+        ):
             rebind_calls.append({"title": title})
             return "ok"
 
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(
@@ -670,11 +687,11 @@ class TestHubRadioReplaceFlowRebindTitle:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — already_configured error path
+# ReceiverRadioReplaceRepairFlow — already_configured error path
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowAlreadyConfigured:
+class TestReceiverRadioReplaceFlowAlreadyConfigured:
     """Assert the already-configured error path details.
 
     Kills survivors 95/96 (status string wrong), 97 (step_id=None),
@@ -685,15 +702,15 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
     """
 
     async def test_already_configured_reshows_form_with_id_in_use_error(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """When rebind returns 'already_configured' the form re-shows with id_in_use error.
 
         Kills mutants 95/96 that corrupt the 'already_configured' status string check.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -707,7 +724,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="already_configured"),
             ),
         ):
@@ -717,15 +734,15 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         assert result["step_id"] == "confirm"
 
     async def test_already_configured_error_dict_exact_keys_and_values(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The errors dict must have key 'base' with value 'id_in_use'.
 
         Kills mutants 99, 107, 108, 109, 110.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -739,7 +756,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="already_configured"),
             ),
         ):
@@ -755,15 +772,15 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         assert errors["base"] != "ID_IN_USE"
 
     async def test_already_configured_description_placeholders_title_key(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """description_placeholders must contain 'title', not 'XXtitleXX' or 'TITLE'.
 
         Kills mutants 100, 104, 111, 112.
         """
-        entry = hub_entry_builder(host="rtl433.local")
+        entry = receiver_entry_builder(host="rtl433.local")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -777,7 +794,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="already_configured"),
             ),
         ):
@@ -791,15 +808,15 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         assert placeholders["title"] == entry.title
 
     async def test_already_configured_has_data_schema(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The already_configured re-show must include a data_schema (not None/omitted).
 
         Kills mutants 98 and 102.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -813,7 +830,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="already_configured"),
             ),
         ):
@@ -823,11 +840,11 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — success path CREATE_ENTRY
+# ReceiverRadioReplaceRepairFlow — success path CREATE_ENTRY
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowSuccess:
+class TestReceiverRadioReplaceFlowSuccess:
     """Assert that the successful rebind path creates an entry with exact values.
 
     Kills survivors 117 (title=None), 118 (data=None), 119 (title omitted),
@@ -835,15 +852,15 @@ class TestHubRadioReplaceFlowSuccess:
     """
 
     async def test_success_creates_entry_with_empty_title_and_empty_data(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """Successful confirm must produce CREATE_ENTRY with title='' and data={}.
 
         Kills mutmut_117, 118, 119, 121.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -857,7 +874,7 @@ class TestHubRadioReplaceFlowSuccess:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="ok"),
             ),
             patch(
@@ -885,15 +902,17 @@ class TestSampleRateApplyFlowSuccess:
     """
 
     async def test_apply_creates_entry_with_empty_title(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The apply step must produce title='' (not None or 'XXXX')."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+        coordinator = Rtl433Coordinator(
+            hass, entry, receiver_subentry(entry), host="rtl433.local"
+        )
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-        flow = repairs.SampleRateRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_apply()
@@ -901,15 +920,17 @@ class TestSampleRateApplyFlowSuccess:
         assert result["title"] == ""
 
     async def test_apply_creates_entry_with_empty_data(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The apply step must produce data={} (not None)."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+        coordinator = Rtl433Coordinator(
+            hass, entry, receiver_subentry(entry), host="rtl433.local"
+        )
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-        flow = repairs.SampleRateRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_apply()
@@ -917,16 +938,16 @@ class TestSampleRateApplyFlowSuccess:
         assert result["data"] == {}
 
     async def test_ignore_creates_entry_with_empty_title_and_data(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The ignore step must produce title='' and data={} on the flow result.
 
         (This is the flow result, distinct from the entry.data dismissal flag.)
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
-        flow = repairs.SampleRateRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_ignore()
@@ -943,12 +964,12 @@ class TestSampleRateApplyFlowForm:
     """
 
     async def test_init_is_menu_with_apply_and_ignore(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The initial step must be a menu listing exactly apply then ignore."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.SampleRateRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_init()
@@ -957,12 +978,12 @@ class TestSampleRateApplyFlowForm:
         assert result["menu_options"] == ["apply", "ignore"]
 
     async def test_menu_description_placeholders_title_key(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """description_placeholders must use key 'title' (not 'XXtitleXX' or 'TITLE')."""
-        entry = hub_entry_builder(host="rtl433.local")
+        entry = receiver_entry_builder(host="rtl433.local")
         entry.add_to_hass(hass)
-        flow = repairs.SampleRateRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_init()
@@ -974,12 +995,12 @@ class TestSampleRateApplyFlowForm:
         assert placeholders["title"] == entry.title
 
     async def test_menu_description_placeholders_suggested_value(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """description_placeholders 'suggested' must be '1024000'."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.SampleRateRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_init()
@@ -996,38 +1017,38 @@ class TestAsyncCreateFixFlow:
     """Test that async_create_fix_flow passes the correct entry to flow objects.
 
     Kills survivors:
-    - mutmut_8: HubRadioReplaceRepairFlow(None) instead of HubRadioReplaceRepairFlow(entry)
-    - mutmut_16: SampleRateRepairFlow(None) instead of SampleRateRepairFlow(entry)
+    - mutmut_8: ReceiverRadioReplaceRepairFlow(None, receiver_subentry(None)) instead of ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
+    - mutmut_16: SampleRateRepairFlow(None, receiver_subentry(None)) instead of SampleRateRepairFlow(entry, receiver_subentry(entry))
     """
 
     async def test_unreachable_flow_has_correct_entry(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        """HubRadioReplaceRepairFlow must hold a reference to the real entry, not None.
+        """ReceiverRadioReplaceRepairFlow must hold a reference to the real entry, not None.
 
         Kills mutmut_8.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
         flow = await repairs.async_create_fix_flow(
-            hass, repairs._unreachable_issue_id(entry), None
+            hass, repairs._unreachable_issue_id(entry, receiver_id(entry)), None
         )
-        assert isinstance(flow, repairs.HubRadioReplaceRepairFlow)
+        assert isinstance(flow, repairs.ReceiverRadioReplaceRepairFlow)
         assert flow._entry is entry
 
     async def test_sample_rate_flow_has_correct_entry(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """SampleRateRepairFlow must hold a reference to the real entry, not None.
 
         Kills mutmut_16.
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
         flow = await repairs.async_create_fix_flow(
-            hass, repairs._sample_rate_issue_id(entry), None
+            hass, repairs._sample_rate_issue_id(entry, receiver_id(entry)), None
         )
         assert isinstance(flow, repairs.SampleRateRepairFlow)
         assert flow._entry is entry
@@ -1062,16 +1083,19 @@ class TestAsyncCreateFixFlow:
 class TestAsyncRaiseSampleRateLow:
     """Test that the sample-rate advisory carries exactly the right placeholder keys."""
 
-    def test_raise_uses_title_key(self, hass: HomeAssistant, hub_entry_builder):
+    def test_raise_uses_title_key(self, hass: HomeAssistant, receiver_entry_builder):
         """Issue placeholders must include 'title' key (not renamed)."""
-        entry = hub_entry_builder(host="rtl433.local")
+        entry = receiver_entry_builder(host="rtl433.local")
         entry.add_to_hass(hass)
 
         repairs.async_raise_sample_rate_low(
-            hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+            hass,
+            entry,
+            receiver_subentry(entry),
+            {"center_frequency": 915_000_000, "samp_rate": 250_000},
         )
         issue_reg = ir.async_get(hass)
-        issue_id = repairs._sample_rate_issue_id(entry)
+        issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry))
         issue = issue_reg.async_get_issue(DOMAIN, issue_id)
 
         assert issue is not None
@@ -1082,100 +1106,129 @@ class TestAsyncRaiseSampleRateLow:
         assert "suggested" in placeholders
 
     def test_raise_frequency_formatted_as_mhz(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """Frequency placeholder must be formatted in MHz (e.g., '915' not '915000000')."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
         repairs.async_raise_sample_rate_low(
-            hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+            hass,
+            entry,
+            receiver_subentry(entry),
+            {"center_frequency": 915_000_000, "samp_rate": 250_000},
         )
         issue_reg = ir.async_get(hass)
-        issue = issue_reg.async_get_issue(DOMAIN, repairs._sample_rate_issue_id(entry))
+        issue = issue_reg.async_get_issue(
+            DOMAIN, repairs._sample_rate_issue_id(entry, receiver_id(entry))
+        )
         assert issue.translation_placeholders["frequency"] == "915"
 
-    def test_raise_suggested_is_1024000(self, hass: HomeAssistant, hub_entry_builder):
+    def test_raise_suggested_is_1024000(
+        self, hass: HomeAssistant, receiver_entry_builder
+    ):
         """Suggested placeholder must be '1024000'."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
         repairs.async_raise_sample_rate_low(
-            hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+            hass,
+            entry,
+            receiver_subentry(entry),
+            {"center_frequency": 915_000_000, "samp_rate": 250_000},
         )
         issue_reg = ir.async_get(hass)
-        issue = issue_reg.async_get_issue(DOMAIN, repairs._sample_rate_issue_id(entry))
+        issue = issue_reg.async_get_issue(
+            DOMAIN, repairs._sample_rate_issue_id(entry, receiver_id(entry))
+        )
         assert issue.translation_placeholders["suggested"] == "1024000"
 
-    def test_raise_sample_rate_string(self, hass: HomeAssistant, hub_entry_builder):
+    def test_raise_sample_rate_string(
+        self, hass: HomeAssistant, receiver_entry_builder
+    ):
         """sample_rate placeholder must be the integer string of the current rate."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
         repairs.async_raise_sample_rate_low(
-            hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+            hass,
+            entry,
+            receiver_subentry(entry),
+            {"center_frequency": 915_000_000, "samp_rate": 250_000},
         )
         issue_reg = ir.async_get(hass)
-        issue = issue_reg.async_get_issue(DOMAIN, repairs._sample_rate_issue_id(entry))
+        issue = issue_reg.async_get_issue(
+            DOMAIN, repairs._sample_rate_issue_id(entry, receiver_id(entry))
+        )
         assert issue.translation_placeholders["sample_rate"] == "250000"
 
 
 # ---------------------------------------------------------------------------
-# async_raise_hub_unreachable — exact issue fields
+# async_raise_receiver_unreachable — exact issue fields
 # ---------------------------------------------------------------------------
 
 
-class TestAsyncRaiseHubUnreachable:
+class TestAsyncRaiseReceiverUnreachable:
     """Test that the unreachable issue carries exactly the right fields."""
 
-    def test_unreachable_issue_is_fixable(self, hass: HomeAssistant, hub_entry_builder):
+    def test_unreachable_issue_is_fixable(
+        self, hass: HomeAssistant, receiver_entry_builder
+    ):
         """The unreachable issue must be fixable."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
-        repairs.async_raise_hub_unreachable(hass, entry)
+        repairs.async_raise_receiver_unreachable(hass, entry, receiver_subentry(entry))
         issue_reg = ir.async_get(hass)
-        issue = issue_reg.async_get_issue(DOMAIN, repairs._unreachable_issue_id(entry))
+        issue = issue_reg.async_get_issue(
+            DOMAIN, repairs._unreachable_issue_id(entry, receiver_id(entry))
+        )
 
         assert issue is not None
         assert issue.is_fixable is True
 
     def test_unreachable_issue_severity_is_error(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The unreachable issue must have ERROR severity."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
-        repairs.async_raise_hub_unreachable(hass, entry)
+        repairs.async_raise_receiver_unreachable(hass, entry, receiver_subentry(entry))
         issue_reg = ir.async_get(hass)
-        issue = issue_reg.async_get_issue(DOMAIN, repairs._unreachable_issue_id(entry))
+        issue = issue_reg.async_get_issue(
+            DOMAIN, repairs._unreachable_issue_id(entry, receiver_id(entry))
+        )
 
         assert issue.severity is ir.IssueSeverity.ERROR
 
     def test_unreachable_issue_translation_key(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The unreachable issue translation_key must be ISSUE_UNREACHABLE."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
-        repairs.async_raise_hub_unreachable(hass, entry)
+        repairs.async_raise_receiver_unreachable(hass, entry, receiver_subentry(entry))
         issue_reg = ir.async_get(hass)
-        issue = issue_reg.async_get_issue(DOMAIN, repairs._unreachable_issue_id(entry))
+        issue = issue_reg.async_get_issue(
+            DOMAIN, repairs._unreachable_issue_id(entry, receiver_id(entry))
+        )
 
         assert issue.translation_key == repairs.ISSUE_UNREACHABLE
 
     def test_unreachable_issue_title_placeholder(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The unreachable issue must carry 'title' in translation_placeholders."""
-        entry = hub_entry_builder(host="rtl433.local")
+        entry = receiver_entry_builder(host="rtl433.local")
         entry.add_to_hass(hass)
 
-        repairs.async_raise_hub_unreachable(hass, entry)
+        repairs.async_raise_receiver_unreachable(hass, entry, receiver_subentry(entry))
         issue_reg = ir.async_get(hass)
-        issue = issue_reg.async_get_issue(DOMAIN, repairs._unreachable_issue_id(entry))
+        issue = issue_reg.async_get_issue(
+            DOMAIN, repairs._unreachable_issue_id(entry, receiver_id(entry))
+        )
 
         assert "title" in issue.translation_placeholders
         assert issue.translation_placeholders["title"] == entry.title
@@ -1191,25 +1244,27 @@ class TestAsyncTrackSampleRateInitialEval:
 
     If the coordinator.meta is already in the flagged state when the tracker
     is wired, the issue should be raised immediately (without waiting for a
-    signal_hub_update). This tests the ``_evaluate()`` call at the end of
+    signal_receiver_update). This tests the ``_evaluate()`` call at the end of
     async_track_sample_rate.
     """
 
     async def test_issue_raised_immediately_when_already_flagged(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """With flagged meta already set, issue is raised before any signal fires."""
 
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+        coordinator = Rtl433Coordinator(
+            hass, entry, receiver_subentry(entry), host="rtl433.local"
+        )
         coordinator._client.meta = {
             "center_frequency": 915_000_000,
             "samp_rate": 250_000,
         }
 
         issue_reg = ir.async_get(hass)
-        issue_id = repairs._sample_rate_issue_id(entry)
+        issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry))
 
         unsub = repairs.async_track_sample_rate(hass, entry, coordinator)
         # No signal sent yet — issue should already be raised.
@@ -1217,19 +1272,21 @@ class TestAsyncTrackSampleRateInitialEval:
         unsub()
 
     async def test_no_issue_when_initially_not_flagged(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """With good meta on wire-up, no issue is raised initially."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+        coordinator = Rtl433Coordinator(
+            hass, entry, receiver_subentry(entry), host="rtl433.local"
+        )
         coordinator._client.meta = {
             "center_frequency": 433_920_000,
             "samp_rate": 250_000,
         }
 
         issue_reg = ir.async_get(hass)
-        issue_id = repairs._sample_rate_issue_id(entry)
+        issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry))
 
         unsub = repairs.async_track_sample_rate(hass, entry, coordinator)
         assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
@@ -1237,11 +1294,11 @@ class TestAsyncTrackSampleRateInitialEval:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — form schema contents (defaults from entry data)
+# ReceiverRadioReplaceRepairFlow — form schema contents (defaults from entry data)
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowSchemaDefaults:
+class TestReceiverRadioReplaceFlowSchemaDefaults:
     """Test that form schema defaults correctly use entry data values.
 
     These tests ensure that schema field defaults (for host, port, path) are
@@ -1255,7 +1312,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
     """
 
     async def test_schema_host_default_matches_entry_host(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The schema's CONF_HOST default must match entry.data host.
 
@@ -1263,9 +1320,9 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         When CONF_HOST is in data, CONF_HOST key lookup returns the real host,
         but None key lookup returns the fallback '' - so the default differs.
         """
-        entry = hub_entry_builder(host="special-host.local")
+        entry = receiver_entry_builder(host="special-host.local")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1292,7 +1349,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
             pytest.fail("Schema rejected input with CONF_HOST defaulting")
 
     async def test_schema_port_default_matches_entry_port(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The schema's CONF_PORT default must match entry.data port.
 
@@ -1300,9 +1357,9 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         data.get(None, DEFAULT_PORT). When CONF_PORT is in data, lookup by
         CONF_PORT returns the real port, but None key returns DEFAULT_PORT fallback.
         """
-        entry = hub_entry_builder(port=9876)
+        entry = receiver_entry_builder(port=9876)
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1328,7 +1385,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
             pytest.fail("Schema rejected input with CONF_PORT defaulting")
 
     async def test_schema_path_default_matches_entry_path(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The schema's CONF_PATH default must match entry.data path.
 
@@ -1336,9 +1393,9 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         data.get(None, DEFAULT_PATH). When CONF_PATH is in data, lookup by
         CONF_PATH returns the real path, but None key returns DEFAULT_PATH fallback.
         """
-        entry = hub_entry_builder(path="/specialpath")
+        entry = receiver_entry_builder(path="/specialpath")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1364,7 +1421,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
             pytest.fail("Schema rejected input with CONF_PATH defaulting")
 
     async def test_schema_secure_default_matches_entry_secure(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The schema's CONF_SECURE default must match entry.data secure.
 
@@ -1372,9 +1429,9 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         data.get(None, False). When CONF_SECURE=True is in data, lookup by
         CONF_SECURE returns True, but None key returns False fallback.
         """
-        entry = hub_entry_builder(secure=True)
+        entry = receiver_entry_builder(secure=True)
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1400,18 +1457,20 @@ class TestHubRadioReplaceFlowSchemaDefaults:
             pytest.fail("Schema rejected input with CONF_SECURE defaulting")
 
     async def test_schema_radio_id_default_matches_entry_unique_id(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        """The schema's CONF_RADIO_ID default must match entry.unique_id.
+        """The schema's CONF_RADIO_ID default must match the receiver's unique_id.
 
         Kills mutmut_6 (default=None), mutmut_8 (no default), mutmut_9
         (or -> and), mutmut_10 (or 'XXXX').
         """
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        hass.config_entries.async_update_entry(entry, unique_id="my-radio-id")
+        hass.config_entries.async_update_subentry(
+            entry, receiver_subentry(entry), unique_id="my-radio-id"
+        )
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1442,21 +1501,20 @@ class TestHubRadioReplaceFlowSchemaDefaults:
 
         Kills mutmut_10 (or 'XXXX' fallback) and mutmut_82 (same in new_uid path).
         """
-        from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-        entry = MockConfigEntry(
-            domain="rtl_433",
-            title="rtl_433 (rtl433.local)",
-            data={
+        entry = build_location_entry(
+            receiver_data={
                 CONF_HOST: "rtl433.local",
                 CONF_PORT: DEFAULT_PORT,
                 CONF_PATH: DEFAULT_PATH,
             },
-            unique_id=None,
+            receiver_unique_id=None,
+            title="rtl_433 (rtl433.local)",
+            receiver_title="rtl_433 (rtl433.local)",
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1482,11 +1540,11 @@ class TestHubRadioReplaceFlowSchemaDefaults:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — schema defaults when entry data keys missing
+# ReceiverRadioReplaceRepairFlow — schema defaults when entry data keys missing
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowSchemaFallbacks:
+class TestReceiverRadioReplaceFlowSchemaFallbacks:
     """Test schema fallback defaults when entry.data is missing a key.
 
     These tests create a minimal entry without CONF_HOST/CONF_PORT/CONF_PATH/CONF_SECURE
@@ -1503,19 +1561,18 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
         Kills mutmut_12 (None), 14 (no default), 15 (data.get(None)),
         16 (None fallback), 17 (data.get('')), 18 (no second arg), 19 ('XXXX').
         """
-        from pytest_homeassistant_custom_component.common import MockConfigEntry
         import voluptuous as vol
 
         # Entry with no host in data - the fallback must be ""
-        entry = MockConfigEntry(
-            domain="rtl_433",
+        entry = build_location_entry(
+            receiver_data={CONF_PORT: DEFAULT_PORT, CONF_PATH: DEFAULT_PATH},
+            receiver_unique_id=None,
             title="rtl_433 (unknown)",
-            data={CONF_PORT: DEFAULT_PORT, CONF_PATH: DEFAULT_PATH},
-            unique_id=None,
+            receiver_title="rtl_433 (unknown)",
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1545,18 +1602,17 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
         25 (None fallback), 26 (data.get(DEFAULT_PORT) wrong args),
         27 (no second arg).
         """
-        from pytest_homeassistant_custom_component.common import MockConfigEntry
         import voluptuous as vol
 
-        entry = MockConfigEntry(
-            domain="rtl_433",
+        entry = build_location_entry(
+            receiver_data={CONF_HOST: "rtl433.local", CONF_PATH: DEFAULT_PATH},
+            receiver_unique_id=None,
             title="rtl_433 (unknown)",
-            data={CONF_HOST: "rtl433.local", CONF_PATH: DEFAULT_PATH},
-            unique_id=None,
+            receiver_title="rtl_433 (unknown)",
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1583,18 +1639,17 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
         Kills mutmut_29 (None), 31 (no default), 32 (data.get(None)),
         33 (None fallback), 34 (data.get(DEFAULT_PATH) wrong args), 35 (no second arg).
         """
-        from pytest_homeassistant_custom_component.common import MockConfigEntry
         import voluptuous as vol
 
-        entry = MockConfigEntry(
-            domain="rtl_433",
+        entry = build_location_entry(
+            receiver_data={CONF_HOST: "rtl433.local", CONF_PORT: DEFAULT_PORT},
+            receiver_unique_id=None,
             title="rtl_433 (unknown)",
-            data={CONF_HOST: "rtl433.local", CONF_PORT: DEFAULT_PORT},
-            unique_id=None,
+            receiver_title="rtl_433 (unknown)",
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1622,22 +1677,21 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
         41 (None fallback), 42 (data.get(False) wrong args), 43 (no second arg),
         44 (True fallback).
         """
-        from pytest_homeassistant_custom_component.common import MockConfigEntry
         import voluptuous as vol
 
-        entry = MockConfigEntry(
-            domain="rtl_433",
-            title="rtl_433 (unknown)",
-            data={
+        entry = build_location_entry(
+            receiver_data={
                 CONF_HOST: "rtl433.local",
                 CONF_PORT: DEFAULT_PORT,
                 CONF_PATH: DEFAULT_PATH,
             },
-            unique_id=None,
+            receiver_unique_id=None,
+            title="rtl_433 (unknown)",
+            receiver_title="rtl_433 (unknown)",
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1660,11 +1714,11 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — new_uid fallback when unique_id is None
+# ReceiverRadioReplaceRepairFlow — new_uid fallback when unique_id is None
 # ---------------------------------------------------------------------------
 
 
-class TestHubRadioReplaceFlowNewUidNoneUniqueId:
+class TestReceiverRadioReplaceFlowNewUidNoneUniqueId:
     """Test new_uid fallback when entry.unique_id is None.
 
     Kills mutmut_82: ``entry.unique_id or ""`` -> ``entry.unique_id or "XXXX"``
@@ -1675,21 +1729,20 @@ class TestHubRadioReplaceFlowNewUidNoneUniqueId:
 
         Kills mutmut_82 which changes the fallback to 'XXXX'.
         """
-        from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-        entry = MockConfigEntry(
-            domain="rtl_433",
-            title="rtl_433 (rtl433.local)",
-            data={
+        entry = build_location_entry(
+            receiver_data={
                 CONF_HOST: "rtl433.local",
                 CONF_PORT: DEFAULT_PORT,
                 CONF_PATH: DEFAULT_PATH,
             },
-            unique_id=None,
+            receiver_unique_id=None,
+            title="rtl_433 (rtl433.local)",
+            receiver_title="rtl_433 (rtl433.local)",
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         user_input = {
@@ -1701,14 +1754,16 @@ class TestHubRadioReplaceFlowNewUidNoneUniqueId:
         }
         rebind_calls = []
 
-        async def _capture_rebind(hass_arg, entry_arg, new_uid, data, *, title):
+        async def _capture_rebind(
+            hass_arg, entry_arg, subentry_arg, new_uid, data, *, title
+        ):
             rebind_calls.append({"new_uid": new_uid})
             return "ok"
 
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(
@@ -1729,40 +1784,49 @@ class TestHubRadioReplaceFlowNewUidNoneUniqueId:
 
 
 class TestSampleRateIgnoreFlow:
-    """Test that the ignore step persists the per-hub dismissal flag.
+    """Test that the ignore step persists the per-receiver dismissal flag.
 
     The flag must land in ``entry.data`` (so it survives reloads) and the ignore
     path must not touch the sample rate.
     """
 
     async def test_ignore_sets_dismissal_flag_in_entry_data(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        """async_step_ignore must persist CONF_SAMPLE_RATE_DISMISSED=True."""
+        """async_step_ignore persists the flag on the *receiver* it silences.
+
+        A location may hold several receivers, and a user who deliberately keeps
+        one radio on a low sample rate has said nothing about the others -- so the
+        flag lives on the subentry, not on the location entry.
+        """
         from custom_components.rtl_433.const import CONF_SAMPLE_RATE_DISMISSED
 
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
+        subentry = receiver_subentry(entry)
 
-        flow = repairs.SampleRateRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry, subentry)
         flow.hass = hass
 
-        assert not entry.data.get(CONF_SAMPLE_RATE_DISMISSED)
+        assert not subentry.data.get(CONF_SAMPLE_RATE_DISMISSED)
         await flow.async_step_ignore()
-        assert entry.data.get(CONF_SAMPLE_RATE_DISMISSED) is True
+        assert subentry.data.get(CONF_SAMPLE_RATE_DISMISSED) is True
+        assert CONF_SAMPLE_RATE_DISMISSED not in entry.data
 
     async def test_ignore_does_not_apply_sample_rate(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The ignore path must leave the coordinator's desired rate untouched."""
         from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
 
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+        coordinator = Rtl433Coordinator(
+            hass, entry, receiver_subentry(entry), host="rtl433.local"
+        )
         hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-        flow = repairs.SampleRateRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         await flow.async_step_ignore()
@@ -1782,16 +1846,16 @@ class TestSampleRateApplyFlowNoCoordinator:
     """
 
     async def test_no_coordinator_still_creates_entry_empty(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """Without coordinator, apply must still be CREATE_ENTRY with title='' data={}."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
         # Ensure no coordinator is registered
         hass.data.setdefault(DOMAIN, {})
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data[DOMAIN].pop(receiver_id(entry), None)
 
-        flow = repairs.SampleRateRepairFlow(entry)
+        flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
 
         result = await flow.async_step_apply()
@@ -1813,14 +1877,18 @@ class TestEventTimeIssueIdentity:
         assert repairs.ISSUE_EVENT_TIME_UNUSABLE == "event_time_unusable"
 
     def test_issue_id_is_prefix_underscore_entry_id(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        """Asserted literally: the router slices this apart by prefix length."""
-        entry = hub_entry_builder()
+        """Asserted literally: the router slices this apart by prefix length.
+
+        The receiver id is in there too, because a location may hold several and
+        the advisory is about one of them.
+        """
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
         assert (
-            repairs._event_time_issue_id(entry)
-            == f"event_time_unusable_{entry.entry_id}"
+            repairs._event_time_issue_id(entry, receiver_id(entry))
+            == f"event_time_unusable_{entry.entry_id}:{receiver_id(entry)}"
         )
 
 
@@ -1828,55 +1896,64 @@ class TestEventTimeDismissalFlag:
     """The durable acknowledgement: read, write, and the idempotence guard."""
 
     def test_absent_flag_reads_as_not_dismissed(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        assert repairs._event_time_advisory_dismissed(entry) is False
+        assert repairs._event_time_advisory_dismissed(receiver_subentry(entry)) is False
 
     def test_falsey_flag_reads_as_not_dismissed(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """A stored ``False`` is "not dismissed", not merely "key present"."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        hass.config_entries.async_update_entry(
-            entry, data={**entry.data, CONF_EVENT_TIME_DISMISSED: False}
+        subentry = receiver_subentry(entry)
+        hass.config_entries.async_update_subentry(
+            entry, subentry, data={**subentry.data, CONF_EVENT_TIME_DISMISSED: False}
         )
-        assert repairs._event_time_advisory_dismissed(entry) is False
+        assert repairs._event_time_advisory_dismissed(subentry) is False
 
-    def test_set_flag_reads_as_dismissed(self, hass: HomeAssistant, hub_entry_builder):
-        entry = hub_entry_builder()
+    def test_set_flag_reads_as_dismissed(
+        self, hass: HomeAssistant, receiver_entry_builder
+    ):
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        hass.config_entries.async_update_entry(
-            entry, data={**entry.data, CONF_EVENT_TIME_DISMISSED: True}
+        subentry = receiver_subentry(entry)
+        hass.config_entries.async_update_subentry(
+            entry, subentry, data={**subentry.data, CONF_EVENT_TIME_DISMISSED: True}
         )
-        assert repairs._event_time_advisory_dismissed(entry) is True
+        assert repairs._event_time_advisory_dismissed(subentry) is True
 
     def test_dismiss_writes_the_flag_and_keeps_the_rest_of_the_data(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        """The write merges into ``entry.data`` rather than replacing it."""
-        entry = hub_entry_builder()
+        """The write merges into the receiver's data rather than replacing it."""
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        before = dict(entry.data)
+        subentry = receiver_subentry(entry)
+        before = dict(subentry.data)
 
-        repairs._async_dismiss_event_time_advisory(hass, entry)
+        repairs._async_dismiss_event_time_advisory(hass, entry, subentry)
 
-        assert entry.data[CONF_EVENT_TIME_DISMISSED] is True
+        assert subentry.data[CONF_EVENT_TIME_DISMISSED] is True
         for key, value in before.items():
-            assert entry.data[key] == value
+            assert subentry.data[key] == value
 
     def test_dismiss_is_a_no_op_once_the_flag_is_set(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """The guard exists to avoid a pointless entry write (and its listener)."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        repairs._async_dismiss_event_time_advisory(hass, entry)
+        repairs._async_dismiss_event_time_advisory(
+            hass, entry, receiver_subentry(entry)
+        )
 
         with patch.object(hass.config_entries, "async_update_entry") as update:
-            repairs._async_dismiss_event_time_advisory(hass, entry)
+            repairs._async_dismiss_event_time_advisory(
+                hass, entry, receiver_subentry(entry)
+            )
 
         assert update.call_count == 0
 
@@ -1885,27 +1962,29 @@ class TestAsyncRaiseEventTimeUnusable:
     """The advisory carries exactly these fields."""
 
     def _raise(self, hass, entry):
-        repairs.async_raise_event_time_unusable(hass, entry)
+        repairs.async_raise_event_time_unusable(hass, entry, receiver_subentry(entry))
         return ir.async_get(hass).async_get_issue(
-            DOMAIN, repairs._event_time_issue_id(entry)
+            DOMAIN, repairs._event_time_issue_id(entry, receiver_id(entry))
         )
 
-    def test_issue_is_fixable(self, hass: HomeAssistant, hub_entry_builder):
+    def test_issue_is_fixable(self, hass: HomeAssistant, receiver_entry_builder):
         """Fixable so the card can carry the explanation and the acknowledgement."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
         issue = self._raise(hass, entry)
         assert issue is not None
         assert issue.is_fixable is True
 
-    def test_issue_severity_is_warning(self, hass: HomeAssistant, hub_entry_builder):
-        """A degraded-but-working hub is a warning, not an error."""
-        entry = hub_entry_builder()
+    def test_issue_severity_is_warning(
+        self, hass: HomeAssistant, receiver_entry_builder
+    ):
+        """A degraded-but-working receiver is a warning, not an error."""
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
         assert self._raise(hass, entry).severity is ir.IssueSeverity.WARNING
 
-    def test_issue_translation_key(self, hass: HomeAssistant, hub_entry_builder):
-        entry = hub_entry_builder()
+    def test_issue_translation_key(self, hass: HomeAssistant, receiver_entry_builder):
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
         assert (
             self._raise(hass, entry).translation_key
@@ -1913,22 +1992,22 @@ class TestAsyncRaiseEventTimeUnusable:
         )
 
     def test_issue_title_placeholder_is_the_entry_title(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        """The card names the hub, which is the only placeholder it carries."""
-        entry = hub_entry_builder()
+        """The card names the receiver, which is the only placeholder it carries."""
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
         issue = self._raise(hass, entry)
         assert issue.translation_placeholders == {"title": entry.title}
 
-    def test_clear_deletes_the_issue(self, hass: HomeAssistant, hub_entry_builder):
-        entry = hub_entry_builder()
+    def test_clear_deletes_the_issue(self, hass: HomeAssistant, receiver_entry_builder):
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
         self._raise(hass, entry)
-        repairs.async_clear_event_time_unusable(hass, entry)
+        repairs.async_clear_event_time_unusable(hass, entry, receiver_id(entry))
         assert (
             ir.async_get(hass).async_get_issue(
-                DOMAIN, repairs._event_time_issue_id(entry)
+                DOMAIN, repairs._event_time_issue_id(entry, receiver_id(entry))
             )
             is None
         )
@@ -1938,20 +2017,22 @@ class TestEventTimeTracker:
     """Which precision values the tracker acts on, and when it evaluates."""
 
     def _wire(self, hass, entry, precision):
-        coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+        coordinator = Rtl433Coordinator(
+            hass, entry, receiver_subentry(entry), host="rtl433.local"
+        )
         coordinator._client.time_precision = precision
         unsub = repairs.async_track_event_time_precision(hass, entry, coordinator)
         issue = ir.async_get(hass).async_get_issue(
-            DOMAIN, repairs._event_time_issue_id(entry)
+            DOMAIN, repairs._event_time_issue_id(entry, receiver_id(entry))
         )
         unsub()
         return issue
 
     async def test_wire_up_raises_immediately_when_already_unusable(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        """The evaluation on wire-up matters: a hub can already be in this state."""
-        entry = hub_entry_builder()
+        """The evaluation on wire-up matters: a receiver can already be in this state."""
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
         assert self._wire(hass, entry, TimePrecision.UNUSABLE) is not None
 
@@ -1959,10 +2040,10 @@ class TestEventTimeTracker:
         "precision", [TimePrecision.SECOND, TimePrecision.MICROSECOND, None]
     )
     async def test_usable_precisions_are_never_flagged(
-        self, hass: HomeAssistant, hub_entry_builder, precision
+        self, hass: HomeAssistant, receiver_entry_builder, precision
     ):
         """Only UNUSABLE is a problem; SECOND is the rtl_433 default and works."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
         assert self._wire(hass, entry, precision) is None
 
@@ -1971,13 +2052,13 @@ class TestEventTimeFixFlow:
     """Routing into the flow, and what confirming it does."""
 
     async def test_router_returns_the_flow_bound_to_the_entry(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
 
         flow = await repairs.async_create_fix_flow(
-            hass, repairs._event_time_issue_id(entry), None
+            hass, repairs._event_time_issue_id(entry, receiver_id(entry)), None
         )
         assert isinstance(flow, repairs.EventTimeRepairFlow)
         assert flow._entry is entry
@@ -1991,14 +2072,14 @@ class TestEventTimeFixFlow:
         assert isinstance(flow, ConfirmRepairFlow)
 
     async def test_init_shows_the_confirm_form_without_acting(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
         """Opening the card must explain, not silently dismiss."""
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        repairs.async_raise_event_time_unusable(hass, entry)
+        repairs.async_raise_event_time_unusable(hass, entry, receiver_subentry(entry))
 
-        flow = repairs.EventTimeRepairFlow(entry)
+        flow = repairs.EventTimeRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
         result = await flow.async_step_init()
 
@@ -2010,22 +2091,22 @@ class TestEventTimeFixFlow:
         # schema from None.
         assert result.get("data_schema") is not None
         assert result["data_schema"].schema == {}
-        assert repairs._event_time_advisory_dismissed(entry) is False
+        assert repairs._event_time_advisory_dismissed(receiver_subentry(entry)) is False
         assert (
             ir.async_get(hass).async_get_issue(
-                DOMAIN, repairs._event_time_issue_id(entry)
+                DOMAIN, repairs._event_time_issue_id(entry, receiver_id(entry))
             )
             is not None
         )
 
     async def test_confirm_records_the_acknowledgement_and_clears_the_card(
-        self, hass: HomeAssistant, hub_entry_builder
+        self, hass: HomeAssistant, receiver_entry_builder
     ):
-        entry = hub_entry_builder()
+        entry = receiver_entry_builder()
         entry.add_to_hass(hass)
-        repairs.async_raise_event_time_unusable(hass, entry)
+        repairs.async_raise_event_time_unusable(hass, entry, receiver_subentry(entry))
 
-        flow = repairs.EventTimeRepairFlow(entry)
+        flow = repairs.EventTimeRepairFlow(entry, receiver_subentry(entry))
         flow.hass = hass
         result = await flow.async_step_confirm({})
         await hass.async_block_till_done()
@@ -2035,10 +2116,10 @@ class TestEventTimeFixFlow:
         # stray title or payload cannot creep in unnoticed.
         assert result["title"] == ""
         assert result["data"] == {}
-        assert repairs._event_time_advisory_dismissed(entry) is True
+        assert repairs._event_time_advisory_dismissed(receiver_subentry(entry)) is True
         assert (
             ir.async_get(hass).async_get_issue(
-                DOMAIN, repairs._event_time_issue_id(entry)
+                DOMAIN, repairs._event_time_issue_id(entry, receiver_id(entry))
             )
             is None
         )
