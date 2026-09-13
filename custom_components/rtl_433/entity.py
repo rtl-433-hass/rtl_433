@@ -5,12 +5,20 @@ location config entry derives from :class:`Rtl433Entity`. The base centralizes t
 four concerns the platforms would otherwise duplicate:
 
 * **Device registry** — a single :class:`DeviceInfo` keyed by
-  ``{receiver_id}:{device_key}`` and linked to the receiver device via
-  ``via_device_id`` so every device groups under the receiver that heard it.
-* **Dispatcher subscription** — each entity subscribes to the per-device signal
-  ``signal_device_update(receiver_id, device_key)`` that the coordinator fans a
-  :class:`~pyrtl_433.normalizer.NormalizedEvent` out on, and
-  unsubscribes in ``async_will_remove_from_hass``.
+  ``{location_entry_id}:{device_key}`` and linked to the **location** device via
+  ``via_device_id``. The identity is location-scoped, not receiver-scoped, which
+  is what collapses every receiver's view of one physical sensor onto one
+  device-registry device: the receivers are subentries of one entry, so they
+  register the same identifier under the same owner.
+* **Dispatcher subscription** — a unioned sensor field subscribes to the
+  location-scoped ``signal_location_device_update(location_entry_id, device_key)``
+  that the location aggregator re-emits after deduping every receiver's frames;
+  a per-receiver *link* field (``rssi`` / ``snr`` / ``last_seen``, the union's
+  exclusion set — see ``aggregator.py``) subscribes to its own receiver's
+  ``signal_device_update(receiver_id, device_key)`` instead, because "how well
+  does *this* receiver hear it" is not a property of the sensor. Both carry a
+  :class:`~pyrtl_433.normalizer.NormalizedEvent` and both unsubscribe in
+  ``async_will_remove_from_hass``.
 * **Availability** — computed from the coordinator's ``last_seen`` timestamp
   versus the effective per-device timeout. On startup the entity baselines a
   missing ``last_seen`` to "now" so a restored state shows until the timeout
@@ -29,6 +37,13 @@ rule), registers a per-device listener on ``signal_device_update`` that adds
 entities as previously unseen mapped fields arrive, and keeps
 ``entry.data[CONF_DEVICES]`` current via the idempotent
 :func:`async_upsert_device` helper.
+
+The per-receiver passes share one created-``unique_id`` set, because the entity
+identity is location-scoped: the first receiver to reach a device's field builds
+that entity and every later receiver finds it already built. That is the entity
+half of the union — one physical sensor yields one entity per mapped field
+however many receivers decode it — and it is also what keeps Home Assistant from
+rejecting the second receiver's duplicate ``unique_id``.
 
 Every RF-device entity is added with **no** ``config_subentry_id``, leaving its
 device owned by the location entry itself. That is what keeps a device legal once
@@ -59,6 +74,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
+from .aggregator import is_link_field
 from .calibration import COMMODITY_DEVICE_CLASS, normalize_calibration
 from .const import (
     AVAILABILITY_TIMEOUT_NEVER,
@@ -75,6 +91,7 @@ from .const import (
     DOMAIN,
     MANUFACTURER,
     signal_device_update,
+    signal_location_device_update,
     signal_new_device,
     signal_receiver_availability,
     signal_receiver_update,
@@ -150,12 +167,26 @@ class Rtl433Entity(RestoreEntity):
         """Initialize identity, device info, and entity description fields."""
         self._coordinator = coordinator
         self._receiver_id = receiver_id
+        # The location config entry's id -- the scope every merged identity is
+        # minted in. Read off the coordinator rather than passed in, because a
+        # coordinator belongs to exactly one location and the two could not
+        # disagree without minting an entity under the wrong location's scope.
+        self._location_id = coordinator.entry.entry_id
         self._device_key = device_key
         self._descriptor = descriptor
+        # Whether this field measures the receiver-to-sensor link (``rssi`` /
+        # ``snr`` / ``last_seen``) rather than the sensor itself. Link fields are
+        # excluded from the union, so they listen to their own receiver
+        # (see :meth:`async_added_to_hass`).
+        self._is_link_field = is_link_field(descriptor.field_key)
 
-        # Instance-scoped unique_id: scoping by the receiver (its config subentry
-        # id) means two receivers observing the same model+id never collide.
-        self._attr_unique_id = f"{receiver_id}:{device_key}:{descriptor.object_suffix}"
+        # Location-scoped unique_id: receiver-agnostic on purpose, so one
+        # physical sensor yields one entity per mapped field however many of the
+        # location's receivers decode it. Two *locations* that happen to hear the
+        # same model+id still cannot collide -- their entry ids differ.
+        self._attr_unique_id = (
+            f"{self._location_id}:{device_key}:{descriptor.object_suffix}"
+        )
 
         # Per-field entity metadata common to both platforms. ``_attr_name`` is a
         # device-relative name because ``_attr_has_entity_name`` is set. A
@@ -173,20 +204,22 @@ class Rtl433Entity(RestoreEntity):
 
         device_name = display_name(model, device_key)
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{receiver_id}:{device_key}")},
+            identifiers={(DOMAIN, f"{self._location_id}:{device_key}")},
             name=device_name,
             model=model or None,
             serial_number=identity_suffix(model, device_key),
             manufacturer=MANUFACTURER,
-            # The receiver device is registered by ``async_setup_entry`` before any
-            # platform is forwarded, so the lookup always resolves; ``via_device``
-            # (the identifier tuple) is deprecated and gone from ``DeviceInfo``.
-            # The lookup is scoped to the *location* entry, which owns both this
-            # device and the receiver device the link points at.
+            # Linked to the LOCATION device, not to the receiver that happened to
+            # decode this frame: a merged device may be fed by several receivers,
+            # and a "via" pointing at one of them would claim the sensor sits
+            # behind that server alone. The location device is registered by
+            # ``async_setup_entry`` before any platform is forwarded, so the
+            # lookup always resolves; ``via_device`` (the identifier tuple) is
+            # deprecated and gone from ``DeviceInfo``.
             via_device_id=dr.async_get_device_id_by_identifier(
                 coordinator.hass,
-                (DOMAIN, coordinator.receiver_identity),
-                config_entry_id=coordinator.entry.entry_id,
+                (DOMAIN, self._location_id),
+                config_entry_id=self._location_id,
             ),
         )
 
@@ -249,9 +282,15 @@ class Rtl433Entity(RestoreEntity):
         # Let the subclass re-apply its restored value (if any).
         await self._async_restore_state()
 
+        # A unioned sensor field listens to the location aggregator's deduped,
+        # receiver-agnostic stream; a per-receiver link field listens to its own
+        # receiver, because the union deliberately leaves those per receiver
+        # (see ``aggregator.py``).
         self._unsub_dispatcher = async_dispatcher_connect(
             self.hass,
-            signal_device_update(self._receiver_id, self._device_key),
+            signal_device_update(self._receiver_id, self._device_key)
+            if self._is_link_field
+            else signal_location_device_update(self._location_id, self._device_key),
             self._handle_dispatch,
         )
         # The receiver-connection gate flips for every device at once and is not tied
@@ -289,6 +328,14 @@ class Rtl433Entity(RestoreEntity):
         A replayed / stale frame (``event.is_replay``) still applies its value and
         writes state here so sensors seed their latest reading from the reconnect
         replay; only ``Rtl433Event`` honors the flag (to not re-fire automations).
+
+        The apply is unconditional *here* because the decision has already been
+        taken upstream: for a unioned field the location aggregator has deduped
+        the location's receivers against each other and dropped the near-duplicate
+        and the stale replay before re-emitting, so a field that survives into
+        ``event.fields`` is by construction a value this entity should take
+        (``aggregator.py``). A link field is single-source and has nothing to
+        dedup against.
         """
         if self._descriptor.field_key in event.fields:
             self._apply_value(event.fields[self._descriptor.field_key])
@@ -585,7 +632,18 @@ async def async_setup_receiver_platform(
     the dependency direction clean: ``entity.py`` does not import from the
     platform modules. Callers that omit it (e.g. ``binary_sensor``) create no
     extra entity.
+
+    The per-receiver passes share the created-``unique_id`` bookkeeping below,
+    because the entity identity is location-scoped: the first receiver to reach a
+    device's field builds that entity and every later receiver finds it already
+    built. That is the entity half of the union, and it is also what stops the
+    second receiver minting a duplicate ``unique_id`` Home Assistant would reject.
     """
+    # Created ``unique_id``s per ``device_key``, and the ``device_key``s whose
+    # optional ``per_device_factory`` extra entity exists -- both shared across
+    # the location's receivers (see above).
+    created: dict[str, set[str]] = {}
+    extra_created: set[str] = set()
     for coordinator in receiver_coordinators(hass, entry).values():
         _setup_receiver_platform(
             hass,
@@ -595,6 +653,8 @@ async def async_setup_receiver_platform(
             platform,
             entity_cls,
             per_device_factory,
+            created,
+            extra_created,
         )
     # The initial devices-map build persists any coordinator-known fields that
     # are not stored yet; done after every receiver has registered its listeners
@@ -628,8 +688,15 @@ def _setup_receiver_platform(
     entity_cls: Callable[..., Rtl433Entity],
     per_device_factory: Callable[[Rtl433Coordinator, str, str, str], Rtl433Entity]
     | None,
+    created: dict[str, set[str]],
+    extra_created: set[str],
 ) -> None:
-    """Run :func:`async_setup_receiver_platform`'s body for one receiver."""
+    """Run :func:`async_setup_receiver_platform`'s body for one receiver.
+
+    ``created`` / ``extra_created`` are the caller's location-wide bookkeeping,
+    passed in rather than owned here so every receiver's pass sees what the
+    others already built (see :func:`async_setup_receiver_platform`).
+    """
     receiver_id = coordinator.receiver_id
 
     # Use the per-entry merged registry (shipped library + this location's user
@@ -641,15 +708,12 @@ def _setup_receiver_platform(
         .get(entry.entry_id, (None, None))[0]
     )
 
-    # Track created unique_ids per device_key so neither the initial build nor the
-    # dynamic-add handlers double-create entities for the same field.
-    created: dict[str, set[str]] = {}
     # Per-device ``signal_device_update`` unsubscribe handles, so a removed device's
     # listener can be torn down (and re-registered cleanly if it re-appears).
+    # These stay per receiver: the listener's job is to notice a field *this*
+    # receiver has started reporting, including the per-receiver link fields the
+    # union strips out of the location-scoped stream.
     field_unsubs: dict[str, Callable[[], None]] = {}
-    # ``device_key``s whose optional ``per_device_factory`` extra entity has been
-    # created, so it is made exactly once per device across both creation paths.
-    extra_created: set[str] = set()
 
     def _calibration_for(device_key: str) -> dict[str, Any] | None:
         """Return the validated per-device calibration record, or ``None``.
@@ -687,7 +751,7 @@ def _setup_receiver_platform(
             # known consumption field(s), overriding the library descriptor.
             if calibration is not None and field_key in CONSUMPTION_FIELD_KEYS:
                 descriptor = _apply_calibration(descriptor, calibration)
-            unique_id = f"{receiver_id}:{device_key}:{descriptor.object_suffix}"
+            unique_id = f"{entry.entry_id}:{device_key}:{descriptor.object_suffix}"
             if unique_id in seen:
                 continue
             seen.add(unique_id)

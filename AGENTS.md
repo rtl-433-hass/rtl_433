@@ -22,6 +22,12 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     [Approval surfaces](#approval-surfaces-adoption-service-websocket-api-panel)).
   - `adoption.py` (the single adopt / ignore / un-ignore implementation) and
     `websocket_api.py` (the six admin-gated discovery commands over it).
+  - `aggregator.py` — the location-level fan-in. A location entry's receivers each
+    decode the same transmission, so this subscribes to every receiver's
+    per-device dispatch and re-emits one deduped, receiver-agnostic
+    device-update signal keyed by `device_key`. It also owns the union's
+    **exclusion set**: `rssi` / `snr` / `last_seen` measure the link between one
+    receiver and the sensor, so they are partitioned out and stay per receiver.
   - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`,
     `diagnostics.py`, `repairs.py`, `sensor.py`, `binary_sensor.py`,
     `event.py`, `translations/en.json`. There is no local `mapping/` package or
