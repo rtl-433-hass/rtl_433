@@ -102,7 +102,11 @@ from .const import (
 from .coordinator import Rtl433Coordinator
 from .device_replace import DeviceReplaceError, async_replace_device
 from .entity import resolve_event_type
-from .receiver_settings import _receiver_ignored_devices, receiver_coordinator
+from .receiver_settings import (
+    _receiver_ignored_devices,
+    receiver_coordinator,
+    receiver_coordinators,
+)
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,
@@ -615,18 +619,20 @@ def ws_receivers(
 
 @callback
 def _hub_connected(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Whether this hub's socket is open, for a hub that may not be set up.
+    """Whether this location has a receiver on the air, set up or not.
 
-    An entry that is not loaded has no coordinator on ``hass.data`` to ask, and
-    one mid-teardown may have been removed from it already, so both are read
-    rather than assumed.
+    True while *any* of its receivers holds an open socket, because that is the
+    answer the entry-level row is asked for: a location with two radios and one
+    of them down is still receiving. An entry that is not loaded has no
+    coordinators to ask, and one mid-teardown may have been emptied already, so
+    both are read rather than assumed.
     """
     if entry.state is not ConfigEntryState.LOADED:
         return False
-    coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
-        entry.entry_id
+    return any(
+        coordinator.connected
+        for coordinator in receiver_coordinators(hass, entry).values()
     )
-    return coordinator is not None and coordinator.connected
 
 
 @websocket_api.websocket_command(

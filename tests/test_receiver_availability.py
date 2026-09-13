@@ -805,7 +805,11 @@ async def _bare_coordinator(
     entry = receiver_entry_builder(**kwargs)
     entry.add_to_hass(hass)
     return Rtl433Coordinator(
-        hass, entry, host="rtl433.local", adopted_keys=adopted_keys
+        hass,
+        entry,
+        receiver_subentry(entry),
+        host="rtl433.local",
+        adopted_keys=adopted_keys,
     )
 
 
