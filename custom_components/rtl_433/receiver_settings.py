@@ -196,6 +196,30 @@ def _receiver_ignored_devices(entry: ConfigEntry) -> list[str]:
     return list(entry.data.get(CONF_IGNORED_DEVICES, []))
 
 
+def _location_adopted_devices(entry: ConfigEntry) -> set[str]:
+    """Return the location's adopted device keys, with **ignored winning** a clash.
+
+    Adoption and ignoring are both decisions about a *sensor*, so both lists live
+    on the location entry -- and normally they are disjoint, because the approval
+    surfaces refuse to ignore a device that is already adopted. A deliberate
+    consolidation is where they can meet: folding a second receiver's install
+    into this location unions both lists, and a device one of them added while
+    the other explicitly hid it lands on both.
+
+    The tie goes to ``ignored``. Hiding a device is the more specific statement
+    and the more conservative outcome -- a sensor the user said they did not want
+    stays out of Home Assistant, where the opposite default would resurrect a
+    neighbour's thermometer they had already dismissed -- and it is trivially
+    undone from the un-ignore step, where re-adding a device is the whole of the
+    add-device page.
+
+    Applied where the persisted state becomes runtime state (the coordinators'
+    seeding in ``__init__.py``), so the gate on the event path carries the rule
+    and nothing downstream has to re-derive it.
+    """
+    return set(entry.data.get(CONF_DEVICES, {})) - set(_receiver_ignored_devices(entry))
+
+
 def _explicit_receiver_timeout(entry: ConfigEntry) -> int | None:
     """Return the location's *explicitly set* availability timeout, or ``None``.
 

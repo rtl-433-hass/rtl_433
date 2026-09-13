@@ -7,7 +7,8 @@ receiver is hearing and to approve it, and they are testable without loading any
 JavaScript at all.
 
 - ``rtl_433/hubs`` — the configured receivers, so a caller can address one.
-- ``rtl_433/devices/pending`` — one receiver's candidates, plus its ignore list.
+- ``rtl_433/devices/pending`` — the location's merged candidates (one row per
+  sensor, however many of its receivers heard it), plus its ignore list.
 - ``rtl_433/devices/add`` / ``.../ignore`` / ``.../unignore`` — the three
   actions, each delegating to :mod:`.adoption` so they do exactly what the
   options flow does.
@@ -28,8 +29,10 @@ condition to report, not a crash to log.
 **Pushes to an open subscription are rate-limited**, and come in two kinds.
 
 A *membership* change (:data:`~.const.SIGNAL_PENDING_UPDATE`: a candidate
-appeared, or one was adopted, ignored, or un-ignored) is pushed immediately,
-because it answers "is there something new for me?".
+appeared on any of the location's receivers, or one was adopted, ignored, or
+un-ignored across them) is pushed immediately, because it answers "is there
+something new for me?". That signal is location-scoped, so two receivers
+decoding the same new sensor announce one changed list, not two.
 
 A *repeat sighting* only ages the count and last-seen columns of a row already
 on screen, so it is not pushed directly. A slow :data:`_REFRESH_INTERVAL` timer
@@ -79,6 +82,7 @@ from .adoption import (
     async_ignore_devices,
     async_unignore_devices,
 )
+from .aggregator import clear_pending, merged_candidates
 from .calibration import COMMODITY_UNITS, normalize_calibration
 from .const import (
     CALIBRATION_COMMODITIES,
@@ -102,7 +106,11 @@ from .const import (
 from .coordinator import Rtl433Coordinator
 from .device_replace import DeviceReplaceError, async_replace_device
 from .entity import resolve_event_type
-from .receiver_settings import _receiver_ignored_devices, receiver_coordinator
+from .receiver_settings import (
+    _receiver_ignored_devices,
+    receiver_coordinator,
+    receiver_coordinators,
+)
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,
@@ -464,26 +472,25 @@ def _readings(
 
 
 @callback
-def _pending_payload(
-    hass: HomeAssistant, entry: ConfigEntry, coordinator: Rtl433Coordinator
-) -> dict[str, Any]:
-    """Render one receiver's approval state: the candidates and the ignore list.
+def _pending_payload(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
+    """Render the location's approval state: the candidates and the ignore list.
 
     One payload rather than two commands so the panel has a single renderer and a
     single source of truth for a screen that shows both -- and so an un-ignore,
     which changes only the second half, still reaches an open panel through the
     same push.
 
-    Candidates are ordered by
-    :meth:`~.coordinator.Rtl433Coordinator.pending_candidates`, which is also
-    what the options form renders, so the two surfaces cannot put a different
-    device at the top of the same list. Timestamps go out as ISO
-    strings because JSON has no datetime and the panel wants to format them in the
-    viewer's locale anyway.
+    Candidates are the location's **merged** list
+    (:func:`~.aggregator.merged_candidates`), which is also what the options form
+    renders, so the two surfaces cannot put a different device at the top of the
+    same list -- and a sensor two receivers both hear is one row showing whichever
+    of them heard it last, carrying ``receivers`` so the page can say who did.
+    Timestamps go out as ISO strings because JSON has no datetime and the panel
+    wants to format them in the viewer's locale anyway.
 
     The ignore list carries a model wherever one can be found. There is rarely a
     *stored* record -- a device is usually ignored while pending, long before it
-    has one -- so the coordinator's memory of what it last decoded for that key
+    has one -- so the receivers' memory of what they last decoded for that key
     fills in, which covers both the device just ignored and the one still
     transmitting after a restart. Only a key that has neither goes out unnamed.
     """
@@ -494,35 +501,50 @@ def _pending_payload(
     # the preview shows "no readings" rather than a guess.
     registry = entry_registry(hass, entry)
     meta: _EntityMeta = hass.data.get(DOMAIN, {}).get(DATA_ENTITY_META, _EMPTY_META)
+    coordinators = receiver_coordinators(hass, entry)
+    # One lookup for the whole render: the last model each receiver decoded for
+    # an ignored key, merged in receiver order so any receiver that can still
+    # name the device does.
+    ignored_models: dict[str, str] = {}
+    for coordinator in coordinators.values():
+        ignored_models.update(coordinator.ignored_models)
     return {
-        # Whether the receiver's socket to the rtl_433 server is up -- the same fact
-        # the receiver's Connectivity binary sensor reports. The panel cannot work
-        # this out for itself: its own subscription stays healthy while the
-        # receiver's connection is down, so a page that inferred it from "am I
-        # receiving payloads?" would say Online through an outage.
-        "connected": coordinator.connected,
+        # Whether the location can currently hear anything -- true while *any* of
+        # its receivers has its socket to an rtl_433 server up, the same fact
+        # those receivers' Connectivity binary sensors report one at a time. The
+        # panel cannot work this out for itself: its own subscription stays
+        # healthy while a receiver's connection is down, so a page that inferred
+        # it from "am I receiving payloads?" would say Online through an outage.
+        "connected": any(
+            coordinator.connected for coordinator in coordinators.values()
+        ),
         "pending": [
             {
-                "key": record.key,
-                "model": record.model,
-                "count": record.count,
-                "signal": record.signal,
-                "first_seen": record.first_seen.isoformat(),
-                "last_seen": record.last_seen.isoformat(),
-                "readings": _readings(record.fields, record.model, registry, meta),
+                "key": candidate.key,
+                "model": candidate.record.model,
+                "count": candidate.record.count,
+                "signal": candidate.record.signal,
+                "first_seen": candidate.record.first_seen.isoformat(),
+                "last_seen": candidate.record.last_seen.isoformat(),
+                # Which receivers have heard this candidate, in receiver order,
+                # so the page can show coverage before the user adds anything.
+                "receivers": list(candidate.receivers),
+                "readings": _readings(
+                    candidate.record.fields, candidate.record.model, registry, meta
+                ),
             }
-            for record in coordinator.pending_candidates()
+            for candidate in merged_candidates(hass, entry)
         ],
         "ignored": [
             {
                 "key": device_key,
                 "model": stored.get(device_key, {}).get(CONF_MODEL)
-                or coordinator.ignored_models.get(device_key, ""),
+                or ignored_models.get(device_key, ""),
             }
             for device_key in sorted(_receiver_ignored_devices(entry))
         ],
-        # The devices this receiver already has, offered as the thing a candidate can
-        # replace. Sent with the candidates rather than fetched when the
+        # The devices this location already has, offered as the thing a candidate
+        # can replace. Sent with the candidates rather than fetched when the
         # dialog opens, so the candidate and the devices it could replace always
         # come from the same snapshot and cannot disagree.
         "devices": [
@@ -547,11 +569,11 @@ async def _async_run_action(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
     action: Callable[
-        [HomeAssistant, ConfigEntry, Rtl433Coordinator, list[str]],
+        [HomeAssistant, ConfigEntry, list[str]],
         Awaitable[AdoptionResult],
     ],
 ) -> None:
-    """Resolve the receiver, run one :mod:`.adoption` verb, and reply with the result.
+    """Resolve the location, run one :mod:`.adoption` verb, and reply with the result.
 
     The three action commands differ only in which verb they call: each resolves
     the same ``entry_id``, hands the same ``device_keys`` to its function, and
@@ -566,8 +588,8 @@ async def _async_run_action(
     resolved = _async_get_coordinator(hass, connection, msg)
     if resolved is None:
         return
-    entry, coordinator = resolved
-    result = await action(hass, entry, coordinator, msg["device_keys"])
+    entry, _coordinator = resolved
+    result = await action(hass, entry, msg["device_keys"])
     connection.send_result(
         msg["id"], {"applied": result.applied, "skipped": result.skipped}
     )
@@ -616,7 +638,7 @@ def ws_pending_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Return one receiver's pending candidates and its ignore list.
+    """Return the location's merged pending candidates and its ignore list.
 
     The one-shot form of what ``rtl_433/devices/subscribe`` pushes, for a caller
     that wants an answer rather than a stream -- a script, a diagnostic, or a
@@ -625,8 +647,8 @@ def ws_pending_devices(
     resolved = _async_get_coordinator(hass, connection, msg)
     if resolved is None:
         return
-    entry, coordinator = resolved
-    connection.send_result(msg["id"], _pending_payload(hass, entry, coordinator))
+    entry, _coordinator = resolved
+    connection.send_result(msg["id"], _pending_payload(hass, entry))
 
 
 @websocket_api.websocket_command(
@@ -683,6 +705,10 @@ def ws_clear_devices(
 ) -> None:
     """Forget every candidate heard so far, so the list can refill from scratch.
 
+    Cleared across every receiver of the location, because the list the user is
+    looking at is the merge of all of them: leaving one receiver's copy would put
+    the rows straight back.
+
     A receiver in a busy neighbourhood can accumulate hundreds of candidates,
     burying the one device the user actually wants. After clearing, only devices
     that transmit from now on are listed -- so the user can press their doorbell
@@ -699,8 +725,8 @@ def ws_clear_devices(
     resolved = _async_get_coordinator(hass, connection, msg)
     if resolved is None:
         return
-    _entry, coordinator = resolved
-    connection.send_result(msg["id"], {"cleared": coordinator.clear_pending()})
+    entry, _coordinator = resolved
+    connection.send_result(msg["id"], {"cleared": clear_pending(hass, entry)})
 
 
 @websocket_api.websocket_command(
@@ -786,7 +812,7 @@ def ws_subscribe_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Push one receiver's approval state whenever it changes.
+    """Push the location's approval state whenever it changes.
 
     The pending list changes continuously by design -- that is what makes a
     config-flow form the wrong shape for it -- so the panel subscribes rather
@@ -810,23 +836,23 @@ def ws_subscribe_devices(
     timer down with the listener and never leaves an orphaned interval firing
     against a dead connection.
 
-    The **coordinator is re-resolved on every render**, never captured. A receiver
-    reload replaces the object in ``hass.data`` while the subscription lives on
-    (the config entry, and so the dispatcher signal, survive the reload), so a
+    The **coordinators are re-resolved on every render**, never captured. A
+    reload replaces those objects in ``hass.data`` while the subscription lives
+    on (the config entry, and so the dispatcher signal, survive the reload), so a
     captured coordinator would be a stopped one whose pending map never changes
     again -- the panel would sit on a frozen list for the rest of the session
-    without ever reporting an error. Re-reading it means the first render after
-    the new coordinator lands shows what the running receiver is actually hearing.
-    While the entry is mid-reload there is briefly no coordinator at all; that is
+    without ever reporting an error. Re-reading them means the first render after
+    the new coordinators land shows what the running receivers are actually
+    hearing. While the entry is mid-reload there is briefly none at all; that is
     a gap of milliseconds with nothing truthful to say, so the render is skipped
-    and the last payload stands until the receiver is back.
+    and the last payload stands until the location is back.
     """
     resolved = _async_get_coordinator(hass, connection, msg)
     if resolved is None:
         return
-    entry, coordinator = resolved
+    entry, _coordinator = resolved
 
-    last_sent: dict[str, Any] = _pending_payload(hass, entry, coordinator)
+    last_sent: dict[str, Any] = _pending_payload(hass, entry)
 
     @callback
     def _push_if_changed(_now: Any = None) -> None:
@@ -837,17 +863,16 @@ def ws_subscribe_devices(
         rather than absorbed by a second wrapper per trigger.
         """
         nonlocal last_sent
-        live = receiver_coordinator(hass, entry)
-        if live is None:
+        if not receiver_coordinators(hass, entry):
             return
-        payload = _pending_payload(hass, entry, live)
+        payload = _pending_payload(hass, entry)
         if payload == last_sent:
             return
         last_sent = payload
         connection.send_message(websocket_api.event_message(msg["id"], payload))
 
     remove_signal = async_dispatcher_connect(
-        hass, signal_pending_update(coordinator.receiver_id), _push_if_changed
+        hass, signal_pending_update(entry.entry_id), _push_if_changed
     )
     remove_timer = async_track_time_interval(
         hass,

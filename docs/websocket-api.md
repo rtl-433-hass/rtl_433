@@ -313,7 +313,7 @@ administrator**, so a token issued for a non-admin user is refused:
 | `type` | Parameters | Returns |
 | --- | --- | --- |
 | `rtl_433/hubs` | — | Every configured receiver, loaded or not. |
-| `rtl_433/devices/pending` | `entry_id` | One receiver's discovered devices and its ignore list. |
+| `rtl_433/devices/pending` | `entry_id` | The location's merged discovered devices and its ignore list. |
 | `rtl_433/devices/add` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
 | `rtl_433/devices/ignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
 | `rtl_433/devices/unignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
@@ -366,8 +366,14 @@ too, flagged rather than hidden.
 
 ### `rtl_433/devices/pending`
 
-Returns one receiver's discovered devices, most recently heard first, together with
-the keys it is ignoring.
+Returns the location's discovered devices, most recently heard first, together
+with the keys it is ignoring.
+
+A location can have several receivers, and two of them within range of the same
+sensor decode the same transmission. The list is **merged**: one row per device
+key however many receivers heard it, showing the frame that arrived last and
+naming the receivers that heard it in `receivers` (their config-subentry ids, in
+receiver order). Adding or ignoring a row applies to the whole location.
 
 ```json
 {"id": 2, "type": "rtl_433/devices/pending",
@@ -386,6 +392,7 @@ The `result`, with four of its six devices left out:
       "signal": 39.134,
       "first_seen": "2026-09-01T04:01:51.881359+00:00",
       "last_seen": "2026-09-01T04:07:02.042143+00:00",
+      "receivers": ["01M1DJ2TB0YQ6S3KZ0T0C2YV8J", "01M1DJ2TB1P5N0F5V0R3C7XKQ4"],
       "readings": [
         {"key": "humidity", "name": "Humidity", "value": 74.0,
          "display": "74.0%", "unit": "%", "platform": "sensor",
@@ -405,6 +412,7 @@ The `result`, with four of its six devices left out:
       "signal": null,
       "first_seen": "2026-09-01T04:01:56.472199+00:00",
       "last_seen": "2026-09-01T04:07:00.516721+00:00",
+      "receivers": ["01M1DJ2TB0YQ6S3KZ0T0C2YV8J"],
       "readings": [
         {"key": "detect_wet", "name": "Water sensor", "value": true,
          "display": "Wet", "unit": null, "platform": "binary_sensor",
