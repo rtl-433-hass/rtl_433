@@ -25,8 +25,8 @@ The step order in :func:`async_replace_device` is load-bearing:
    a new ``entity_id`` (or a ``_2`` suffix) and orphan its history.
 
 Only the ``device_key`` *value* a row carries changes: the entity ``unique_id``
-template ``f"{hub_entry_id}:{device_key}:{object_suffix}"`` and the device
-identifiers template ``(DOMAIN, f"{hub_entry_id}:{device_key}")`` are re-emitted
+template ``f"{receiver_entry_id}:{device_key}:{object_suffix}"`` and the device
+identifiers template ``(DOMAIN, f"{receiver_entry_id}:{device_key}")`` are re-emitted
 verbatim, so nothing in ``COMPATIBILITY_CONTRACT.md`` moves.
 """
 
