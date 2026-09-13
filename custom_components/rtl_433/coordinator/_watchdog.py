@@ -11,7 +11,7 @@ the class default, and the watchdog tick itself.
 
 *Receiver connection.* The silence gate is only meaningful while the integration is
 listening. Once the WebSocket to the rtl_433 server is down the integration
-hears nothing at all, so no device's cached state can be trusted — the same
+receives nothing at all, so no device's cached state can be trusted — the same
 situation an MQTT availability topic covers with an LWT, and the same gate
 ``zwave_js`` applies when its driver connection drops. :meth:`receiver_available` is
 that gate, and like every Home Assistant integration that gates on a live
@@ -22,7 +22,7 @@ exemption is about silence, not about the transport being gone.
 
 There is deliberately no grace window (see the note in ``const.py``). Riding out
 a blip would mean presenting readings as current while the integration knows it
-cannot hear the radio, which is exactly what the Silver-tier
+cannot receive the radio, which is exactly what the Silver-tier
 ``entity-unavailable`` rule asks integrations not to do. The debounced half of
 the story is the *repair issue*: ``repairs._UNREACHABLE_GRACE`` waits before
 raising the user-facing "server unreachable" notification, so the entities tell
