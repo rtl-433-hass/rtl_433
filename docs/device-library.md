@@ -219,9 +219,9 @@ default, so its battery and other entities stay available between events. An
 explicit per-device or hub timeout always overrides the class default.
 
 Because an event-driven device's availability no longer signals freshness, its
-per-device **Last seen** timestamp sensor is enabled by default (it ships
-disabled for periodic devices). It stays available once seen, so "no signal for
-N minutes" automations keep working.
+per-device **Last seen** timestamp sensor is enabled by default, and is disabled
+for periodic devices. It stays available once seen, so "no signal for N
+minutes" automations keep working.
 
 ### Event entities
 
