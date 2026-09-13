@@ -2613,6 +2613,209 @@ async def test_subentry_flow_reports_an_unreachable_server(
     assert len(entry.subentries) == 1
 
 
+async def test_subentry_flow_offers_the_whole_connection_form(
+    hass, receiver_entry_builder
+):
+    """The add-a-receiver form asks for everything a receiver needs.
+
+    A form shown with no schema would submit whatever the caller happened to
+    send, so the fields are asserted rather than the fact that a form appeared.
+    """
+    entry = receiver_entry_builder(host="attic.local")
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, "receiver"), context={"source": SOURCE_USER}
+    )
+    assert _schema_keys(result) == {
+        CONF_HOST,
+        CONF_PORT,
+        CONF_PATH,
+        "secure",
+        CONF_MANAGE_SETTINGS,
+        CONF_INITIAL_FREQUENCY,
+    }
+
+
+async def test_subentry_flow_stores_every_connection_field_it_was_given(
+    hass, receiver_entry_builder
+):
+    """The added receiver records the exact endpoint and radio policy typed in.
+
+    The stored subentry data is what the coordinator dials and what the settings
+    manager reads on the next start, so each field is asserted by value; a
+    receiver that silently kept a default would connect somewhere else.
+    """
+    entry = receiver_entry_builder(host="attic.local")
+    entry.add_to_hass(hass)
+
+    with patch(VALIDATE, return_value=True):
+        result = await _add_receiver(
+            hass,
+            entry,
+            **{
+                CONF_PORT: 9443,
+                CONF_PATH: "/stream",
+                "secure": True,
+                CONF_MANAGE_SETTINGS: True,
+                CONF_INITIAL_FREQUENCY: 915000000.0,
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    added = receiver_subentry(entry, 1)
+    assert added.data == {
+        CONF_HOST: "garage.local",
+        CONF_PORT: 9443,
+        CONF_PATH: "/stream",
+        "secure": True,
+        CONF_MANAGE_SETTINGS: True,
+        CONF_INITIAL_FREQUENCY: 915000000.0,
+    }
+    assert added.unique_id == "hub:garage.local:9443"
+
+
+async def test_subentry_flow_stores_no_frequency_when_not_managing_the_radio(
+    hass, receiver_entry_builder
+):
+    """An initial frequency is only persisted when Home Assistant drives the radio.
+
+    The frequency rides the managed desired-state path; storing one for an
+    unmanaged receiver would promise a tuning that nothing ever applies.
+    """
+    entry = receiver_entry_builder(host="attic.local")
+    entry.add_to_hass(hass)
+
+    with patch(VALIDATE, return_value=True):
+        await _add_receiver(
+            hass,
+            entry,
+            **{
+                CONF_MANAGE_SETTINGS: False,
+                CONF_INITIAL_FREQUENCY: 915000000.0,
+            },
+        )
+        await hass.async_block_till_done()
+
+    added = receiver_subentry(entry, 1)
+    assert added.data[CONF_MANAGE_SETTINGS] is False
+    assert CONF_INITIAL_FREQUENCY not in added.data
+
+
+async def test_subentry_flow_probes_the_server_the_user_typed(
+    hass, receiver_entry_builder
+):
+    """The reachability check dials the typed endpoint, not some other one.
+
+    Probing the wrong target would either add a receiver nobody verified or
+    refuse a healthy one, and both look identical from the form.
+    """
+    entry = receiver_entry_builder(host="attic.local")
+    entry.add_to_hass(hass)
+
+    probed: list[tuple] = []
+
+    async def _probe(probe_hass, host, port, path, *, secure):
+        probed.append((probe_hass is hass, host, port, path, secure))
+        return True
+
+    with patch(VALIDATE, new=_probe):
+        result = await _add_receiver(
+            hass,
+            entry,
+            **{CONF_PORT: 9443, CONF_PATH: "/stream", "secure": True},
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert probed == [(True, "garage.local", 9443, "/stream", True)]
+
+
+async def test_subentry_flow_refuses_a_server_already_keyed_by_its_radio_id(
+    hass, receiver_entry_builder
+):
+    """A discovered receiver blocks a manual add of the same endpoint.
+
+    Its unique_id is the radio's stable id, so only the host:port half of the
+    guard can recognise it -- and without that half a second coordinator would
+    open a second socket onto the same server.
+    """
+    entry = receiver_entry_builder(host="attic.local")
+    entry.add_to_hass(hass)
+    discovered = _radio_entry(host="garage.local", port=8433, uid="serial:0123")
+    discovered.add_to_hass(hass)
+
+    with patch(VALIDATE, return_value=True):
+        result = await _add_receiver(hass, entry)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert len(entry.subentries) == 1
+
+
+async def test_discovery_rekeys_a_manual_receiver_that_already_has_devices(hass):
+    """A placeholder identity is adopted however many devices the location holds.
+
+    ``hub:host:port`` means "added by hand, awaiting a stable radio id" -- it is
+    not a claim about a *different* radio, so adoption is safe even once the
+    location has adopted sensors. Only a receiver already bound to another stable
+    id is left alone.
+    """
+    entry = build_location_entry(
+        receiver_data={
+            CONF_HOST: "core-rtl433",
+            CONF_PORT: 8433,
+            CONF_PATH: "/ws",
+            "secure": False,
+            CONF_MANAGE_SETTINGS: False,
+        },
+        receiver_unique_id="hub:core-rtl433:8433",
+        data={CONF_DEVICES: {"Acurite-606TX-1": {CONF_MODEL: "Acurite-606TX"}}},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=_disc(uid="serial:0123")
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    assert receiver_subentry(entry).unique_id == "serial:0123"
+    # The adopted device is untouched by the re-key.
+    assert entry.data[CONF_DEVICES] == {
+        "Acurite-606TX-1": {CONF_MODEL: "Acurite-606TX"}
+    }
+
+
+async def test_hassio_confirm_offers_only_this_integrations_locations(hass):
+    """The "which location?" choices never include another integration's entries.
+
+    The list is built by scanning config entries, and an unscoped scan would
+    offer to attach an rtl_433 receiver to, say, a Hue bridge.
+    """
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    mine = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    mine.add_to_hass(hass)
+    stranger = MockConfigEntry(domain="hue", title="Hue Bridge")
+    stranger.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="new.local", port=9000, uid="radio-new"),
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"replaces": "__new__"}
+    )
+    options = _select_options(result, "location")
+    assert ("__new__", "A new location") in options
+    assert (mine.entry_id, mine.title) in options
+    assert stranger.entry_id not in {value for value, _ in options}
+
+
 async def test_hassio_confirm_defaults_to_a_new_location(hass):
     """Discovery offers the existing locations but defaults to a new one.
 
