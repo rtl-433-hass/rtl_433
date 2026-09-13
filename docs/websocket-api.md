@@ -293,9 +293,27 @@ the panel adds no logic of its own on top of them, so anything it can do, these
 can do.
 
 They are the programmatic form of [Device Discovery](device-discovery.md): see
-what the receiver has heard, then add, ignore or un-ignore it — and, since the
-panel became the integration's configuration page, read and write the receiver's
-settings too.
+what a location has heard, then add, ignore or un-ignore it — and, since the
+panel became the integration's configuration page, read and write the location's
+and its receivers' settings too.
+
+### Locations and receivers
+
+Two ids run through everything below, and they are not interchangeable.
+
+A **location** is a config entry: the logical place whose sensors you care
+about. It owns the devices, the ignore list, the mapping overrides and the
+availability default, because those are statements about *sensors*.
+
+A **receiver** is a config subentry of a location: one computer running
+rtl_433, with one radio in it. A location can hold several, and two receivers of
+one location that both decode the same sensor produce **one** device with one set
+of entities — so the candidate is offered once, approved once, and stays
+available while either receiver can still hear it.
+
+Every command therefore takes an `entry_id` naming a location. The one command
+that configures a radio takes a `receiver_id` as well — the receiver's
+config-subentry id. Both come from `rtl_433/receivers`.
 
 ### Authentication
 
@@ -310,41 +328,43 @@ administrator**, so a token issued for a non-admin user is refused:
 
 ### Command summary
 
-| `type` | Parameters | Returns |
-| --- | --- | --- |
-| `rtl_433/hubs` | — | Every configured receiver, loaded or not. |
-| `rtl_433/devices/pending` | `entry_id` | The location's merged discovered devices and its ignore list. |
-| `rtl_433/devices/add` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
-| `rtl_433/devices/ignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
-| `rtl_433/devices/unignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
-| `rtl_433/devices/subscribe` | `entry_id` | A subscription pushing the `pending` payload on change. |
-| `rtl_433/devices/replace` | `entry_id`, `device_key`, `replaces` | Re-points an existing device onto a candidate. |
-| `rtl_433/devices/clear` | `entry_id` | Forgets every candidate; `cleared` counts them. |
-| `rtl_433/settings/get` | `entry_id` | Everything the three settings forms render. |
-| `rtl_433/settings/hub` | `entry_id`, `availability_timeout`, `manage_settings` | The receiver's stored options. |
-| `rtl_433/settings/device` | `entry_id`, `device_key`, + overrides | That device's stored settings. |
-| `rtl_433/settings/mappings` | `entry_id`, `yaml` | The stored override document, re-rendered. |
+| `type` | Scope | Parameters | Returns |
+| --- | --- | --- | --- |
+| `rtl_433/receivers` | — | — | Every location, each with the receivers in it. |
+| `rtl_433/devices/pending` | location | `entry_id` | The merged candidate list and the ignore list. |
+| `rtl_433/devices/add` | location | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
+| `rtl_433/devices/ignore` | location | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
+| `rtl_433/devices/unignore` | location | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
+| `rtl_433/devices/subscribe` | location | `entry_id` | A subscription pushing the `pending` payload on change. |
+| `rtl_433/devices/coverage` | location | `entry_id`, *(`device_keys`)* | Per-receiver signal detail for adopted devices. |
+| `rtl_433/devices/replace` | location | `entry_id`, `device_key`, `replaces` | Re-points an existing device onto a candidate. |
+| `rtl_433/devices/clear` | location | `entry_id` | Forgets every candidate; `cleared` counts them. |
+| `rtl_433/settings/get` | location | `entry_id` | Everything the settings forms render. |
+| `rtl_433/settings/location` | location | `entry_id`, `availability_timeout` | The location's stored options. |
+| `rtl_433/settings/receiver` | receiver | `entry_id`, `receiver_id`, `manage_settings` | That receiver's row, as stored. |
+| `rtl_433/settings/device` | location | `entry_id`, `device_key`, + overrides | That device's stored settings. |
+| `rtl_433/settings/mappings` | location | `entry_id`, `yaml` | The stored override document, re-rendered. |
 
-`entry_id` is a receiver's config-entry id, from `rtl_433/hubs`. `device_keys` is a
-list, so one message can add or ignore several devices.
+`device_keys` is a list, so one message can add or ignore several devices.
 
 Errors are the usual `{"success": false, "error": {...}}` result:
 
 | `error.code` | Meaning |
 | --- | --- |
 | `unauthorized` | The connection's user is not an administrator. |
-| `not_found` | No rtl_433 receiver has that `entry_id`. An entry belonging to another integration reads the same way — these commands never reach into one. |
-| `not_loaded` | The receiver exists but is not set up — reloading, or its server is unreachable. The discovered list lives in memory, so there is nothing to answer with until it loads. |
+| `not_found` | No rtl_433 location has that `entry_id`, or the location has no receiver with that `receiver_id`. An entry belonging to another integration reads the same way — these commands never reach into one. |
+| `not_loaded` | The location exists but is not set up — reloading, or its servers are unreachable. The discovered list lives in memory, so there is nothing to answer with until it loads. |
 | `replace_failed` | The replacement cannot be made: an unknown survivor, or the same key on both sides. Distinct from `not_loaded` so a script can tell "retry in a moment" from "this request cannot work". |
 | `invalid_mappings` | The submitted device-mapping document is not YAML, is not a mapping, or breaks the override schema. `error.message` carries every problem found. Nothing is stored. |
 
-### `rtl_433/hubs`
+### `rtl_433/receivers`
 
-Lists the receivers, so a caller can pick one. Receivers that failed to load are listed
-too, flagged rather than hidden.
+Lists the locations and the receivers inside each, so a caller can pick both ids
+it needs. Locations that failed to load are listed too, flagged rather than
+hidden, and still name their receivers.
 
 ```json
-{"id": 1, "type": "rtl_433/hubs"}
+{"id": 1, "type": "rtl_433/receivers"}
 ```
 
 ```json
@@ -353,16 +373,38 @@ too, flagged rather than hidden.
   "type": "result",
   "success": true,
   "result": {
-    "hubs": [
+    "locations": [
       {
         "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
-        "title": "rtl_433 (wsbridge)",
-        "loaded": true
+        "title": "Home",
+        "loaded": true,
+        "receivers": [
+          {
+            "receiver_id": "01M1DJ2TB0YQ6S3KZ0T0C2YV8J",
+            "title": "rtl_433 (attic.local)",
+            "host": "attic.local",
+            "port": 8433,
+            "connected": true,
+            "manage_settings": true
+          },
+          {
+            "receiver_id": "01M1DJ2TB1P5N0F5V0R3C7XKQ4",
+            "title": "rtl_433 (garage.local)",
+            "host": "garage.local",
+            "port": 8433,
+            "connected": false,
+            "manage_settings": false
+          }
+        ]
       }
     ]
   }
 }
 ```
+
+`connected` is the live WebSocket to that server. A receiver of a location that
+is not loaded reports `false`, which is the honest answer rather than a missing
+one.
 
 ### `rtl_433/devices/pending`
 
@@ -372,8 +414,8 @@ with the keys it is ignoring.
 A location can have several receivers, and two of them within range of the same
 sensor decode the same transmission. The list is **merged**: one row per device
 key however many receivers heard it, showing the frame that arrived last and
-naming the receivers that heard it in `receivers` (their config-subentry ids, in
-receiver order). Adding or ignoring a row applies to the whole location.
+naming the receivers that heard it in `receivers`. Adding or ignoring a row
+applies to the whole location.
 
 ```json
 {"id": 2, "type": "rtl_433/devices/pending",
@@ -384,6 +426,7 @@ The `result`, with four of its six devices left out:
 
 ```json
 {
+  "connected": true,
   "pending": [
     {
       "key": "Acurite-Tower-12053-chC",
@@ -392,7 +435,14 @@ The `result`, with four of its six devices left out:
       "signal": 39.134,
       "first_seen": "2026-09-01T04:01:51.881359+00:00",
       "last_seen": "2026-09-01T04:07:02.042143+00:00",
-      "receivers": ["01M1DJ2TB0YQ6S3KZ0T0C2YV8J", "01M1DJ2TB1P5N0F5V0R3C7XKQ4"],
+      "receivers": [
+        {"receiver_id": "01M1DJ2TB0YQ6S3KZ0T0C2YV8J", "connected": true,
+         "vouches": false, "last_seen": "2026-09-01T04:07:02.042143+00:00",
+         "rssi": -62.0, "snr": 11.5},
+        {"receiver_id": "01M1DJ2TB1P5N0F5V0R3C7XKQ4", "connected": true,
+         "vouches": false, "last_seen": "2026-09-01T04:06:58.104512+00:00",
+         "rssi": -89.0, "snr": 3.0}
+      ],
       "readings": [
         {"key": "humidity", "name": "Humidity", "value": 74.0,
          "display": "74.0%", "unit": "%", "platform": "sensor",
@@ -412,7 +462,11 @@ The `result`, with four of its six devices left out:
       "signal": null,
       "first_seen": "2026-09-01T04:01:56.472199+00:00",
       "last_seen": "2026-09-01T04:07:00.516721+00:00",
-      "receivers": ["01M1DJ2TB0YQ6S3KZ0T0C2YV8J"],
+      "receivers": [
+        {"receiver_id": "01M1DJ2TB0YQ6S3KZ0T0C2YV8J", "connected": true,
+         "vouches": false, "last_seen": "2026-09-01T04:07:00.516721+00:00",
+         "rssi": null, "snr": null}
+      ],
       "readings": [
         {"key": "detect_wet", "name": "Water sensor", "value": true,
          "display": "Wet", "unit": null, "platform": "binary_sensor",
@@ -423,18 +477,23 @@ The `result`, with four of its six devices left out:
       ]
     }
   ],
-  "ignored": []
+  "ignored": [],
+  "devices": []
 }
 ```
 
 | Field | Meaning |
 | --- | --- |
+| `connected` | Whether the location can currently hear anything — true while *any* of its receivers has its socket up. |
 | `key` | The device key: the decoded model plus the id, channel and subtype it reported. This is the id every command below takes. |
 | `model` | The model rtl_433 decoded. |
-| `count` | Sightings since Home Assistant started. The list is memory-only, so this counts from the last restart or receiver reload. |
+| `count` | Sightings since Home Assistant started, summed across the receivers that heard it. The list is memory-only, so this counts from the last restart or reload. |
 | `signal` | The most recent message's SNR, or its RSSI when no SNR was reported, in dB. `null` when the server reports no levels (it needs `-M level`). |
-| `first_seen`, `last_seen` | ISO 8601 timestamps. |
+| `first_seen`, `last_seen` | ISO 8601 timestamps: when the location first heard it, and when it last did. |
+| `receivers` | One row per receiver that has heard this candidate, in receiver order — see [coverage rows](#coverage-rows). Only receivers that actually heard it appear; before adoption, "has heard it" is the whole question. |
 | `readings` | The most recent message, resolved through the device library into the entities adoption would create. Ordered as a device page orders them: readings first, then diagnostics, alphabetical within each. |
+| `ignored` | One `{"key", "model"}` per ignored device. The model is an empty string for a device ignored while still pending, which is the usual case — nothing is stored about a device that was never added. |
+| `devices` | The devices this location has already adopted, as `{"key", "model"}` — the things a candidate can *replace*. Sent with the candidates so the two cannot come from different snapshots. |
 
 Each reading describes the entity that field would become:
 
@@ -459,21 +518,20 @@ unit system (for this library, wind speed, rainfall and pressure). `display`
 does not, so on a US-customary installation those three read in metric here and
 in imperial on the device page.
 
-Two kinds of field are deliberately absent, because neither produces an entity
-the user would see: one the device library does not map at all, and one it maps
-with `enabled_by_default: false` (the `time`, `freq`, `rssi`, `snr` and `noise`
-diagnostics). Read the raw frame from the device's own entities after adoption,
-or from `rtl_433/events` above, if you need it verbatim.
-
-`ignored` carries one `{"key", "model"}` per ignored device. The model is an
-empty string for a device that was ignored while still pending, which is the
-usual case — nothing is stored about a device that was never added.
+Two kinds of field are deliberately absent from `readings`, because neither
+produces an entity the user would see: one the device library does not map at
+all, and one it maps with `enabled_by_default: false` (the `time`, `freq`,
+`rssi`, `snr` and `noise` diagnostics). The signal figures are not lost — they
+are per receiver, and travel in `receivers` instead.
 
 ### `rtl_433/devices/add`, `.../ignore`, `.../unignore`
 
 The three actions. All take the same parameters and return the same shape, and
 all do exactly what the equivalent options-flow step does — there is one
 implementation behind both.
+
+They apply to the **location**, so a sensor two receivers both hear is approved
+once and stays approved for both.
 
 ```json
 {"id": 3, "type": "rtl_433/devices/add",
@@ -491,16 +549,16 @@ applies to, and each command means something slightly different by that:
 | Command | `applied` | `skipped` |
 | --- | --- | --- |
 | `add` | The device was created, with its entities. | The key was no longer discovered — usually already added, or ignored. |
-| `ignore` | The key was added to the ignore list and dropped from the discovered list. | It was already ignored. |
+| `ignore` | The key was added to the ignore list and dropped from every receiver's discovered list. | It was already ignored. |
 | `unignore` | The key was taken off the ignore list. | It was not on it. |
 
-`applied` means the key is no longer ignored, not that it is back on the
-discovered list. The device returns there on its next transmission.
+For `unignore`, `applied` means the key is no longer ignored, not that it is back
+on the discovered list. The device returns there on its next transmission.
 
 ### `rtl_433/devices/subscribe`
 
-Subscribes to one receiver's discovered devices. The event payload is exactly what
-`rtl_433/devices/pending` returns.
+Subscribes to one location's discovered devices. The event payload is exactly
+what `rtl_433/devices/pending` returns.
 
 ```json
 {"id": 4, "type": "rtl_433/devices/subscribe",
@@ -524,8 +582,9 @@ whenever it changes:
     area decodes constantly, and a push per frame would flood every open
     connection.
 
-    Membership changes — a device heard for the first time, or added, ignored or
-    un-ignored — are pushed immediately.
+    Membership changes — a device heard for the first time on any receiver, or
+    added, ignored or un-ignored — are pushed immediately, and **once** for the
+    location however many of its receivers heard it.
 
     So a client must not count messages to count transmissions, and must not
     assume the counts it holds are current to the second. Read `count` and
@@ -537,16 +596,110 @@ Unsubscribe the standard way, naming the subscription's id:
 {"id": 9, "type": "unsubscribe_events", "subscription": 4}
 ```
 
+### `rtl_433/devices/coverage`
+
+Per-receiver signal detail for the devices the location has **already adopted** —
+the A-vs-B comparison the union necessarily hides. A merged device shows one
+temperature however many receivers decoded it, which is the point; *which*
+receiver hears it, how strongly and how recently is what a second receiver was
+bought to answer.
+
+```json
+{"id": 6, "type": "rtl_433/devices/coverage",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P"}
+```
+
+```json
+{
+  "devices": [
+    {
+      "key": "Acurite-Tower-12053-chC",
+      "available": true,
+      "receivers": [
+        {"receiver_id": "01M1DJ2TB0YQ6S3KZ0T0C2YV8J", "connected": true,
+         "vouches": true, "last_seen": "2026-09-01T04:07:02.042143+00:00",
+         "rssi": -62.0, "snr": 11.5},
+        {"receiver_id": "01M1DJ2TB1P5N0F5V0R3C7XKQ4", "connected": true,
+         "vouches": false, "last_seen": null, "rssi": null, "snr": null}
+      ]
+    }
+  ]
+}
+```
+
+`device_keys` is optional and names the devices to report on, in the order given;
+omit it for every adopted device, sorted by key. A key nothing has ever heard is
+answered rather than refused — every receiver present, all values `null` — so a
+client racing an adoption gets an answer instead of an error.
+
+This is a one-shot command and deliberately *not* part of the subscription
+payload: coverage moves on every frame, so pushing it would send a message every
+refresh interval for as long as anything is transmitting, including on the
+settled install where the candidate list is empty and an open panel currently
+costs nothing at all. Re-request it while the page showing it is open.
+
+#### Coverage rows
+
+The same row shape appears in `receivers` here and in each `pending` row:
+
+| Key | Meaning |
+| --- | --- |
+| `receiver_id` | The receiver's config-subentry id. |
+| `connected` | Whether that receiver's socket to its rtl_433 server is up right now. |
+| `vouches` | Whether that receiver **is connected and** heard the device within its effective timeout. The merged device is available when at least one receiver vouches — which is why a connected-but-deaf receiver and an offline one with a fresh timestamp are different answers. Always `false` for a *pending* candidate: vouching is about an adopted device's availability. |
+| `last_seen` | When that receiver last heard a real frame from the device, ISO 8601, or `null` if it never has. Not the same as the device's own `last_seen`, which also carries an entity's startup baseline. |
+| `rssi`, `snr` | The last levels that receiver reported for the device, in dB, or `null` — not every decoder emits them, and the server needs `-M level`. |
+
+These values come from the aggregator's own state, so **no entity has to be
+enabled to read them**. `rssi` and `snr` are mapped `enabled_by_default: false`
+and stay that way: a location with many sensors would otherwise pay
+*sensors × receivers × 2* disabled entities for a detail most people only glance
+at.
+
+In `rtl_433/devices/coverage`, *every* running receiver is listed, including one
+that has never heard the device — "the garage does not hear it" is as much a
+coverage answer as a weak signal is. In a `pending` row, only the receivers that
+actually heard the candidate appear.
+
+### `rtl_433/devices/replace`
+
+Re-points an existing device onto a candidate's identity: the battery-swap
+recovery, where a sensor came back with a new transmitter id and its history
+should follow. `device_key` is the candidate, `replaces` is the device that
+already exists.
+
+```json
+{"id": 7, "type": "rtl_433/devices/replace",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
+ "device_key": "Acurite-Tower-30991-chC",
+ "replaces": "Acurite-Tower-12053-chC"}
+```
+
+A request that cannot work — an unknown survivor, or the same key on both sides —
+comes back as `replace_failed` rather than as a failure to retry.
+
+### `rtl_433/devices/clear`
+
+Forgets every candidate heard so far, across every receiver of the location, so
+the list refills from live traffic and the user can press their doorbell and see
+it alone on the screen. `cleared` counts what was dropped. Nothing is deleted and
+nothing is ignored; devices the user has explicitly ignored stay ignored.
+
+```json
+{"id": 8, "type": "rtl_433/devices/clear",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P"}
+```
+
 ## Home Assistant settings commands
 
-The same three forms the panel's settings pages render. They are ordinary
-commands, so anything those pages do is scriptable — including the parts that
-are awkward by hand, like setting the same calibration on a dozen meters.
+The same forms the panel's settings pages render. They are ordinary commands, so
+anything those pages do is scriptable — including the parts that are awkward by
+hand, like setting the same calibration on a dozen meters.
 
 ### `rtl_433/settings/get`
 
-Everything the three forms need, in one call — they are one screenful, and the
-alternative is three round trips to fill controls the user may never open.
+Everything the forms need, in one call — they are one screenful, and the
+alternative is a round trip each to fill controls the user may never open.
 
 ```json
 {"id": 10, "type": "rtl_433/settings/get",
@@ -555,7 +708,12 @@ alternative is three round trips to fill controls the user may never open.
 
 ```json
 {"id": 10, "type": "result", "success": true, "result": {
-  "hub": {"availability_timeout": 600, "manage_settings": true},
+  "location": {"availability_timeout": 600},
+  "receivers": [
+    {"receiver_id": "01M1DJ2TB0YQ6S3KZ0T0C2YV8J",
+     "title": "rtl_433 (attic.local)", "host": "attic.local", "port": 8433,
+     "connected": true, "manage_settings": true}
+  ],
   "defaults": {"availability_timeout": 600, "motion_clear_delay": 90},
   "devices": [
     {"device_key": "SCM-12345", "label": "SCM (SCM-12345) — gas detected",
@@ -569,6 +727,10 @@ alternative is three round trips to fill controls the user may never open.
 }}
 ```
 
+`location` and `receivers` are separate keys because they are written by separate
+commands: `location` is submitted to `rtl_433/settings/location`, and each row of
+`receivers` to `rtl_433/settings/receiver` with its own `receiver_id`.
+
 `commodity_units` travels in the payload rather than being a constant a client
 carries, because which units Home Assistant will convert for a given commodity is
 a fact about the integration's calibration table. A client with its own copy will
@@ -579,28 +741,62 @@ sensor just stops being eligible for the Energy dashboard.
 calibration when it has one, and otherwise a guess from the `MeterType` /
 `ert_type` fields of its last decoded frame.
 
-### `rtl_433/settings/hub`
+### `rtl_433/settings/location`
+
+The location-wide defaults. Today that is the availability timeout: how long a
+sensor may go quiet before it is called unavailable, which has nothing to do with
+which server decoded it, so it is set once and every receiver's watchdog reads
+the same number.
 
 ```json
-{"id": 11, "type": "rtl_433/settings/hub",
+{"id": 11, "type": "rtl_433/settings/location",
  "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
- "availability_timeout": 1800, "manage_settings": true}
+ "availability_timeout": 1800}
 ```
 
-!!! note "The default timeout is not stored"
-    Submitting `availability_timeout` equal to the shipped default (600) *removes*
-    the stored value rather than saving it, so the per-device-class defaults keep
-    applying. That matters most for event-driven devices — a doorbell that has not
-    rung in ten minutes is not unavailable. Any other value is stored as given,
-    including `0`, which means "never expire".
+!!! note "`null` means the defaults, and stores nothing"
+    Submitting `availability_timeout: null` *removes* the stored value so the
+    per-device-class defaults keep applying. That matters most for event-driven
+    devices — a doorbell that has not rung in ten minutes is not unavailable. Any
+    number is stored as given, including `0` ("never expire") and the shipped
+    default of `600`.
+
+### `rtl_433/settings/receiver`
+
+One receiver's radio settings. `manage_settings` decides whether *that* radio's
+frequency, gain and sample rate are adopted into Home Assistant as controls and
+re-applied on reconnect — so a location with an attic receiver of your own and a
+garage receiver shared with a neighbour can say so per receiver.
+
+```json
+{"id": 12, "type": "rtl_433/settings/receiver",
+ "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
+ "receiver_id": "01M1DJ2TB0YQ6S3KZ0T0C2YV8J",
+ "manage_settings": false}
+```
+
+The reply is that receiver's row from `rtl_433/settings/get`, as stored.
+
+Changing the toggle changes which entities exist (the radio controls appear or
+disappear), so the location reloads. A save that changes nothing writes nothing.
+
+!!! note "It retires the older location-wide toggle"
+    Entries created before receivers became subentries carry a single
+    `manage_settings` in the location's options that overrides every receiver.
+    Storing a receiver's own answer drops that override — first writing it down
+    onto any receiver that had no answer of its own, so every *other* receiver
+    keeps behaving exactly as it did. The options flow's combined form still
+    writes the location-wide value, so with both surfaces in play the last write
+    wins.
 
 ### `rtl_433/settings/device`
 
 Every override is optional and nullable, and the two mean the same thing: clear
-it, falling back to the receiver default or the library descriptor.
+it, falling back to the location default or the library descriptor. The device
+belongs to the location, so this is addressed by `entry_id` alone.
 
 ```json
-{"id": 12, "type": "rtl_433/settings/device",
+{"id": 13, "type": "rtl_433/settings/device",
  "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
  "device_key": "SCM-12345",
  "timeout_override": 1800,
@@ -620,11 +816,12 @@ nothing behind it.
 
 ### `rtl_433/settings/mappings`
 
-The receiver's [device-library overrides](device-library.md), as the YAML text the
-documentation writes them in.
+The location's [device-library overrides](device-library.md), as the YAML text
+the documentation writes them in. They describe how *fields* become entities, so
+they are the location's and apply to every receiver in it.
 
 ```json
-{"id": 13, "type": "rtl_433/settings/mappings",
+{"id": 14, "type": "rtl_433/settings/mappings",
  "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
  "yaml": "temperature_C:\n  platform: sensor\n  unit_of_measurement: K\n"}
 ```
