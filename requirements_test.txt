@@ -50,4 +50,4 @@ mutmut==3.7.0
 # --restrict-functions`, and `ratchet --mode functions`, all of which the
 # mutation workflow now calls. This is the file CI installs from, so the floor
 # has to be stated here and not only in pyproject.toml.
-mutmut-ratchet>=0.2.0
+mutmut-ratchet>=0.4.0
