@@ -38,6 +38,22 @@ name: Mutation
 #     more) shards because only ~5 modules dominate the time; extra shards would sit
 #     near-idle and widen the spread without lowering the pole (the slowest module).
 #
+# That last sentence held only while a *module* was the smallest thing the
+# sharder could place. mutmut filters per function, and from mutmut-ratchet
+# 0.4.0 the profile records per-function seconds, so a bin can hold part of a
+# file and the pole becomes the heaviest function rather than the heaviest
+# module. Measured here: `__init__.py` is 6,069s of a 30,851s package and sets
+# the makespan at every width from 6 shards to 32; its heaviest function,
+# `async_setup_entry`, is 3,184s. Same six shards, ~20 min instead of ~28, and
+# a wider matrix now buys something (~15 min at 12) where before it bought
+# nothing.
+#
+# This switches on by itself: `shards` packs by function as soon as the
+# committed profile carries a `functions` block, and until then every path
+# below behaves exactly as it did. The profile gains one the first time a full
+# run refreshes it under 0.4.0, so the change is inert on merge and the
+# download-and-commit step is what arms it.
+#
 # That weighting is only as good as the committed profile. A module missing from
 # it is packed as though it were free, which does not fail anything -- it just
 # drops one shard's worth of work into whichever bin looked lightest and leaves
@@ -78,6 +94,13 @@ name: Mutation
 # those files' scores are partial measurements. `--mode functions` reads which
 # functions were actually measured out of the stats payload, so the scope step
 # never has to hand the gate a list. See the `Enforce the mutation gate` step.
+#
+# Packing by function makes that true of FULL runs as well -- a shard holding
+# half a file reports the other half as unchecked -- so the per-shard gate
+# follows the profile, not just the PR's scope. The per-file floor does not
+# disappear with it: the `baseline` job rebuilds each file from the functions
+# its shards actually measured and runs the floor over that, which is the same
+# check against the same numbers, just assembled one job later.
 #
 # The one thing the shards DO share is mutmut's stats profile
 # (`mutants/mutmut-stats.json`): the function -> covering-tests map and per-test
@@ -281,6 +304,14 @@ jobs:
             # Scoped run with nothing in scope (e.g. a docs-only PR): no work.
             printf '\n\n' > shard.txt
           fi
+          # Whether the sharder could split a file at all. With per-function
+          # seconds in the profile a shard can hold part of a module, which is
+          # what makes the per-file floor the wrong gate for it.
+          if jq -e 'has("functions")' scripts/mutation_timings.json >/dev/null 2>&1; then
+            echo "by_function=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "by_function=no" >> "$GITHUB_OUTPUT"
+          fi
           {
             echo "patterns=$(sed -n '1p' shard.txt)"
             echo "paths=$(sed -n '2p' shard.txt)"
@@ -323,7 +354,8 @@ jobs:
       - name: Enforce the mutation gate vs baseline
         if: steps.shard.outputs.patterns != ''
         run: |
-          if [ -n "${{ steps.scope.outputs.functions }}" ]; then
+          if [ -n "${{ steps.scope.outputs.functions }}" ] \
+             || [ "${{ steps.shard.outputs.by_function }}" = "yes" ]; then
             uv run mutmut-ratchet ratchet --mode functions --stats mutation-stats.json
           else
             uv run mutmut-ratchet ratchet --mode floor --stats mutation-stats.json
@@ -383,36 +415,69 @@ jobs:
           merge-multiple: true
           path: partials
 
-      # The shards mutate disjoint module sets, so the partials never disagree;
-      # a duplicated key would mean the partition itself is broken, so fail loudly
+      # The shards mutate disjoint work, so the partials never disagree; a
+      # duplicated key means the partition itself is broken, so fail loudly
       # rather than silently picking a winner.
+      #
+      # What "disjoint" covers depends on how finely the profile splits. Packing
+      # by module puts each file in exactly one shard, so a repeated *path* is
+      # the error. Packing by function lets two shards each time part of one
+      # file legitimately, and the error becomes a repeated *function* -- with
+      # the file's seconds summed across the shards that measured it.
       - name: Merge into one profile
         run: |
           python3 - <<'PY'
           import json
           from pathlib import Path
 
-          merged: dict[str, float] = {}
+          files: dict[str, float] = {}
+          functions: dict[str, dict[str, float]] = {}
+          owner: dict[tuple[str, str | None], str] = {}
+
           sources = sorted(Path("partials").glob("*.json"))
           if not sources:
               raise SystemExit("no partial timings were uploaded")
+
           for part in sources:
-              files = json.loads(part.read_text(encoding="utf-8"))["files"]
-              for path, seconds in files.items():
-                  if path in merged:
-                      raise SystemExit(
-                          f"{path} was timed by more than one shard; the shard "
-                          "partition is not disjoint"
-                      )
-                  merged[path] = seconds
-          out = Path("mutation_timings.json")
-          out.write_text(
-              json.dumps({"files": dict(sorted(merged.items()))}, indent=2, sort_keys=True)
-              + "\n",
-              encoding="utf-8",
+              payload = json.loads(part.read_text(encoding="utf-8"))
+              per_function = payload.get("functions", {})
+              for path, fns in per_function.items():
+                  for name, seconds in fns.items():
+                      held = owner.get((path, name))
+                      if held is not None:
+                          raise SystemExit(
+                              f"{name} was timed by both {held} and {part.name}; "
+                              "the shard partition is not disjoint"
+                          )
+                      owner[(path, name)] = part.name
+                      functions.setdefault(path, {})[name] = seconds
+              for path, seconds in payload.get("files", {}).items():
+                  if not per_function.get(path):
+                      # No function detail for this file, so it must be whole.
+                      held = owner.get((path, None))
+                      if held is not None:
+                          raise SystemExit(
+                              f"{path} was timed by both {held} and {part.name}; "
+                              "the shard partition is not disjoint"
+                          )
+                      owner[(path, None)] = part.name
+                  files[path] = files.get(path, 0.0) + seconds
+
+          payload = {"files": dict(sorted(files.items()))}
+          if functions:
+              payload["functions"] = {
+                  path: dict(sorted(fns.items()))
+                  for path, fns in sorted(functions.items())
+              }
+          Path("mutation_timings.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
           )
-          total = sum(merged.values())
-          print(f"Merged {len(sources)} shards: {len(merged)} modules, {total:.0f}s total.")
+          total = sum(files.values())
+          n_fn = sum(len(v) for v in functions.values())
+          print(
+              f"Merged {len(sources)} shards: {len(files)} modules, "
+              f"{n_fn} functions, {total:.0f}s total."
+          )
           PY
 
       - name: Upload the refreshed profile
@@ -461,22 +526,53 @@ jobs:
           import json
           from pathlib import Path
 
-          files: dict[str, dict] = {}
+          BUCKETS = (
+              "killed", "survived", "timeout", "suspicious",
+              "skipped", "no_tests", "total", "not_checked",
+          )
+
+          def measured(tally):
+              # Everything mutmut generated is in every shard's meta file
+              # whether that shard's filter selected it or not; what it skipped
+              # reads as "not checked". A tally that is entirely not-checked is
+              # not a bad score, it is no score -- so the shard that actually
+              # ran the function is the one whose numbers count.
+              return tally.get("not_checked", 0) < tally.get("total", 0)
+
+          whole_files: dict[str, dict] = {}
           functions: dict[str, dict] = {}
           sources = sorted(Path("partials").rglob("mutation-stats.json"))
           if not sources:
               raise SystemExit("no partial stats were uploaded")
+
           for part in sources:
               payload = json.loads(part.read_text(encoding="utf-8"))
+              per_function = payload.get("functions", {})
+              for path, fns in per_function.items():
+                  for name, tally in fns.items():
+                      if measured(tally) or name not in functions.get(path, {}):
+                          functions.setdefault(path, {})[name] = tally
               for path, stats in payload.get("files", {}).items():
-                  if path in files:
+                  # Only a file with no function detail at all is taken whole,
+                  # and then it must belong to exactly one shard.
+                  if per_function.get(path):
+                      continue
+                  if path in whole_files:
                       raise SystemExit(
                           f"{path} was measured by more than one shard; the "
                           "shard partition is not disjoint"
                       )
-                  files[path] = stats
-              for path, per_function in payload.get("functions", {}).items():
-                  functions.setdefault(path, {}).update(per_function)
+                  whole_files[path] = stats
+
+          # Rebuild each file from the functions that were actually measured.
+          # A shard holding part of a file reports the whole file, with the rest
+          # as "not checked", so its own file block is a partial measurement and
+          # summing those across shards would count every mutant many times.
+          files = dict(whole_files)
+          for path, fns in functions.items():
+              rebuilt = {b: sum(t.get(b, 0) for t in fns.values()) for b in BUCKETS}
+              files[path] = rebuilt
+
           Path("merged-stats.json").write_text(
               json.dumps(
                   {
@@ -491,9 +587,13 @@ jobs:
               + "\n",
               encoding="utf-8",
           )
+          unmeasured = sum(
+              1 for fns in functions.values() for t in fns.values() if not measured(t)
+          )
           print(
               f"Merged {len(sources)} shards: {len(files)} files, "
-              f"{sum(len(f) for f in functions.values())} functions."
+              f"{sum(len(f) for f in functions.values())} functions "
+              f"({unmeasured} never executed by any shard)."
           )
           PY
 
