@@ -2,7 +2,7 @@
 
 The per-device availability model infers "is this radio still there?" from
 silence, which only means anything while the integration is actually listening.
-Once the receiver's WebSocket is down the integration hears nothing at all, so no
+Once the receiver's WebSocket is down the integration receives nothing at all, so no
 device's cached state can be trusted — the same thing an MQTT availability topic
 covers with an LWT. ``Rtl433Coordinator.receiver_available`` is that second gate, and
 it follows the socket with no grace window: the moment the connection drops,
@@ -123,7 +123,7 @@ def test_there_is_no_grace_window():
     """The gate is the socket state, with no delay constant behind it.
 
     Deliberate: a delay would present readings as current while the integration
-    knows it cannot hear the radio. The debounce lives on the *repair issue*
+    knows it cannot receive the radio. The debounce lives on the *repair issue*
     instead, so the notification waits while the entities tell the truth at once.
     """
     assert not hasattr(const, "RECEIVER_OFFLINE_GRACE")
@@ -299,7 +299,7 @@ async def test_disconnect_logs_the_loss_and_the_device_count(hass, coordinator, 
 
     The device is marked adopted first: only an adopted device has entities for
     the gate to take unavailable, so only an adopted device is counted. A device
-    that has merely been *heard* sits in the pending list with nothing in Home
+    that has merely been *received* sits in the pending list with nothing in Home
     Assistant to mark, and correctly contributes nothing to this total.
     """
     from pyrtl_433.normalizer import NormalizedEvent

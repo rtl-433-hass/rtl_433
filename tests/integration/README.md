@@ -16,7 +16,7 @@ captures documentation screenshots with Playwright.
 ## What it proves
 
 A single `rtl_433` process replays a real Acurite capture continuously; the
-integration connects over a WebSocket, holds every device it hears as a pending
+integration connects over a WebSocket, holds every device it receives as a pending
 candidate, creates entities with correct device classes/units for the ones the
 run adds from the panel, and flips them to `unavailable` when the stream
 stops. Playwright captures these screenshots (see `../../screenshots/`):
@@ -24,14 +24,14 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | File | Shows |
 | --- | --- |
 | `02-device-page.png` | The device page: Temperature `26.7 °C`, Humidity `74.0%`, Battery `100%`, signal diagnostics |
-| `17-discovery-panel.png` | The **discovered devices** page (`/rtl_433/discovered`): the location's union of candidates, one card per heard device — however many receivers heard it — with its sighting count, signal level, the receivers that heard it, latest readings and per-card Replace / Ignore / Add buttons |
+| `17-discovery-panel.png` | The **discovered devices** page (`/rtl_433/discovered`): the location's union of candidates, one card per received device — however many receivers received it — with its sighting count, signal level, the receivers that received it, latest readings and per-card Replace / Ignore / Add buttons |
 | `16-ignored-devices.png` | The same page with the ignored section revealed, showing the ignored leak detector and its Un-ignore button |
 | `04-unavailable-state.png` | The same device after the stream stops — all entities `Unavailable` |
 | `05-mapping-overrides.png` | The **Device mappings** page: the YAML editor pre-filled with an example per-location override |
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
 | `07-location-settings.png` | The **Location settings** page: the availability-timeout choice every device at the location starts from |
 | `07-receiver-settings.png` | One receiver's **Receiver settings** page: the manage-radio toggle, headed by the receiver it belongs to |
-| `18-coverage.png` | The **Signal coverage** page: one card per merged device, one row per receiver, with the level and age each one last heard it at |
+| `18-coverage.png` | The **Signal coverage** page: one card per merged device, one row per receiver, with the level and age each one last received it at |
 | `08-device-settings.png` | The **Device settings** page for the SCMplus meter: the picker, the timeout override, the commodity pre-filled to `gas`, and the base unit + scale it reveals |
 | `09-home-hero.png` | The integration overview: a location with its receiver and nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
@@ -44,7 +44,7 @@ Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
 > **The harness runs ONE receiver, and the shots show one.** There is a single
 > `rtl_433` container and a single `ws-bridge`, so every capture is of a location
 > holding one receiver: the **Receivers** card has one row, the discovered cards
-> name one receiver under *Heard by*, **Signal coverage** has one row per device,
+> name one receiver under *Received by*, **Signal coverage** has one row per device,
 > and each device carries one set of `RSSI` / `SNR` / `Last seen` entities. That
 > is a faithful picture of the common install, and it is what the docs' alt text
 > describes — but it does **not** exercise the union, the dedup debounce, or the
@@ -63,7 +63,7 @@ pending candidate — a whole round emitted at once would leave only its first
 device visible.
 
 Nothing is added to Home Assistant automatically, so the `shots` stage works the
-approval flow for real: it captures the page with every heard device still
+approval flow for real: it captures the page with every received device still
 pending, ignores the leak detector and captures the ignored section, then
 un-ignores it and adds every device — which is why the later shots have a full
 receiver to work with.

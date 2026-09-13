@@ -2162,7 +2162,7 @@ async def test_platform_setup_persists_what_every_receiver_already_knows(hass):
     A coordinator starts decoding as soon as it connects, which is before the
     platforms are forwarded, so by the time entities are built a receiver may
     already know fields the stored record has never carried. Every receiver's
-    view is unioned in -- one that never heard the device at all contributes
+    view is unioned in -- one that never received the device at all contributes
     nothing rather than erasing the others -- and the stored record is what
     survives a restart, so a field dropped here is a sensor that silently fails
     to come back.
@@ -2187,7 +2187,7 @@ async def test_platform_setup_persists_what_every_receiver_already_knows(hass):
     attic = hass.data[DOMAIN][receiver_id(location, 0)]
     garage = hass.data[DOMAIN][receiver_id(location, 1)]
     attic.device_fields[device_key] = {"temperature_C", "humidity"}
-    # The garage receiver is out of range of this sensor and never heard it.
+    # The garage receiver is out of range of this sensor and never received it.
     garage.device_fields.pop(device_key, None)
 
     added: list = []

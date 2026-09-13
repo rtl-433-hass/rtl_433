@@ -366,7 +366,7 @@ def signal_location_device_update(location_id: str, device_key: str) -> str:
 
     ``location_id`` is the location config entry's id -- the scope the merged
     device's identity is minted in -- so the aggregator and the entities agree on
-    the key without either of them knowing which receiver heard the frame.
+    the key without either of them knowing which receiver received the frame.
     """
     return SIGNAL_LOCATION_DEVICE_UPDATE.format(
         location_id=location_id, device_key=device_key
@@ -420,7 +420,7 @@ def signal_receiver_availability(receiver_id: str) -> str:
 # WebSocket subscription behind the discovery panel can push a fresh list the
 # moment the answer to "what is waiting for me?" actually changes.
 #
-# Scoped to the **location**, not to the receiver that heard the frame. A sensor
+# Scoped to the **location**, not to the receiver that received the frame. A sensor
 # two receivers can both hear is ONE candidate row (``aggregator.py`` merges
 # their pending maps), so there is one list and one subscription; a per-receiver
 # signal would push the same merged list once per receiver that decoded the same

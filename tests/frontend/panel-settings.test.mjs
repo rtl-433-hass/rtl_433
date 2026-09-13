@@ -2,7 +2,7 @@
 // the same constraint the panel itself is written under.
 //
 // What is under test is the *location* form's availability-timeout rule -- one
-// answer for every device at a location, whichever of its receivers hears it,
+// answer for every device at a location, whichever of its receivers receives it,
 // which is why it is a page of its own now and the manage-radio toggle is a
 // second one. The stored timeout has three states and only one of them is a
 // number, so the form asks which of the three you mean and sends a value to

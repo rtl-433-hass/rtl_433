@@ -32,7 +32,7 @@ conventions (commits, releases, CI) see [CONTRIBUTING.md](CONTRIBUTING.md).
     `device_available`, see [Merged availability](#merged-availability-across-a-locations-receivers)),
     the **coverage map** (`ReceiverCoverage` / `coverage`), which records the
     link half of every frame per `(device_key, receiver)` so the panel can show
-    "heard by Attic (−62 dB) / Garage (−89 dB)" with no entity enabled, and the
+    "received by Attic (−62 dB) / Garage (−89 dB)" with no entity enabled, and the
     **merged candidate list** (`MergedCandidate` / `merged_candidates` /
     `enforce_pending_cap`) behind the union add-device page.
   - `config_flow.py`, `__init__.py`, `const.py`, `entity.py`,
@@ -234,14 +234,14 @@ on top:
   receiver because it is an ingestion buffer behind that receiver's own
   replay/backlog gate; the list the user is offered is
   `aggregator.merged_candidates(hass, entry)`, one row per `device_key` however
-  many receivers heard it, showing **last-received-wins** data (the most recently
+  many receivers received it, showing **last-received-wins** data (the most recently
   *arrived* frame from any receiver, with no debounce — a preview needs the
   freshest sample, where a recorded entity value needs the union's
   anti-regression guard) and carrying each hearing receiver's coverage. The
   order is: per-receiver replay/backlog gate → merge → cap. The cap
   (`_events.MAX_PENDING_CANDIDATES`, 512) is enforced on the **merged** list by
   `aggregator.enforce_pending_cap` (hooked onto every coordinator's
-  `pending_listeners`), dropping the least recently heard candidate first and
+  `pending_listeners`), dropping the least recently received candidate first and
   from *every* receiver's map, so N receivers cannot hold N × 512 candidates:
   433 MHz is a shared band where a bad decode mints a device key of its own, so
   without a ceiling the list grows for the life of the config entry and every
@@ -252,11 +252,11 @@ on top:
   (`receiver_settings._location_adopted_devices`).
   A device becomes real only through `adoption.async_adopt_devices`, which
   promotes the merged record through every receiver's `coordinator.adopt_device`
-  (or `mark_adopted`, for a receiver that never heard it) and fires the **same**
+  (or `mark_adopted`, for a receiver that never received it) and fires the **same**
   `new_device_callback` / `SIGNAL_NEW_DEVICE` seam a live sighting used — one
   registration path, not two, and one device, because the entity platforms share
   their created-`unique_id` bookkeeping across a location's receivers. There is
-  **no** persistent notification for a heard device (the per-device
+  **no** persistent notification for a received device (the per-device
   notification, and the per-receiver discovery toggle that used to gate
   auto-add, were both removed); the `INFO` log line in `_record_pending` is the
   only signal.
@@ -440,7 +440,7 @@ second implementation.
   `ignored`; un-ignore removes the key everywhere and is **not retroactive**
   (the device returns on its next transmission). Every membership change
   dispatches the location-scoped `signal_pending_update(location_entry_id)`
-  (`const.py`) — once, whichever receiver heard the device.
+  (`const.py`) — once, whichever receiver received a frame from the device.
 - **`options_flow.py` and `websocket_api.py` are presentation.** Both call the
   three functions above. A behavioural difference between the form and the panel
   is therefore a duplicated implementation, not a missing feature.
@@ -468,7 +468,7 @@ second implementation.
   `rtl_433/settings/hub` names.
 - **Per-receiver signal detail is served from aggregator state, not entities.**
   `rtl_433/devices/coverage` returns `aggregator.coverage(device_key)` per
-  adopted device so the panel can render "heard by Attic (−62 dB) / Garage
+  adopted device so the panel can render "received by Attic (−62 dB) / Garage
   (−89 dB)" with **no** entity enabled; `rssi` / `snr` are
   `enabled_by_default: false` and stay that way. Keep it a one-shot command —
   coverage moves on every frame, so folding it into the subscription payload
@@ -905,7 +905,7 @@ Durable contract for what a location's receivers do to one sensor's *values*
   each receiver's *own host clock* at decode, so a strict comparison is invertible
   by clock skew. The aggregator keeps the last-applied `(event_time, applied_at)`
   per `(device_key, field)` and: within `_MERGE_DEBOUNCE` (3 s) → the **same
-  transmission heard twice**, ignored (first applied wins); clearly older → a
+  transmission received twice**, ignored (first applied wins); clearly older → a
   stale frame or a reconnect-backlog replay, **rejected**; clearly newer →
   applied. Sized from below by repeat transmissions plus decode/delivery latency
   plus modest skew, and from above by the fact that no mapped periodic sensor
@@ -922,7 +922,7 @@ Durable contract for what a location's receivers do to one sensor's *values*
 Durable contract for how the two gates combine once a location has more than one
 receiver (`aggregator.py`, `entity.py`).
 
-- **A receiver *vouches* for a device when it is connected AND heard the device
+- **A receiver *vouches* for a device when it is connected AND received a frame from the device
   within the device's effective timeout.** The merged device is available when
   **at least one** receiver vouches (`Rtl433LocationAggregator.device_available`,
   OR-ing `receiver_vouches` over `receiver_coordinators`).
@@ -969,7 +969,7 @@ receiver (`aggregator.py`, `entity.py`).
   from the update listener, before the reload) additionally removes that
   receiver's signal entities on every merged device — the sweep cannot see them,
   precisely because they carry no subentry id. Merged devices and their history
-  **survive**; a device only the removed receiver ever heard goes **unavailable,
+  **survive**; a device only the removed receiver ever received goes **unavailable,
   not deleted** (removing it stays an explicit user action).
 
 ## Receiver-connection availability gate
@@ -985,7 +985,7 @@ all?". End-user docs live in
   no debounce, no timer: the socket drops, every device behind the receiver is
   unavailable on the same tick. **Do not add a delay here.** It was tried and
   removed deliberately — a delay presents readings as current while the
-  integration knows it cannot hear the radio, which is what the Silver-tier
+  integration knows it cannot receive the radio, which is what the Silver-tier
   `entity-unavailable` rule exists to prevent, and every Home Assistant
   integration gating on a live connection flag (`mqtt`, `zwave_js`, `esphome`,
   `deconz`, `unifi`, and newer arrivals like `harbor`) flips instantly. The

@@ -9,8 +9,8 @@ they are testable without loading any JavaScript at all.
 - ``rtl_433/receivers`` — every configured location and the receivers inside
   it, so a caller can address one of each.
 - ``rtl_433/devices/pending`` — the location's merged candidates (one row per
-  sensor, however many of its receivers heard it, each naming the receivers
-  that heard it and how well), plus its ignore list.
+  sensor, however many of its receivers received it, each naming the receivers
+  that received it and how well), plus its ignore list.
 - ``rtl_433/devices/add`` / ``.../ignore`` / ``.../unignore`` — the three
   actions, each delegating to :mod:`.adoption` so they do exactly what the
   options flow does.
@@ -298,7 +298,7 @@ def _receiver_row(
 def _coverage_row(coverage: ReceiverCoverage) -> dict[str, Any]:
     """Render one receiver's view of one device as JSON.
 
-    The shape a panel draws *"heard by Attic (-62 dB) / Garage (-89 dB)"* from,
+    The shape a panel draws *"received by Attic (-62 dB) / Garage (-89 dB)"* from,
     and the reason it can draw it at all: ``rssi`` and ``snr`` are mapped with
     ``enabled_by_default: false`` and stay that way, so a coverage display that
     waited for entities would show nothing on a default install. These values
@@ -306,7 +306,7 @@ def _coverage_row(coverage: ReceiverCoverage) -> dict[str, Any]:
     because the union throws them away.
 
     ``last_seen`` goes out as an ISO string because JSON has no datetime, and is
-    ``null`` for a receiver that has never heard the device -- itself a coverage
+    ``null`` for a receiver that has never received the device -- itself a coverage
     answer, and why such a receiver is listed rather than omitted.
     """
     return {
@@ -591,7 +591,7 @@ def _pending_payload(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
     (:func:`~.aggregator.merged_candidates`), which is also what the options form
     renders, so the two surfaces cannot put a different device at the top of the
     same list -- and a sensor two receivers both hear is one row showing whichever
-    of them heard it last, carrying ``receivers`` so the page can say who did,
+    of them received it last, carrying ``receivers`` so the page can say who did,
     how recently, and how well. That per-receiver detail is the candidate's own
     (:class:`~.aggregator.MergedCandidate`), not the aggregator's coverage map: a
     *pending* device dispatches nothing, so there is nothing in that map to read
@@ -637,7 +637,7 @@ def _pending_payload(hass: HomeAssistant, entry: ConfigEntry) -> dict[str, Any]:
                 "signal": candidate.record.signal,
                 "first_seen": candidate.record.first_seen.isoformat(),
                 "last_seen": candidate.record.last_seen.isoformat(),
-                # Which receivers have heard this candidate, in receiver order,
+                # Which receivers have received this candidate, in receiver order,
                 # and how well, so the page can show coverage before the user
                 # adds anything. ``vouches`` is always false here -- vouching is
                 # about an adopted device's availability, and a candidate has
@@ -831,7 +831,7 @@ def ws_clear_devices(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Forget every candidate heard so far, so the list can refill from scratch.
+    """Forget every candidate received so far, so the list can refill from scratch.
 
     Cleared across every receiver of the location, because the list the user is
     looking at is the merge of all of them: leaving one receiver's copy would put
@@ -870,11 +870,11 @@ def ws_device_coverage(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Report how well each receiver hears each of the location's devices.
+    """Report how well each receiver receives each of the location's devices.
 
     The A-vs-B detail the union deliberately hides. A merged device shows one
     temperature however many receivers decoded it, which is the point -- but
-    *which* receiver hears it, how strongly, and how recently is the question a
+    *which* receiver receives it, how strongly, and how recently is the question a
     second receiver was bought to answer, so it is served here from
     :meth:`~.aggregator.Rtl433LocationAggregator.coverage` rather than from
     entities: ``rssi`` and ``snr`` are mapped ``enabled_by_default: false`` and
@@ -893,7 +893,7 @@ def ws_device_coverage(
     defaults to every device the location has adopted, sorted, which is what a
     page listing them all wants. A key that was never adopted is answered rather
     than refused -- every receiver present, all values ``null`` -- because
-    "nothing has heard that" is the true answer and a panel racing an adoption
+    "nothing has received that" is the true answer and a panel racing an adoption
     should not get an error for it.
     """
     entry = _async_get_location(hass, connection, msg)
@@ -1018,7 +1018,7 @@ def ws_subscribe_devices(
 
     The pending list changes continuously by design -- that is what makes a
     config-flow form the wrong shape for it -- so the panel subscribes rather
-    than polling, and a device heard while the page is open appears without a
+    than polling, and a device received while the page is open appears without a
     reload.
 
     Two triggers, deliberately unequal (see the module docstring). The dispatcher
