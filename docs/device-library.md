@@ -9,14 +9,10 @@ reports, without editing the integration code or waiting for a new release. You
 can add mappings from the Home Assistant UI; contributors can add mappings to
 the shipped library.
 
-> **Where the shipped library lives.** The YAML files and their loader are part
-> of [`pyrtl_433`](https://github.com/rtl-433-hass/pyrtl_433), the integration's
-> runtime dependency — not this repository. This page is the
-> **Home-Assistant-facing** guide: how to add and override mappings from the UI,
-> how the resulting descriptors behave as entities, and how to contribute a
-> mapping upstream. The **authoritative YAML schema reference** — every
-> attribute, the value transforms, binary payloads, the `models:` block and the
-> skip-keys file — is
+> The YAML files and their loader are part of
+> [`pyrtl_433`](https://github.com/rtl-433-hass/pyrtl_433), the integration's
+> runtime dependency — not this repository. The authoritative YAML schema
+> reference is
 > [the pyrtl_433 device-library reference](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/).
 
 ## Adding device mappings
