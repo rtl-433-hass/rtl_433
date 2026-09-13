@@ -23,7 +23,7 @@ You can extend or correct device mappings directly from the Home Assistant UI.
 
 The *Device mappings* step opens Home Assistant's built-in YAML editor pre-filled
 with that hub's current mappings. You edit mappings as YAML, using the **same
-schema** as the shipped library ([reference](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/)): top-level keys are rtl_433
+schema** as pyrtl_433 ([reference](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/)): top-level keys are rtl_433
 field names, values are entry mappings. They may optionally include a `skip_keys:` list to add extra
 skip entries, and an optional [`models:` block](#model-scoped-mappings-models) to
 add or override model-scoped descriptors.
