@@ -1,16 +1,16 @@
 # Device Discovery
 
 Nothing is added to Home Assistant on its own. Every device your rtl_433 servers
-decode is heard and held on a list of discovered devices, and you decide which
+decode is received and held on a list of discovered devices, and you decide which
 ones become real devices.
 
 That list is where neighbours' sensors, weak signals, and bad decodes end up. In
-a busy area a receiver hears far more than you want to keep, which is why the
+a busy area a receiver receives far more than you want to keep, which is why the
 integration waits for you to choose.
 
 The list belongs to the **location**, not to one receiver. However many receivers
 a location holds, a sensor is **one** row — showing the readings from whichever
-receiver heard it last, and naming the receivers that heard it — and adding or
+receiver received it last, and naming the receivers that received it — and adding or
 ignoring it once applies to the whole location. That is the point: you are
 approving a *sensor*, not a sighting.
 
@@ -45,18 +45,18 @@ that location's page.
 ## Adding Devices
 
 Click **Add or replace device**. Every device this location's receivers have
-heard and you have not added is here, newest first. If nothing has transmitted
+received and you have not added is here, newest first. If nothing has transmitted
 yet the page says it is still searching — which is normal, and the next section
 explains why.
 
 ![The Discovered devices page on a location with one receiver: a toolbar, then a grid of device cards, each with a blue heading giving the model and device key, its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Ignore and Add buttons](images/17-discovery-panel.png)
 
-Each candidate gets a card — one per sensor, not one per receiver that heard it.
+Each candidate gets a card — one per sensor, not one per receiver that received it.
 Cards keep their place as devices transmit, so a card does not move under the
 cursor while you are reading it.
 
 That capture is of a location with a single receiver, which is why the cards
-carry no **Heard by** line and there is no note above them explaining the union:
+carry no **Received by** line and there is no note above them explaining the union:
 with nothing to union, the page does not say so. Add a second receiver and both
 appear.
 
@@ -66,10 +66,10 @@ another, with its channel and subtype when it reports them.
 
 | On the card | What it tells you |
 | --- | --- |
-| **Sightings** | How many times the device has transmitted since Home Assistant started. A real sensor keeps checking in; a bad decode is usually heard once. |
+| **Sightings** | How many times the device has transmitted since Home Assistant started. A real sensor keeps checking in; a bad decode is usually received once. |
 | **Signal** | The signal-to-noise ratio of the most recent message, or its RSSI when no SNR was reported. Only shown when the server reports levels; your own sensors are normally the strongest. |
 | **Last seen** | How long ago the device last transmitted. Hover over it for the exact first and last times. |
-| **Heard by** | Which of this location's receivers have heard it, with each one's signal level. Only shown once the location has more than one receiver, and only receivers that have actually heard the device are listed — so the line tells you which receivers a sensor is in range of. |
+| **Received by** | Which of this location's receivers have received it, with each one's signal level. Only shown once the location has more than one receiver, and only receivers that have actually received a frame from the device are listed — so the line tells you which receivers a sensor is in range of. |
 | **Readings** | The most recent message, shown as the entities adding it would create — `Temperature 21.4 °C`, not `temperature_C: 21.4`. This is usually the quickest way to tell two identical sensors apart. |
 
 The readings are the ones you would actually get. A field the device library
@@ -77,7 +77,7 @@ does not map creates no entity, and one it maps as disabled by default (the
 `SNR`, `RSSI` and `Noise` diagnostics) is not something you would see on the
 device page, so neither is listed here.
 
-Where several receivers have heard the candidate, the readings are simply the
+Where several receivers have received a frame from the candidate, the readings are simply the
 most recent message to arrive from any of them. That is a deliberately simpler
 rule than the one used for a device you have already added: a preview only needs
 the freshest sample, where a recorded value needs the guard against an old frame
@@ -88,7 +88,7 @@ Leave it on *No area* to sort it out later on the device page.
 
 **Add** creates that device and its entities straight away, and starts
 recording history from that point — once, for the location, however many
-receivers heard it. The card stays where it is and turns green, with a link to
+receivers received it. The card stays where it is and turns green, with a link to
 the device that was just created:
 
 ![An Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics](images/02-device-page.png)
@@ -96,7 +96,7 @@ the device that was just created:
 **Ignore** hides the device until you un-ignore it — see [Ignoring
 Devices](#ignoring-devices).
 
-The page is live. A device heard while it is open appears on its own, sighting
+The page is live. A device received while it is open appears on its own, sighting
 counts climb as devices transmit, and nothing needs a reload. So trigger a
 doorbell or open a door sensor and watch it arrive.
 
@@ -118,14 +118,14 @@ ignored — that is a decision, and this is not the control for undoing it.
 ## Signal Coverage
 
 **Signal coverage** answers the question a second receiver is added to answer:
-which receivers hear each device, and how well.
+which receivers receive each device, and how well.
 
-![The Signal coverage page: one card per added device, one row per receiver, each giving that receiver's signal level and how long ago it last heard the device](images/18-coverage.png)
+![The Signal coverage page: one card per added device, one row per receiver, each giving that receiver's signal level and how long ago it last received a frame from the device](images/18-coverage.png)
 
 One card per device you have added, one row per receiver in the location. Each
 row gives that receiver's last signal level for the device and how long ago it
-last heard it, so `-62 dB, 30s ago` next to `-89 dB, 4m ago` tells you which
-receiver is carrying that sensor. A receiver that has never heard the device says
+last received it, so `-62 dB, 30s ago` next to `-89 dB, 4m ago` tells you which
+receiver is carrying that sensor. A receiver that has never received a frame from the device says
 so, and one whose connection is down says that instead — a distinction that
 matters, because "offline" and "online but deaf to this sensor" are different
 problems.
@@ -143,7 +143,7 @@ so you can bookmark it or link someone straight to it, and the back arrow return
 you to the overview.
 
 **Location settings** is the default availability timeout for every device at
-this location, whichever receiver hears it — see
+this location, whichever receiver receives it — see
 [Configuration](configuration.md#reconfigure-vs-configure).
 
 **Receiver settings** is one receiver's own page, reached from its row on the
@@ -204,7 +204,7 @@ instead.
 
 ## Post-Connection Registration
 
-Only devices heard after the integration connects count as live sightings. On
+Only devices received after the integration connects count as live sightings. On
 connect, an rtl_433 server replays its recent backlog. The integration uses
 frame timestamps to tell that replay apart from live traffic: backlog frames
 refresh the values of devices you have already added, but they never put a
@@ -213,7 +213,7 @@ that transmitted while Home Assistant was away.
 
 Each receiver applies that gate to its own stream, before the lists are merged.
 So one receiver reconnecting does not repopulate the location's list with
-everything the *other* receiver already heard and you already dismissed.
+everything the *other* receiver already received and you already dismissed.
 
 A device you have not added appears the first time it transmits after the
 connection. This assumes the rtl_433 servers and Home Assistant have clocks that
@@ -238,7 +238,7 @@ the same model are listed first, since a battery swap does not change the model.
 The button only appears once there is at least one added device the candidate
 could stand in for.
 
-There is one replace to do however many receivers heard the sensor. The device
+There is one replace to do however many receivers received the sensor's frames. The device
 is the location's, so the new id is taken over once and every receiver starts
 feeding the same device again — including the per-receiver signal entities, which
 follow the device across.
@@ -260,7 +260,7 @@ renaming it starts a new history under the new entity id.
 
 The replacement does not have to be added first. The card you start from is a
 device you have not added, which is exactly what a battery-swapped sensor looks
-like; it only has to have been heard once. If it is not on the page yet, wait
+like; it only has to have been received once. If it is not on the page yet, wait
 until it transmits again.
 
 To confirm you are picking the right device, check the **Serial number** on the

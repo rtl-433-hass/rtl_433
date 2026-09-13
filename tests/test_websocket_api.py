@@ -2,7 +2,7 @@
 
 ``custom_components/rtl_433/websocket_api.py`` is the only programmatic route to
 the approval flow: six admin-gated commands that expose what a receiver has
-heard and the three things a user can do about it. The discovery panel is one
+received and the three things a user can do about it. The discovery panel is one
 caller, a script is another, and neither is exercised by the options-flow tests
 in ``tests/test_config_flow.py`` — those drive the *other* surface over the same
 shared :mod:`~custom_components.rtl_433.adoption` service.
@@ -79,7 +79,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 from tests.conftest import build_receiver_subentry, receiver_id, receiver_subentry
 
-# The three devices the receiver hears in the fixture below, spelled out as the
+# The three devices the receiver receives in the fixture below, spelled out as the
 # normalizer derives them from ``model`` + ``id`` so the assertions read the way
 # the panel's table does.
 #
@@ -109,7 +109,7 @@ _NEW_FRAME = {
     "rssi": -3.0,
 }
 
-# A fourth device, heard only by the tests that need a *new* candidate to appear
+# A fourth device, received only by the tests that need a *new* candidate to appear
 # while a subscription is open.
 _EXTRA_KEY = "Bresser-3CH-7"
 _EXTRA_FRAME = {"model": "Bresser-3CH", "id": 7, "temperature_C": 3.5}
@@ -229,11 +229,11 @@ async def _setup_receiver(hass, receiver_entry_builder, **kwargs):
 
 @pytest.fixture
 async def receiver(hass, receiver_entry_builder, no_socket):
-    """A loaded receiver that has heard three devices at four distinct instants.
+    """A loaded receiver that has received three devices at four distinct instants.
 
-    The sightings are frozen a minute apart so "most recently heard first" is a
+    The sightings are frozen a minute apart so "most recently received first" is a
     real ordering rather than an artefact of insertion order, and the newest
-    device is heard twice — a minute apart — so its sighting count is
+    device is received twice — a minute apart — so its sighting count is
     distinguishable from the others' and its ``first_seen`` is provably not its
     ``last_seen``.
     """
@@ -326,7 +326,7 @@ async def test_pending_merges_a_device_two_receivers_heard(
     Two servers in range of the same sensor decode the same transmission, so
     without the merge the panel would offer the device twice and the user would
     have to approve it twice. One row goes out instead, showing the frame that
-    arrived last and naming the receivers that heard it -- which is what lets the
+    arrived last and naming the receivers that received it -- which is what lets the
     page show coverage before anything is added.
     """
     entry = await _setup_receiver(
@@ -355,7 +355,7 @@ async def test_pending_merges_a_device_two_receivers_heard(
     assert reply["success"]
     rows = reply["result"]["pending"]
     assert [row["key"] for row in rows] == [_NEW_KEY]
-    # Each receiver that heard it, in receiver order, with the signal detail the
+    # Each receiver that received it, in receiver order, with the signal detail the
     # add-device page shows before anything is adopted -- the frame carries both
     # levels, and they are kept per receiver rather than unioned away.
     assert [row["receiver_id"] for row in rows[0]["receivers"]] == [
@@ -366,7 +366,7 @@ async def test_pending_merges_a_device_two_receivers_heard(
     assert rows[0]["receivers"][0]["snr"] == 11.5
     assert rows[0]["receivers"][1]["connected"] is True
     assert rows[0]["receivers"][1]["last_seen"] is not None
-    # The location heard it twice, and the row shows the last frame to arrive.
+    # The location received it twice, and the row shows the last frame to arrive.
     assert rows[0]["count"] == 2
     readings = {reading["key"]: reading for reading in rows[0]["readings"]}
     assert readings["power_W"]["value"] == 1600.0
@@ -590,7 +590,7 @@ async def test_replace_repoints_an_existing_device_onto_a_candidate(
 ):
     """The battery-swap recovery, driven from the candidate the user is looking at.
 
-    ``device_key`` is the new transmitter id heard on the air and ``replaces``
+    ``device_key`` is the new transmitter id received on the air and ``replaces``
     is the device already in Home Assistant whose history should survive, which
     is the inverse of :func:`async_replace_device`'s own argument order -- so
     this pins the mapping, not just the outcome. A silent swap of the two would
@@ -700,7 +700,7 @@ async def test_add_creates_only_what_was_asked_for_and_reports_the_rest_skipped(
 
     The rest asserts the add really went all the way: a persisted record in the
     same shape every other write path produces (so a restart rebuilds it),
-    entities in the registry seeded from the frame already heard, and the two
+    entities in the registry seeded from the frame already received, and the two
     devices that were not named left strictly alone.
     """
     client = await hass_ws_client(hass)
@@ -944,10 +944,10 @@ async def test_clear_empties_the_list_without_undoing_any_decision(
 async def test_coverage_reports_each_receivers_signal_with_no_entity_enabled(
     hass, receiver_entry_builder, hass_ws_client, no_socket
 ):
-    """ "Heard by Attic (-62 dB) / Garage (-89 dB)", served from aggregator state.
+    """ "Received by Attic (-62 dB) / Garage (-89 dB)", served from aggregator state.
 
     The union publishes one temperature for a sensor two receivers both decode,
-    which is the point -- but *which* receiver hears it and how strongly is the
+    which is the point -- but *which* receiver receives it and how strongly is the
     question a second receiver was bought to answer. ``rssi`` and ``snr`` are
     mapped ``enabled_by_default: false`` and stay that way, so a page that waited
     for entities would show nothing on a default install. This command reads the
@@ -1011,7 +1011,7 @@ async def test_coverage_answers_for_a_key_nothing_has_heard(
     """An unknown key is answered, not refused: every receiver, all values null.
 
     A panel racing an adoption -- or one asking about a device that has not
-    transmitted since the restart -- wants "nothing has heard that" rather than
+    transmitted since the restart -- wants "nothing has received that" rather than
     an error it has to render in a banner.
     """
     client = await hass_ws_client(hass)
@@ -1159,7 +1159,7 @@ async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribe
 
     The pending list changes continuously by design — that is exactly what makes
     a config-flow form the wrong shape for it — so the panel subscribes instead
-    of polling and a device heard while the page is open appears without a
+    of polling and a device received while the page is open appears without a
     reload. The three membership changes walked here are the three that matter: a
     candidate appearing, one being adopted, and one being ignored. All three go
     out immediately rather than waiting for the coalescing timer, because they are
@@ -1192,7 +1192,7 @@ async def test_subscription_pushes_membership_changes_and_stops_when_unsubscribe
         _OLD_KEY,
     ]
 
-    # A device nobody has heard before transmits.
+    # A device nobody has received before transmits.
     _hear(coordinator, _EXTRA_FRAME)
     await hass.async_block_till_done()
     pushed = await client.receive_json()
@@ -1333,7 +1333,7 @@ def _adopted_snapshot(hass, entry, device_key) -> dict[str, Any]:
     """
     device = _registry_device(hass, entry, device_key)
     assert device is not None
-    # Identity is scoped by the location, not by whichever receiver heard the
+    # Identity is scoped by the location, not by whichever receiver received the
     # device, so the prefix stripped here is the location entry id -- otherwise
     # two locations' snapshots would differ only by the id this helper exists to
     # normalise away. The per-receiver link entities (``rssi`` / ``snr`` /
@@ -1389,7 +1389,7 @@ async def test_adopting_over_the_socket_matches_adopting_from_the_options_flow(
     integrations, and the difference would show up as a missing entity or a wrong
     unit long after the fact.
 
-    Two identical receivers hear the identical frame; one is adopted over the socket
+    Two identical receivers receive the identical frame; one is adopted over the socket
     and the other through the form, and the resulting device metadata, entity set
     (names, device classes, units, categories, enabled-ness) and persisted record
     are compared. This is the mirror of the equivalence check the options flow
@@ -1928,7 +1928,7 @@ async def test_settings_for_an_unknown_device_are_refused(
     """A device key this receiver has never adopted is ``not_found``, not a new record.
 
     Without the check the write would happily create the record, and the receiver
-    would grow a device it has never heard -- from a stale panel, or a typo in a
+    would grow a device it has never received -- from a stale panel, or a typo in a
     script.
     """
     client = await hass_ws_client(hass)

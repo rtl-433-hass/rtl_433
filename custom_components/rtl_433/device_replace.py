@@ -39,7 +39,7 @@ what make one pass enough:
 * **A location may hold several receivers, but they all feed one merged device**
   under one location-scoped identity, so a re-key is a single pass rather than
   one per receiver: there is only ever one device row to re-point, and one entity
-  per mapped field, however many servers heard the sensor.
+  per mapped field, however many servers received the sensor.
 * **The per-receiver link fields (``rssi`` / ``snr`` / ``last_seen``) carry
   through for free.** They are one entity per (sensor x receiver) and their
   ``unique_id`` gains a receiver segment -- but it sits *after* the
@@ -103,7 +103,7 @@ async def async_replace_device(
     and reloads the entry so the platforms rebuild.
 
     ``new_key`` need **not** already exist in ``entry.data[CONF_DEVICES]``: the
-    replacement is normally a *pending* device -- heard but never added, so it has
+    replacement is normally a *pending* device -- received but never added, so it has
     no stored record, no device row and no entities -- and re-keying onto such a
     key is the ordinary battery-swap case, not an edge one (the fold treats a
     missing record as an empty one, and steps 1-3 simply find nothing to free).
@@ -235,11 +235,11 @@ def _fold_devices(
 ) -> dict[str, dict[str, Any]]:
     """Union two locations' adopted-device maps, the target's record winning.
 
-    A device_key both locations adopted is one physical sensor heard by both, and
+    A device_key both locations adopted is one physical sensor received by both, and
     its surviving entity is the target's -- so the target's record (timeout
     override, calibration, motion clear delay, event types) is the one that still
     describes a live entity, and it wins. ``fields`` is the exception and is
-    unioned: the source may have heard a field the target never did, and a field
+    unioned: the source may have received a field the target never did, and a field
     the merged device can produce should not be forgotten because only one
     receiver ever decoded it. ``model`` falls back to the source's when the
     target's record never learned one.

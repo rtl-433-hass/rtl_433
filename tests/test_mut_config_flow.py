@@ -646,7 +646,7 @@ async def test_options_init_shows_menu_with_receiver_and_device(
 ):
     """Options init offers the approval pair first, then the settings steps.
 
-    The order is part of the contract: adding a heard device is the only way one
+    The order is part of the contract: adding a received device is the only way one
     reaches Home Assistant, so it leads, with "ignored devices" beside it as the
     place a user looks for a device that stopped being offered; 'replace' stays
     last as the rarest and most consequential action.
@@ -2868,7 +2868,7 @@ async def test_rebind_preserves_nested_device_and_entity_unique_ids(hass):
     # Seed a nested device + entity exactly as the platforms would: the device is
     # identified by ``{receiver_id}:{device_key}`` and the entity unique_id by
     # ``{receiver_id}:{device_key}:{object_suffix}`` — both scoped by the receiver
-    # that heard the device, never by the radio id a rebind moves.
+    # that received the device, never by the radio id a rebind moves.
     scope = receiver_id(entry)
     dev_reg = dr.async_get(hass)
     ent_reg = er.async_get(hass)

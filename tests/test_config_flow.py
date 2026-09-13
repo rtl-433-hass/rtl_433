@@ -2,7 +2,7 @@
 
 The connectivity check is patched throughout (no sockets are opened). Coverage:
 the receiver user step (success + ``cannot_connect``), the approval steps that turn a
-heard device into a Home Assistant device (``add_devices`` / ``ignored_devices``:
+received device into a Home Assistant device (``add_devices`` / ``ignored_devices``:
 the add / ignore / un-ignore round trip, the conflict rejection, and the empty
 and receiver-not-loaded aborts), the receiver options step (availability timeout persisted
 to ``entry.options``), the device options step (set/clear a per-device
@@ -153,7 +153,7 @@ async def test_user_step_cannot_connect_shows_error(hass):
 # --------------------------------------------------------------------------- #
 # Options flow — add / ignore discovered devices (the approval steps).         #
 # --------------------------------------------------------------------------- #
-# The three devices the receiver hears in the fixtures below. Keys are what the
+# The three devices the receiver receives in the fixtures below. Keys are what the
 # normalizer derives from ``model`` + ``id``; they are spelled out here so the
 # assertions read as the user's picker does.
 PENDING_OLD = "Acurite-606TX-42"
@@ -200,12 +200,12 @@ def _registry_device(hass, entry, device_key):
 
 
 async def _receiver_hearing_three_devices(hass, receiver_entry_builder, **kwargs):
-    """Set up a receiver that has heard three devices at three distinct times.
+    """Set up a receiver that has received three devices at three distinct times.
 
     The sightings are frozen a minute apart so "most recently seen first" is a
     real ordering rather than an artefact of insertion order (a stable sort over
     three identical timestamps would silently pass either way), and the newest
-    device is heard twice so its sighting count is distinguishable from the
+    device is received twice so its sighting count is distinguishable from the
     others'. Only that newest device reports a signal level, which is what makes
     the "omit the level when the device does not report one" branch observable.
     """
@@ -249,7 +249,7 @@ async def test_options_menu_leads_with_the_two_approval_steps(
 ):
     """The menu offers add_devices and ignored_devices, in that order, first.
 
-    Adding a heard device is the only route by which an RF device reaches Home
+    Adding a received device is the only route by which an RF device reaches Home
     Assistant at all, so the pair leads the menu; the settings steps keep their
     established order behind them.
     """
@@ -273,10 +273,10 @@ async def test_options_menu_leads_with_the_two_approval_steps(
 async def test_add_devices_adds_ignores_and_leaves_the_rest_pending(
     hass, receiver_entry_builder, no_socket
 ):
-    """The whole approval workflow: three heard, one added, one ignored, one left.
+    """The whole approval workflow: three received, one added, one ignored, one left.
 
     This is the plan's primary contract in a single walk. Nothing reached the
-    device registry from being heard; after the submit exactly the added device
+    device registry from being received; after the submit exactly the added device
     exists (with its entities and a record in ``entry.data["devices"]``), exactly
     the ignored device is on the persistent ignore list and has no device, and
     the unselected candidate is still waiting to be offered again. The form is
@@ -289,7 +289,7 @@ async def test_add_devices_adds_ignores_and_leaves_the_rest_pending(
     result = await _open_add_devices(hass, entry)
     assert result["step_id"] == "add_devices"
 
-    # Most recently heard first, and both multi-selects offer the same candidates
+    # Most recently received first, and both multi-selects offer the same candidates
     # (one selector serves both fields; only the meaning of a pick differs).
     assert [value for value, _ in _select_options(result, "add")] == [
         PENDING_NEW,
@@ -334,7 +334,7 @@ async def test_add_devices_adds_ignores_and_leaves_the_rest_pending(
     assert set(coordinator.pending) == {PENDING_OLD}
 
     # Only the added device reached the device registry, and it arrived with
-    # entities seeded from the frame that was already heard.
+    # entities seeded from the frame that was already received.
     assert _registry_device(hass, entry, PENDING_NEW) is not None
     assert _device_entity_unique_ids(hass, entry, PENDING_NEW)
     for key in (PENDING_MID, PENDING_OLD):
@@ -1127,7 +1127,7 @@ async def test_replace_target_offers_a_pending_device_and_consumes_it(
     """A battery swap's new identity is *pending*, so replace must still offer it.
 
     This is the regression the approval flow introduces: a sensor that draws a
-    new transmitter id when its batteries are changed is heard under that new id
+    new transmitter id when its batteries are changed is received under that new id
     and nothing more — it is never added automatically — so a candidate set drawn
     only from the stored devices map and the coordinator's adopted runtime state
     would exclude the very device this step exists to adopt. The row is marked
@@ -1159,7 +1159,7 @@ async def test_replace_target_offers_a_pending_device_and_consumes_it(
     )
     assert survivor is not None
 
-    # The swapped sensor checks in under its new id: heard, not added.
+    # The swapped sensor checks in under its new id: received, not added.
     coordinator = _coordinator(hass, entry)
     _hear(coordinator, {"model": REPLACE_MODEL, "id": 9999, "temperature_C": 21.9})
     await hass.async_block_till_done()

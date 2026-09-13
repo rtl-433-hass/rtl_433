@@ -47,7 +47,7 @@
  * `rtl_433/devices/add` / `.../ignore` / `.../unignore` are the three actions,
  * `rtl_433/devices/replace` re-points an existing device onto a candidate, and
  * `rtl_433/devices/coverage` answers the one question the union necessarily
- * hides -- which receiver hears a device, how strongly, how recently.
+ * hides -- which receiver receives a device, how strongly, how recently.
  * None of the adopt/ignore/replace *logic* is reimplemented here; every button
  * is one command call, so this panel cannot drift from what the integration
  * does. The same holds for the four settings pages: `rtl_433/settings/get`
@@ -63,7 +63,7 @@
  * carries both.
  *
  * **Why cards rather than a table.** A candidate is judged on evidence that is
- * not columnar: how often it has been heard, how strong it was, and above all
+ * not columnar: how often it has been received, how strong it was, and above all
  * *what it reports*. A row can hold one truncated line of that; a card holds
  * the readings laid out the way the device's own page will lay them out after
  * adoption, which is the actual question ("is this the sensor on my patio?").
@@ -76,7 +76,7 @@
  *
  * The subscription only pushes when the payload changes, so on an idle location
  * "2s ago" would otherwise stay on screen indefinitely and quietly lie about
- * how long it has been since anything was heard. Re-rendering is cheap because
+ * how long it has been since anything was received. Re-rendering is cheap because
  * rendering reconciles the existing cards rather than rebuilding them.
  *
  * It is also the interval on which the two things nothing pushes are re-asked:
@@ -175,7 +175,7 @@ export const STRINGS = {
   "overview.add_device": "Add or replace device",
   "overview.coverage": "Signal coverage",
   "overview.coverage_description":
-    "Which of this location's receivers hear each device, and how well",
+    "Which of this location's receivers receive each device, and how well",
   "overview.receivers": "Receivers",
   "overview.receiver_supporting": "{host}:{port} — {status}",
   "overview.receiver_connected": "Connected",
@@ -191,7 +191,7 @@ export const STRINGS = {
   "discovered.searching": "Searching for rtl_433 devices…",
   "discovered.hint": "Devices will show up here once discovered.",
   "discovered.union":
-    "Every receiver at this location feeds this one list: a sensor two of them hear is a single card showing whichever heard it last, and adding or ignoring it applies to the whole location.",
+    "Every receiver at this location feeds this one list: a sensor two of them receive is a single card showing whichever received it last, and adding or ignoring it applies to the whole location.",
   "discovered.show_ignored": "Show ignored devices ({count})",
   "discovered.hide_ignored": "Hide ignored devices ({count})",
   "discovered.clear": "Clear discovered devices",
@@ -203,8 +203,8 @@ export const STRINGS = {
   "card.signal": "Signal",
   "card.signal_value": "{value} dB",
   "card.last_seen": "Last seen",
-  "card.heard_by": "Heard by",
-  "card.heard_by_receiver": "{receiver} ({signal})",
+  "card.received_by": "Received by",
+  "card.received_by_receiver": "{receiver} ({signal})",
   "card.seen_tooltip": "First seen {first}\nLast seen {last}",
   "card.open_device": "Open device",
   "card.area": "Area",
@@ -213,12 +213,12 @@ export const STRINGS = {
   "card.replace": "Replace",
   "card.unignore": "Un-ignore",
   "coverage.intro":
-    "How well each receiver hears each device at this location, read from the receivers themselves — no diagnostic entity has to be enabled to see it.",
+    "How well each receiver receives each device at this location, read from the receivers themselves — no diagnostic entity has to be enabled to see it.",
   "coverage.empty":
     "No devices have been added yet. Add one from the discovered devices page, and its coverage will appear here.",
   "coverage.available": "Available",
   "coverage.unavailable": "Unavailable",
-  "coverage.never_heard": "Never heard it",
+  "coverage.never_received": "Never received it",
   "coverage.offline": "This receiver is not connected.",
   "coverage.snr_tooltip": "Signal-to-noise ratio {value} dB",
   "coverage.unknown_receiver": "Unknown receiver",
@@ -242,7 +242,7 @@ export const STRINGS = {
     "{device} ({key}) is new to Home Assistant. If it is a device you already have — the same sensor after a battery change, say — pick it below. Its history, settings and entity ids move across to the new transmitter id, and the candidate is merged into it.",
   "settings.saved": "Settings saved.",
   "settings.location_intro":
-    "Settings for every device at this location, whichever receiver hears it. Individual devices can override the timeout.",
+    "Settings for every device at this location, whichever receiver receives it. Individual devices can override the timeout.",
   "settings.receiver_intro":
     "Settings for one receiver's own radio. Every other receiver at this location keeps its own answer.",
   "settings.device_intro":
@@ -268,7 +268,7 @@ export const STRINGS = {
   "settings.data.scale": "Scale",
   "settings.data.mappings": "Overrides",
   "settings.data_description.availability_mode":
-    "How long a device may go unheard before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
+    "How long a device may go without being received before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
   "settings.data_description.availability_timeout":
     "Applies to every device at this location without an override of its own.",
   "settings.data_description.manage_settings":
@@ -510,7 +510,7 @@ const ICON_MAPPINGS =
  *
  * Drawn here rather than named as `mdi*` constants like the five above, because
  * these two are this file's own shapes: an aerial radiating on both sides for a
- * receiver, and ascending bars for how well it hears. Both are plain path data
+ * receiver, and ascending bars for how well it receives. Both are plain path data
  * with no dependency on which icon set the frontend happens to ship.
  */
 const ICON_RECEIVER_ROW =
@@ -662,12 +662,12 @@ export function formatSignal(t, value) {
 }
 
 /**
- * *"Attic (-62 dB) / Garage (-89 dB)"*: who heard this, and how well.
+ * *"Attic (-62 dB) / Garage (-89 dB)"*: who received this, and how well.
  *
  * The union's one visible seam. A sensor two receivers both hear is a single
  * row on the add-device page, so without this line there is nothing on the page
- * to say that the garage heard it too -- or that the garage heard it at -89 dB
- * while the attic heard it at -62.
+ * to say that the garage received it too -- or that the garage received it at -89 dB
+ * while the attic received it at -62.
  *
  * A receiver that reported no level is named on its own rather than beside an
  * em dash, which reads as a measurement of nothing rather than as an absence of
@@ -678,14 +678,14 @@ export function formatSignal(t, value) {
  * has to be right with one receiver, with three, and with a level missing from
  * any of them.
  */
-export function formatHeardBy(t, receivers, titleFor) {
+export function formatReceivedBy(t, receivers, titleFor) {
   return receivers
     .map((coverage) => {
       const receiver = titleFor(coverage.receiver_id);
       if (coverage.rssi === null || coverage.rssi === undefined) {
         return receiver;
       }
-      return t("card.heard_by_receiver", {
+      return t("card.received_by_receiver", {
         receiver,
         signal: formatSignal(t, coverage.rssi),
       });
@@ -694,7 +694,7 @@ export function formatHeardBy(t, receivers, titleFor) {
 }
 
 /**
- * When a receiver last heard a device, or that it never has.
+ * When a receiver last received a device, or that it never has.
  *
  * `last_seen` is `null` for a receiver that has never decoded this device, and
  * `rtl_433/devices/coverage` lists such a receiver rather than omitting it:
@@ -704,7 +704,7 @@ export function formatHeardBy(t, receivers, titleFor) {
  */
 export function coverageAge(t, coverage, now) {
   if (coverage.last_seen === null || coverage.last_seen === undefined) {
-    return t("coverage.never_heard");
+    return t("coverage.never_received");
   }
   return formatAge(t, coverage.last_seen, now);
 }
@@ -1734,7 +1734,7 @@ class Rtl433Panel extends HTMLElement {
         return delta;
       }
       // A stable tiebreak on the key stops cards swapping places under the
-      // cursor when two devices are first heard in the same millisecond.
+      // cursor when two devices are first received in the same millisecond.
       return left.key < right.key ? -1 : left.key > right.key ? 1 : 0;
     });
   }
@@ -1979,7 +1979,7 @@ class Rtl433Panel extends HTMLElement {
    * below it is meaningless while nothing is listening, and "is it connected?"
    * is the first question anyone opens this page with. It is the location's
    * *merged* answer -- true while any one of its receivers has its socket up --
-   * because that is the condition under which the location can still hear a
+   * because that is the condition under which the location can still receive a
    * sensor. Which of them is up is a row on the receivers card below.
    */
   _buildStatusCard(slot) {
@@ -2365,7 +2365,7 @@ class Rtl433Panel extends HTMLElement {
     // The two list actions are built rather than templated so they can be Home
     // Assistant's buttons. They are appended in the order they read on the page,
     // and both start hidden: one has nothing to reveal until there are ignored
-    // devices, the other nothing to clear until something has been heard.
+    // devices, the other nothing to clear until something has been received.
     this._el.ignoredToggle = haButton("", "ghost ignored-toggle");
     this._el.ignoredToggle.hidden = true;
     this._el.clear = haButton(
@@ -2580,7 +2580,7 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * Fetch this location's coverage: who hears what, and how well.
+   * Fetch this location's coverage: who receives what, and how well.
    *
    * One command, not a subscription, and that is the whole design. Coverage
    * moves on *every decoded frame*, so carrying it on the device subscription
@@ -2639,7 +2639,7 @@ class Rtl433Panel extends HTMLElement {
    *
    * The page the union is legible from. A merged device reports one temperature
    * however many receivers decoded it -- which is the point -- so *which*
-   * receiver hears it, how strongly and how recently has nowhere else to be
+   * receiver receives it, how strongly and how recently has nowhere else to be
    * shown: `rssi` and `snr` are mapped `enabled_by_default: false` and stay
    * that way, and a location would otherwise pay *devices x receivers x 2*
    * disabled entities for a detail most people only glance at.
@@ -2731,15 +2731,15 @@ class Rtl433Panel extends HTMLElement {
 
   _updateCoverageRow(row, coverage, now) {
     this._text(row.nameEl, this._receiverTitle(coverage.receiver_id));
-    // A receiver that has never heard this device is listed rather than left
+    // A receiver that has never received this device is listed rather than left
     // out: "the garage does not hear it" is as much a coverage answer as a weak
     // signal is, and it is the answer someone comparing two receivers is
     // usually looking for. It gets words instead of a level (see `coverageAge`)
     // because there is no level to show beside them.
-    const heard = coverage.last_seen !== null && coverage.last_seen !== undefined;
-    this._text(row.signalEl, heard ? this._formatSignal(coverage.rssi) : "");
+    const received = coverage.last_seen !== null && coverage.last_seen !== undefined;
+    this._text(row.signalEl, received ? this._formatSignal(coverage.rssi) : "");
     this._text(row.ageEl, coverageAge(this._t, coverage, now));
-    row.classList.toggle("never", !heard);
+    row.classList.toggle("never", !received);
     row.classList.toggle("offline", !coverage.connected);
     // Two facts that do not deserve a column each: whether the receiver is
     // reachable at all, and the signal-to-noise ratio behind the level.
@@ -2825,9 +2825,9 @@ class Rtl433Panel extends HTMLElement {
             <span class="stat-value stat-age"></span>
           </div>
         </div>
-        <div class="heard-by" hidden>
-          <span class="stat-label stat-label-heard"></span>
-          <span class="heard-by-list"></span>
+        <div class="received-by" hidden>
+          <span class="stat-label stat-label-received"></span>
+          <span class="received-by-list"></span>
         </div>
         <div class="readings"></div>
         <div class="area"></div>
@@ -2843,8 +2843,8 @@ class Rtl433Panel extends HTMLElement {
       this._t("card.signal");
     element.querySelector(".stat-label-age").textContent =
       this._t("card.last_seen");
-    element.querySelector(".stat-label-heard").textContent =
-      this._t("card.heard_by");
+    element.querySelector(".stat-label-received").textContent =
+      this._t("card.received_by");
     element.querySelector(".device-link").textContent =
       this._t("card.open_device");
     element
@@ -2861,8 +2861,8 @@ class Rtl433Panel extends HTMLElement {
       count: element.querySelector(".stat-count"),
       signal: element.querySelector(".stat-signal"),
       age: element.querySelector(".stat-age"),
-      heard: element.querySelector(".heard-by"),
-      heardList: element.querySelector(".heard-by-list"),
+      received: element.querySelector(".received-by"),
+      receivedList: element.querySelector(".received-by-list"),
       readings: element.querySelector(".readings"),
       area: element.querySelector(".area"),
       link: element.querySelector(".device-link"),
@@ -2921,11 +2921,11 @@ class Rtl433Panel extends HTMLElement {
       })
     );
 
-    this._renderHeardBy(parts, row.receivers || []);
+    this._renderReceivedBy(parts, row.receivers || []);
     this._renderReadings(parts, row.readings || []);
 
     // `areasChanged` alone would only ever populate the cards that existed on
-    // the render the area registry last changed on. A candidate heard while the
+    // the render the area registry last changed on. A candidate received while the
     // panel is open -- the whole point of subscribing -- is created on a render
     // where the registry has not moved, so its `<select>` would stay empty and
     // the user could not give the new device an area at all. An empty select is
@@ -2973,26 +2973,26 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * Name the receivers that heard this candidate, and how well each did.
+   * Name the receivers that received this candidate, and how well each did.
    *
    * The detail comes from the candidate's own coverage rows, which ride the
    * pending payload -- so it costs no extra round trip and no entity: `rssi`
    * and `snr` ship disabled by default, and a user comparing two receivers
    * *before adopting anything* has no entity to enable even if they wanted to.
    *
-   * Hidden outright for a candidate only one receiver heard, where "heard by
-   * Attic" is a line saying nothing. Only receivers that actually heard it are
-   * on the row, so there is no "never heard it" case here -- that one belongs
+   * Hidden outright for a candidate only one receiver received, where "received by
+   * Attic" is a line saying nothing. Only receivers that actually received it are
+   * on the row, so there is no "never received it" case here -- that one belongs
    * to the coverage page, where every receiver is listed.
    */
-  _renderHeardBy(parts, receivers) {
-    parts.heard.hidden = receivers.length < 2;
-    if (parts.heard.hidden) {
+  _renderReceivedBy(parts, receivers) {
+    parts.received.hidden = receivers.length < 2;
+    if (parts.received.hidden) {
       return;
     }
     this._text(
-      parts.heardList,
-      formatHeardBy(this._t, receivers, (receiverId) =>
+      parts.receivedList,
+      formatReceivedBy(this._t, receivers, (receiverId) =>
         this._receiverTitle(receiverId)
       )
     );
@@ -4362,13 +4362,13 @@ const STYLES = `
   }
   .stats { display: flex; flex-wrap: wrap; gap: 16px; }
   /*
-   * Which receivers heard this candidate. A line of its own rather than a
+   * Which receivers received this candidate. A line of its own rather than a
    * fourth stat: it is a sentence of names, not a number, and on a location
    * with three receivers it needs the whole width to wrap into.
    */
-  .heard-by { display: flex; flex-direction: column; }
-  .heard-by[hidden] { display: none; }
-  .heard-by-list { font-size: 14px; overflow-wrap: anywhere; }
+  .received-by { display: flex; flex-direction: column; }
+  .received-by[hidden] { display: none; }
+  .received-by-list { font-size: 14px; overflow-wrap: anywhere; }
   .stat { display: flex; flex-direction: column; }
   .stat-label {
     font-size: 11px;
@@ -4500,7 +4500,7 @@ const STYLES = `
     white-space: nowrap;
     color: var(--secondary-text-color, #727272);
   }
-  /* A receiver that has never heard the device, or is not connected at all. */
+  /* A receiver that has never received the device, or is not connected at all. */
   .coverage-row.never .coverage-age { font-style: italic; }
   .coverage-row.offline .coverage-name { opacity: 0.6; }
   button {

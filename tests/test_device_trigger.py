@@ -73,7 +73,7 @@ async def _setup_button_receiver(hass, receiver_entry_builder):
 def _resolve_device_id(hass: HomeAssistant, receiver) -> str:
     """Resolve the nested RF device's HA ``device_id`` from its identifiers.
 
-    The device's identity is scoped by the *receiver* that heard it, while the
+    The device's identity is scoped by the *receiver* that received it, while the
     registry lookup is scoped by the location entry that owns it -- two different
     ids, which is why both are passed.
     """

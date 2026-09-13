@@ -293,7 +293,7 @@ the panel adds no logic of its own on top of them, so anything it can do, these
 can do.
 
 They are the programmatic form of [Device Discovery](device-discovery.md): see
-what a location has heard, then add, ignore or un-ignore it — and, since the
+what a location has received, then add, ignore or un-ignore it — and, since the
 panel became the integration's configuration page, read and write the location's
 and its receivers' settings too.
 
@@ -309,7 +309,7 @@ A **receiver** is a config subentry of a location: one computer running
 rtl_433, with one radio in it. A location can hold several, and two receivers of
 one location that both decode the same sensor produce **one** device with one set
 of entities — so the candidate is offered once, approved once, and stays
-available while either receiver can still hear it.
+available while either receiver can still receive it.
 
 Every command therefore takes an `entry_id` naming a location. The one command
 that configures a radio takes a `receiver_id` as well — the receiver's
@@ -408,13 +408,13 @@ one.
 
 ### `rtl_433/devices/pending`
 
-Returns the location's discovered devices, most recently heard first, together
+Returns the location's discovered devices, most recently received first, together
 with the keys it is ignoring.
 
 A location can have several receivers, and two of them within range of the same
 sensor decode the same transmission. The list is **merged**: one row per device
-key however many receivers heard it, showing the frame that arrived last and
-naming the receivers that heard it in `receivers`. Adding or ignoring a row
+key however many receivers received it, showing the frame that arrived last and
+naming the receivers that received it in `receivers`. Adding or ignoring a row
 applies to the whole location.
 
 ```json
@@ -487,10 +487,10 @@ The `result`, with four of its six devices left out:
 | `connected` | Whether the location can currently hear anything — true while *any* of its receivers has its socket up. |
 | `key` | The device key: the decoded model plus the id, channel and subtype it reported. This is the id every command below takes. |
 | `model` | The model rtl_433 decoded. |
-| `count` | Sightings since Home Assistant started, summed across the receivers that heard it. The list is memory-only, so this counts from the last restart or reload. |
+| `count` | Sightings since Home Assistant started, summed across the receivers that received it. The list is memory-only, so this counts from the last restart or reload. |
 | `signal` | The most recent message's SNR, or its RSSI when no SNR was reported, in dB. `null` when the server reports no levels (it needs `-M level`). |
-| `first_seen`, `last_seen` | ISO 8601 timestamps: when the location first heard it, and when it last did. |
-| `receivers` | One row per receiver that has heard this candidate, in receiver order — see [coverage rows](#coverage-rows). Only receivers that actually heard it appear; before adoption, "has heard it" is the whole question. |
+| `first_seen`, `last_seen` | ISO 8601 timestamps: when the location first received it, and when it last did. |
+| `receivers` | One row per receiver that has received a frame from this candidate, in receiver order — see [coverage rows](#coverage-rows). Only receivers that actually received it appear; before adoption, "has received it" is the whole question. |
 | `readings` | The most recent message, resolved through the device library into the entities adoption would create. Ordered as a device page orders them: readings first, then diagnostics, alphabetical within each. |
 | `ignored` | One `{"key", "model"}` per ignored device. The model is an empty string for a device ignored while still pending, which is the usual case — nothing is stored about a device that was never added. |
 | `devices` | The devices this location has already adopted, as `{"key", "model"}` — the things a candidate can *replace*. Sent with the candidates so the two cannot come from different snapshots. |
@@ -582,9 +582,9 @@ whenever it changes:
     area decodes constantly, and a push per frame would flood every open
     connection.
 
-    Membership changes — a device heard for the first time on any receiver, or
+    Membership changes — a device received for the first time on any receiver, or
     added, ignored or un-ignored — are pushed immediately, and **once** for the
-    location however many of its receivers heard it.
+    location however many of its receivers received it.
 
     So a client must not count messages to count transmissions, and must not
     assume the counts it holds are current to the second. Read `count` and
@@ -601,7 +601,7 @@ Unsubscribe the standard way, naming the subscription's id:
 Per-receiver signal detail for the devices the location has **already adopted** —
 the A-vs-B comparison the union necessarily hides. A merged device shows one
 temperature however many receivers decoded it, which is the point; *which*
-receiver hears it, how strongly and how recently is what a second receiver was
+receiver receives it, how strongly and how recently is what a second receiver was
 bought to answer.
 
 ```json
@@ -628,7 +628,7 @@ bought to answer.
 ```
 
 `device_keys` is optional and names the devices to report on, in the order given;
-omit it for every adopted device, sorted by key. A key nothing has ever heard is
+omit it for every adopted device, sorted by key. A key nothing has ever received is
 answered rather than refused — every receiver present, all values `null` — so a
 client racing an adoption gets an answer instead of an error.
 
@@ -646,8 +646,8 @@ The same row shape appears in `receivers` here and in each `pending` row:
 | --- | --- |
 | `receiver_id` | The receiver's config-subentry id. |
 | `connected` | Whether that receiver's socket to its rtl_433 server is up right now. |
-| `vouches` | Whether that receiver **is connected and** heard the device within its effective timeout. The merged device is available when at least one receiver vouches — which is why a connected-but-deaf receiver and an offline one with a fresh timestamp are different answers. Always `false` for a *pending* candidate: vouching is about an adopted device's availability. |
-| `last_seen` | When that receiver last heard a real frame from the device, ISO 8601, or `null` if it never has. Not the same as the device's own `last_seen`, which also carries an entity's startup baseline. |
+| `vouches` | Whether that receiver **is connected and** received a frame from the device within its effective timeout. The merged device is available when at least one receiver vouches — which is why a connected-but-deaf receiver and an offline one with a fresh timestamp are different answers. Always `false` for a *pending* candidate: vouching is about an adopted device's availability. |
+| `last_seen` | When that receiver last received a real frame from the device, ISO 8601, or `null` if it never has. Not the same as the device's own `last_seen`, which also carries an entity's startup baseline. |
 | `rssi`, `snr` | The last levels that receiver reported for the device, in dB, or `null` — not every decoder emits them, and the server needs `-M level`. |
 
 These values come from the aggregator's own state, so **no entity has to be
@@ -657,9 +657,9 @@ and stay that way: a location with many sensors would otherwise pay
 at.
 
 In `rtl_433/devices/coverage`, *every* running receiver is listed, including one
-that has never heard the device — "the garage does not hear it" is as much a
+that has never received a frame from the device — "the garage does not receive it" is as much a
 coverage answer as a weak signal is. In a `pending` row, only the receivers that
-actually heard the candidate appear.
+actually received a frame from the candidate appear.
 
 ### `rtl_433/devices/replace`
 
@@ -680,7 +680,7 @@ comes back as `replace_failed` rather than as a failure to retry.
 
 ### `rtl_433/devices/clear`
 
-Forgets every candidate heard so far, across every receiver of the location, so
+Forgets every candidate received so far, across every receiver of the location, so
 the list refills from live traffic and the user can press their doorbell and see
 it alone on the screen. `cleared` counts what was dropped. Nothing is deleted and
 nothing is ignored; devices the user has explicitly ignored stay ignored.
