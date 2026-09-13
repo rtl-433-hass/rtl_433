@@ -54,13 +54,13 @@ Mappings you add in the UI layer **on top of** pyrtl_433:
   wins** (full entry replacement, not a deep merge), so you can correct a
   unit, device class, or transform.
 - A field present only in the UI mapping: it is **added** as a new mapping.
-- `skip_keys` entries in the UI mapping are **unioned** with the shipped skip
+- `skip_keys` entries in the UI mapping are **unioned** with the upstream skip
   list.
 - A `models:` block in the UI mapping is **merged per `(model, field_key)`**: a
-  UI model-scoped entry replaces the shipped one for the same model and field,
-  while other shipped model fields are preserved. Per the
+  UI model-scoped entry replaces the upstream one for the same model and field,
+  while other upstream model fields are preserved. Per the
   [precedence rules](#precedence-specificity-first), a model-scoped entry (from
-  either source) always beats a global one — so a **shipped** `models:` entry
+  either source) always beats a global one — so an **upstream** `models:` entry
   outranks a **UI global** entry for a matching model.
 
 Paste a mapping like the following into the *Device mappings* editor. This
@@ -178,7 +178,7 @@ motion:
 The `clear_delay` attribute (seconds) drives the synthesized off: the sensor
 turns `on` on each detection and is auto-cleared to off after the delay elapses
 with no re-detection. Every fresh detection **reschedules** the timer, so the
-off window restarts on each retrigger. The shipped default is **90 s**.
+off window restarts on each retrigger. The upstream default is **90 s**.
 
 A stale `on` is never restored across a restart (there would be no live timer to
 clear it): the sensor comes back off/unknown until the next detection.
@@ -207,7 +207,7 @@ The class default has two outcomes:
   timeout would eventually misfire and wrongly hide a healthy device. A field is
   event-driven when it uses `platform: event` **or** sets `event_driven: true`
   (e.g. `motion`, `contact_open`, `reed_open`, `closed`, `alarm`). The set is
-  derived from the active library (shipped descriptors plus user mappings).
+  derived from the active library (upstream descriptors plus user mappings).
 - **Periodic** → a finite default (10 min). Everything else — temperature,
   humidity, power, etc. — which reports on a regular cadence.
 
@@ -265,7 +265,7 @@ it maps a **stringified raw value → named `event_type`**. When present:
   rather than only appearing once observed — so a `device_trigger` lists them
   even before the first press.
 
-The doorbell is the shipped example. `secret_knock` is emitted on **every**
+The doorbell is the upstream example. `secret_knock` is emitted on **every**
 press: raw `0` is a regular single press and raw `1` is a "secret knock" (the
 button pressed three times rapidly). It maps both onto Home Assistant's doorbell
 standard:
@@ -281,7 +281,7 @@ secret_knock:
     "1": secret_knock  # custom type for the 3x-rapid "secret knock"
 ```
 
-The shipped `events.yaml` has two examples:
+The upstream `events.yaml` has two examples:
 
 | Field | `device_class` | Notes |
 |-------|----------------|-------|
@@ -340,15 +340,15 @@ single field on a single device is, **highest to lowest**:
 
 1. **Per-device calibration** (commodity + base unit + scale, set in the options
    flow) — applies only to the consumption field(s) of the one calibrated device.
-2. **Model-scoped** entry — UI `models:` entry, else shipped `models:` entry.
-3. **Global** flat entry — UI flat key, else shipped flat key.
+2. **Model-scoped** entry — UI `models:` entry, else upstream `models:` entry.
+3. **Global** flat entry — UI flat key, else upstream flat key.
 4. Unmapped → no entity.
 
 The rule is **specificity-first**: a model-scoped entry always beats a global one
-*regardless of source*. In particular a **shipped** `models:` entry outranks a
+*regardless of source*. In particular an **upstream** `models:` entry outranks a
 **UI global** entry for a matching model. Within each tier the UI mapping beats
 pyrtl_433. (This falls out naturally from the merge: the UI mapping replaces
-the shipped entry *within* a tier, and the lookup checks the model tier before
+the upstream entry *within* a tier, and the lookup checks the model tier before
 the global tier.)
 
 > **No speculative real-meter mappings ship.** Because a meter's consumption
