@@ -2065,10 +2065,11 @@ async def test_async_get_options_flow_is_callable(hass, receiver_entry_builder):
 
 
 def test_config_flow_version():
-    """Config flow VERSION must be exactly 2."""
+    """Config flow VERSION/MINOR_VERSION must be exactly the v3 schema."""
     from custom_components.rtl_433.config_flow import Rtl433ConfigFlow
 
-    assert Rtl433ConfigFlow.VERSION == 2
+    assert Rtl433ConfigFlow.VERSION == 3
+    assert Rtl433ConfigFlow.MINOR_VERSION == 1
 
 
 # ---------------------------------------------------------------------------

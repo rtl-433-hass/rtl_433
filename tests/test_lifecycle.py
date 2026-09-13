@@ -985,12 +985,11 @@ async def test_migration_folds_legacy_device_entries_into_receiver(hass):
     pre = {e.unique_id: e.entity_id for e in (temp_entry, hum_entry, watts_entry)}
 
     # Run setup, which executes ``async_migrate_entry`` for the receiver (and its
-    # children) first. Setup itself does *not* succeed: the folded entry is a v2
-    # receiver entry with no receiver subentry, and the v2 -> v3 conversion that
-    # gives it one is not written yet -- so the entry is refused rather than set
-    # up as a receiver-less shell. Everything asserted below is the fold, which
-    # runs regardless.
-    assert not await hass.config_entries.async_setup(receiver.entry_id)
+    # children) first: the fold, then the v2 -> v3 conversion that turns the
+    # folded entry into a location holding one receiver subentry. Setup then
+    # succeeds, which is the whole point of the conversion -- an entry with no
+    # receiver subentry is refused.
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
     # Only the receiver config entry remains.
@@ -1007,11 +1006,18 @@ async def test_migration_folds_legacy_device_entries_into_receiver(hass):
         # One owner per device, so this also says neither legacy entry owns it.
         assert device.config_entry_id == receiver.entry_id
 
-    # The seeded entities' identities are unchanged: the same unique_ids are what
-    # the platforms rebuild from, and each maps to the same entity_id (so recorder
-    # history carries through). They are *registry rows* only once the entry can
-    # load, which this one cannot until the v2 -> v3 conversion gives it a
-    # receiver, so what is asserted here is the identity, not the row.
+    # The seeded entities are the same *registry rows* after the migration, not
+    # recreated ones: same registry id, same entity_id, same unique_id, now owned
+    # by the location. That is what carries recorder history through, and it only
+    # holds because the re-home moves the entities before it moves their device
+    # -- moving the device first makes Home Assistant delete every entity still
+    # pointing at the old entry.
+    for seeded in (temp_entry, hum_entry, watts_entry):
+        moved = ent_reg.async_get(seeded.entity_id)
+        assert moved is not None, f"{seeded.entity_id} was destroyed by the re-home"
+        assert moved.id == seeded.id
+        assert moved.unique_id == seeded.unique_id
+        assert moved.config_entry_id == receiver.entry_id
     assert set(pre) == {
         f"{receiver_entry_id}:{key_a}:T",
         f"{receiver_entry_id}:{key_a}:H",
@@ -2417,7 +2423,7 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
 
     for receiver in (receiver_a, receiver_b):
         assert await async_migrate_entry(hass, receiver) is True
-        assert receiver.minor_version == 8
+        assert (receiver.version, receiver.minor_version) == (3, 1)
         overrides = receiver.data[CONF_USER_MAPPINGS]
         # Each receiver got its own normalized copy: payload bare on/off -> string keys.
         assert overrides["battery_low"]["payload"] == {"on": "0", "off": "1"}
@@ -2425,10 +2431,10 @@ async def test_migration_seeds_user_mappings_from_legacy_file(
     # The legacy file is left on disk (never deleted by the migration).
     assert os.path.exists(mappings_path)
 
-    # A second migrate call is a no-op: already at minor 8, mappings unchanged.
+    # A second migrate call is a no-op: already at the current schema, mappings unchanged.
     snapshot = dict(receiver_a.data[CONF_USER_MAPPINGS])
     assert await async_migrate_entry(hass, receiver_a) is True
-    assert receiver_a.minor_version == 8
+    assert (receiver_a.version, receiver_a.minor_version) == (3, 1)
     assert receiver_a.data[CONF_USER_MAPPINGS] == snapshot
 
 
@@ -2453,7 +2459,7 @@ async def test_migration_seeds_empty_mappings_when_file_missing(
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
     assert entry.data[CONF_USER_MAPPINGS] == {}
 
 
@@ -2515,7 +2521,7 @@ async def test_migration_disables_existing_last_seen_sensors(
     ).entity_id
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
 
     # The enabled Last-seen sensor is now disabled by the integration.
     assert (
@@ -2529,9 +2535,9 @@ async def test_migration_disables_existing_last_seen_sensors(
         ent_reg.async_get(already_disabled).disabled_by is er.RegistryEntryDisabler.USER
     )
 
-    # A second migrate call is a no-op: already at minor 8.
+    # A second migrate call is a no-op: already at the current schema.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
 
 
 # --------------------------------------------------------------------------- #
@@ -2571,12 +2577,12 @@ async def test_migration_drops_legacy_default_timeout(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
-    # A second migrate call is a no-op: already at minor 8.
+    # A second migrate call is a no-op: already at the current schema.
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2597,7 +2603,7 @@ async def test_migration_minor6_drops_resaved_default_timeout(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2616,7 +2622,7 @@ async def test_migration_keeps_deliberate_timeout(hass, configured):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == configured
 
 
@@ -2628,7 +2634,7 @@ async def test_migration_timeout_no_option_just_bumps_version(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
 
@@ -2643,11 +2649,11 @@ async def test_migration_timeout_minor2_through_to_current(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
     assert CONF_AVAILABILITY_TIMEOUT not in entry.options
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
 
 
 # --------------------------------------------------------------------------- #
@@ -2686,14 +2692,14 @@ async def test_migration_rewrites_persisted_doorbell_event_types(hass):
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
     persisted = entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]
     assert persisted["secret_knock"] == ["ring", "secret_knock"]
 
     # Re-running is a no-op: already-mapped values pass through unchanged.
     snapshot = persisted["secret_knock"]
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
     assert (
         entry.data[CONF_DEVICES][device_key][DEVICE_EVENT_TYPES]["secret_knock"]
         == snapshot
@@ -2754,7 +2760,7 @@ async def test_migration_reenables_last_seen_for_event_driven_devices(hass):
     user_ls = _register_last_seen(user_key, er.RegistryEntryDisabler.USER)
 
     assert await async_migrate_entry(hass, entry) is True
-    assert entry.minor_version == 8
+    assert (entry.version, entry.minor_version) == (3, 1)
 
     # Event-driven + integration-disabled -> re-enabled.
     assert ent_reg.async_get(motion_ls).disabled_by is None
@@ -2879,6 +2885,56 @@ async def test_receiver_entities_are_owned_by_their_receiver(hass):
         # Both receivers mint their own connectivity sensor; four segments keep
         # them apart where the old three-segment template would have collided.
         assert f"{prefix}connectivity" in {entity.unique_id for entity in owned}
+
+
+async def test_two_receivers_expose_two_complete_non_colliding_control_sets(hass):
+    """Each receiver in a location gets its own full set of receiver-owned entities.
+
+    The v2 template ``f"{entry_id}:hub:{suffix}"`` was scoped to the config entry,
+    so two receivers under one location would have minted identical unique_ids
+    and Home Assistant would have silently dropped the second set — no radio
+    controls, no noise sensors and no connectivity for the second server. The
+    receiver segment is what prevents that, and this asserts the outcome rather
+    than the template: two identical suffix sets, spanning every platform, on two
+    disjoint sets of unique_ids.
+    """
+    location = await _setup_two_receivers(hass)
+    ent_reg = er.async_get(hass)
+
+    per_receiver: list[dict[str, set[str]]] = []
+    for index in (0, 1):
+        prefix = f"{receiver_scope(location, index)}:"
+        owned: dict[str, set[str]] = {}
+        for entity in ent_reg.entities.values():
+            if entity.platform == DOMAIN and entity.unique_id.startswith(prefix):
+                owned.setdefault(entity.domain, set()).add(
+                    entity.unique_id[len(prefix) :]
+                )
+        per_receiver.append(owned)
+
+    # Both receivers expose the same entities -- neither set was dropped or
+    # truncated by the other's registration.
+    assert per_receiver[0] == per_receiver[1]
+    # And the set is the complete one: radio controls across all three control
+    # platforms, the noise diagnostics, and the connectivity sensor.
+    assert per_receiver[0]["number"] >= {"center_frequency", "sample_rate", "gain"}
+    assert per_receiver[0]["select"] >= {"conversion_mode"}
+    assert per_receiver[0]["switch"] >= {"gain_auto"}
+    assert per_receiver[0]["sensor"] >= {"noise_level", "min_level"}
+    assert per_receiver[0]["binary_sensor"] == {"connectivity"}
+
+    # Non-colliding: the registry keys a row by (entity domain, platform,
+    # unique_id), so that pair is what two receivers must not share. Two rows per
+    # control, never one shared row.
+    scopes = [receiver_scope(location, index) for index in (0, 1)]
+    ids = [
+        (entity.domain, entity.unique_id)
+        for entity in ent_reg.entities.values()
+        if entity.platform == DOMAIN
+        and any(entity.unique_id.startswith(f"{scope}:") for scope in scopes)
+    ]
+    assert len(ids) == len(set(ids))
+    assert len(ids) == 2 * sum(len(v) for v in per_receiver[0].values())
 
 
 async def test_rf_device_entities_are_owned_by_the_location_not_a_receiver(hass):
@@ -3016,3 +3072,36 @@ async def test_removing_a_receiver_stops_its_coordinator(hass):
     assert doomed not in hass.data[DOMAIN]
     assert [s.subentry_id for s in receiver_subentries(location)] == [survivor]
     assert hass.data[DOMAIN][survivor].host == "attic.local"
+
+
+async def test_removing_the_last_receiver_removes_its_location(hass):
+    """A location cannot outlive its last receiver.
+
+    ``async_setup_entry`` refuses a receiver-less entry, and Home Assistant
+    offers no hook to refuse the subentry removal itself (``async_remove_subentry``
+    is a plain callback with no veto), so the location follows the receiver out
+    rather than lingering as a shell that can never load again.
+    """
+    location = await _setup_two_receivers(hass)
+    first, second = list(location.subentries)
+
+    hass.config_entries.async_remove_subentry(location, first)
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_get_entry(location.entry_id) is not None
+
+    hass.config_entries.async_remove_subentry(location, second)
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_get_entry(location.entry_id) is None
+
+
+async def test_removing_one_of_two_receivers_keeps_the_location(hass):
+    """Removing a non-final receiver leaves the location and its other receiver."""
+    location = await _setup_two_receivers(hass)
+    first, second = list(location.subentries)
+
+    hass.config_entries.async_remove_subentry(location, first)
+    await hass.async_block_till_done()
+
+    kept = hass.config_entries.async_get_entry(location.entry_id)
+    assert kept is not None
+    assert set(kept.subentries) == {second}

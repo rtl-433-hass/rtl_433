@@ -1739,12 +1739,12 @@ class TestMigrateReceiverEntry:
 class TestAsyncMigrateEntry:
     """Fine-grained tests for async_migrate_entry minor version gates."""
 
-    async def test_version_greater_than_2_returns_false(self, hass):
-        """Version > 2 returns False immediately."""
+    async def test_version_greater_than_3_returns_false(self, hass):
+        """Version > 3 returns False immediately."""
         entry = MockConfigEntry(
             domain=DOMAIN,
             title="future",
-            version=3,
+            version=4,
             data={CONF_HOST: "h", CONF_PORT: 8433, CONF_PATH: "/ws"},
         )
         entry.add_to_hass(hass)
@@ -1787,7 +1787,7 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         assert CONF_USER_MAPPINGS in entry.data
-        assert entry.minor_version >= 2
+        assert (entry.version, entry.minor_version) == (3, 1)
 
     async def test_minor_version_2_already_at_2_skips_mappings_seed(self, hass):
         """Entry already at minor 2 skips the user-mappings seed step."""
@@ -1862,7 +1862,7 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         assert CONF_AVAILABILITY_TIMEOUT not in entry.options
-        assert entry.minor_version >= 4
+        assert (entry.version, entry.minor_version) == (3, 1)
 
     async def test_minor_version_4_preserves_custom_timeout(self, hass):
         """Minor 3 → 4 preserves non-default timeout option."""
@@ -1908,7 +1908,7 @@ class TestAsyncMigrateEntry:
         result = await async_migrate_entry(hass, entry)
 
         assert result is True
-        assert entry.minor_version >= 4
+        assert (entry.version, entry.minor_version) == (3, 1)
 
     async def test_minor_version_5_rewrites_doorbell_event_types(self, hass):
         """Minor 4 → 5 rewrites raw doorbell event_types."""
@@ -1941,7 +1941,7 @@ class TestAsyncMigrateEntry:
         assert "secret_knock" in event_types[_DOORBELL_FIELD_KEY]
         assert "0" not in event_types[_DOORBELL_FIELD_KEY]
         assert "1" not in event_types[_DOORBELL_FIELD_KEY]
-        assert entry.minor_version >= 5
+        assert (entry.version, entry.minor_version) == (3, 1)
 
     async def test_minor_version_6_enables_event_driven_last_seen(self, hass):
         """Minor 5 → 6 re-enables integration-disabled last_seen for event-driven."""
@@ -1976,7 +1976,7 @@ class TestAsyncMigrateEntry:
         result = await async_migrate_entry(hass, entry)
 
         assert result is True
-        assert entry.minor_version >= 6
+        assert (entry.version, entry.minor_version) == (3, 1)
         updated = ent_reg.async_get(ent.entity_id)
         assert updated.disabled_by is None
 
@@ -2028,7 +2028,7 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         assert CONF_AVAILABILITY_TIMEOUT not in entry.options
-        assert entry.minor_version >= 7
+        assert (entry.version, entry.minor_version) == (3, 1)
         # The drop is announced with the dropped value and the receiver title — pins the
         # interpolated log args (a bare "version bumped" log would not mention them).
         assert any(
@@ -2125,7 +2125,7 @@ class TestAsyncMigrateEntry:
         assert device.version == 2
         assert device.minor_version == 2
 
-    async def test_v1_receiver_entry_bumped_to_version_2(self, hass):
+    async def test_v1_receiver_entry_bumped_to_version_3(self, hass):
         """A v1 receiver entry is bumped to version=2 after migration."""
         receiver_id = "receiver-id-1"
         receiver = MockConfigEntry(
@@ -2149,7 +2149,7 @@ class TestAsyncMigrateEntry:
             result = await async_migrate_entry(hass, receiver)
 
         assert result is True
-        assert receiver.version == 2
+        assert receiver.version == 3
 
     async def test_legacy_default_timeout_600_is_dropped(self, hass):
         """Specifically LEGACY_DEFAULT_AVAILABILITY_TIMEOUT (600) is dropped."""
@@ -2241,8 +2241,7 @@ class TestAsyncMigrateEntry:
             result = await async_migrate_entry(hass, entry)
 
         assert result is True
-        assert entry.version == 2
-        assert entry.minor_version == 8
+        assert (entry.version, entry.minor_version) == (3, 1)
 
     async def test_v2_minor_4_goes_through_steps_4_to_8(self, hass):
         """Version 2, minor 4 skips steps 2 and 3, does 4, 5, 6, 7, 8."""
@@ -2267,7 +2266,7 @@ class TestAsyncMigrateEntry:
 
         assert result is True
         mock_read.assert_not_called()
-        assert entry.minor_version == 8
+        assert (entry.version, entry.minor_version) == (3, 1)
 
     async def test_v1_device_without_receiver_id_still_returns_true(self, hass):
         """A v1 device entry with no CONF_RECEIVER_ENTRY_ID still returns True."""
@@ -3540,9 +3539,8 @@ class TestKillSurvivingMutants:
         ):
             await async_migrate_entry(hass, entry)
 
-        # Final result: version=2, minor_version=8
-        assert entry.version == 2
-        assert entry.minor_version == 8
+        # Final result: the current schema, version=3, minor_version=1
+        assert (entry.version, entry.minor_version) == (3, 1)
 
         # Check the first update call (for minor 2) had correct version/minor
         calls = update_spy.call_args_list
@@ -3850,7 +3848,7 @@ class TestKillSurvivingMutants:
         # Step 4 skipped: no update call bumped the entry to minor 4. If <= 4 or
         # < 5 were used, the step would re-run and emit a minor-4 bump.
         assert [u for u in updates if u.get("minor_version") == 4] == []
-        assert entry.minor_version == 8
+        assert (entry.version, entry.minor_version) == (3, 1)
 
     async def test_migrate_entry_minor_5_skipped_when_at_5(self, hass):
         """Minor 5 step is skipped when minor_version is already 5.

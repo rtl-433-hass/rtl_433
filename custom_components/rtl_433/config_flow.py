@@ -432,8 +432,8 @@ class ReceiverSubentryFlowHandler(ConfigSubentryFlow):
 class Rtl433ConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle setup of an rtl_433 location (one config entry per location)."""
 
-    VERSION = 2
-    MINOR_VERSION = 8
+    VERSION = 3
+    MINOR_VERSION = 1
 
     # Connection params carried from ``async_step_hassio`` into the confirm step.
     _discovery: dict[str, Any] | None = None

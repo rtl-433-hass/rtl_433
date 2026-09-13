@@ -1410,11 +1410,11 @@ async def test_update_listener_no_coordinator_returns_early(
 
 
 async def test_migrate_entry_returns_false_for_future_version(hass):
-    """Version > 2 (future schema) is unsupported and returns False."""
+    """Version > 3 (future schema) is unsupported and returns False."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="future receiver",
-        version=3,
+        version=4,
         data={CONF_HOST: "h", CONF_PORT: 8433, CONF_PATH: "/ws"},
     )
     entry.add_to_hass(hass)
@@ -1443,8 +1443,8 @@ async def test_migrate_entry_v2_returns_true_immediately(hass):
     assert result is True
 
 
-async def test_migrate_entry_v1_receiver_bumps_version_to_2(hass):
-    """Migrating a v1 receiver entry bumps its version to 2."""
+async def test_migrate_entry_v1_receiver_bumps_version_to_3(hass):
+    """Migrating a v1 receiver entry walks the whole ladder to version 3."""
     receiver = MockConfigEntry(
         domain=DOMAIN,
         title="receiver v1",
@@ -1460,7 +1460,7 @@ async def test_migrate_entry_v1_receiver_bumps_version_to_2(hass):
 
     result = await async_migrate_entry(hass, receiver)
     assert result is True
-    assert receiver.version == 2
+    assert receiver.version == 3
 
 
 async def test_migrate_entry_v1_device_bumps_version_to_2(hass):
