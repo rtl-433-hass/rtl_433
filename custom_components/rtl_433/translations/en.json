@@ -337,6 +337,8 @@
     "title": "rtl_433",
     "view": {
       "discovered": "Discovered devices",
+      "coverage": "Signal coverage",
+      "location_settings": "Location settings",
       "receiver_settings": "Receiver settings",
       "device_settings": "Device settings",
       "mappings": "Device mappings"
@@ -351,7 +353,7 @@
     },
     "status": {
       "no_receivers": "No rtl_433 receivers are configured.",
-      "waiting_for_reload": "Waiting for the receiver to reload…",
+      "waiting_for_reload": "Waiting for the location to reload…",
       "online": "Online",
       "connecting": "Connecting…",
       "problem": "Problem"
@@ -369,13 +371,21 @@
         "other": "{count} entities"
       },
       "add_device": "Add or replace device",
-      "receiver_settings_description": "Availability timeout and whether Home Assistant manages the receiver",
+      "coverage": "Signal coverage",
+      "coverage_description": "Which of this location's receivers hear each device, and how well",
+      "receivers": "Receivers",
+      "receiver_supporting": "{host}:{port} — {status}",
+      "receiver_connected": "Connected",
+      "receiver_disconnected": "Not connected",
+      "location_settings_description": "The availability timeout every device at this location starts from",
+      "receiver_settings_description": "Whether Home Assistant manages this receiver's own radio",
       "device_settings_description": "Per-device timeout overrides and utility-meter calibration",
       "mappings_description": "YAML overrides for how fields become entities"
     },
     "discovered": {
       "searching": "Searching for rtl_433 devices…",
       "hint": "Devices will show up here once discovered.",
+      "union": "Every receiver at this location feeds this one list: a sensor two of them hear is a single card showing whichever heard it last, and adding or ignoring it applies to the whole location.",
       "show_ignored": "Show ignored devices ({count})",
       "hide_ignored": "Hide ignored devices ({count})",
       "clear": "Clear discovered devices",
@@ -389,6 +399,8 @@
       "signal": "Signal",
       "signal_value": "{value} dB",
       "last_seen": "Last seen",
+      "heard_by": "Heard by",
+      "heard_by_receiver": "{receiver} ({signal})",
       "seen_tooltip": "First seen {first}\nLast seen {last}",
       "open_device": "Open device",
       "area": "Area",
@@ -396,6 +408,16 @@
       "ignore": "Ignore",
       "replace": "Replace",
       "unignore": "Un-ignore"
+    },
+    "coverage": {
+      "intro": "How well each receiver hears each device at this location, read from the receivers themselves — no diagnostic entity has to be enabled to see it.",
+      "empty": "No devices have been added yet. Add one from the discovered devices page, and its coverage will appear here.",
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "never_heard": "Never heard it",
+      "offline": "This receiver is not connected.",
+      "snr_tooltip": "Signal-to-noise ratio {value} dB",
+      "unknown_receiver": "Unknown receiver"
     },
     "age": {
       "seconds": "{count}s ago",
@@ -419,10 +441,11 @@
     },
     "settings": {
       "saved": "Settings saved.",
-      "receiver_intro": "Settings for this receiver as a whole. Individual devices can override the timeout.",
-      "device_intro": "Overrides for one device. Blank means “use the receiver's setting”.",
+      "location_intro": "Settings for every device at this location, whichever receiver hears it. Individual devices can override the timeout.",
+      "receiver_intro": "Settings for one receiver's own radio. Every other receiver at this location keeps its own answer.",
+      "device_intro": "Overrides for one device. Blank means “use the location's setting”.",
       "device_empty": "No devices have been added yet. Add one from this page first, and its settings will appear here.",
-      "mappings_intro": "YAML overrides for how this receiver's fields become entities. Clearing the editor removes them all.",
+      "mappings_intro": "YAML overrides for how this location's fields become entities. Clearing the editor removes them all.",
       "documentation": "Documentation",
       "seconds": "seconds",
       "label_with_unit": "{label} ({unit})",
@@ -434,7 +457,7 @@
       "data": {
         "availability_mode": "Availability timeout",
         "availability_timeout": "Timeout",
-        "manage_settings": "Manage the receiver's own settings",
+        "manage_settings": "Manage this receiver's radio",
         "device_key": "Device",
         "timeout_override": "Availability timeout override",
         "motion_clear_delay": "Motion clear delay",
@@ -445,9 +468,9 @@
       },
       "data_description": {
         "availability_mode": "How long a device may go unheard before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
-        "availability_timeout": "Applies to every device without an override of its own.",
-        "manage_settings": "Adds frequency, gain and sample-rate entities to this receiver's device page.",
-        "timeout_override": "Blank uses the receiver's timeout. 0 means never expire.",
+        "availability_timeout": "Applies to every device at this location without an override of its own.",
+        "manage_settings": "Adds frequency, gain and sample-rate entities for this receiver's radio.",
+        "timeout_override": "Blank uses the location's timeout. 0 means never expire.",
         "motion_clear_delay": "How long after a detection this device is reported clear. Blank uses {motion_clear_delay} seconds.",
         "commodity": "Setting a commodity turns this device's counter into an Energy-dashboard sensor. “none” leaves it as the library describes it.",
         "unit": "One unit of what the counter counts.",

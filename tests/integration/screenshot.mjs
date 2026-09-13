@@ -4,23 +4,32 @@
 // up, HA onboarding is seeded (ha-onboard.mjs), and the WebSocket is emitting
 // JSON (verified with ws-probe.mjs).
 //
-// Captured shots: 06 (empty config-flow form), 17 (the panel, live and
-// populated), 16 (the ignored-devices section), 09 (integration overview / docs
-// home hero), 02 (device page), 11 (doorbell event entity), 07 (Receiver
-// settings dialog), 05 (Device mappings editor), 08 (Device settings dialog),
-// 10 (device page with the signal-diagnostic sensors enabled and populated),
-// 14 (the receiver device's Diagnostic card with the radio-noise sensors),
-// 04 (unavailable). The doorbell / energy meter / door / leak devices come from
-// ws-bridge replaying tests/fixtures.
+// Captured shots: 06 (empty config-flow form), 17 (the panel's union
+// add-device page, live and populated), 16 (the ignored-devices section), 09
+// (integration overview / docs home hero), 02 (device page), 11 (doorbell event
+// entity), 07 (Location settings and one receiver's radio settings), 18 (the
+// signal-coverage page), 05 (Device mappings editor), 08 (Device settings
+// dialog), 10 (device page with the signal-diagnostic sensors enabled and
+// populated), 14 (a receiver device's Diagnostic card with the radio-noise
+// sensors), 04 (unavailable). The doorbell / energy meter / door / leak devices
+// come from ws-bridge replaying tests/fixtures.
 //
-// **Everything but the config flow is now driven through the panel.** The receiver
-// entry registers it with `config_panel_domain`, so Configure on the entry opens
-// `/rtl_433` and there is no options dialog to drive: adding, ignoring,
-// un-ignoring, receiver settings, device settings and device mappings are all
-// controls inside the panel's shadow root, reached through `inPanel` below. A
-// stage that finds no dialog says so loudly rather than capturing whatever page
-// it landed on -- a settings form with no entry point is exactly the break this
-// harness exists to catch.
+// **Everything but the config flow is now driven through the panel.** The
+// location entry registers it with `config_panel_domain`, so Configure on the
+// entry opens `/rtl_433` and there is no options dialog to drive: adding,
+// ignoring, un-ignoring, the location's settings, one receiver's radio
+// settings, device settings and device mappings are all controls inside the
+// panel's shadow root, reached through `inPanel` below. A stage that finds no
+// form says so loudly rather than capturing whatever page it landed on -- a
+// settings form with no entry point is exactly the break this harness exists to
+// catch.
+//
+// The panel speaks the location model: `rtl_433/receivers` answers with
+// locations, each naming the receivers inside it, and every other command names
+// a location by `entry_id` -- with `rtl_433/settings/receiver` naming a
+// receiver as well, because the manage-radio toggle is per receiver while the
+// availability timeout is per location. That split is why there are two
+// settings captures below where there used to be one.
 //
 // Stages (STAGE env var):
 //   add      - log in, add the rtl_433 receiver via the config flow (host=wsbridge).
@@ -30,10 +39,11 @@
 //              leak detector to capture the ignored section, then un-ignores it
 //              and adds every device the later shots need (approveDevices). It
 //              then captures the integration overview and the device page; opens
-//              Receiver settings, sets a low availability timeout (15s) so the
-//              unavailable stage is fast and captures the dialog; then Device
-//              mappings with an example override, Device settings against the
-//              gas meter, and the per-device signal diagnostics.
+//              Location settings, sets a low availability timeout (15s) so the
+//              unavailable stage is fast and captures the page; captures one
+//              receiver's radio settings and the signal-coverage page; then
+//              Device mappings with an example override, Device settings
+//              against the gas meter, and the per-device signal diagnostics.
 //   approve  - re-capture only the approval / ignored-devices shots against an
 //              already-running harness; for iterating.
 //   panel    - re-capture only the panel itself against an already-running
@@ -42,8 +52,11 @@
 //              timeout) capture the device page with all entities Unavailable.
 //   device   - re-capture only the Device settings dialog against an
 //              already-running harness (receiver already added); for iterating.
-//   receiver      - re-capture only the Receiver settings and Device mappings
-//              dialogs against an already-running harness; for iterating.
+//   coverage - re-capture only the signal-coverage page against an
+//              already-running harness (devices already added); for iterating.
+//   receiver      - re-capture only the Location settings, Receiver settings
+//              and Device mappings pages against an already-running harness;
+//              for iterating.
 //   receivernoise - re-capture only the receiver Diagnostic card (radio-noise sensors)
 //              against an already-running harness; for iterating.
 //   full     - add, then unavail (the orchestrator stops replay in between).
@@ -193,12 +206,21 @@ async function addReceiverAndCapture(page) {
     console.log("screenshot: doorbell device not present; skipping 11-event-entity.png");
   }
 
-  // --- Receiver settings: lower the availability timeout, then save --------
-  // Captured from the panel's own dialog, which is where these settings live
+  // --- Location settings: lower the availability timeout, then save --------
+  // Captured from the panel's own page, which is where these settings live
   // now: the config entry's Configure control opens the panel, so there is no
   // options form to drive. Lowering the timeout here is also what makes the
   // later unavailable stage fast.
+  await captureLocationSettings(page);
+
+  // --- One receiver's radio settings ---------------------------------------
+  // The other half of the split: per receiver, not per location.
   await captureReceiverSettings(page);
+
+  // --- Signal coverage ------------------------------------------------------
+  // Run after approveDevices, which is what gives the page devices to report
+  // on: coverage is about adopted devices, and a pending candidate has none.
+  await captureCoverage(page);
 
   // --- Device mappings editor ----------------------------------------------
   // Pre-fill the editor with an example override and capture it. NOT saved --
@@ -281,7 +303,7 @@ async function openPanel(page, { cards = 1, tries = 30, path = "" } = {}) {
 // forms have lost their entry point, which is the failure mode this page
 // exists to avoid -- so it is said loudly rather than captured blank.
 async function openPanelSettings(page, rowClass) {
-  // The rows are not in the skeleton: they are built once `rtl_433/hubs`
+  // The rows are not in the skeleton: they are built once `rtl_433/receivers`
   // answers. Clicking before then would be a click on `null`, and the
   // TypeError would come back out of `page.evaluate` and abort the whole run
   // with a stack trace -- instead of the warning below, which is the thing
@@ -474,12 +496,19 @@ async function capturePanel(page) {
   const api = await page.evaluate(async () => {
     const hass = document.querySelector("home-assistant")?.hass;
     if (!hass) return { error: "no hass on page" };
-    const receivers = await hass.callWS({ type: "rtl_433/hubs" });
-    const entryId = receivers.hubs?.[0]?.entry_id;
+    // `rtl_433/receivers` answers with locations, each naming the receivers
+    // inside it; every other command names a location by `entry_id`.
+    const receivers = await hass.callWS({ type: "rtl_433/receivers" });
+    const entryId = receivers.locations?.[0]?.entry_id;
     const pending = entryId
       ? await hass.callWS({ type: "rtl_433/devices/pending", entry_id: entryId })
       : null;
-    return { receivers, pending };
+    // Coverage is a one-shot command rather than part of the subscription, and
+    // the payload docs quote it, so it is dumped from the same live location.
+    const coverage = entryId
+      ? await hass.callWS({ type: "rtl_433/devices/coverage", entry_id: entryId })
+      : null;
+    return { receivers, pending, coverage };
   });
   console.log("screenshot: api -> " + JSON.stringify(api));
 
@@ -722,21 +751,24 @@ async function enableAndCaptureDiagnostics(page) {
   await shot(page, "10-diagnostics.png");
 }
 
-// Capture the receiver-settings dialog and lower the availability timeout.
+// Capture the location-settings page and lower the availability timeout.
 //
-//   07-receiver-settings.png  the receiver's own settings: default availability
-//                        timeout and the managed-settings toggle
+//   07-location-settings.png  the settings every device at the location starts
+//                        from: the availability-timeout choice
 //
 // The timeout is lowered to SHORT_TIMEOUT as a side effect, which is what makes
-// the later unavailable stage finish in under a minute instead of ten.
-async function captureReceiverSettings(page) {
+// the later unavailable stage finish in under a minute instead of ten. It lives
+// on the location page now: it is one answer for every device here, whichever
+// receiver hears it, which is exactly why it is no longer on the same form as
+// the per-receiver manage-radio toggle.
+async function captureLocationSettings(page) {
   await openPanel(page, { cards: 0 });
-  if (!(await openPanelSettings(page, ".open-receiver-settings"))) {
+  if (!(await openPanelSettings(page, ".open-location-settings"))) {
     return;
   }
-  await shot(page, "07-receiver-settings.png");
+  await shot(page, "07-location-settings.png");
   console.log(
-    "screenshot: receiver settings -> " +
+    "screenshot: location settings -> " +
       JSON.stringify(
         await inPanel(
           page,
@@ -759,9 +791,72 @@ async function captureReceiverSettings(page) {
         ),
       ),
   );
-  // Saving the receiver form does not reload the entry (the timeout applies live), but
-  // the panel re-subscribes regardless; give it a moment to settle.
+  // Saving the location form does not reload the entry (the timeout applies
+  // live), but the panel re-subscribes regardless; give it a moment to settle.
   await page.waitForTimeout(4000);
+}
+
+// Capture one receiver's own radio settings, reached from the receivers card.
+//
+//   07-receiver-settings.png  one receiver's radio: the manage-radio toggle,
+//                        headed by the receiver it belongs to
+//
+// A page per receiver, because a location's receivers each answer this for
+// themselves -- an attic radio that is Home Assistant's to drive and a garage
+// radio shared with a neighbour cannot share one toggle. Nothing is saved here:
+// flipping it reloads the location and would change every device-page shot that
+// follows.
+async function captureReceiverSettings(page) {
+  await openPanel(page, { cards: 0 });
+  if (!(await openPanelSettings(page, ".open-receiver-settings"))) {
+    return;
+  }
+  await shot(page, "07-receiver-settings.png");
+  console.log(
+    "screenshot: receiver settings -> " +
+      JSON.stringify(
+        await inPanel(
+          page,
+          `(panel) => ({
+            path: window.location.pathname,
+            subject: panel.shadowRoot.querySelector(".settings-subject")
+              ?.textContent,
+            data: panel._settingsData,
+          })`,
+        ),
+      ),
+  );
+}
+
+// Capture the signal-coverage page: which receiver hears each merged device.
+//
+//   18-coverage.png  one card per adopted device, one row per receiver, with
+//                    the level and the age each one last heard it at
+//
+// The page the union is legible from, and the reason it exists at all: a merged
+// device reports one temperature however many receivers decoded it, and `rssi`
+// / `snr` ship disabled by default -- so without this page the A-vs-B
+// comparison a second receiver was bought for cannot be seen anywhere. It is
+// fed by `rtl_433/devices/coverage`, a one-shot command rather than part of the
+// subscription, so the page asks when it opens and again on its clock.
+async function captureCoverage(page) {
+  await openPanel(page, { cards: 0, path: "coverage" });
+  // The cards cannot be drawn until the command answers, which is a round trip
+  // after the view is already on screen.
+  let cards = 0;
+  for (let i = 0; i < 15 && cards === 0; i++) {
+    await page.waitForTimeout(2000);
+    cards = await inPanel(
+      page,
+      `(panel) => panel.shadowRoot.querySelectorAll(".coverage-card").length`,
+    );
+  }
+  console.log("screenshot: coverage cards -> " + cards);
+  if (!cards) {
+    console.log("screenshot: no coverage to show; skipping 18-coverage.png");
+    return;
+  }
+  await shot(page, "18-coverage.png");
 }
 
 // Capture the device-settings dialog against the replayed gas meter:
@@ -865,9 +960,14 @@ async function run() {
       // running harness (receiver already added, devices still pending). Not part of
       // the full pipeline.
       await approveDevices(page);
+    } else if (STAGE === "coverage") {
+      // Iterate only the signal-coverage page against an already running
+      // harness (devices already added). Not part of the full pipeline.
+      await captureCoverage(page);
     } else if (STAGE === "receiver") {
-      // Iterate only the receiver-settings and device-mappings dialogs against
-      // an already running harness. Not part of the full pipeline.
+      // Iterate only the settings pages against an already running harness.
+      // Not part of the full pipeline.
+      await captureLocationSettings(page);
       await captureReceiverSettings(page);
       await captureMappings(page);
     } else if (STAGE === "diagnostics") {
