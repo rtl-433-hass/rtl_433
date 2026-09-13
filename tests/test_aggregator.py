@@ -1479,6 +1479,40 @@ async def test_the_candidate_cap_is_enforced_on_the_merged_list(hass):
     assert f"Noise-b{each - 1}" in garage.pending
 
 
+async def test_an_evicted_candidate_says_so_in_the_log(hass, caplog):
+    """The merged eviction names the key it dropped and the cap that forced it.
+
+    A candidate that disappears from the add-device page with nothing in the log
+    is indistinguishable from one that was never heard, which is the first thing
+    a "my sensor never shows up" report has to rule out -- and the *merged*
+    eviction is the one with no other explanation, because neither receiver is
+    anywhere near its own ceiling here. The record is matched to
+    ``aggregator.py`` for exactly that reason: each coordinator logs the same
+    sentence for its own per-receiver cap.
+    """
+    caplog.set_level(logging.DEBUG, logger="custom_components.rtl_433")
+    location = await _setup_two_receivers(hass)
+    attic, garage = _coordinators(hass, location)
+    each = 300
+
+    _heard(attic, key="Shared-Cold-1", model="Noise")
+    _heard(garage, key="Shared-Cold-1", model="Noise")
+    for index in range(each):
+        _heard(attic, key=f"Noise-a{index}", model="Noise")
+    for index in range(each):
+        _heard(garage, key=f"Noise-b{index}", model="Noise")
+
+    assert "Shared-Cold-1" not in merged_candidates(hass, location)
+    assert (
+        "rtl_433 dropping the coldest candidate Shared-Cold-1 "
+        f"(over the {MAX_PENDING_CANDIDATES} key cap)"
+    ) in [
+        record.getMessage()
+        for record in caplog.records
+        if record.filename == "aggregator.py"
+    ]
+
+
 async def test_the_candidate_list_announces_on_one_location_scoped_signal(hass):
     """One list, one signal -- whichever receiver heard the device.
 
