@@ -15,8 +15,8 @@ second time or ask for the same approval again. So each function takes
 ``(hass, entry, device_keys)`` — the location entry, no coordinator — and fans
 the decision out over every receiver in it: the candidate adopted is the
 **merged** one (:func:`~.aggregator.merged_candidate`, built from whichever
-receiver heard it last), and the key lands in every receiver's ``adopted`` or
-``ignored`` set, including the receivers that have never heard the device and so
+receiver received it last), and the key lands in every receiver's ``adopted`` or
+``ignored`` set, including the receivers that have never received the device and so
 had no candidate of their own.
 
 Each returns an :class:`AdoptionResult` naming what actually happened. The
@@ -85,7 +85,7 @@ async def async_adopt_devices(
     registration path, not two; the entity platforms share their created-id
     bookkeeping across a location's receivers, so the second receiver's pass
     finds every merged entity already built rather than minting a duplicate. A
-    receiver that never heard the device has no candidate to promote and is told
+    receiver that never received the device has no candidate to promote and is told
     :meth:`~.coordinator.Rtl433Coordinator.mark_adopted` instead, which is what
     keeps it from re-queueing the device as new the first time it does hear it.
 
@@ -214,7 +214,7 @@ async def async_unignore_devices(
     set mirrors it), but every receiver's copy is still discarded from directly:
     that is what un-ignores the device on its next transmission instead of only
     after a reload, and missing one would leave the device hidden from whichever
-    receiver hears it best. A key that is not on the stored list is reported as
+    receiver receives it best. A key that is not on the stored list is reported as
     skipped.
 
     The pending map's membership does not change here -- but every subscriber's
