@@ -51,7 +51,7 @@ class _FakeCoordinator:
         self.device_fields = {}
         self.last_seen = {}
         self.available = {}
-        # Hub state as of the last event frame; ``None`` before the first one.
+        # Receiver state as of the last event frame; ``None`` before the first one.
         self.time_precision = TimePrecision.SECOND
 
     @property
@@ -60,10 +60,10 @@ class _FakeCoordinator:
 
 
 async def test_diagnostics_redacts_host_and_reports_unmatched(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """Diagnostics redact the host and list observed-but-unmapped field keys."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     coordinator = _FakeCoordinator()
@@ -96,10 +96,10 @@ async def test_diagnostics_redacts_host_and_reports_unmatched(
 
 
 async def test_diagnostics_when_coordinator_absent(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """With no loaded coordinator, diagnostics report the static entry only."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["coordinator_loaded"] is False
@@ -107,10 +107,10 @@ async def test_diagnostics_when_coordinator_absent(
 
 
 async def test_reachability_raises_after_grace_and_clears_on_reconnect(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """The repair issue surfaces only after sustained disconnect, then clears."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
@@ -125,7 +125,7 @@ async def test_reachability_raises_after_grace_and_clears_on_reconnect(
         return real_track(hass_, action, interval, name=name)
 
     with patch.object(repairs, "async_track_time_interval", _capture):
-        unsub = repairs.async_track_hub_reachability(hass, entry, coordinator)
+        unsub = repairs.async_track_receiver_reachability(hass, entry, coordinator)
 
     poll = polls[0]
     issue_reg = ir.async_get(hass)
@@ -179,13 +179,13 @@ def test_sample_rate_looks_low_predicate():
 
 
 async def test_sample_rate_advisory_edge_triggered(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """The advisory raises on entering the flagged state and clears on leaving."""
     from custom_components.rtl_433.const import signal_receiver_update
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
 
@@ -228,13 +228,13 @@ async def test_sample_rate_advisory_edge_triggered(
 # Unusable-event-time advisory                                                #
 # --------------------------------------------------------------------------- #
 async def test_event_time_advisory_edge_triggered(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """The advisory raises only for UNUSABLE, and clears when stamps return."""
     from custom_components.rtl_433.const import signal_receiver_update
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
 
@@ -276,7 +276,7 @@ async def test_event_time_advisory_edge_triggered(
 
 
 async def test_dismissed_event_time_advisory_is_not_re_raised(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """A persisted acknowledgement survives the restart the tracker's state does not."""
     from custom_components.rtl_433.const import (
@@ -285,7 +285,7 @@ async def test_dismissed_event_time_advisory_is_not_re_raised(
     )
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_EVENT_TIME_DISMISSED: True}
@@ -308,13 +308,13 @@ async def test_dismissed_event_time_advisory_is_not_re_raised(
 
 
 # --------------------------------------------------------------------------- #
-# Unreachable-hub repair: rebind fix flow                                     #
+# Unreachable-receiver repair: rebind fix flow                                     #
 # --------------------------------------------------------------------------- #
 async def test_create_fix_flow_routes_by_issue_id(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """The unreachable issue gets the rebind flow; other issues get confirm."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     unreachable = await repairs.async_create_fix_flow(
@@ -338,7 +338,7 @@ async def test_create_fix_flow_routes_by_issue_id(
 
 
 async def test_sample_rate_fix_flow_applies_rate_and_clears_issue(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """Choosing "apply" writes 1.024 MS/s and clears the card.
 
@@ -348,7 +348,7 @@ async def test_sample_rate_fix_flow_applies_rate_and_clears_issue(
     """
     from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
 
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
     coordinator._client.connected = False
@@ -380,10 +380,10 @@ async def test_sample_rate_fix_flow_applies_rate_and_clears_issue(
 
 
 async def test_sample_rate_fix_flow_apply_dismisses_when_coordinator_absent(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """With no loaded coordinator, "apply" just clears the card (no crash)."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     repairs.async_raise_sample_rate_low(
@@ -402,7 +402,7 @@ async def test_sample_rate_fix_flow_apply_dismisses_when_coordinator_absent(
 
 
 async def test_sample_rate_fix_flow_ignore_silences_advisory(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """Choosing "keep the current rate" persists a flag and clears the card.
 
@@ -412,7 +412,7 @@ async def test_sample_rate_fix_flow_ignore_silences_advisory(
     from custom_components.rtl_433.const import CONF_SAMPLE_RATE_DISMISSED
     from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
 
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
     coordinator._client.connected = False
@@ -440,14 +440,14 @@ async def test_sample_rate_fix_flow_ignore_silences_advisory(
 
 
 async def test_sample_rate_advisory_clears_after_a_reload(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
     """A sample-rate card raised before a reload is cleared by its successor.
 
     Same shape as the event-time advisory: the issue registry outlives a reload,
     the tracker's in-memory "already flagged" state does not.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     repairs.async_raise_sample_rate_low(
@@ -467,11 +467,11 @@ async def test_sample_rate_advisory_clears_after_a_reload(
 
 
 async def test_dismissed_advisory_is_not_re_raised(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
-    """Once dismissed, the tracker never re-raises the advisory for this hub.
+    """Once dismissed, the tracker never re-raises the advisory for this receiver.
 
-    This is the restart/reload case: a fresh tracker wired against a flagged hub
+    This is the restart/reload case: a fresh tracker wired against a flagged receiver
     whose ``entry.data`` carries the dismissal flag must stay silent, even on the
     immediate wire-up evaluation and on subsequent meta refreshes.
     """
@@ -481,7 +481,7 @@ async def test_dismissed_advisory_is_not_re_raised(
     )
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     # Simulate a prior "keep the current rate" choice persisted on the entry.
     hass.config_entries.async_update_entry(
@@ -505,22 +505,22 @@ async def test_dismissed_advisory_is_not_re_raised(
     unsub()
 
 
-async def test_rebind_fix_flow_repoints_hub_and_clears_issue(
-    hass: HomeAssistant, hub_entry_builder
+async def test_rebind_fix_flow_repoints_receiver_and_clears_issue(
+    hass: HomeAssistant, receiver_entry_builder
 ):
-    """Driving the fix flow rebinds the hub in place and clears the issue.
+    """Driving the fix flow rebinds the receiver in place and clears the issue.
 
-    An adopted hub (stable radio id, populated devices) goes unreachable; the
+    An adopted receiver (stable radio id, populated devices) goes unreachable; the
     repair re-points it at a replacement radio, preserving entry_id and the
     nested devices, and the unreachable card disappears.
     """
     devices = {"acurite-1": {"model": "Acurite", "fields": {}}}
-    entry = hub_entry_builder(devices=devices)
+    entry = receiver_entry_builder(devices=devices)
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(entry, unique_id="radio-old")
 
     original_entry_id = entry.entry_id
-    repairs.async_raise_hub_unreachable(hass, entry)
+    repairs.async_raise_receiver_unreachable(hass, entry)
     issue_reg = ir.async_get(hass)
     issue_id = repairs._unreachable_issue_id(entry)
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
@@ -566,10 +566,10 @@ async def test_rebind_fix_flow_repoints_hub_and_clears_issue(
 
 
 async def test_rebind_fix_flow_cannot_connect_reshows_form(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ):
-    """A failed connection re-shows the form and leaves the hub unchanged."""
-    entry = hub_entry_builder()
+    """A failed connection re-shows the form and leaves the receiver unchanged."""
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(entry, unique_id="radio-old")
 

@@ -1,6 +1,6 @@
-"""Switch control platform for the rtl_433 hub config entry.
+"""Switch control platform for the rtl_433 receiver config entry.
 
-``async_setup_entry`` runs once for the hub config entry. When the hub's
+``async_setup_entry`` runs once for the receiver config entry. When the receiver's
 ``manage_settings`` toggle is off it creates **no** entities and returns
 immediately; when management is on it statically registers one
 :class:`Rtl433SwitchControl` per ``switch``-platform field in the
@@ -29,7 +29,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import Rtl433ReceiverControl, async_setup_hub_controls
+from .entity import Rtl433ReceiverControl, async_setup_receiver_controls
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
@@ -40,7 +40,7 @@ PLATFORM = "switch"
 
 
 class Rtl433SwitchControl(Rtl433ReceiverControl, SwitchEntity):
-    """A managed boolean SDR setting (Auto gain) as a hub-device Switch entity."""
+    """A managed boolean SDR setting (Auto gain) as a receiver-device Switch entity."""
 
     def __init__(
         self,
@@ -80,7 +80,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Register the hub's managed Switch controls (only when managing)."""
-    await async_setup_hub_controls(
+    """Register the receiver's managed Switch controls (only when managing)."""
+    await async_setup_receiver_controls(
         hass, entry, async_add_entities, PLATFORM, Rtl433SwitchControl
     )

@@ -535,13 +535,13 @@
         "survived": 0,
         "total": 26
       },
-      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1_emit_hub_update": {
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1_emit_receiver_update": {
         "killed": 22,
         "score": 1.0,
         "survived": 0,
         "total": 22
       },
-      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1_maybe_refresh_hub_identity": {
+      "custom_components.rtl_433.coordinator.base.x\u01c1Rtl433Coordinator\u01c1_maybe_refresh_receiver_identity": {
         "killed": 14,
         "score": 1.0,
         "survived": 0,
@@ -663,7 +663,7 @@
         "survived": 0,
         "total": 2
       },
-      "custom_components.rtl_433.entity.x_async_setup_hub_controls": {
+      "custom_components.rtl_433.entity.x_async_setup_receiver_controls": {
         "killed": 12,
         "score": 1.0,
         "survived": 0,
@@ -913,12 +913,6 @@
         "survived": 6,
         "total": 98
       },
-      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_hub": {
-        "killed": 40,
-        "score": 0.952381,
-        "survived": 2,
-        "total": 42
-      },
       "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_ignored_devices": {
         "killed": 68,
         "score": 0.906667,
@@ -936,6 +930,12 @@
         "score": 0.946429,
         "survived": 3,
         "total": 56
+      },
+      "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_receiver": {
+        "killed": 40,
+        "score": 0.952381,
+        "survived": 2,
+        "total": 42
       },
       "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_replace": {
         "killed": 33,
@@ -957,37 +957,37 @@
         "survived": 1,
         "total": 12
       },
-      "custom_components.rtl_433.receiver_settings.x__explicit_hub_timeout": {
+      "custom_components.rtl_433.receiver_settings.x__explicit_receiver_timeout": {
         "killed": 4,
         "score": 1.0,
         "survived": 0,
         "total": 4
       },
-      "custom_components.rtl_433.receiver_settings.x__hub_availability_timeout": {
+      "custom_components.rtl_433.receiver_settings.x__receiver_availability_timeout": {
         "killed": 3,
         "score": 1.0,
         "survived": 0,
         "total": 3
       },
-      "custom_components.rtl_433.receiver_settings.x__hub_connection": {
+      "custom_components.rtl_433.receiver_settings.x__receiver_connection": {
         "killed": 4,
         "score": 1.0,
         "survived": 0,
         "total": 4
       },
-      "custom_components.rtl_433.receiver_settings.x__hub_ignored_devices": {
+      "custom_components.rtl_433.receiver_settings.x__receiver_ignored_devices": {
         "killed": 5,
         "score": 1.0,
         "survived": 0,
         "total": 5
       },
-      "custom_components.rtl_433.receiver_settings.x__hub_manage_settings": {
+      "custom_components.rtl_433.receiver_settings.x__receiver_manage_settings": {
         "killed": 9,
         "score": 1.0,
         "survived": 0,
         "total": 9
       },
-      "custom_components.rtl_433.receiver_settings.x__hub_secure": {
+      "custom_components.rtl_433.receiver_settings.x__receiver_secure": {
         "killed": 6,
         "score": 0.75,
         "survived": 2,
