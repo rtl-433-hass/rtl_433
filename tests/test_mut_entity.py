@@ -2339,3 +2339,98 @@ def test_a_descriptor_icon_becomes_the_entitys_icon():
 def test_a_descriptor_without_an_icon_leaves_the_choice_to_home_assistant():
     """No icon in the library means no override: core picks by device class."""
     assert _icon_entity(None).icon is None
+
+
+async def test_platform_setup_persists_what_every_receiver_already_knows(hass):
+    """The stored record gains the fields the location's receivers have seen.
+
+    A coordinator starts decoding as soon as it connects, which is before the
+    platforms are forwarded, so by the time entities are built a receiver may
+    already know fields the stored record has never carried. Every receiver's
+    view is unioned in -- one that never heard the device at all contributes
+    nothing rather than erasing the others -- and the stored record is what
+    survives a restart, so a field dropped here is a sensor that silently fails
+    to come back.
+    """
+    device_key = "Acurite-606TX-42"
+    # A second device whose record predates the fields key entirely, and a third
+    # that carries neither -- both shapes an entry written by an older version
+    # leaves behind.
+    bare_key = "Nexus-TH-77"
+    blank_key = "Unknown-9"
+    location = await _two_receiver_location(
+        hass,
+        {
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            },
+            bare_key: {CONF_MODEL: "Nexus-TH"},
+            blank_key: {DEVICE_FIELDS: ["temperature_C"]},
+        },
+    )
+    attic = hass.data[DOMAIN][receiver_id(location, 0)]
+    garage = hass.data[DOMAIN][receiver_id(location, 1)]
+    attic.device_fields[device_key] = {"temperature_C", "humidity"}
+    # The garage receiver is out of range of this sensor and never heard it.
+    garage.device_fields.pop(device_key, None)
+
+    added: list = []
+    await _built(hass, location, added)
+    await hass.async_block_till_done()
+
+    assert location.data[CONF_DEVICES][device_key][DEVICE_FIELDS] == [
+        "humidity",
+        "temperature_C",
+    ]
+    # The fields-less record is tolerated, not a crash that strands the rest...
+    assert location.data[CONF_DEVICES][bare_key][CONF_MODEL] == "Nexus-TH"
+    # ...and a record with no model at all is left without one rather than
+    # gaining a placeholder that would render as the device's name.
+    assert CONF_MODEL not in location.data[CONF_DEVICES][blank_key]
+    # One entity per mapped field for the whole location, not one per receiver:
+    # the second receiver's pass finds every id already built. A device whose
+    # model never decoded builds its entities all the same, under an empty model.
+    assert sorted(
+        (entity.device_key, entity.object_suffix, entity.model) for entity in added
+    ) == [
+        (device_key, "H", "Acurite-606TX"),
+        (device_key, "T", "Acurite-606TX"),
+        (blank_key, "T", ""),
+    ]
+
+
+async def test_a_receiver_agnostic_extra_is_added_once_for_the_location(hass):
+    """An extra whose id does not name a receiver lands on the device once.
+
+    The optional per-device extra is deduped against the same ids the field
+    entities claim, so the shipped Last-seen -- a link field, one id per
+    receiver -- contributes one entity each, while an extra minting a single
+    location-wide id contributes exactly one however many receivers run. Without
+    that, the merged device would carry the same reading twice and Home
+    Assistant would suffix the second with ``_2``.
+    """
+    device_key = "Acurite-606TX-42"
+    location = await _two_receiver_location(
+        hass,
+        {
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+
+    def _location_wide_extra(coordinator, receiver_id, device_key, model):
+        return SimpleNamespace(
+            unique_id=f"{coordinator.entry.entry_id}:{device_key}:extra",
+            device_key=device_key,
+            model=model,
+            object_suffix="extra",
+        )
+
+    added: list = []
+    await _built(hass, location, added, per_device_factory=_location_wide_extra)
+    await hass.async_block_till_done()
+
+    assert [entity.object_suffix for entity in added].count("extra") == 1
