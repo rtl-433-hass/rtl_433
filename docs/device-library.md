@@ -117,9 +117,10 @@ of a model, not a single physical unit. To change settings for one specific unit
 
 ## Mapping entry schema (summary)
 
-The full schema is documented upstream, where the library lives:
-**[pyrtl_433 device-library reference](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/)**. What follows is only enough to
-read and write an entry in the *Device mappings* editor.
+The full schema is documented in the
+[pyrtl_433 device-library reference](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/).
+What follows is only enough to read and write an entry in the *Device mappings*
+editor.
 
 Top-level keys are rtl_433 field names **exactly** as they appear in the JSON
 event (`temperature_C`, `wind_avg_km_h`, `battery_ok`). Names are matched
