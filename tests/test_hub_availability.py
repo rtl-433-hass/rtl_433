@@ -30,6 +30,8 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.rtl_433 import const, repairs
 from custom_components.rtl_433.const import (
+    AVAILABILITY_TIMEOUT_NEVER,
+    CONF_DEVICES,
     CONF_MODEL,
     DEVICE_FIELDS,
     DOMAIN,
@@ -748,3 +750,437 @@ async def test_diagnostics_report_the_gate(hass, hub_entry_builder):
     device_diag = diag["devices"][device_key]
     assert device_diag["available"] is False
     assert device_diag["silence_available"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Timeout resolution: the tier, not only the number                            #
+# --------------------------------------------------------------------------- #
+# The suites above can only observe a resolved timeout through what it does to
+# availability, and availability cannot see *which* tier produced it. The tier is
+# the second element of ``_resolve_timeout`` and the thing the watchdog logs, so
+# it is what answers "why did this device never expire?" in a support dump. These
+# call the resolver directly and assert the whole tuple.
+
+
+async def _bare_coordinator(hass, hub_entry_builder, *, adopted_keys=None, **kwargs):
+    """A coordinator that has never connected, for direct-call tests.
+
+    Async because the client is constructed inside the event loop. Nothing is
+    started and no socket is opened: these tests drive single methods rather than
+    a running hub.
+
+    ``adopted_keys`` is the in-memory mirror of the entry's device map that
+    ``async_setup_entry`` normally seeds. It is the gate on the event path, so any
+    test that feeds a frame has to supply it -- without it the frame is recorded
+    as a pending discovery and never reaches the runtime state under test.
+    """
+    entry = hub_entry_builder(**kwargs)
+    entry.add_to_hass(hass)
+    return Rtl433Coordinator(
+        hass, entry, host="rtl433.local", adopted_keys=adopted_keys
+    )
+
+
+async def test_resolve_timeout_reports_the_hub_default_tier(hass, hub_entry_builder):
+    """With no resolver wired, every device resolves through the hub default.
+
+    This is the pre-setup state (the resolver is attached by ``async_setup_entry``)
+    and the state a failed resolver falls back to, so it has to be the hub's own
+    number, attributed to the hub.
+    """
+    coord = await _bare_coordinator(hass, hub_entry_builder, availability_timeout=600)
+    assert coord.effective_timeout_resolver is None
+    assert coord._resolve_timeout("Acurite-606TX-42") == (600, "hub-default")
+
+
+async def test_resolve_timeout_reports_the_override_tier(hass, hub_entry_builder):
+    """A resolver returning a number wins outright, and says which tier it was.
+
+    The resolver collapses the per-device override and the explicit hub default
+    into one int, so ``override-or-hub`` is the most the log can honestly claim --
+    but it must not be mistaken for the class default, which is what a reader uses
+    to tell "the user configured this" from "we guessed it".
+    """
+    coord = await _bare_coordinator(hass, hub_entry_builder, availability_timeout=600)
+    coord.effective_timeout_resolver = lambda key: 120
+    assert coord._resolve_timeout("Acurite-606TX-42") == (120, "override-or-hub")
+
+
+async def test_resolve_timeout_treats_never_as_an_answer_not_an_absence(
+    hass, hub_entry_builder
+):
+    """Never-expire is ``0``, which is falsy -- it must not read as "unset".
+
+    A resolver that returns ``0`` has made a decision: this device never expires.
+    Testing it for truth rather than for ``None`` would discard that decision and
+    drop the device to the class default, which for anything without an
+    event-driven field is the periodic timeout -- so a doorbell configured never
+    to expire would start going unavailable between presses.
+    """
+    coord = await _bare_coordinator(hass, hub_entry_builder, availability_timeout=600)
+    coord.effective_timeout_resolver = lambda key: AVAILABILITY_TIMEOUT_NEVER
+    assert coord._resolve_timeout("Acurite-606TX-42") == (
+        AVAILABILITY_TIMEOUT_NEVER,
+        "override-or-hub",
+    )
+
+
+async def test_resolve_timeout_hands_none_to_the_class_default(hass, hub_entry_builder):
+    """``None`` from the resolver means "nothing explicit", so the class decides.
+
+    This is the tier that keeps an event-driven device on never-expire without the
+    user configuring anything, so the hand-off has to actually happen rather than
+    falling through to the hub number.
+    """
+    coord = await _bare_coordinator(hass, hub_entry_builder, availability_timeout=600)
+    coord.effective_timeout_resolver = lambda key: None
+    timeout, source = coord._resolve_timeout("Acurite-606TX-42")
+    assert source == "class-default"
+    assert timeout == coord._class_default_timeout("Acurite-606TX-42")
+
+
+async def test_a_broken_resolver_logs_and_falls_back_to_the_hub_default(
+    hass, hub_entry_builder, caplog
+):
+    """A resolver that raises must not take the whole watchdog tick with it.
+
+    The resolver runs once per device per tick, so an exception that escaped would
+    stop every *later* device in the loop being evaluated at all. It is caught,
+    reported with the device it failed on -- otherwise the traceback names no
+    device and is unactionable -- and the hub default stands in.
+    """
+    coord = await _bare_coordinator(hass, hub_entry_builder, availability_timeout=600)
+
+    def _failing_resolver(device_key):
+        raise RuntimeError("resolver broken")
+
+    coord.effective_timeout_resolver = _failing_resolver
+    caplog.set_level(logging.ERROR, logger=_LOGGER_NAME)
+
+    assert coord._resolve_timeout("Acurite-606TX-42") == (600, "hub-default")
+
+    lines = [m for m in caplog.messages if "availability timeout" in m]
+    assert len(lines) == 1
+    assert lines[0] == (
+        "rtl_433 failed to determine the availability timeout for "
+        "Acurite-606TX-42; using the default"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# The restart-safe field set behind the class default                          #
+# --------------------------------------------------------------------------- #
+# ``_known_field_keys`` is the pairing that stops a device silent since a restart
+# being classified from an empty live payload. The suites above reach it only
+# through the class-default verdict, which collapses a whole field set down to one
+# integer and so cannot see which half supplied it.
+
+
+async def test_known_field_keys_unions_the_adopted_and_the_live_fields(
+    hass, hub_entry_builder
+):
+    """Both halves count: neither one alone is the device's full field set.
+
+    A device adopted for temperature that later starts reporting humidity has
+    both, and the classification has to see both -- reading only the live payload
+    was the bug this pairing exists to fix.
+    """
+    key = "Acurite-606TX-42"
+    coord = await _bare_coordinator(
+        hass,
+        hub_entry_builder,
+        adopted_keys={key},
+        devices={key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}},
+    )
+    _feed(coord, {"model": "Acurite-606TX", "id": 42, "humidity": 55})
+
+    assert {"temperature_C", "humidity"} <= coord._known_field_keys(key)
+
+
+async def test_known_field_keys_reads_a_device_that_is_silent_since_a_restart(
+    hass, hub_entry_builder
+):
+    """Nothing live, everything adopted -- the case the whole pairing exists for.
+
+    Home Assistant has just restarted and this device has not transmitted yet. Its
+    fields must still come back, or an event-driven device would be classified as
+    periodic and expire its battery sensor at the periodic timeout while it waits
+    for a door to open.
+    """
+    key = "Acurite-606TX-42"
+    coord = await _bare_coordinator(
+        hass,
+        hub_entry_builder,
+        devices={
+            key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C", "battery_ok"],
+            }
+        },
+    )
+    assert coord.devices == {}
+    assert coord._known_field_keys(key) == {"temperature_C", "battery_ok"}
+
+
+async def test_known_field_keys_tolerates_an_entry_with_no_device_map(
+    hass, hub_entry_builder
+):
+    """A hub entry written before any device was adopted has no device map at all.
+
+    The watchdog resolves a class default for every device it has ever seen, so it
+    reaches this method on a hub whose entry carries no ``devices`` key yet --
+    which must read as "nothing adopted" rather than raising and killing the tick.
+    """
+    coord = await _bare_coordinator(hass, hub_entry_builder)
+    data = {k: v for k, v in coord.entry.data.items() if k != CONF_DEVICES}
+    hass.config_entries.async_update_entry(coord.entry, data=data)
+
+    assert CONF_DEVICES not in coord.entry.data
+    assert coord._known_field_keys("Acurite-606TX-42") == set()
+
+
+async def test_known_field_keys_tolerates_an_adopted_device_with_no_fields(
+    hass, hub_entry_builder
+):
+    """An adopted record written before fields were recorded reads as empty.
+
+    Older entries carry a model but no field list. That is "we know of this device
+    and know nothing about its fields", which classifies as periodic -- not a
+    crash, and not a ``None`` handed on to the library.
+    """
+    key = "Acurite-606TX-42"
+    coord = await _bare_coordinator(
+        hass, hub_entry_builder, devices={key: {CONF_MODEL: "Acurite-606TX"}}
+    )
+    assert coord._known_field_keys(key) == set()
+
+
+async def test_known_field_keys_is_empty_for_a_device_nobody_has_heard_of(
+    hass, hub_entry_builder
+):
+    """An unknown key is empty, not an error -- the watchdog asks about anything."""
+    coord = await _bare_coordinator(hass, hub_entry_builder)
+    assert coord._known_field_keys("Never-Seen-1") == set()
+
+
+# --------------------------------------------------------------------------- #
+# The watchdog tick itself                                                     #
+# --------------------------------------------------------------------------- #
+# The suites above drive the tick to observe entity state. These assert the tick's
+# own decisions: the staleness boundary, what an un-recorded device defaults to,
+# that both halves of the flip condition are required, and the DEBUG line that is
+# the only in-log explanation of why a device disappeared.
+
+
+async def _seen_at(hass, hub_entry_builder, key, when, **kwargs):
+    """A coordinator that last heard ``key`` at ``when`` and nothing since."""
+    coord = await _bare_coordinator(hass, hub_entry_builder, **kwargs)
+    coord.last_seen[key] = when
+    return coord
+
+
+async def test_watchdog_expires_a_device_it_has_no_availability_record_for(
+    hass, hub_entry_builder
+):
+    """A device with a last-seen but no availability entry is assumed available.
+
+    ``available`` is only written once a verdict has been reached, so between the
+    first frame and the first tick a device has a last-seen and no entry. Assuming
+    it is already unavailable would mean a device that went silent immediately
+    after being discovered never flips, and so never tells the user it is gone.
+    """
+    key = "Acurite-606TX-42"
+    start = dt_util.utcnow()
+    coord = await _seen_at(
+        hass, hub_entry_builder, key, start, availability_timeout=600
+    )
+    assert key not in coord.available
+
+    with freeze_time(start + timedelta(seconds=601)):
+        await coord._async_watchdog(dt_util.utcnow())
+
+    assert coord.available[key] is False
+
+
+async def test_watchdog_leaves_a_device_that_is_still_transmitting_alone(
+    hass, hub_entry_builder
+):
+    """Being available is not on its own a reason to be flipped.
+
+    Both halves of the condition are required: a device only goes unavailable when
+    it is *stale* and currently available. Dropping the staleness half would take
+    every device unavailable on the first tick after it was heard from.
+    """
+    key = "Acurite-606TX-42"
+    start = dt_util.utcnow()
+    coord = await _seen_at(
+        hass, hub_entry_builder, key, start, availability_timeout=600
+    )
+    coord.available[key] = True
+
+    with freeze_time(start + timedelta(seconds=30)):
+        await coord._async_watchdog(dt_util.utcnow())
+
+    assert coord.available[key] is True
+
+
+async def test_a_device_expires_only_once_the_timeout_has_been_exceeded(
+    hass, hub_entry_builder
+):
+    """The timeout is a duration to exceed, not to reach.
+
+    At exactly the configured age the device is still within its window; the
+    watchdog runs every 30 seconds, so treating the boundary as already stale
+    would expire a device that is transmitting exactly on its interval.
+    """
+    key = "Acurite-606TX-42"
+    start = dt_util.utcnow()
+    coord = await _seen_at(
+        hass, hub_entry_builder, key, start, availability_timeout=600
+    )
+
+    with freeze_time(start + timedelta(seconds=600)):
+        await coord._async_watchdog(dt_util.utcnow())
+    assert coord.available.get(key, True) is True
+
+    with freeze_time(start + timedelta(seconds=601)):
+        await coord._async_watchdog(dt_util.utcnow())
+    assert coord.available[key] is False
+
+
+async def test_the_watchdog_logs_which_device_went_quiet_and_for_how_long(
+    hass, hub_entry_builder, caplog
+):
+    """The DEBUG line is the only in-log explanation of a disappearing device.
+
+    "Why is this sensor unavailable?" is answered by this one line, so it has to
+    name the device and the timeout it exceeded; either alone leaves the reader
+    guessing which of their devices the message is about or what it was measured
+    against.
+    """
+    key = "Acurite-606TX-42"
+    start = dt_util.utcnow()
+    coord = await _seen_at(
+        hass, hub_entry_builder, key, start, availability_timeout=600
+    )
+    caplog.set_level(logging.DEBUG, logger=_LOGGER_NAME)
+
+    with freeze_time(start + timedelta(seconds=601)):
+        await coord._async_watchdog(dt_util.utcnow())
+
+    lines = [m for m in caplog.messages if "went unavailable" in m]
+    assert len(lines) == 1
+    # Asserted whole rather than by substring: this line is a documented
+    # diagnostic, and a substring check passes on a line that has been garbled
+    # around the part it happens to quote.
+    assert lines[0] == f"rtl_433 device {key} went unavailable (no event for 600s)"
+
+
+async def test_the_watchdog_announces_a_device_going_quiet_only_once(
+    hass, hub_entry_builder, caplog
+):
+    """A device that stays silent must not log on every tick.
+
+    The watchdog runs every 30 seconds forever. Re-announcing an already-expired
+    device would put a line in the log twice a minute per silent device for as
+    long as Home Assistant runs, which buries the transition that actually matters.
+    """
+    key = "Acurite-606TX-42"
+    start = dt_util.utcnow()
+    coord = await _seen_at(
+        hass, hub_entry_builder, key, start, availability_timeout=600
+    )
+    caplog.set_level(logging.DEBUG, logger=_LOGGER_NAME)
+
+    with freeze_time(start + timedelta(seconds=601)):
+        await coord._async_watchdog(dt_util.utcnow())
+    with freeze_time(start + timedelta(seconds=901)):
+        await coord._async_watchdog(dt_util.utcnow())
+
+    assert len([m for m in caplog.messages if "went unavailable" in m]) == 1
+
+
+async def test_a_never_expire_device_is_skipped_before_any_staleness_maths(
+    hass, hub_entry_builder
+):
+    """Never-expire means never, however old the last frame is.
+
+    A doorbell that has not been pressed since installation is working perfectly.
+    Its age is irrelevant, so the tick must skip it rather than compare it against
+    a zero-second window -- which would expire it on the very next tick.
+    """
+    key = "Doorbell-1"
+    start = dt_util.utcnow()
+    coord = await _seen_at(hass, hub_entry_builder, key, start)
+    coord.effective_timeout_resolver = lambda device_key: AVAILABILITY_TIMEOUT_NEVER
+
+    with freeze_time(start + timedelta(days=30)):
+        await coord._async_watchdog(dt_util.utcnow())
+
+    assert coord.available.get(key, True) is True
+
+
+async def test_a_never_expire_device_does_not_mask_the_devices_after_it(
+    hass, hub_entry_builder
+):
+    """Skipping a never-expire device must skip *it*, not abandon the sweep.
+
+    One tick evaluates every device the hub has ever heard from, in the order they
+    were first seen. A doorbell is exempt from silence, so it is stepped over --
+    but stepping out of the loop instead would mean every device discovered after
+    the first doorbell silently stops being checked, and a weather station that
+    died days ago would keep reporting its last reading as current.
+    """
+    doorbell = "Doorbell-1"
+    sensor = "Acurite-606TX-42"
+    start = dt_util.utcnow()
+
+    # Insertion order is iteration order, so the exempt device goes first: that is
+    # the arrangement in which abandoning the loop costs the second device.
+    coord = await _seen_at(
+        hass, hub_entry_builder, doorbell, start, availability_timeout=600
+    )
+    coord.last_seen[sensor] = start
+    assert list(coord.last_seen) == [doorbell, sensor]
+
+    coord.effective_timeout_resolver = lambda key: (
+        AVAILABILITY_TIMEOUT_NEVER if key == doorbell else 600
+    )
+
+    with freeze_time(start + timedelta(seconds=601)):
+        await coord._async_watchdog(dt_util.utcnow())
+
+    assert coord.available.get(doorbell, True) is True
+    assert coord.available[sensor] is False
+
+
+async def test_the_watchdog_repaint_is_not_a_replay(hass, hub_entry_builder):
+    """The re-paint carries the cached frame but must not re-fire it as an event.
+
+    ``is_repaint`` tells ``Rtl433Event`` this is a re-read of a value it has
+    already fired; ``is_replay`` is false because nothing was re-delivered by the
+    server. Getting either wrong would fire a stale button press -- an automation
+    firing at the moment a device is declared *gone*.
+    """
+    key = "Acurite-606TX-42"
+    coord = await _bare_coordinator(
+        hass,
+        hub_entry_builder,
+        adopted_keys={key},
+        availability_timeout=600,
+        devices={key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}},
+    )
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _feed(coord, {"model": "Acurite-606TX", "id": 42, "temperature_C": 21.0})
+    assert key in coord.devices
+
+    with (
+        patch.object(coord, "_dispatch") as dispatch,
+        freeze_time(start + timedelta(seconds=601)),
+    ):
+        await coord._async_watchdog(dt_util.utcnow())
+
+    assert dispatch.call_count == 1
+    assert dispatch.call_args.kwargs["is_replay"] is False
+    assert dispatch.call_args.kwargs["is_repaint"] is True
