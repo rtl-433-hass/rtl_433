@@ -1157,9 +1157,18 @@ def test_pending_label_carries_model_count_signal_and_age():
 
     label = _pending_label(record, now)
 
-    assert label.startswith(f"Acurite-606TX ({DEVICE_KEY}) — seen 7x — 11.5 dB — ")
-    assert "last seen " in label
-    assert label.endswith(" ago")
+    # Segment by segment rather than by substring: a row that merely *contained*
+    # the right words in the wrong order, or carried a fourth column nobody
+    # asked for, would still read as a broken picker.
+    segments = label.split(" — ")
+    assert segments[:3] == [
+        f"Acurite-606TX ({DEVICE_KEY})",
+        "seen 7x",
+        "11.5 dB",
+    ]
+    assert len(segments) == 4
+    assert segments[3].startswith("last seen ")
+    assert segments[3].endswith(" ago")
 
 
 def test_pending_label_omits_the_signal_when_the_receiver_reports_none():
