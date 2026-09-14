@@ -10,8 +10,8 @@ make it eligible for Home Assistant's Energy dashboard, calibrate the device.
 
 ## Calibrating a Meter
 
-Open **Settings → Devices & Services → rtl_433 → Configure → Device settings**
-and pick the meter.
+Open **Settings → Devices & Services → rtl_433 → Configure (the gear icon) →
+Device settings** and pick the meter.
 
 Meters whose commodity the integration recognized from the signal are labelled
 with it in the picker, so you can tell at a glance which devices are calibratable
@@ -56,5 +56,5 @@ For models whose unit and scale are authoritatively known, a contributor can shi
 a model-scoped mapping in the [device library](device-library.md#model-scoped-mappings-models)
 so those meters work without per-device calibration.
 
-The shipped library does not include speculative real-meter consumption mappings.
-A wrong scale would silently corrupt Energy data.
+pyrtl_433 does not include speculative real-meter consumption mappings. A
+wrong scale would silently corrupt Energy data.
