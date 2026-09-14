@@ -5,13 +5,12 @@ asserts the exact behaviour the corresponding mutation would break:
 exact return values, dict key presence, scale arithmetic, both branches,
 and boundary nibble values in the ert_type lookup.
 
-Surviving mutants targeted (17/18 — one genuinely equivalent):
+Surviving mutants targeted (17 of the original 18, plus mutmut_9 and
+mutmut_11; mutmut_15 and mutmut_17 are equivalent — see the note below):
 
 normalize_calibration:
   mutmut_9  – COMMODITY_UNITS.get(commodity, ()) default changed to None
   mutmut_11 – COMMODITY_UNITS.get(commodity, ()) default removed (TypeError on miss)
-  mutmut_15 – raw.get(CALIBRATION_SCALE, 1.0) default changed to None
-  mutmut_17 – raw.get(CALIBRATION_SCALE, ) default removed
   mutmut_18 – raw.get(CALIBRATION_SCALE, 1.0) default changed to 2.0
   mutmut_19 – except-block scale = 1.0 changed to None
   mutmut_20 – except-block scale = 1.0 changed to 2.0
@@ -28,6 +27,15 @@ commodity_from_fields:
   mutmut_34 – nibble 9 key changed to 10 (gas nibble 9 dropped)
   mutmut_36 – nibble 12 key changed to 13 (gas nibble 12 dropped; 13 is water)
   mutmut_37 – nibble 13 key changed to 14 (water nibble 13 dropped)
+
+mutmut_9 and mutmut_11 needed the table-drift tests below: the unit-validation
+tests reach the ``in`` comparison but never the ``.get`` default, because every
+commodity in COMMODITY_DEVICE_CLASS also has a COMMODITY_UNITS row.
+
+mutmut_15 (``raw.get(CALIBRATION_SCALE, None)``) and mutmut_17
+(``raw.get(CALIBRATION_SCALE)``) are equivalent and are left alive: with the
+key absent both hand ``None`` to ``float()``, the ``TypeError`` is caught, and
+``scale`` lands on the same 1.0 the real default supplies.
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ from __future__ import annotations
 import pytest
 
 from custom_components.rtl_433.calibration import (
+    COMMODITY_DEVICE_CLASS,
     COMMODITY_UNITS,
     commodity_from_fields,
     normalize_calibration,
@@ -48,11 +57,12 @@ from custom_components.rtl_433.const import (
     COMMODITY_NONE,
     COMMODITY_WATER,
 )
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 
 # ---------------------------------------------------------------------------
 # normalize_calibration — scale default = 1.0 when key absent
-# mutmut_15, mutmut_17, mutmut_18
+# mutmut_18
 # ---------------------------------------------------------------------------
 
 
@@ -60,7 +70,7 @@ class TestNormCalibrationScaleDefault:
     """normalize_calibration uses 1.0 when CALIBRATION_SCALE is absent."""
 
     def test_scale_defaults_to_1_when_key_absent(self):
-        """When scale key is missing, scale must be exactly 1.0 (kills _15, _17, _18)."""
+        """When scale key is missing, scale must be exactly 1.0 (kills _18)."""
         raw = {
             CALIBRATION_COMMODITY: COMMODITY_ENERGY,
             CALIBRATION_UNIT: UnitOfEnergy.KILO_WATT_HOUR,
@@ -82,7 +92,7 @@ class TestNormCalibrationScaleDefault:
         assert result[CALIBRATION_SCALE] != pytest.approx(2.0)
 
     def test_scale_default_is_1_not_none(self):
-        """Absent scale must be float 1.0, not None (kills _15: default=None)."""
+        """Absent scale must be float 1.0, not None: a None scale would break the sensor."""
         raw = {
             CALIBRATION_COMMODITY: COMMODITY_WATER,
             CALIBRATION_UNIT: UnitOfVolume.GALLONS,
@@ -184,18 +194,17 @@ class TestNormCalibrationScaleNonPositive:
 
 # ---------------------------------------------------------------------------
 # normalize_calibration — unit validation rejects an unknown unit
-# mutmut_9, mutmut_11
+# (the .get default itself is covered separately, below)
 # ---------------------------------------------------------------------------
-# These mutants change COMMODITY_UNITS.get(commodity, ()) to return None
-# or raise TypeError — the "in" test would then behave differently for an
-# unknown unit.  The test below asserts that None is NOT a valid unit.
+# These tests reach the ``in`` comparison but not the ``.get`` default; the
+# default itself is pinned by TestNormCalibrationCommodityTableDrift below.
 
 
 class TestNormCalibrationUnitValidation:
     """normalize_calibration rejects units not in COMMODITY_UNITS for the commodity."""
 
     def test_none_unit_rejected(self):
-        """Unit=None is not valid for any commodity (kills _9, _11 via changed default)."""
+        """Unit=None is not valid for any commodity: an unset unit is no calibration."""
         raw = {
             CALIBRATION_COMMODITY: COMMODITY_ENERGY,
             CALIBRATION_UNIT: None,
@@ -204,7 +213,7 @@ class TestNormCalibrationUnitValidation:
         assert result is None
 
     def test_wrong_commodity_unit_rejected(self):
-        """A unit valid for energy is not valid for water (kills _9, _11)."""
+        """A unit valid for energy is not valid for water."""
         raw = {
             CALIBRATION_COMMODITY: COMMODITY_WATER,
             CALIBRATION_UNIT: UnitOfEnergy.KILO_WATT_HOUR,
@@ -242,6 +251,51 @@ class TestNormCalibrationUnitValidation:
             }
             result = normalize_calibration(raw)
             assert result is not None, f"Expected valid result for water unit {unit!r}"
+
+
+# ---------------------------------------------------------------------------
+# normalize_calibration — the two commodity tables are allowed to drift
+# mutmut_9, mutmut_11
+# ---------------------------------------------------------------------------
+
+
+class TestNormCalibrationCommodityTableDrift:
+    """A commodity the two tables disagree about is ignored, never fatal.
+
+    COMMODITY_DEVICE_CLASS decides whether a commodity is known at all;
+    COMMODITY_UNITS decides which base units it accepts. They are maintained
+    by hand, so a fourth commodity landing in one and not the other is an
+    ordinary mistake to make. The ``()`` default on the units lookup is what
+    keeps that mistake cheap: the calibration is dropped and the sensor falls
+    back to the library descriptor. Without it the lookup yields ``None``,
+    ``unit not in None`` raises TypeError, and that escapes into the entity
+    build — every entity on the device would fail to load over one stale
+    options entry that the user can no longer even reach to clear.
+
+    The existing unit-validation tests cannot see this: they reach the ``in``
+    comparison but never the default, because today the two tables agree.
+    """
+
+    def test_commodity_known_only_to_the_device_class_table_is_dropped(
+        self, monkeypatch
+    ):
+        """A commodity with no units row must yield no calibration, not an exception."""
+        monkeypatch.setitem(COMMODITY_DEVICE_CLASS, "steam", SensorDeviceClass.ENERGY)
+        raw = {
+            CALIBRATION_COMMODITY: "steam",
+            CALIBRATION_UNIT: UnitOfVolume.CUBIC_METERS,
+            CALIBRATION_SCALE: 2.0,
+        }
+        assert normalize_calibration(raw) is None
+
+    def test_commodity_that_loses_its_units_row_is_dropped(self, monkeypatch):
+        """Dropping a units row makes gas uncalibratable, not the device unloadable."""
+        monkeypatch.delitem(COMMODITY_UNITS, COMMODITY_GAS)
+        raw = {
+            CALIBRATION_COMMODITY: COMMODITY_GAS,
+            CALIBRATION_UNIT: UnitOfVolume.CUBIC_METERS,
+        }
+        assert normalize_calibration(raw) is None
 
 
 # ---------------------------------------------------------------------------
