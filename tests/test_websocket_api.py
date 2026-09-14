@@ -891,6 +891,35 @@ async def test_hubs_lists_every_configured_receiver_loaded_or_not(
     assert by_id[hub.entry_id]["title"] == hub.title
     assert by_id[unloaded.entry_id]["loaded"] is False
 
+    # Each row also carries the connection the subscription only reports for the
+    # hub it is opened against. The panel's overview describes *every* receiver
+    # — its device count and its links cover them all — and it can subscribe to
+    # only one, so without this it would report one radio's socket as though it
+    # were the whole installation. An entry that never loaded has no socket to
+    # report, which is a "no" rather than a silence.
+    assert by_id[hub.entry_id]["connected"] is True
+    assert by_id[unloaded.entry_id]["connected"] is False
+
+
+@pytest.mark.hub_disconnected
+async def test_hubs_reports_a_loaded_receiver_with_no_socket_as_disconnected(
+    hass, hub, hass_ws_client
+):
+    """Loaded and connected are two different answers, and both are reported.
+
+    A receiver whose server has gone away stays a loaded entry — the coordinator
+    is there, retrying — so ``loaded`` alone would tell a user everything is
+    fine. This is the state the overview card exists to show, and it is the one
+    that cannot be read off the entry.
+    """
+    client = await hass_ws_client(hass)
+    reply, _ = await _call(client, {"type": "rtl_433/hubs"})
+
+    assert reply["success"]
+    (row,) = reply["result"]["hubs"]
+    assert row["loaded"] is True
+    assert row["connected"] is False
+
 
 # --------------------------------------------------------------------------- #
 # Gating and error handling: one sweep each, not one test per command.        #

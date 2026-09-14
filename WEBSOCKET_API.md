@@ -317,7 +317,7 @@ administrator**, so a token issued for a non-admin user is refused:
 
 | `type` | Parameters | Returns |
 | --- | --- | --- |
-| `rtl_433/hubs` | — | Every configured hub, loaded or not. |
+| `rtl_433/hubs` | — | Every configured hub, loaded or not, with its connection. |
 | `rtl_433/devices/pending` | `entry_id` | One hub's discovered devices and its ignore list. |
 | `rtl_433/devices/add` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
 | `rtl_433/devices/ignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
@@ -348,6 +348,12 @@ Errors are the usual `{"success": false, "error": {...}}` result:
 Lists the hubs, so a caller can pick one. Hubs that failed to load are listed
 too, flagged rather than hidden.
 
+`loaded` is whether the config entry is set up. `connected` is whether that
+hub's WebSocket to its rtl_433 server is open right now — the same fact
+`rtl_433/devices/subscribe` reports, but for every hub at once, since a
+subscription only covers the hub it is opened against. A hub that is not loaded
+has no socket to report and so is never `connected`.
+
 ```json
 {"id": 1, "type": "rtl_433/hubs"}
 ```
@@ -362,7 +368,8 @@ too, flagged rather than hidden.
       {
         "entry_id": "01M1DJ2TAV2NPMPB2JA4ZHDR2P",
         "title": "rtl_433 (wsbridge)",
-        "loaded": true
+        "loaded": true,
+        "connected": true
       }
     ]
   }

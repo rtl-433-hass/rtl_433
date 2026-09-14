@@ -292,7 +292,8 @@
       "waiting_for_reload": "Waiting for the receiver to reload…",
       "online": "Online",
       "connecting": "Connecting…",
-      "problem": "Problem"
+      "problem": "Problem",
+      "receivers_offline": "{count} of {total} receivers offline"
     },
     "overview": {
       "network": "My network",

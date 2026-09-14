@@ -141,6 +141,7 @@ export const STRINGS = {
   "status.online": "Online",
   "status.connecting": "Connecting…",
   "status.problem": "Problem",
+  "status.receivers_offline": "{count} of {total} receivers offline",
   "overview.network": "My network",
   "overview.devices": "Devices",
   "overview.entities": "Entities",
@@ -530,6 +531,61 @@ export function backAction(segment, pushed, historyLength) {
     return pushed ? "unwind" : "replace-up";
   }
   return historyLength > 1 ? "leave" : "exit";
+}
+
+/**
+ * What the status card says, given every receiver's connection.
+ *
+ * The overview describes the *integration*, not one radio: its counts and its
+ * links cover every receiver, so the card above them has to as well. One
+ * receiver online and a second one down is the case that makes this matter --
+ * a card that read "Online" there would be reporting the hub the panel happens
+ * to be subscribed to as though it were the whole installation.
+ *
+ * `states` is one entry per receiver: `true` connected, `false` not, and `null`
+ * for one whose state is not known yet. Unknown is deliberately not "offline":
+ * the page opens with nothing known, and a card that flashed a problem on the
+ * way in would cry wolf on every visit.
+ *
+ * Pure, and exported, so the wording can be tested without a browser.
+ *
+ * @param {Array<boolean|null>} states one connection state per receiver
+ * @returns {{connected: boolean, key: string, args: object}} what to draw
+ */
+export function overviewStatus(states) {
+  const offline = states.filter((state) => state === false).length;
+  if (offline) {
+    // With one receiver the card is about that receiver, and "Problem" is what
+    // it has always said. Counting to one of one would be a strange way to
+    // tell a user with a single radio that it is down.
+    return states.length === 1
+      ? { connected: false, key: "status.problem", args: {} }
+      : {
+          connected: false,
+          key: "status.receivers_offline",
+          args: { count: offline, total: states.length },
+        };
+  }
+  if (!states.length || states.some((state) => state === null)) {
+    return { connected: false, key: "status.connecting", args: {} };
+  }
+  return { connected: true, key: "status.online", args: {} };
+}
+
+/**
+ * The Home Assistant registry page one of the overview's rows opens.
+ *
+ * Filtered by *integration* rather than by config entry, because the row it
+ * sits on counts every rtl_433 device there is. `domain` is the filter Home
+ * Assistant's own devices and entities dashboards read out of the URL (it fills
+ * in their integration filter), and `historyBack=1` is what makes their back
+ * arrow return to this panel instead of to their own tab.
+ *
+ * Exported so the filter is pinned by a test: entry-scoped links were the bug,
+ * and the difference between the two URLs is one word on screen nowhere.
+ */
+export function configPagePath(which) {
+  return `/config/${which}/dashboard?historyBack=1&domain=${DOMAIN}`;
 }
 
 /** mdiArrowLeft, for the toolbar's back control and its native fallback. */
@@ -1153,7 +1209,14 @@ class Rtl433Panel extends HTMLElement {
   _startClock() {
     if (this._clock === null) {
       this._clock = window.setInterval(() => {
-        if (this._data) {
+        // With several receivers the overview reports all of them, and only the
+        // subscribed one pushes. So while that card is on screen the tick
+        // re-asks for the hub list, which is what keeps the other receivers'
+        // connections from being as old as the page. One receiver needs none of
+        // this: its state arrives on the subscription.
+        if (this._hubs.length > 1 && !this._segment) {
+          this._refreshHubs();
+        } else if (this._data) {
           this._render();
         }
       }, CLOCK_INTERVAL_MS);
@@ -1178,6 +1241,57 @@ class Rtl433Panel extends HTMLElement {
     this._render();
   }
 
+  /**
+   * Re-read the hub list, without disturbing the subscription.
+   *
+   * Deliberately not `_loadHubs`: that one *chooses* a receiver and subscribes
+   * to it, which is right once and wrong every fifteen seconds -- it would tear
+   * down and reopen the subscription on every tick. This only refreshes what
+   * the overview reports about the receivers it is not subscribed to.
+   *
+   * A failure is swallowed rather than bannered: the page already has an answer
+   * on screen, and the next tick will try again. A receiver removed since the
+   * page opened simply leaves the list, and one added joins it -- which is also
+   * how a second receiver's settings card appears without a reload.
+   */
+  async _refreshHubs() {
+    let result;
+    try {
+      result = await this._call({ type: "rtl_433/hubs" });
+    } catch (error) {
+      return;
+    }
+    if (!this.isConnected || !this._el) {
+      return;
+    }
+    this._hubs = result.hubs || [];
+    if (!this._hubs.length) {
+      // Every receiver removed while the page sat open. Saying so is better
+      // than a page of empty counts with nothing to explain them.
+      this._status = this._t("status.no_hubs");
+    } else if (!this._hubs.some((hub) => hub.entry_id === this._entryId)) {
+      // The receiver this page was subscribed to is the one that was removed,
+      // so it is re-pointed at a surviving one -- the same choice the first
+      // load makes, and `_subscribe` renders on its way through.
+      this._entryId = this._pickEntry();
+      this._subscribe();
+      this._renderSettingsCards(this._el.root);
+      return;
+    }
+    this._renderSettingsCards(this._el.root);
+    this._render();
+  }
+
+  /**
+   * Which receiver this page opens on, and falls back to.
+   *
+   * Prefer a loaded hub: with one healthy receiver and one mid-reload, the
+   * healthy one is the one worth opening on.
+   */
+  _pickEntry() {
+    return (this._hubs.find((hub) => hub.loaded) || this._hubs[0]).entry_id;
+  }
+
   async _loadHubs(pending) {
     const { value: result, error } = await pending;
     if (error) {
@@ -1191,10 +1305,7 @@ class Rtl433Panel extends HTMLElement {
       this._render();
       return;
     }
-    // Prefer a loaded hub: with one healthy receiver and one mid-reload, the
-    // healthy one is the one worth opening on.
-    const initial = this._hubs.find((hub) => hub.loaded) || this._hubs[0];
-    this._entryId = initial.entry_id;
+    this._entryId = this._pickEntry();
     this._renderSettingsCards(this._el.root);
     this._subscribe();
   }
@@ -1787,13 +1898,18 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * The overview's two lists: what this receiver has, and what can be changed.
+   * The overview's two lists: what rtl_433 has, and what can be changed.
    *
    * Devices and entities link out to the registry pages filtered to this
    * integration, which is where Home Assistant already lists them -- there is
    * nothing this panel could add by drawing that list again. There is no
    * groups row because rtl_433 has no grouping, and no map because a receiver
    * has no topology to draw.
+   *
+   * Both rows cover every receiver. The settings cards below them are the half
+   * of this page that is per-receiver, because a setting has to be stored
+   * against one; a device list does not, and splitting it would leave a user
+   * with two radios wondering where half their sensors went.
    */
   _buildOverview(root) {
     const made = {};
@@ -1890,16 +2006,19 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * Open one of Home Assistant's own registry pages, scoped to this hub.
+   * Open one of Home Assistant's own registry pages, filtered to rtl_433.
    *
-   * The config-entry filter is the same one the integration page's own
-   * "N devices" link uses, so this lands on exactly that list.
+   * Every receiver's devices, not the subscribed one's: this panel is the
+   * integration's page and there is one of it however many radios are set up,
+   * so a link that quietly dropped the other receivers' devices would be
+   * answering a question nobody asked. The count beside the link is counted the
+   * same way, so what a user reads is what they land on.
    */
   _openConfigPage(which) {
-    if (!this._entryId) {
+    if (!this._hubs.length) {
       return;
     }
-    const path = `/config/${which}/dashboard?historyBack=1&config_entry=${this._entryId}`;
+    const path = configPagePath(which);
     window.history.pushState(null, "", path);
     window.dispatchEvent(
       new CustomEvent("location-changed", { detail: { replace: false } })
@@ -2508,40 +2627,30 @@ class Rtl433Panel extends HTMLElement {
    * subscription is still connecting.
    */
   _renderOverview() {
-    // These open Home Assistant's own pages filtered to a hub, and the FAB
-    // needs one too, so all three wait for a receiver to resolve. The settings
-    // rows do not: they are built per receiver, from a list that only exists
-    // once `rtl_433/hubs` has answered.
-    for (const row of [
-      this._el.rowDevices,
-      this._el.rowEntities,
-      this._el.fab,
-    ]) {
-      row.disabled = !this._entryId;
+    // The two rows open Home Assistant's own pages filtered to the integration,
+    // so they wait only for the hub list; the FAB leads to the discovered
+    // devices of the subscribed receiver, so it waits for one to resolve. The
+    // settings rows wait for neither: they are built per receiver, from the
+    // same list, once `rtl_433/hubs` has answered.
+    for (const row of [this._el.rowDevices, this._el.rowEntities]) {
+      row.disabled = !this._hubs.length;
     }
+    this._el.fab.disabled = !this._entryId;
 
     // One walk of the device registry, shared by the status card and both rows.
     // `_render` reaches here on every push from the receiver and on the clock
     // tick, and the registry is the user's whole instance -- thousands of
     // entries on a big one -- so walking it once per count added up.
-    const deviceIds = this._entryDeviceIds();
+    const deviceIds = this._hubDeviceIds();
     const devices = deviceIds === null ? null : deviceIds.length;
     const status = this._el.status0;
-    // The receiver's own connection, as the payload reports it -- not
-    // "is my subscription working?", which stays true through an outage.
-    const connected = Boolean(this._data && this._data.connected);
+    const { connected, key, args } = overviewStatus(this._hubConnections());
     status.glyph.className = "status-icon";
     if (status.glyph.localName === "ha-svg-icon") {
       status.glyph.path = connected ? ICON_ONLINE : ICON_OFFLINE;
     }
     status.badge.classList.toggle("offline", !connected);
-    status.headline.textContent = this._t(
-      connected
-        ? "status.online"
-        : this._data === null
-          ? "status.connecting"
-          : "status.problem"
-    );
+    status.headline.textContent = this._t(key, args);
     status.supporting.textContent =
       devices === null
         ? ""
@@ -2550,9 +2659,35 @@ class Rtl433Panel extends HTMLElement {
     this._setRowCount(this._el.rowDevices, devices, "overview.device_count");
     this._setRowCount(
       this._el.rowEntities,
-      this._entryEntityCount(deviceIds),
+      this._entityCountFor(deviceIds),
       "overview.entity_count"
     );
+  }
+
+  /**
+   * Every receiver's connection state, for the status card.
+   *
+   * Two sources, because only one receiver is subscribed to. That one is read
+   * off the live payload -- the connection as the receiver reports it, not "is
+   * my subscription working?", which stays true through an outage -- and it is
+   * the freshest thing on the page, since losing the socket pushes a payload.
+   * The rest come from the hub list, which the clock re-asks for while several
+   * receivers are configured (see `_startClock`), so their rows cannot sit on a
+   * stale "Online" either.
+   *
+   * A hub list that predates the `connected` field falls back to `loaded`: an
+   * entry that is not set up has no open socket by definition, which is the
+   * half of the answer that matters on that row.
+   */
+  _hubConnections() {
+    return this._hubs.map((hub) => {
+      if (hub.entry_id === this._entryId) {
+        return this._data === null ? null : Boolean(this._data.connected);
+      }
+      return typeof hub.connected === "boolean"
+        ? hub.connected
+        : Boolean(hub.loaded);
+    });
   }
 
   /**
@@ -2573,29 +2708,35 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * The device ids this hub owns, from the device registry.
+   * The device ids every configured receiver owns, from the device registry.
    *
    * `hass.devices` is keyed by device id and each entry names the single config
    * entry that owns it (`config_entry_id`; the older `config_entries` list is
    * deprecated and goes away in Home Assistant 2027.8), so this is a filter
-   * rather than a lookup. The receiver's own device is *included*, because the
-   * row this count sits on opens Home Assistant's device list filtered to this
-   * entry -- and that list includes it. A count that disagreed with what
-   * clicking it shows would read as a bug in the count.
+   * rather than a lookup. The hub list is what says which entries are rtl_433's
+   * -- the registry a panel is handed carries no domain -- so a count is only
+   * possible once `rtl_433/hubs` has answered, and until then there is none.
+   *
+   * Every receiver, not the subscribed one: the row this count sits on opens
+   * Home Assistant's device list filtered to the integration, and a count that
+   * disagreed with what clicking it shows would read as a bug in the count. The
+   * receivers' own devices are *included* for the same reason -- that list
+   * includes them.
    */
-  _entryDeviceIds() {
+  _hubDeviceIds() {
     const devices = this._hass && this._hass.devices;
-    if (!devices || !this._entryId) {
+    if (!devices || !this._hubs.length) {
       return null;
     }
+    const entries = new Set(this._hubs.map((hub) => hub.entry_id));
     return Object.values(devices)
-      .filter((device) => device.config_entry_id === this._entryId)
+      .filter((device) => entries.has(device.config_entry_id))
       .map((device) => device.id);
   }
 
 
   /**
-   * How many entities this hub owns, counted through its devices.
+   * How many entities those devices own.
    *
    * Deliberately not `entity.config_entry_id`: the registry the frontend hands
    * a panel is the *display* registry, and it carries `device_id`, `platform`
@@ -2603,7 +2744,7 @@ class Rtl433Panel extends HTMLElement {
    * silently counted zero. Every entity this integration creates is attached
    * to one of its devices, so the device set is the reliable way in.
    */
-  _entryEntityCount(deviceIds) {
+  _entityCountFor(deviceIds) {
     const entities = this._hass && this._hass.entities;
     if (!entities || deviceIds === null) {
       return null;
