@@ -462,15 +462,21 @@ _MOTION_ENTITY_ID = "binary_sensor.genericpir_z1_5_motion"
 
 # ===========================================================================
 # _async_restore_state mutmut_1: "clear_delay is None" instead of "is not None"
-# Original: if clear_delay is NOT None -> return early (motion sensor skips).
-# Mutant: if clear_delay IS None -> return early (door sensor skips).
+# Original: a restored ``on`` is dropped only when clear_delay is NOT None
+# (motion sensor); a restored ``off`` is kept for either kind.
+# Mutant: the door sensor would drop its restored ``on`` instead.
+# The ``and`` also mutates to ``or`` (every restore dropped) and to
+# ``not restored`` (only ``off`` dropped) -- the motion on/off pair below pins
+# both directions.
 # ===========================================================================
 
 
-async def test_restore_state_skipped_for_motion_sensor(hass, hub_entry_builder):
+async def test_restore_state_on_skipped_for_motion_sensor(hass, hub_entry_builder):
     """Motion sensor (clear_delay set) does NOT restore stale on state.
 
-    Kills mutmut_1: if guard is inverted, door sensor would skip instead of motion.
+    The clear timer does not survive a restart, so a restored ``on`` would
+    linger forever. Kills mutmut_1: if the guard is inverted the door sensor
+    would skip instead of the motion sensor.
     """
     # Set restore cache to "on" BEFORE setup so it's in place when entity adds.
     mock_restore_cache(hass, (State(_MOTION_ENTITY_ID, "on"),))
@@ -482,9 +488,109 @@ async def test_restore_state_skipped_for_motion_sensor(hass, hub_entry_builder):
 
     eid = _motion_eid(hass, hub)
     state = hass.states.get(eid)
-    # Motion sensor: clear_delay is not None -> early return -> not restored.
-    # State must NOT be "on".
+    # Motion sensor: restored "on" dropped -> is_on stays None.
     assert state.state == "unknown"
+
+
+async def test_restore_state_off_applied_for_motion_sensor(hass, hub_entry_builder):
+    """Motion sensor DOES restore a stored off: off needs no timer to hold it.
+
+    Kills the ``or`` mutant (which would drop every motion restore, leaving
+    "unknown") and the ``not restored`` mutant (which would drop ``off`` and
+    keep ``on`` -- exactly backwards).
+    """
+    mock_restore_cache(hass, (State(_MOTION_ENTITY_ID, "off"),))
+
+    hub = hub_entry_builder(availability_timeout=600, devices=_motion_devices())
+    hub.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    eid = _motion_eid(hass, hub)
+    assert hass.states.get(eid).state == "off"
+
+
+async def test_restore_state_off_for_motion_arms_no_clear_timer(
+    hass, hub_entry_builder
+):
+    """A restored off leaves no clear timer pending, and the timer still works.
+
+    ``async_added_to_hass`` arms the clear timer only for a seeded/restored
+    ``on``, so a restored ``off`` must stay off on its own; a real detection
+    afterwards must still turn it on and auto-clear normally.
+    """
+    mock_restore_cache(hass, (State(_MOTION_ENTITY_ID, "off"),))
+
+    hub = hub_entry_builder(availability_timeout=600, devices=_motion_devices())
+    hub.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    eid = _motion_eid(hass, hub)
+    start = dt_util.utcnow()
+    await _advance_to(hass, start, DEFAULT_MOTION_CLEAR_DELAY + 10)
+    assert hass.states.get(eid).state == "off"
+
+    # A real detection still drives the normal on -> auto-off cycle.
+    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).state == "on"
+
+    detected_at = dt_util.utcnow()
+    await _advance_to(hass, detected_at, DEFAULT_MOTION_CLEAR_DELAY + 10)
+    assert hass.states.get(eid).state == "off"
+
+
+async def test_restore_state_off_from_extra_data_for_motion_sensor(
+    hass, hub_entry_builder
+):
+    """The extra-data path also restores off for a motion sensor.
+
+    A restart during an outage persists "unavailable" as the state, so the
+    stored ``off`` can only come from the extra data.
+    """
+    mock_restore_cache_with_extra_data(
+        hass,
+        (
+            (
+                State(_MOTION_ENTITY_ID, "unavailable"),
+                RestoredExtraData({"is_on": False}).as_dict(),
+            ),
+        ),
+    )
+
+    hub = hub_entry_builder(availability_timeout=600, devices=_motion_devices())
+    hub.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(_motion_eid(hass, hub)).state == "off"
+
+
+async def test_restore_state_on_from_extra_data_dropped_for_motion_sensor(
+    hass, hub_entry_builder
+):
+    """The extra-data path drops a stale ``on`` for a motion sensor too.
+
+    The ``on`` filter sits after both restore sources, so neither can smuggle a
+    stale ``on`` past it.
+    """
+    mock_restore_cache_with_extra_data(
+        hass,
+        (
+            (
+                State(_MOTION_ENTITY_ID, "unavailable"),
+                RestoredExtraData({"is_on": True}).as_dict(),
+            ),
+        ),
+    )
+
+    hub = hub_entry_builder(availability_timeout=600, devices=_motion_devices())
+    hub.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(_motion_eid(hass, hub)).state == "unknown"
 
 
 async def test_restore_state_applied_for_door_sensor_on(hass, hub_entry_builder):
