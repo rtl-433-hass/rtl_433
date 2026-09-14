@@ -178,8 +178,9 @@ turns `on` on each detection and is auto-cleared to off after the delay elapses
 with no re-detection. Every fresh detection **reschedules** the timer, so the
 off window restarts on each retrigger. The upstream default is **90 seconds**.
 
-When Home Assistant restarts, a motion sensor comes back unknown, since no timer
-would be left to clear a restored on. It stays unknown until the next detection.
+When Home Assistant restarts, a motion sensor comes back off rather than on,
+since no timer would be left to clear a restored on. A device that has never
+reported stays unknown until its first detection.
 
 **Per-device override.** The delay can be tuned per device in *Device settings* —
 **Settings → Devices & Services → rtl_433 → Configure (the gear icon) →
