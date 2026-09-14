@@ -156,21 +156,35 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
 
         A live value already seeded from the coordinator's last event wins over a
         restored one. For a ``clear_delay`` descriptor a stale ``on`` is never
-        restored (it would otherwise linger with no timer to clear it): the
-        sensor comes back off/unknown until the next detection.
+        restored: the clear timer does not survive a restart, so a restored ``on``
+        would linger with nothing left to clear it. A stored ``off`` *is*
+        restored, because off is the resting state and needs no timer to hold it
+        — the sensor comes back off rather than unknown, and only a device that
+        has never reported stays unknown until its first detection.
         """
-        if self._descriptor.clear_delay is not None:
-            return
         if self._attr_is_on is not None:
             return
-        extra = await self.async_get_last_extra_data()
-        if extra is not None and (restored := extra.as_dict().get("is_on")) is not None:
-            self._attr_is_on = bool(restored)
+        restored = await self._async_restored_is_on()
+        if restored is None:
             return
+        if restored and self._descriptor.clear_delay is not None:
+            return
+        self._attr_is_on = restored
+
+    async def _async_restored_is_on(self) -> bool | None:
+        """Return the persisted on/off value, or ``None`` when there is none.
+
+        The extra data written by :attr:`extra_restore_state_data` wins over the
+        recorded state, which reads ``unavailable`` whenever the device was past
+        its silence timeout when Home Assistant stopped.
+        """
+        extra = await self.async_get_last_extra_data()
+        if extra is not None and (stored := extra.as_dict().get("is_on")) is not None:
+            return bool(stored)
         last_state = await self.async_get_last_state()
         if last_state is None or last_state.state in (None, "unknown", "unavailable"):
-            return
-        self._attr_is_on = last_state.state == "on"
+            return None
+        return last_state.state == "on"
 
 
 class Rtl433HubConnectivity(Rtl433HubEntity, BinarySensorEntity):
