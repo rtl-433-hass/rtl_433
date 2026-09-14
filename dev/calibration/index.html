@@ -348,7 +348,34 @@
   <span class="md-ellipsis">
     
   
-    Device Discovery
+    Adding Devices to Home Assistant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changing-device-ids/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managing Devices That Change IDs
   
 
     
@@ -690,8 +717,8 @@ cannot derive Energy-dashboard-ready values automatically.</p>
 <p>Out of the box, consumption is a plain unitless <code>total_increasing</code> counter. To
 make it eligible for Home Assistant's Energy dashboard, calibrate the device.</p>
 <h2 id="calibrating-a-meter">Calibrating a Meter<a class="headerlink" href="#calibrating-a-meter" title="Permanent link">&para;</a></h2>
-<p>Open <strong>Settings → Devices &amp; Services → rtl_433 → Configure → Device settings</strong>
-and pick the meter.</p>
+<p>Open <strong>Settings → Devices &amp; Services → rtl_433 → Configure (the gear icon) →
+Device settings</strong> and pick the meter.</p>
 <p>Meters whose commodity the integration recognized from the signal are labelled
 with it in the picker, so you can tell at a glance which devices are calibratable
 and what they measure. When the meter reports a <code>MeterType</code> or <code>ert_type</code> hint,
@@ -741,8 +768,8 @@ rebuilt with the new unit and class.</p>
 <p>For models whose unit and scale are authoritatively known, a contributor can ship
 a model-scoped mapping in the <a href="../device-library/#model-scoped-mappings-models">device library</a>
 so those meters work without per-device calibration.</p>
-<p>The shipped library does not include speculative real-meter consumption mappings.
-A wrong scale would silently corrupt Energy data.</p>
+<p>pyrtl_433 does not include speculative real-meter consumption mappings. A
+wrong scale would silently corrupt Energy data.</p>
 
 
 

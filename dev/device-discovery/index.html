@@ -14,7 +14,7 @@
         <link rel="prev" href="../configuration/">
       
       
-        <link rel="next" href="../availability/">
+        <link rel="next" href="../changing-device-ids/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Device Discovery - rtl_433 for Home Assistant</title>
+        <title>Adding Devices to Home Assistant - rtl_433 for Home Assistant</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#device-discovery" class="md-skip">
+        <a href="#adding-devices-to-home-assistant" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Device Discovery
+              Adding Devices to Home Assistant
             
           </span>
         </div>
@@ -359,7 +359,7 @@
   <span class="md-ellipsis">
     
   
-    Device Discovery
+    Adding Devices to Home Assistant
   
 
     
@@ -377,7 +377,7 @@
   <span class="md-ellipsis">
     
   
-    Device Discovery
+    Adding Devices to Home Assistant
   
 
     
@@ -464,17 +464,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-discovered-list-is-temporary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The Discovered List Is Temporary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#deleting-devices" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -485,32 +474,37 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#post-connection-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Post-Connection Registration
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#replacing-a-device-that-changed-id" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Replacing a Device That Changed Id
-      
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changing-device-ids/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managing Devices That Change IDs
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -765,43 +759,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#the-discovered-list-is-temporary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The Discovered List Is Temporary
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#deleting-devices" class="md-nav__link">
     <span class="md-ellipsis">
       
         Deleting Devices
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#post-connection-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Post-Connection Registration
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#replacing-a-device-that-changed-id" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Replacing a Device That Changed Id
       
     </span>
   </a>
@@ -828,20 +789,19 @@
   
 
 
-<h1 id="device-discovery">Device Discovery<a class="headerlink" href="#device-discovery" title="Permanent link">&para;</a></h1>
-<p>Nothing is added to Home Assistant on its own. Every device your rtl_433 server
-decodes is heard and held on a list of discovered devices, and you decide which
-ones become real devices.</p>
-<p>That list is where neighbours' sensors, weak signals, and bad decodes end up. In
-a busy area a receiver hears far more than you want to keep, which is why the
-integration waits for you to choose.</p>
+<h1 id="adding-devices-to-home-assistant">Adding Devices to Home Assistant<a class="headerlink" href="#adding-devices-to-home-assistant" title="Permanent link">&para;</a></h1>
+<p>By default, rtl_433 listens for new devices but doesn't add them to Home
+Assistant. In a busy or dense area, you're likely to see far more sensors than
+you want to keep. You may also see devices that don't really exist, due to
+corrupt or weak decodes. Use this page to add the devices you want, and ignore
+those you don't.</p>
 <p>Doorbells, remotes, and motion sensors only transmit when something happens, so
 trigger them once to make them show up.</p>
 <h2 id="the-rtl_433-page">The rtl_433 Page<a class="headerlink" href="#the-rtl_433-page" title="Permanent link">&para;</a></h2>
-<p>Open <strong>Settings → Devices &amp; Services → rtl_433 → Configure</strong>. This is the
-rtl_433 page, and it works like the Zigbee and Z-Wave pages: it opens on an
-overview of the receiver, with everything else one click away. It is available
-to administrators only.</p>
+<p>Open <strong>Settings → Devices &amp; Services → rtl_433 → Configure (the gear icon)</strong>.
+This is the rtl_433 page, and it works like the Zigbee and Z-Wave pages: it
+opens on an overview of the receiver, with everything else one click away. It is
+available to administrators only.</p>
 <p>The overview has three parts:</p>
 <ul>
 <li>a card at the top saying whether the receiver is <strong>Online</strong>, and how many
@@ -851,22 +811,17 @@ to administrators only.</p>
 <li><strong>Receiver settings</strong>, <strong>Device settings</strong> and <strong>Device mappings</strong>, which each
   open their own page</li>
 </ul>
-<p>and, bottom right, an <strong>Add or replace device</strong> button. That is the one that
-takes you to the discovered devices.</p>
+<p>and, bottom right, an <strong>Add or replace device</strong> button.</p>
+<p><img alt="The rtl_433 page: a status card with a green tick reading Online and 7 devices; a My network card listing Devices, 7 devices and Entities, 33 entities, each with a chevron; then a card of three rows — Receiver settings (availability timeout and whether Home Assistant manages the receiver), Device settings (per-device timeout overrides and utility-meter calibration) and Device mappings (YAML overrides for how fields become entities); and a blue Add or replace device button in the bottom right" src="../images/18-rtl-433-page.png" /></p>
 <p>If you have more than one receiver, each gets its own settings card, headed by
 the receiver it belongs to.</p>
 <h2 id="adding-devices">Adding Devices<a class="headerlink" href="#adding-devices" title="Permanent link">&para;</a></h2>
-<p>Click <strong>Add or replace device</strong>. Every device your receiver has heard and you
-have not added is here, newest first. If nothing has transmitted yet the page
-says it is still searching — which is normal, and the next section explains
-why.</p>
+<p>Click <strong>Add or replace device</strong>. Every device that has been seen is listed here,
+newest first. If you recently restarted Home Assistant and nothing has
+transmitted, this page may be empty until something transmits.</p>
 <p><img alt="The rtl_433 page: a toolbar, a row of Receiver settings / Device settings / Device mappings buttons, then a grid of device cards, each with a blue heading giving the model and device key, its sighting count, signal level and last-seen age, its latest readings named as Home Assistant entities, an Area picker, and Ignore and Add buttons" src="../images/17-discovery-panel.png" /></p>
-<p>Each candidate gets a card. Cards keep their place as
-devices transmit, so a card does not move under the cursor while you are reading
-it.</p>
-<p>The blue heading is the device's identity: the model rtl_433 decoded, and below
-it the device key — the id rtl_433 uses to tell one device of that model from
-another, with its channel and subtype when it reports them.</p>
+<p>Each card shows the device type rtl_433 decoded, and the device key which
+includes any ID, channel, and subtype information.</p>
 <table>
 <thead>
 <tr>
@@ -889,40 +844,25 @@ another, with its channel and subtype when it reports them.</p>
 </tr>
 <tr>
 <td><strong>Readings</strong></td>
-<td>The most recent message, shown as the entities adding it would create — <code>Temperature 21.4 °C</code>, not <code>temperature_C: 21.4</code>. This is usually the quickest way to tell two identical sensors apart.</td>
+<td>The most recent message, shown as the entities adding it would create.</td>
 </tr>
 </tbody>
 </table>
-<p>The readings are the ones you would actually get. A field the device library
-does not map creates no entity, and one it maps as disabled by default (the
-<code>SNR</code>, <code>RSSI</code> and <code>Noise</code> diagnostics) is not something you would see on the
-device page, so neither is listed here.</p>
-<p>Pick an <strong>Area</strong> before adding to have the new device filed there straight away.
-Leave it on <em>No area</em> to sort it out later on the device page.</p>
-<p><strong>Add</strong> creates that device and its entities straight away, and starts
-recording history from that point. The card stays where it is and turns green,
-with a link to the device that was just created:</p>
+<p>Readings that cannot be mapped to Home Assistant will not show here. See
+<a href="../device-library/">Device Library</a> for information about adding support for new
+devices and fields.</p>
+<p>Select an <strong>Area</strong> to assign the device there, or leave it blank if that doesn't
+make sense.</p>
+<p>Click <strong>Add</strong> to create the device. The card stays where it is and turns green,
+with a link to the device that was just created.</p>
 <p><img alt="An Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics" src="../images/02-device-page.png" /></p>
-<p><strong>Ignore</strong> hides the device until you un-ignore it — see <a href="#ignoring-devices">Ignoring
-Devices</a>.</p>
-<p>The page is live. A device heard while it is open appears on its own, sighting
-counts climb as devices transmit, and nothing needs a reload. So trigger a
-doorbell or open a door sensor and watch it arrive.</p>
-<p>Everything the page does is also a Home Assistant WebSocket command, so the same
-list and the same actions are available to a script — see <a href="../websocket-api/#home-assistant-discovery-commands">Home Assistant
-discovery commands</a>.</p>
+<p>Otherwise, <strong>Ignore</strong> hides the device.</p>
 <h3 id="clearing-the-list">Clearing the List<a class="headerlink" href="#clearing-the-list" title="Permanent link">&para;</a></h3>
 <p>A receiver left running for a few weeks in a built-up area accumulates hundreds
-of candidates, and the one you came to add is somewhere among them. <strong>Clear
-discovered devices</strong> empties the list so it refills from live traffic: trigger
-the doorbell, and it is the only thing on the screen.</p>
-<p>Nothing is lost. The list has always been held in memory only, so every device
-cleared comes back on its next transmission. Devices you have ignored stay
-ignored — that is a decision, and this is not the control for undoing it.</p>
+of devices, and the one you came to add is somewhere among them. <strong>Clear
+discovered devices</strong> will empty the list so you can easily add the ones you
+want.</p>
 <h2 id="receiver-and-device-settings">Receiver and Device Settings<a class="headerlink" href="#receiver-and-device-settings" title="Permanent link">&para;</a></h2>
-<p>The three rows on the overview each open a settings page. Each one has its own
-address, so you can bookmark it or link someone straight to it, and the back
-arrow returns you to the overview.</p>
 <p><strong>Receiver settings</strong> is the default availability timeout for every device on
 this receiver, and whether Home Assistant manages the server's own SDR settings
 — see <a href="../configuration/#reconfigure-vs-configure">Configuration</a>.</p>
@@ -933,29 +873,16 @@ rest of the form rebuilds from it, showing only the settings that device
 actually has.</p>
 <p><strong>Device mappings</strong> is this receiver's
 <a href="../device-library/">device-library overrides</a>, as YAML. Clearing the editor
-removes them all. A document that will not store is refused with every problem
-listed, and the overrides you already had are left alone.</p>
+removes them all. The device mappings are automatically validated (but not
+tested!) when saving.</p>
 <h2 id="ignoring-devices">Ignoring Devices<a class="headerlink" href="#ignoring-devices" title="Permanent link">&para;</a></h2>
-<p>Devices you never want to see again are ignored. Click <strong>Ignore</strong> on the card.
-An ignored device is dropped from the list, is never offered again, and stays
-ignored across restarts. It is the way to make a neighbour's sensor go away for
-good.</p>
-<p>Ignoring is not deleting: an ignored device is simply not offered, and its
-messages are dropped as they arrive.</p>
-<p>To undo it, go back to <strong>Add or replace device</strong>, click <strong>Show ignored
+<p>Sometimes devices are detected that you will never want to add to Home
+Assistant. Click <strong>Ignore</strong> on the card to hide it at the bottom of the list. If
+you made a mistake, go back to <strong>Add or replace device</strong>, click <strong>Show ignored
 devices</strong> under the cards, and then <strong>Un-ignore</strong>:</p>
 <p><img alt="The rtl_433 page with the ignored-devices section revealed, showing one ignored device and its Un-ignore button" src="../images/16-ignored-devices.png" /></p>
 <p>The device reappears the next time it transmits, which for a door or motion
 sensor means the next time it is triggered.</p>
-<h2 id="the-discovered-list-is-temporary">The Discovered List Is Temporary<a class="headerlink" href="#the-discovered-list-is-temporary" title="Permanent link">&para;</a></h2>
-<p>The list of discovered devices is held in memory only. It is empty after a
-restart or a reload of the hub, and fills again as devices transmit. A sensor
-that reports every few minutes is back almost immediately; one that reports
-twice a day takes longer.</p>
-<p>So an empty list shortly after a restart is normal — it means nothing has
-transmitted yet. Devices you have already added are unaffected: they are stored
-with the hub and come back with their entities and history on every start.
-Ignored devices are stored too, and stay ignored.</p>
 <h2 id="deleting-devices">Deleting Devices<a class="headerlink" href="#deleting-devices" title="Permanent link">&para;</a></h2>
 <p>To remove a device you no longer want, open it under <strong>Settings → Devices &amp;
 Services → rtl_433 → the device → Delete</strong>.</p>
@@ -963,53 +890,6 @@ Services → rtl_433 → the device → Delete</strong>.</p>
 stop the transmitter. The device returns to the discovered list the next time it
 transmits, so you can add it back. To keep it out of the list, ignore it
 instead.</p>
-<h2 id="post-connection-registration">Post-Connection Registration<a class="headerlink" href="#post-connection-registration" title="Permanent link">&para;</a></h2>
-<p>Only devices heard after the integration connects count as live sightings. On
-connect, the rtl_433 server replays its recent backlog. The integration uses
-frame timestamps to tell that replay apart from live traffic: backlog frames
-refresh the values of devices you have already added, but they never put a
-device on the discovered list, so a reconnect does not fill it with everything
-that transmitted while Home Assistant was away.</p>
-<p>A device you have not added appears the first time it transmits after the
-connection. This assumes the rtl_433 server and Home Assistant clocks are roughly
-in sync, and that the server stamps its events with a readable timestamp — see
-<a href="../configuration/#event-timestamps">Event Timestamps</a> for the accepted forms and
-what changes without one.</p>
-<h2 id="replacing-a-device-that-changed-id">Replacing a Device That Changed Id<a class="headerlink" href="#replacing-a-device-that-changed-id" title="Permanent link">&para;</a></h2>
-<p>Many battery-powered sensors pick a new random transmitter id every time their
-batteries are changed. rtl_433 identifies a device by that id, so the sensor
-comes back as a brand-new device with new entities and no history, while the
-original stops updating and eventually goes unavailable.</p>
-<p>You meet this problem from the new device's side: something you did not add has
-appeared on the discovered list, and it is really a sensor you already have. So
-that is where the fix starts.</p>
-<p>Find the new device's card and click <strong>Replace</strong>, then pick the device it
-replaces: the one you already have, whose history you want to keep. Devices of
-the same model are listed first, since a battery swap does not change the model.
-The button only appears once there is at least one added device the candidate
-could stand in for.</p>
-<p>The device you keep takes over the new id. If you had already added the
-replacement as a device of its own, it and its entities are removed. The kept
-device's entity ids do not change, so its
-history, statistics, dashboards and automations carry straight through, and its
-calibration, availability timeout override, motion clear delay and event types
-come with it. Any field the replacement has already reported is added to the
-device's known fields. The short history the duplicate recorded before the
-replace is discarded along with it.</p>
-<p>Because those entity ids are kept exactly as they were, they still spell out the
-<em>old</em> id — an entity named <code>sensor.acurite_986_1a2b_temperature</code> keeps that name
-after being re-pointed at id <code>9f3c</code>. That is what preserves the history, so it is
-worth leaving alone. You can rename the entity if the stale id bothers you, but
-renaming it starts a new history under the new entity id.</p>
-<p>The replacement does not have to be added first. The card you start from is a
-device you have not added, which is exactly what a battery-swapped sensor looks
-like; it only has to have been heard once. If it is not on the page yet, wait
-until it transmits again.</p>
-<p>To confirm you are picking the right device, check the <strong>Serial number</strong> on the
-device info card: it is the id rtl_433 decoded for that device, plus its channel
-and subtype when it has them. Unlike the device name, the serial number is not
-affected by renaming the device, so it always shows the transmitter the device
-is currently tracking — the old id before a replace, the new one after.</p>
 
 
 

@@ -8,13 +8,13 @@
       
       
       
-        <link rel="canonical" href="https://rtl-433-hass.github.io/rtl_433/dev/availability/">
+        <link rel="canonical" href="https://rtl-433-hass.github.io/rtl_433/dev/changing-device-ids/">
       
       
-        <link rel="prev" href="../changing-device-ids/">
+        <link rel="prev" href="../device-discovery/">
       
       
-        <link rel="next" href="../event-based-devices/">
+        <link rel="next" href="../availability/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Availability - rtl_433 for Home Assistant</title>
+        <title>Managing Devices That Change IDs - rtl_433 for Home Assistant</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#availability" class="md-skip">
+        <a href="#managing-devices-that-change-ids" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Availability
+              Managing Devices That Change IDs
             
           </span>
         </div>
@@ -367,10 +367,19 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../changing-device-ids/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -386,6 +395,7 @@
   
 
       </a>
+      
     </li>
   
 
@@ -394,37 +404,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Availability
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../availability/" class="md-nav__link">
         
   
   
@@ -440,81 +423,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#transmit-cadences" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Transmit Cadences
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#hub-connection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Hub Connection
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#timeout-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Timeout Sources
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#restart-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Restart Behavior
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#last-seen-sensor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Last Seen Sensor
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -674,69 +582,6 @@
     
   
   
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#transmit-cadences" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Transmit Cadences
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#hub-connection" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Hub Connection
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#timeout-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Timeout Sources
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#restart-behavior" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Restart Behavior
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#last-seen-sensor" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Last Seen Sensor
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
 </nav>
                   </div>
                 </div>
@@ -755,113 +600,25 @@
   
 
 
-<h1 id="availability">Availability<a class="headerlink" href="#availability" title="Permanent link">&para;</a></h1>
-<p>RF devices announce their availability only by transmitting, so the integration
-uses a silence-based availability model. If no event for a device arrives within
-its availability timeout, its entities become <code>unavailable</code>.</p>
-<p><img alt="Device entities showing the unavailable state after the availability timeout" src="../images/04-unavailable-state.png" /></p>
-<h2 id="transmit-cadences">Transmit Cadences<a class="headerlink" href="#transmit-cadences" title="Permanent link">&para;</a></h2>
-<p>How long a device can reasonably stay silent depends on the device type.</p>
-<table>
-<thead>
-<tr>
-<th>Device type</th>
-<th>Typical behavior</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Periodic weather, temperature, soil, and air-quality sensors</td>
-<td>Transmit on a regular cadence.</td>
-</tr>
-<tr>
-<td>Door/window contacts, motion/PIR, buttons, doorbells, and security sensors</td>
-<td>Transmit on events, sometimes with an occasional heartbeat.</td>
-</tr>
-<tr>
-<td>Generic EV1527 door/PIR devices and parked TPMS sensors</td>
-<td>May have no heartbeat and stay silent for days.</td>
-</tr>
-</tbody>
-</table>
-<p>Periodic devices use finite timeouts. Event-driven devices default to never
-expiring because a long silence is normal and does not imply failure.</p>
-<h2 id="hub-connection">Hub Connection<a class="headerlink" href="#hub-connection" title="Permanent link">&para;</a></h2>
-<p>Silence only means something while the integration is listening. If the
-connection to the rtl_433 server drops, no events can arrive for any device, so a
-device's last reading says nothing about whether the device is still there.</p>
-<p>When the connection to the rtl_433 server drops, every device behind that hub is
-marked <code>unavailable</code> straight away, regardless of its own timeout — including
-event-driven devices that never expire on silence, and their <strong>Last seen</strong>
-sensors. There is no grace period: while the socket is down the integration
-cannot hear the radio at all, so continuing to show the last reading would
-present stale data as current. This is the same behavior an MQTT device gets from
-an availability topic and a last-will message, and what Home Assistant
-integrations do generally when a connection to a hub is lost.</p>
-<p>The devices come back as soon as the connection is re-established; their values
-are the last ones received, and the usual silence timeouts resume from there. A
-brief drop therefore shows up as a brief <code>unavailable</code> — an honest one, because
-during it the integration genuinely was not listening.</p>
-<p>If you want an automation to tolerate short blips, condition it on the hub's
-<strong>Connectivity</strong> binary sensor with a <code>for:</code> delay rather than reacting to each
-device going unavailable.</p>
-<p>The separate <strong>rtl_433 server unreachable</strong> repair issue is debounced: it waits
-90 seconds before raising, so a routine server restart does not produce a
-notification even though the entities reported the outage immediately.</p>
-<p><code>event</code> entities (buttons, doorbells, remotes) go unavailable with everything
-else. This matches Zigbee2MQTT, whose event entities carry the bridge-state
-availability topic alongside the per-device one, and Home Assistant's own Shelly
-and ESPHome integrations. Use the <code>event.received</code> trigger rather than a plain
-state trigger: it ignores transitions out of <code>unavailable</code>, so a reconnect never
-replays a stale press.</p>
-<p>One kind of entity is deliberately exempt:</p>
-<ul>
-<li><strong>The hub's SDR controls</strong> (<strong>Gain</strong>, <strong>Sample rate</strong>, <strong>Frequency
-  correction</strong>, <strong>Hop interval</strong>, <strong>Conversion mode</strong>) stay available, because
-  they are settings you are writing rather than readings you are trusting. With
-  <strong>Manage SDR settings</strong> on — the default — these appear as <code>number</code>/<code>select</code>
-  entities. Turning it off replaces them with read-only diagnostic sensors, and
-  those <em>are</em> gated on the connection along with the hub's other diagnostic
-  sensors (center frequency, frame counters, enabled decoders), whose values are
-  fetched over HTTP and would otherwise freeze at whatever was last read.</li>
-</ul>
-<p>The <strong>Connectivity</strong> binary sensor is the entity that reports the outage: it
-reads the socket state directly and stays available throughout. The Home
-Assistant log records the drop and the reconnect:</p>
-<div class="highlight"><pre><span></span><code>INFO  rtl_433 lost the connection to ws://rtl433.local:8433/ws; reconnecting, and marking all 12 device(s) ...
-INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
-</code></pre></div>
-<h2 id="timeout-sources">Timeout Sources<a class="headerlink" href="#timeout-sources" title="Permanent link">&para;</a></h2>
-<p>The effective availability timeout is resolved in this order:</p>
-<ol>
-<li>Per-device override from <strong>Device settings</strong>.</li>
-<li>Hub default from <strong>Receiver settings</strong>, if set.</li>
-<li>Device-class default.</li>
-<li>600 second fallback.</li>
-</ol>
-<p>Set a timeout to <code>0</code> to make a device never expire. This is already the automatic
-default for event-driven devices.</p>
-<p><strong>Receiver settings</strong> asks which of the three you want outright — <em>Per-device-type
-defaults</em>, <em>Never expire</em>, or <em>a fixed timeout</em> — so leaving the receiver on the
-class defaults is a choice you make rather than a number you have to leave alone.
-A fixed timeout of 600 seconds is a hub default like any other, and stops at step
-2; it is not the same as the step-4 fallback, which only applies to devices no
-earlier step has claimed.</p>
-<h2 id="restart-behavior">Restart Behavior<a class="headerlink" href="#restart-behavior" title="Permanent link">&para;</a></h2>
-<p>On Home Assistant restart, the last known states are restored first. The timeout
-then runs from the restart time, and entities flip to unavailable only after the
-restored silence window elapses without a fresh event.</p>
-<h2 id="last-seen-sensor">Last Seen Sensor<a class="headerlink" href="#last-seen-sensor" title="Permanent link">&para;</a></h2>
-<p>Every device gets a diagnostic timestamp sensor named <strong>Last seen</strong>. It reports
-when the device was last heard from and restores its previous value across
-restarts.</p>
-<p>Last seen is enabled by default for event-driven devices because they never
-expire and the timestamp is their freshness signal. It is disabled by default for
-periodic devices, whose availability already conveys freshness.</p>
-<p>Unlike measurement sensors, Last seen stays available after the device falls
-silent, so it can drive staleness automations. It does go unavailable while the
-hub connection is down, because the timestamp then only records when the
-integration stopped listening.</p>
+<h1 id="managing-devices-that-change-ids">Managing Devices That Change IDs<a class="headerlink" href="#managing-devices-that-change-ids" title="Permanent link">&para;</a></h1>
+<p>Many battery-powered sensors pick a new random transmitter ID every time their
+batteries are changed. rtl_433 identifies a device by that ID, so the sensor
+comes back as a brand-new device with new entities and no history, while the
+original stops updating and eventually goes unavailable.</p>
+<p>rtl_433 can't tell the difference between a new device and one that changed its
+ID. To re-link the device, go to the <strong>Add or replace device</strong> page.</p>
+<p>Find the new device's card and click <strong>Replace</strong>, then pick the device it
+replaces. Devices of the same model are listed first, since a battery swap does
+not change the model. The button only appears once there is at least one added
+device the candidate could stand in for.</p>
+<p>The device is updated to take over the new ID. Entity IDs <strong>do not change</strong> even
+if they contain the old ID. Automations, history, dashboards, and so on will all
+keep working as they did before.</p>
+<p>To confirm you are picking the right device, check the <strong>Serial number</strong> on the
+device info card: it is the ID rtl_433 decoded for that device, plus its channel
+and subtype when it has them. Unlike the device name, the serial number is not
+affected by renaming the device, so it always shows the transmitter the device
+is currently tracking — the old ID before a replace, the new one after.</p>
 
 
 

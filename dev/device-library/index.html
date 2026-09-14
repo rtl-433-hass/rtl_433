@@ -350,7 +350,34 @@
   <span class="md-ellipsis">
     
   
-    Device Discovery
+    Adding Devices to Home Assistant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changing-device-ids/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managing Devices That Change IDs
   
 
     
@@ -937,27 +964,22 @@ files that map each rtl_433 field name to a Home Assistant entity descriptor.</p
 <p>Use device mappings to add support for fields your rtl_433 hardware already
 reports, without editing the integration code or waiting for a new release. You
 can add mappings from the Home Assistant UI; contributors can add mappings to
-the shipped library.</p>
+pyrtl_433.</p>
 <blockquote>
-<p><strong>Where the shipped library lives.</strong> The YAML files and their loader are part
-of <a href="https://github.com/rtl-433-hass/pyrtl_433"><code>pyrtl_433</code></a>, the integration's
-runtime dependency — not this repository. This page is the
-<strong>Home-Assistant-facing</strong> guide: how to add and override mappings from the UI,
-how the resulting descriptors behave as entities, and how to contribute a
-mapping upstream. The <strong>authoritative YAML schema reference</strong> — every
-attribute, the value transforms, binary payloads, the <code>models:</code> block and the
-skip-keys file — is
+<p>The YAML files and their loader are part of
+<a href="https://github.com/rtl-433-hass/pyrtl_433"><code>pyrtl_433</code></a>, the integration's
+runtime dependency — not this repository. The authoritative YAML schema
+reference is
 <a href="https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/">the pyrtl_433 device-library reference</a>.</p>
 </blockquote>
 <h2 id="adding-device-mappings">Adding device mappings<a class="headerlink" href="#adding-device-mappings" title="Permanent link">&para;</a></h2>
-<p>You can extend or correct the shipped library <strong>without editing the integration
-files</strong> directly from the Home Assistant UI:</p>
+<p>You can extend or correct device mappings directly from the Home Assistant UI.</p>
 <blockquote>
-<p><strong>Settings → Devices &amp; Services → rtl_433 → Configure → Device mappings</strong></p>
+<p><strong>Settings → Devices &amp; Services → rtl_433 → Configure (the gear icon) → Device mappings</strong></p>
 </blockquote>
 <p>The <em>Device mappings</em> step opens Home Assistant's built-in YAML editor pre-filled
-with that hub's current mappings. You edit mappings as YAML, using the <strong>same
-schema</strong> as the shipped library (<a href="https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/">reference</a>): top-level keys are rtl_433
+with that hub's current mappings. You edit mappings as YAML, using the
+<a href="https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/">same schema as pyrtl_433</a>: top-level keys are rtl_433
 field names, values are entry mappings. They may optionally include a <code>skip_keys:</code> list to add extra
 skip entries, and an optional <a href="#model-scoped-mappings-models"><code>models:</code> block</a> to
 add or override model-scoped descriptors.</p>
@@ -980,19 +1002,19 @@ data, an entry for <code>skip_keys:</code>.</p>
 so any comments or hand-formatting in what you paste are dropped once the
 mappings are stored. The mapping <em>content</em> is preserved exactly.</p>
 </blockquote>
-<p>Mappings you add in the UI layer <strong>on top of</strong> the shipped library:</p>
+<p>Mappings you add in the UI layer <strong>on top of</strong> pyrtl_433:</p>
 <ul>
-<li>A field present in both the UI mapping and the shipped library: the <strong>UI mapping
-  wins</strong> (full entry replacement, not a deep merge), so you can correct a unit,
-  device class, or transform.</li>
+<li>A field present in both the UI mapping and pyrtl_433: the <strong>UI mapping
+  wins</strong> (full entry replacement, not a deep merge), so you can correct a
+  unit, device class, or transform.</li>
 <li>A field present only in the UI mapping: it is <strong>added</strong> as a new mapping.</li>
-<li><code>skip_keys</code> entries in the UI mapping are <strong>unioned</strong> with the shipped skip
+<li><code>skip_keys</code> entries in the UI mapping are <strong>unioned</strong> with the upstream skip
   list.</li>
 <li>A <code>models:</code> block in the UI mapping is <strong>merged per <code>(model, field_key)</code></strong>: a
-  UI model-scoped entry replaces the shipped one for the same model and field,
-  while other shipped model fields are preserved. Per the
+  UI model-scoped entry replaces the upstream one for the same model and field,
+  while other upstream model fields are preserved. Per the
   <a href="#precedence-specificity-first">precedence rules</a>, a model-scoped entry (from
-  either source) always beats a global one — so a <strong>shipped</strong> <code>models:</code> entry
+  either source) always beats a global one — so an <strong>upstream</strong> <code>models:</code> entry
   outranks a <strong>UI global</strong> entry for a matching model.</li>
 </ul>
 <p>Paste a mapping like the following into the <em>Device mappings</em> editor. This
@@ -1017,8 +1039,8 @@ binary problem sensor:</p>
 <span class="w">  </span><span class="nt">entity_category</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">diagnostic</span>
 <span class="w">  </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">B</span>
 </code></pre></div>
-<p><code>skip_keys:</code> entries work in the editor exactly as in the shipped library, and so
-do model-scoped mappings — the way to correct a mapping for <strong>one specific device
+<p><code>skip_keys:</code> entries work in the editor exactly as in pyrtl_433, and so do
+model-scoped mappings — the way to correct a mapping for <strong>one specific device
 model</strong> rather than every device that emits the field. Nest the per-model
 descriptors under a <a href="#model-scoped-mappings-models"><code>models:</code> block</a> keyed by the
 exact rtl_433 <code>model</code> string; a model-scoped entry beats any global one for that
@@ -1041,14 +1063,13 @@ of a model, not a single physical unit. To change settings for one specific unit
 (its availability timeout, meter calibration, or motion clear delay), use the
 <em>Device settings</em> page instead.</p>
 <h2 id="mapping-entry-schema-summary">Mapping entry schema (summary)<a class="headerlink" href="#mapping-entry-schema-summary" title="Permanent link">&para;</a></h2>
-<p>The full schema is documented upstream, where the library lives:
-<strong><a href="https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/">pyrtl_433 device-library reference</a></strong>. What follows is only enough to
-read and write an entry in the <em>Device mappings</em> editor.</p>
+<p>The full schema is documented in the
+<a href="https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/">pyrtl_433 device-library reference</a>.</p>
 <p>Top-level keys are rtl_433 field names <strong>exactly</strong> as they appear in the JSON
 event (<code>temperature_C</code>, <code>wind_avg_km_h</code>, <code>battery_ok</code>). Names are matched
 <strong>case-sensitively</strong>, and not every decoder uses <code>snake_case</code> — SCMplus emits
 <code>Consumption</code>, ERT-SCM emits <code>consumption_data</code>. A key that differs only in case
-silently never matches: no entity, no warning, no error.</p>
+silently never matches and will not show up in Home Assistant.</p>
 <div class="highlight"><pre><span></span><code><span class="nt">temperature_C</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">platform</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sensor</span><span class="w">            </span><span class="c1"># sensor | binary_sensor | event</span>
 <span class="w">  </span><span class="nt">device_class</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">temperature</span><span class="w">   </span><span class="c1"># an HA device class, or null</span>
@@ -1068,12 +1089,11 @@ plus <code>clear_delay</code>, <code>event_driven</code>, <code>force_update</co
 lists identity and transport fields (<code>model</code>, <code>id</code>, <code>channel</code>, <code>mic</code>, <code>mod</code>,
 <code>protocol</code>, …) that must never become entities; a UI mapping can add to that
 list with a top-level <code>skip_keys:</code> sequence.</p>
-<p><code>object_suffix</code> is part of every entity's unique id, so <strong>changing it orphans
-existing entities</strong>. Treat it as frozen once shipped.</p>
+<p><code>object_suffix</code> is part of every entity's unique ID, so <strong>changing it orphans
+existing entities</strong>.</p>
 <p>Two attributes change how an entity <em>behaves</em> in Home Assistant rather than just
-how it looks, so they are documented on this page rather than only upstream:
-<code>clear_delay</code> (<a href="#motion-occupancy">Motion / occupancy</a>) and <code>event_driven</code>
-(<a href="#availability-classification">Availability classification</a>).</p>
+how it looks: <code>clear_delay</code> (<a href="#motion-occupancy">Motion / occupancy</a>) and
+<code>event_driven</code> (<a href="#availability-classification">Availability classification</a>).</p>
 <h3 id="motion-occupancy">Motion / occupancy<a class="headerlink" href="#motion-occupancy" title="Permanent link">&para;</a></h3>
 <p>PIR / occupancy decoders (Interlogix, Risco Agility, Kerui, …) emit <code>motion</code>
 <strong>only on detection</strong> (raw value <code>1</code>) and <strong>never send an off</strong> — the hardware is
@@ -1091,22 +1111,26 @@ timer rather than received:</p>
 <p>The <code>clear_delay</code> attribute (seconds) drives the synthesized off: the sensor
 turns <code>on</code> on each detection and is auto-cleared to off after the delay elapses
 with no re-detection. Every fresh detection <strong>reschedules</strong> the timer, so the
-off window restarts on each retrigger. The shipped default is <strong>90 s</strong>.</p>
-<p>A stale <code>on</code> is never restored across a restart (there would be no live timer to
-clear it): the sensor comes back off/unknown until the next detection.</p>
+off window restarts on each retrigger. The upstream default is <strong>90 seconds</strong>.</p>
+<p>When Home Assistant restarts, a motion sensor comes back unknown, since no timer
+would be left to clear a restored on. It stays unknown until the next detection.</p>
 <p><strong>Per-device override.</strong> The delay can be tuned per device in <em>Device settings</em> —
-<strong>Settings → Devices &amp; Services → rtl_433 → Configure → (device step)</strong> exposes a
-<em>Motion clear delay (seconds)</em> field, shown only for motion-bearing devices.
-Leave it blank to use the 90 s default. The override is resolved at runtime
-(per-device value, else the descriptor default).</p>
+<strong>Settings → Devices &amp; Services → rtl_433 → Configure (the gear icon) →
+(device step)</strong> exposes a <em>Motion clear delay (seconds)</em> field. Leave it blank
+to use the 90-second default.</p>
 <h3 id="availability-classification">Availability classification<a class="headerlink" href="#availability-classification" title="Permanent link">&para;</a></h3>
-<p>A device is marked <em>unavailable</em> when it falls silent past its availability
-timeout. RF devices signal presence only by transmitting, so the timeout is
-resolved per device: a per-device override, then an explicit hub default, then a
-<strong>device-class default</strong> derived from the device's known fields — both its
-adopted (persisted) fields and its latest payload, so an event-driven device that
-has been silent since a restart is still classified correctly before it next
-transmits (rather than briefly expiring its battery at the periodic default).</p>
+<p>A device is marked <em>unavailable</em> when it is not received past its availability
+timeout. RF devices signal availability only by transmitting, so the timeout is
+resolved per device, in this order:</p>
+<ol>
+<li>A per-device override.</li>
+<li>An explicit hub default.</li>
+<li>A <strong>device-class default</strong> derived from the device's known fields.</li>
+</ol>
+<p>The known fields are both its adopted (persisted) fields and its latest payload,
+so an event-driven device that has been silent since a restart is still
+classified correctly before it next transmits (rather than briefly expiring its
+battery at the periodic default).</p>
 <p>The class default has two outcomes:</p>
 <ul>
 <li><strong>Event-driven</strong> → never-expire (the device, and all its entities including
@@ -1115,7 +1139,7 @@ transmits (rather than briefly expiring its battery at the periodic default).</p
   timeout would eventually misfire and wrongly hide a healthy device. A field is
   event-driven when it uses <code>platform: event</code> <strong>or</strong> sets <code>event_driven: true</code>
   (e.g. <code>motion</code>, <code>contact_open</code>, <code>reed_open</code>, <code>closed</code>, <code>alarm</code>). The set is
-  derived from the active library (shipped descriptors plus user mappings).</li>
+  derived from the active library (upstream descriptors plus user mappings).</li>
 <li><strong>Periodic</strong> → a finite default (10 min). Everything else — temperature,
   humidity, power, etc. — which reports on a regular cadence.</li>
 </ul>
@@ -1124,9 +1148,9 @@ device also has an event-driven field, the whole device uses the event-driven
 default, so its battery and other entities stay available between events. An
 explicit per-device or hub timeout always overrides the class default.</p>
 <p>Because an event-driven device's availability no longer signals freshness, its
-per-device <strong>Last seen</strong> timestamp sensor is enabled by default (it ships
-disabled for periodic devices). It stays available once seen, so "no signal for
-N minutes" automations keep working.</p>
+per-device <strong>Last seen</strong> timestamp sensor is enabled by default, and is disabled
+for periodic devices. It stays available once seen, so "no signal for N
+minutes" automations keep working.</p>
 <h3 id="event-entities">Event entities<a class="headerlink" href="#event-entities" title="Permanent link">&para;</a></h3>
 <p><code>platform: event</code> is for <strong>momentary, fire-and-forget</strong> RF fields — a remote
 button, a doorbell press — that have no steady "on" / "off"
@@ -1166,7 +1190,7 @@ it maps a <strong>stringified raw value → named <code>event_type</code></stron
   rather than only appearing once observed — so a <code>device_trigger</code> lists them
   even before the first press.</li>
 </ul>
-<p>The doorbell is the shipped example. <code>secret_knock</code> is emitted on <strong>every</strong>
+<p>The doorbell is the upstream example. <code>secret_knock</code> is emitted on <strong>every</strong>
 press: raw <code>0</code> is a regular single press and raw <code>1</code> is a "secret knock" (the
 button pressed three times rapidly). It maps both onto Home Assistant's doorbell
 standard:</p>
@@ -1179,7 +1203,7 @@ standard:</p>
 <span class="w">    </span><span class="s">"0"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ring</span><span class="w">          </span><span class="c1"># DoorbellEventType.RING — the HA standard type</span>
 <span class="w">    </span><span class="s">"1"</span><span class="p p-Indicator">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">secret_knock</span><span class="w">  </span><span class="c1"># custom type for the 3x-rapid "secret knock"</span>
 </code></pre></div>
-<p>The shipped <code>events.yaml</code> has two examples:</p>
+<p>The upstream <code>events.yaml</code> has two examples:</p>
 <table>
 <thead>
 <tr>
@@ -1244,21 +1268,21 @@ single field on a single device is, <strong>highest to lowest</strong>:</p>
 <ol>
 <li><strong>Per-device calibration</strong> (commodity + base unit + scale, set in the options
    flow) — applies only to the consumption field(s) of the one calibrated device.</li>
-<li><strong>Model-scoped</strong> entry — UI <code>models:</code> entry, else shipped <code>models:</code> entry.</li>
-<li><strong>Global</strong> flat entry — UI flat key, else shipped flat key.</li>
+<li><strong>Model-scoped</strong> entry — UI <code>models:</code> entry, else upstream <code>models:</code> entry.</li>
+<li><strong>Global</strong> flat entry — UI flat key, else upstream flat key.</li>
 <li>Unmapped → no entity.</li>
 </ol>
 <p>The rule is <strong>specificity-first</strong>: a model-scoped entry always beats a global one
-<em>regardless of source</em>. In particular a <strong>shipped</strong> <code>models:</code> entry outranks a
+<em>regardless of source</em>. In particular an <strong>upstream</strong> <code>models:</code> entry outranks a
 <strong>UI global</strong> entry for a matching model. Within each tier the UI mapping beats
-the shipped library. (This falls out naturally from the merge: the UI mapping
-replaces the shipped entry <em>within</em> a tier, and the lookup checks the model tier
-before the global tier.)</p>
+pyrtl_433. (This falls out naturally from the merge: the UI mapping replaces
+the upstream entry <em>within</em> a tier, and the lookup checks the model tier before
+the global tier.)</p>
 <blockquote>
 <p><strong>No speculative real-meter mappings ship.</strong> Because a meter's consumption
-unit/scale is not knowable from the signal, the shipped library does <strong>not</strong>
-carry a guessed <code>models:</code> consumption mapping for any real model — a wrong
-scale would silently corrupt real Energy data. The example below is purely
+unit/scale is not knowable from the signal, pyrtl_433 does <strong>not</strong> carry a
+guessed <code>models:</code> consumption mapping for any real model — a wrong scale
+would silently corrupt real Energy data. The example below is purely
 illustrative; for a real meter use the per-device calibration step in the
 <em>Device settings</em> page (see <a href="../calibration/">Utility-meter calibration</a>) until a model's unit/scale is authoritatively
 known.</p>

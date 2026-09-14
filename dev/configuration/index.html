@@ -469,7 +469,34 @@
   <span class="md-ellipsis">
     
   
-    Device Discovery
+    Adding Devices to Home Assistant
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changing-device-ids/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Managing Devices That Change IDs
   
 
     
@@ -844,7 +871,7 @@ backlog apart from traffic it is hearing live, so devices that have gone quiet
 are not marked available again and their event entities and device triggers do
 not fire a second time.</p>
 <p>That only works if the timestamps can be read. rtl_433 emits <code>time</code> as a JSON
-string in every mode, and these forms are understood:</p>
+string in every mode, and these formats are understood:</p>
 <table>
 <thead>
 <tr>
@@ -896,8 +923,8 @@ integration separate two transmissions from the same device inside one second.</
 <p>Use <strong>Reconfigure</strong> to point an existing hub at the same server's new address:
 host, port, path, or secure mode. Devices and their history are preserved.</p>
 <p>Use <strong>Configure</strong> to open the rtl_433 page. It is where devices are added and
-ignored — see <a href="../device-discovery/">Device Discovery</a> — and it carries three
-settings pages:</p>
+ignored — see <a href="../device-discovery/">Adding Devices to Home Assistant</a> — and it
+carries three settings pages:</p>
 <ul>
 <li><strong>Receiver settings</strong>: default availability timeout and the managed-settings
   toggle.</li>
@@ -918,11 +945,7 @@ The timeout is one of three choices rather than a bare number:</p>
 </ul>
 <p><img alt="The Receiver settings page, with the availability-timeout choice set to the per-device-type defaults and the managed-settings toggle below it" src="../images/07-hub-settings.png" /></p>
 <p><strong>Device settings</strong> targets one device for a timeout override, motion clear
-delay, or utility-meter calibration. Pick the device at the top of the page and
-the rest of the form rebuilds from it: every field is pre-filled from that
-device, and fields that do not apply to it are not shown — the motion clear delay
-only appears for a device that actually auto-clears, and the base unit and scale
-only once a commodity is chosen.</p>
+delay, or utility-meter calibration.</p>
 <p><img alt="The Device settings page with the device picker, availability timeout override, and meter commodity selector" src="../images/08-device-settings.png" /></p>
 <p>Changing timeout options applies live. Changing the managed-settings toggle
 reloads the hub because the entity set changes.</p>
