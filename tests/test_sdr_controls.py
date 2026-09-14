@@ -34,6 +34,7 @@ from custom_components.rtl_433.const import (
     CONF_AVAILABILITY_TIMEOUT,
     CONF_MANAGE_SETTINGS,
     DOMAIN,
+    SDR_STORE_VERSION,
     sdr_store_key,
     signal_hub_update,
 )
@@ -832,3 +833,188 @@ def test_enforcement_failure_keeps_desired_and_event_stream_works(
 # enforcement replay now lives inside :class:`pyrtl_433.Rtl433Client` (its own
 # ``_cmd_lock``) and is verified in the library's own test-suite, so the
 # coordinator no longer owns that serialization to test here.
+
+
+# --------------------------------------------------------------------------- #
+# Desired-state load: the parts the round-trip tests never observe.             #
+# --------------------------------------------------------------------------- #
+# The store tests above write a payload and read it back, which proves the happy
+# path but leaves the edges untouched: an absent store, a payload predating a
+# field, and whether the load copies or aliases what it read.
+
+
+async def test_load_with_no_store_yields_empty_state(
+    hass, hub_entry_builder, hass_storage
+):
+    """A hub that has never persisted loads empty rather than failing.
+
+    ``async_load`` returns ``None`` for an absent store, so the fallback is what
+    keeps every subsequent ``.get`` on the payload from raising.
+    """
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+    assert sdr_store_key(entry.entry_id) not in hass_storage
+
+    coordinator = Rtl433Coordinator(
+        hass, entry, host="rtl433.local", manage_settings=True
+    )
+    await coordinator.async_load_desired_state()
+
+    assert coordinator._desired == {}
+    assert coordinator._managed == set()
+    assert coordinator._initial_freq_seeded is False
+
+
+async def test_load_restores_the_initial_frequency_seeded_flag(
+    hass, hub_entry_builder, hass_storage
+):
+    """The seed-once flag survives a reload, so the seed is not re-applied.
+
+    Without it a restart would re-seed ``initial_center_frequency`` over a value
+    the user has since changed, which is the bug the flag exists to prevent.
+    """
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+
+    first = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    first._desired = {KEY_CENTER_FREQUENCY: 868.0}
+    first._managed = {KEY_CENTER_FREQUENCY}
+    first._initial_freq_seeded = True
+    await first._persist_desired()
+
+    second = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    await second.async_load_desired_state()
+    assert second._initial_freq_seeded is True
+
+
+async def test_load_treats_a_store_without_the_seeded_flag_as_unseeded(
+    hass, hub_entry_builder, hass_storage
+):
+    """Stores written before the flag existed must read as not-yet-seeded.
+
+    Defaulting the other way would suppress the seed on every pre-existing hub.
+    """
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+    hass_storage[sdr_store_key(entry.entry_id)] = {
+        "version": SDR_STORE_VERSION,
+        "data": {"values": {KEY_CENTER_FREQUENCY: 868.0}, "managed": []},
+    }
+
+    coordinator = Rtl433Coordinator(
+        hass, entry, host="rtl433.local", manage_settings=True
+    )
+    await coordinator.async_load_desired_state()
+    assert coordinator._initial_freq_seeded is False
+
+
+async def test_management_off_also_clears_the_seeded_flag(
+    hass, hub_entry_builder, hass_storage
+):
+    """Turning management off resets the seed so a re-enable seeds again.
+
+    The Store is removed for the same reason; leaving the flag set would mean a
+    re-enabled hub adopts the server's frequency and never applies the
+    configured initial one.
+    """
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+
+    managed = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    managed._desired = {KEY_CENTER_FREQUENCY: 868.0}
+    managed._managed = {KEY_CENTER_FREQUENCY}
+    managed._initial_freq_seeded = True
+    await managed._persist_desired()
+
+    off = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=False)
+    off._initial_freq_seeded = True
+    await off.async_load_desired_state()
+    assert off._initial_freq_seeded is False
+
+
+async def test_loaded_state_is_a_copy_not_a_view_of_the_payload(
+    hass, hub_entry_builder, hass_storage
+):
+    """Writing a field after load must not mutate what is still on disk.
+
+    The load copies into new containers; aliasing the payload would let an
+    in-memory edit reach the Store without a save, so a failed persist would
+    still look applied.
+    """
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+
+    first = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    first._desired = {KEY_CENTER_FREQUENCY: 868.0}
+    first._managed = {KEY_CENTER_FREQUENCY}
+    await first._persist_desired()
+    stored = hass_storage[sdr_store_key(entry.entry_id)]["data"]
+
+    second = Rtl433Coordinator(hass, entry, host="rtl433.local", manage_settings=True)
+    await second.async_load_desired_state()
+    second._desired[KEY_SAMPLE_RATE] = 250000
+    second._managed.add(KEY_SAMPLE_RATE)
+
+    assert KEY_SAMPLE_RATE not in stored["values"]
+    assert KEY_SAMPLE_RATE not in stored["managed"]
+
+
+# --------------------------------------------------------------------------- #
+# Gain composition: one command built from two desired keys.                     #
+# --------------------------------------------------------------------------- #
+# The write-path tests reach this through `_command_args`, which fixes both
+# inputs at once. These pin the composition itself: which desired key feeds
+# which argument, and what an absent or non-bool `gain_auto` means.
+
+
+def _coordinator(hass, hub_entry_builder, desired):
+    entry = hub_entry_builder(availability_timeout=600)
+    entry.add_to_hass(hass)
+    coordinator = Rtl433Coordinator(
+        hass, entry, host="rtl433.local", manage_settings=True
+    )
+    coordinator._desired = dict(desired)
+    return coordinator
+
+
+async def test_gain_arg_is_the_db_value_when_auto_is_off(hass, hub_entry_builder):
+    """dB feeds the value argument and auto feeds the flag, not the reverse."""
+    coordinator = _coordinator(
+        hass, hub_entry_builder, {KEY_GAIN_DB: 32.8, KEY_GAIN_AUTO: False}
+    )
+    assert coordinator._gain_command_arg() == "32.8"
+
+
+async def test_gain_arg_is_empty_when_auto_is_on(hass, hub_entry_builder):
+    """Auto wins over any stored dB value: an empty arg is what selects auto."""
+    coordinator = _coordinator(
+        hass, hub_entry_builder, {KEY_GAIN_DB: 32.8, KEY_GAIN_AUTO: True}
+    )
+    assert coordinator._gain_command_arg() == ""
+
+
+async def test_gain_auto_absent_means_manual(hass, hub_entry_builder):
+    """A desired map without the auto key composes as auto-off.
+
+    Defaulting the other way would silently switch a hub to auto gain the first
+    time only the dB half had been set.
+    """
+    coordinator = _coordinator(hass, hub_entry_builder, {KEY_GAIN_DB: 40.0})
+    assert coordinator._gain_command_arg() == "40"
+
+
+async def test_gain_auto_is_coerced_to_a_bool(hass, hub_entry_builder):
+    """A truthy non-bool from an older store still reads as auto.
+
+    Stores are JSON, so nothing guarantees the flag round-trips as a real bool.
+    """
+    coordinator = _coordinator(
+        hass, hub_entry_builder, {KEY_GAIN_DB: 32.8, KEY_GAIN_AUTO: 1}
+    )
+    assert coordinator._gain_command_arg() == ""
+
+
+async def test_gain_arg_is_empty_when_no_db_is_desired(hass, hub_entry_builder):
+    """Nothing to send when neither half has been set."""
+    coordinator = _coordinator(hass, hub_entry_builder, {})
+    assert coordinator._gain_command_arg() == ""
