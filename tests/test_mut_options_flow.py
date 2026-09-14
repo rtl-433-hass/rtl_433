@@ -729,7 +729,7 @@ async def test_ignored_devices_names_a_row_by_its_key_when_no_model_is_stored(
 async def test_ignored_devices_renders_an_empty_multi_select_list(
     hass, hub_entry_builder
 ):
-    """Nothing is pre-selected, and several rows can be un-ignored in one pass.
+    """Nothing is already selected, and several rows can be un-ignored in one pass.
 
     Un-ignoring is a batch job — a user who ignored a neighbour's whole weather
     station is un-ignoring several keys at once — and a picker that defaulted to
@@ -881,10 +881,12 @@ async def test_mappings_rejection_names_the_problems_it_found(hass, hub_entry_bu
     """A rejected override has to say what was wrong with it, in the dialog.
 
     The editor holds free-form YAML, so "invalid" on its own leaves a user
-    guessing which of a dozen field definitions the validator objected to. The
-    problems are joined into the description placeholder the dialog renders, and
-    the error lands under ``base`` because the fault is with the object as a
-    whole rather than with one form field.
+    guessing which of a dozen field definitions the validator objected to. Every
+    problem is joined into the one description placeholder the dialog renders --
+    all of them, separated readably, because a dialog that named only the first
+    fault would make fixing a broken override a game of whack-a-mole. The error
+    lands under ``base`` because the fault is with the object as a whole rather
+    than with one form field.
     """
     entry = hub_entry_builder()
     entry.add_to_hass(hass)
@@ -893,15 +895,23 @@ async def test_mappings_rejection_names_the_problems_it_found(hass, hub_entry_bu
     result = await _menu(hass, entry, "mappings")
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {CONF_USER_MAPPINGS: {"bad_field": {"name": "X", "object_suffix": "X"}}},
+        {
+            CONF_USER_MAPPINGS: {
+                "bad_one": {"name": "X", "object_suffix": "X"},
+                "bad_two": {"name": "Y", "object_suffix": "Y"},
+            }
+        },
     )
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "mappings"
     assert result["errors"] == {"base": "invalid_mappings"}
-    problems = result["description_placeholders"]["problems"]
-    assert problems
-    assert "bad_field" in problems
+    # Every problem, in one readable line: a user with two broken field
+    # definitions has to be told about both, or fixing the first only earns
+    # them the same dialog again.
+    assert result["description_placeholders"]["problems"] == (
+        "bad_one: missing required 'platform'; bad_two: missing required 'platform'"
+    )
     assert result["description_placeholders"]["docs_url"] == MAPPINGS_DOCS_URL
     assert dict(entry.data) == snapshot
 
@@ -1840,3 +1850,62 @@ async def test_replace_target_survives_a_coordinator_that_is_not_loaded(
 
     assert result["type"] is FlowResultType.FORM
     assert [value for value, _ in _options(result, CONF_DEVICE)] == ["ZWeather-9-3"]
+
+
+async def test_hub_step_refuses_a_fractional_timeout(hass, hub_entry_builder):
+    """The availability timeout is whole seconds, and the form says so.
+
+    The number is compared against a second-resolution "last seen" age and is
+    round-tripped through the config entry's JSON store, so half a second is not
+    a finer setting — it is a value that means nothing to the watchdog and reads
+    back looking like a typo. The field takes an integer and rejects anything
+    else rather than quietly truncating it.
+    """
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+
+    result = await _menu(hass, entry, "hub")
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CONF_AVAILABILITY_TIMEOUT: 600.5, CONF_MANAGE_SETTINGS: True},
+        )
+
+
+async def test_device_settings_refuses_a_fractional_timeout(hass, hub_entry_builder):
+    """A per-device timeout override is whole seconds too, for the same reason.
+
+    It overrides the hub value and is read by the same watchdog, so a form that
+    accepted a float here would let one device carry a setting shaped unlike
+    every other timeout in the entry.
+    """
+    entry = _entry_with_device(hub_entry_builder)
+    entry.add_to_hass(hass)
+
+    result = await _device_settings(hass, entry, DEVICE_KEY)
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {DEVICE_TIMEOUT_OVERRIDE: 30.5, CALIBRATION_COMMODITY: COMMODITY_NONE},
+        )
+
+
+async def test_device_settings_refuses_a_fractional_clear_delay(
+    hass, hub_entry_builder
+):
+    """The motion clear delay is whole seconds: it schedules a timer callback.
+
+    A sub-second component buys nothing an RF motion sensor can use — the frames
+    themselves arrive seconds apart — and would persist a value that reads back
+    from the options store looking like a mistake.
+    """
+    entry = _motion_entry(hub_entry_builder)
+    entry.add_to_hass(hass)
+    _install_motion_library(hass)
+
+    result = await _device_settings(hass, entry, MOTION_KEY)
+    with pytest.raises(InvalidData):
+        await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CALIBRATION_COMMODITY: COMMODITY_NONE, DEVICE_MOTION_CLEAR_DELAY: 45.5},
+        )
