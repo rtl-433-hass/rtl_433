@@ -19,9 +19,9 @@ available to administrators only.
 The overview has three parts:
 
 - a card at the top saying whether the receiver is **Online**, and how many
-  devices you have added to it
-- **My network**, with links to this receiver's devices and entities on the
-  usual Home Assistant pages
+  devices you have added
+- **My network**, with links to your rtl_433 devices and entities on the usual
+  Home Assistant pages
 - **Receiver settings**, **Device settings** and **Device mappings**, which each
   open their own page
 
@@ -29,8 +29,12 @@ and, bottom right, an **Add or replace device** button.
 
 ![The rtl_433 page: a status card with a green tick reading Online and 7 devices; a My network card listing Devices, 7 devices and Entities, 33 entities, each with a chevron; then a card of three rows — Receiver settings (availability timeout and whether Home Assistant manages the receiver), Device settings (per-device timeout overrides and utility-meter calibration) and Device mappings (YAML overrides for how fields become entities); and a blue Add or replace device button in the bottom right](images/18-rtl-433-page.png)
 
-If you have more than one receiver, each gets its own settings card, headed by
-the receiver it belongs to.
+If you have more than one receiver, the top of the page covers all of them: the
+device count and both **My network** links include every rtl_433 device,
+whichever receiver hears it, and the card at the top says how many receivers are
+offline rather than **Online** when one of them is down. Settings are the
+exception — each receiver gets its own settings card, headed by the receiver it
+belongs to.
 
 ## Adding Devices
 

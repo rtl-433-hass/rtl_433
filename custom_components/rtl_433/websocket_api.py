@@ -584,6 +584,15 @@ def ws_hubs(
     sidebar has no way to know one. Hubs that are not loaded are listed too,
     flagged rather than hidden: a user with an unreachable receiver should see it
     named and explained, not silently absent while they wonder where it went.
+
+    ``connected`` is the same fact the subscription payload reports, one row per
+    hub, and it is here because a caller that describes *every* receiver -- the
+    panel's overview card does -- can only subscribe to one of them. Without it
+    the page would have to report one radio's connection as though it were all
+    of them. A hub that is not loaded has no coordinator to ask and no open
+    socket either, so it reports ``False`` rather than nothing: "not connected"
+    is exactly what a user needs to read off that row, and ``loaded`` beside it
+    says why.
     """
     connection.send_result(
         msg["id"],
@@ -593,11 +602,28 @@ def ws_hubs(
                     "entry_id": entry.entry_id,
                     "title": entry.title,
                     "loaded": entry.state is ConfigEntryState.LOADED,
+                    "connected": _hub_connected(hass, entry),
                 }
                 for entry in hass.config_entries.async_entries(DOMAIN)
             ]
         },
     )
+
+
+@callback
+def _hub_connected(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Whether this hub's socket is open, for a hub that may not be set up.
+
+    An entry that is not loaded has no coordinator on ``hass.data`` to ask, and
+    one mid-teardown may have been removed from it already, so both are read
+    rather than assumed.
+    """
+    if entry.state is not ConfigEntryState.LOADED:
+        return False
+    coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
+        entry.entry_id
+    )
+    return coordinator is not None and coordinator.connected
 
 
 @websocket_api.websocket_command(
