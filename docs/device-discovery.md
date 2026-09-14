@@ -31,10 +31,8 @@ and, bottom right, an **Add or replace device** button.
 
 If you have more than one receiver, the top of the page covers all of them: the
 device count and both **My network** links include every rtl_433 device,
-whichever receiver hears it, and the card at the top says how many receivers are
-offline rather than **Online** when one of them is down. Settings are the
-exception — each receiver gets its own settings card, headed by the receiver it
-belongs to.
+whichever receiver sees it, and the card at the top says how many receivers are
+offline rather than **Online** when one of them is down.
 
 ## Adding Devices
 
