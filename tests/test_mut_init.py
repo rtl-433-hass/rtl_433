@@ -1088,6 +1088,106 @@ async def test_reserved_marker_check_is_exact_not_a_prefix(
     assert device_key not in receiver.data.get(CONF_DEVICES, {})
 
 
+async def test_remove_unrelated_device_leaves_the_entry_alone(
+    hass, receiver_entry_builder
+):
+    """A device this entry does not own is not decoded into a device_key.
+
+    Two rows that must both be skipped: one from another integration that
+    happens to carry this entry's prefix, and one of ours carrying a different
+    entry's. Neither names a device of this entry, so the scan finds nothing and
+    the whole update-and-forget block is skipped -- ``True`` here means "nothing
+    of mine to remove", not "removed".
+
+    Pins both halves of the guard. A sentinel of ``""`` rather than ``None``
+    would read as "found" and forget the empty key; joining the two conditions
+    with ``and`` would stop skipping the foreign rows and remove a device off the
+    back of another integration's identifier.
+    """
+    device_key = "EnergyMeter-2000-1234"
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices={device_key: {CONF_MODEL: "Whatever"}}
+    )
+    before = dict(receiver.data[CONF_DEVICES])
+    coordinator = _coordinator(hass, receiver)
+
+    fake = SimpleNamespace(
+        identifiers={
+            ("other_integration", f"{receiver.entry_id}:{device_key}"),
+            (DOMAIN, f"other-entry-id:{device_key}"),
+        }
+    )
+    with patch.object(
+        coordinator, "forget_device", wraps=coordinator.forget_device
+    ) as forget_spy:
+        assert await async_remove_config_entry_device(hass, receiver, fake) is True
+
+    assert receiver.data[CONF_DEVICES] == before
+    forget_spy.assert_not_called()
+
+
+async def test_reserved_marker_is_read_from_the_first_segment(
+    hass, receiver_entry_builder
+):
+    """The segment right after the prefix decides, however many follow it.
+
+    ``device_key`` never contains a colon, so everything past the first one is
+    structure rather than part of the key. Reading the split from the right
+    instead would take ``{entry}:receiver:sub01:extra`` as a device_key of
+    ``receiver:sub01`` -- which is not the reserved marker -- and remove a
+    receiver as though it were an RF device.
+    """
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+    before = dict(receiver.data.get(CONF_DEVICES, {}))
+
+    fake = SimpleNamespace(
+        identifiers={(DOMAIN, f"{receiver.entry_id}:receiver:sub01:extra")}
+    )
+    assert await async_remove_config_entry_device(hass, receiver, fake) is False
+    assert receiver.data.get(CONF_DEVICES, {}) == before
+
+
+async def test_remove_nested_device_keeps_the_other_devices(
+    hass, receiver_entry_builder
+):
+    """Only the named key leaves; everything else the entry owns stays.
+
+    The comprehension rebuilds the whole map, so the map it reads from is what
+    gets stored back. Reading it from the wrong key would hand the comprehension
+    an empty dict and quietly wipe every other device on the entry.
+    """
+    keep, drop = "EnergyMeter-2000-1234", "EnergyMeter-2000-5678"
+    receiver = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        devices={keep: {CONF_MODEL: "A"}, drop: {CONF_MODEL: "B"}},
+    )
+
+    fake = SimpleNamespace(identifiers={(DOMAIN, f"{receiver.entry_id}:{drop}")})
+    assert await async_remove_config_entry_device(hass, receiver, fake) is True
+
+    assert drop not in receiver.data[CONF_DEVICES]
+    assert keep in receiver.data[CONF_DEVICES]
+
+
+async def test_remove_nested_device_with_no_devices_map_stored(
+    hass, receiver_entry_builder
+):
+    """An entry that has never stored a devices map still removes cleanly.
+
+    ``data`` only grows a ``CONF_DEVICES`` key once a device is added, so an
+    entry that has adopted nothing has no key at all -- and that default is what
+    the comprehension iterates. Without it the read returns ``None`` and the
+    removal dies on ``None.items()`` instead of returning.
+    """
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+    assert CONF_DEVICES not in receiver.data
+
+    fake = SimpleNamespace(identifiers={(DOMAIN, f"{receiver.entry_id}:Some-Device-1")})
+    assert await async_remove_config_entry_device(hass, receiver, fake) is True
+    assert receiver.data.get(CONF_DEVICES) == {}
+
+
 async def test_remove_nested_device_returns_true(hass, receiver_entry_builder, events):
     """Removing a nested RF device returns True."""
     power_event = _live(events("power_sensor.json")[0])
