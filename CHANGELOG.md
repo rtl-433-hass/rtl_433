@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.21.0...v0.21.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **entity:** build entities in a deterministic field order ([#287](https://github.com/rtl-433-hass/rtl_433/issues/287)) ([38661c7](https://github.com/rtl-433-hass/rtl_433/commit/38661c7a7360308d86a0a895eec90b9e35e787d3))
+
 ## [0.21.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.20.1...v0.21.0) (2026-09-14)
 
 
