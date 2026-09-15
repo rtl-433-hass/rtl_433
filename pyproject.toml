@@ -188,6 +188,39 @@ also_copy = ["custom_components/__init__.py"]
 # paths) keeps the tool's defaults, which are the values those scripts used.
 [tool.mutmut_ratchet]
 package_path = "custom_components/rtl_433"
+# One survivor of slack on the per-function gate, which defaults to zero.
+#
+# mutmut-ratchet argues for zero, and its argument is sound *for the case it
+# describes*: "this gate counts survivors in the handful of functions a PR
+# changed", where a band would hide a regression exactly where a PR is most
+# likely to cause one. That is not the case this repository runs. The sharder
+# packs by function, so `.github/workflows/mutation.yml` takes the
+# `--mode functions` branch on **every** run -- including the full push-to-main
+# and nightly runs, which grade all 192 functions in the baseline, not a handful.
+# The per-file band (`tolerance_mutants`) that would otherwise absorb drift on a
+# full run only applies to `--mode floor`, which nothing reaches any more.
+#
+# So the gate re-rolls ~192 independent pass/fail checks nightly with no slack,
+# and it flakes. Observed directly, same commit (0aa3b1b), no code or baseline
+# change between them:
+#
+#   run 34900634393 (push)    entity.x_async_setup_hub_platform  134 killed / 20 survived  PASS
+#   run 34947446363 (nightly) entity.x_async_setup_hub_platform  133 killed / 21 survived  FAIL
+#
+# Ruled out as causes: mutmut's timeout-counts-as-kill path (the passing run
+# recorded `timeout: 0`) and drift in per-mutant test selection (the shared
+# `mutmut-stats.json` both runs restored is identical -- 0 of 192 functions
+# differ in the tests mapped to them). What is left is a mutant whose detection
+# depends on run-to-run ordering: `async_setup_hub_platform` builds entities by
+# iterating a *set* of field keys (`entity.py`, `_build`), and PYTHONHASHSEED is
+# not pinned, so entity creation order varies per process. The clean suite is
+# order-robust; a mutant need not be.
+#
+# One survivor is the smallest band that absorbs that. A genuine regression in a
+# function a PR touches adds more than one survivor in practice, and the
+# ratchet's other two gates (the per-file floor for new functions, and the
+# baseline only ever moving up) are unchanged.
+tolerance_survivors = 1
 # Changes to these escalate a scoped PR run to a full one: they can move results
 # package-wide, so scoping to the diff would not be sound.
 escalate_paths = [
