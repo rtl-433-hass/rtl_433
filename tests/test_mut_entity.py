@@ -1626,6 +1626,50 @@ async def test_setup_no_duplicate_entities_on_reload(hass, hub_entry_builder):
     assert len(after) == 1
 
 
+async def test_setup_dedupe_skips_collision_and_keeps_later_fields(
+    hass, hub_entry_builder
+):
+    """A duplicate unique_id is skipped, not treated as the end of the field list.
+
+    ``rain_in`` and ``rain_mm`` both map to the ``RT`` object suffix, so a device
+    reporting rain in both units collapses to a single rain sensor. The dedup
+    guard has to *continue* past that collision: every field ordered after it
+    still needs its entity. Turning that ``continue`` into a ``break`` drops
+    ``temperature_C`` here, which is the bug this pins.
+
+    ``_build`` iterates ``sorted(field_keys)``, so the collision always falls
+    before ``temperature_C``. Without that sort the assertion below would only
+    hold for some ``PYTHONHASHSEED`` values -- which is exactly how this escaped:
+    the mutation gate killed the ``break`` mutant on some runs and not others.
+    """
+    device_key = "Acurite-Tower-4321"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-Tower",
+                DEVICE_FIELDS: ["rain_in", "rain_mm", "temperature_C"],
+            }
+        },
+    )
+    ent_reg = er.async_get(hass)
+
+    # The colliding pair collapses to exactly one sensor for the shared suffix.
+    rain = [
+        e
+        for e in ent_reg.entities.values()
+        if e.unique_id == f"{hub.entry_id}:{device_key}:RT"
+    ]
+    assert len(rain) == 1
+
+    # ...and the field sorted after the collision is still created.
+    assert (
+        ent_reg.async_get_entity_id("sensor", DOMAIN, f"{hub.entry_id}:{device_key}:T")
+        is not None
+    )
+
+
 async def test_teardown_clears_field_listeners(hass, hub_entry_builder):
     """On unload, field-update listeners are torn down."""
     device_key = "EnergyMeter-2000-1234"
