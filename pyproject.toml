@@ -26,7 +26,7 @@ dev = [
     "pytest-homeassistant-custom-component==0.13.365",
     "pyrtl_433==0.4.0",
     "home-assistant-frontend==20260826.7",
-    "mutmut==3.7.0",
+    "mutmut==3.8.0",
     "mutmut-ratchet>=0.4.0",
 ]
 
