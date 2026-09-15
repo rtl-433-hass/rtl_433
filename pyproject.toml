@@ -188,6 +188,17 @@ also_copy = ["custom_components/__init__.py"]
 # paths) keeps the tool's defaults, which are the values those scripts used.
 [tool.mutmut_ratchet]
 package_path = "custom_components/rtl_433"
+# The per-function gate's drift band. `--mode functions` (what every PR runs)
+# compares survivor *counts*, and its tolerance is `tolerance_survivors`, which
+# defaults to 0 -- the `tolerance_mutants`/`tolerance_fraction` band recorded in
+# the baseline applies only to the per-file `--mode floor`. mutmut's score drifts
+# ~1-2% run-to-run on the async coordinator (see the header of
+# .github/workflows/mutation.yml), so a zero-tolerance function gate fails
+# spuriously: main went red on `x_async_setup_hub_platform` at 21 survivors
+# against a baseline of 20, on a commit that never touched it. One survivor of
+# slack absorbs that flake; a real regression moves more than one, and the
+# baseline still only ratchets downward on survivors.
+tolerance_survivors = 1
 # Changes to these escalate a scoped PR run to a full one: they can move results
 # package-wide, so scoping to the diff would not be sound.
 escalate_paths = [

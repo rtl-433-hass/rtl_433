@@ -34,6 +34,7 @@ from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.entity import (
     Rtl433Entity,
+    Rtl433HubEntity,
     _apply_calibration,
     _resolve_entity_category,
     async_upsert_device,
@@ -1563,6 +1564,25 @@ async def test_hub_entity_device_info_identifiers(hass, hub_entry_builder):
     assert connectivity_eid is not None
     conn_entry = ent_reg.async_get(connectivity_eid)
     assert conn_entry.device_id == hub_device.id
+
+
+async def test_hub_entity_removal_before_add_tears_down_nothing():
+    """Removing a hub entity that was never added to hass is a no-op.
+
+    ``async_will_remove_from_hass`` decides whether to call each unsubscribe
+    handle with an ``is not None`` guard, so the two ``None`` seeds in
+    ``__init__`` are what keep it from calling a handle that was never
+    assigned. Every other test reaches removal through
+    ``async_added_to_hass``, which overwrites both seeds with real callables --
+    this is the one path on which their initial value is observable, and an
+    entity discarded between construction and registration takes it.
+    """
+    entity = Rtl433HubEntity(MagicMock(), "hub")
+
+    await entity.async_will_remove_from_hass()
+
+    assert entity._unsub_hub is None
+    assert entity._unsub_hub_availability is None
 
 
 # ---------------------------------------------------------------------------
