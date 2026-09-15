@@ -597,7 +597,14 @@ async def async_setup_hub_platform(
         seen = created.setdefault(device_key, set())
         calibration = _calibration_for(device_key)
         new_entities: list[Rtl433Entity] = []
-        for field_key in field_keys:
+        # Sorted because every caller passes a *set*, and set iteration order for
+        # strings varies per process (PYTHONHASHSEED is not pinned). That order is
+        # observable: several field keys share an ``object_suffix`` -- a device
+        # reporting both ``rain_in`` and ``rain_mm`` maps both to ``RT`` -- so
+        # which one wins the unique_id, and therefore which entity is created and
+        # which is deduped away, was previously decided by the hash seed. Sorting
+        # makes it the same field on every run and every host.
+        for field_key in sorted(field_keys):
             descriptor = _descriptor_for(field_key, model)
             if descriptor is None:
                 continue
