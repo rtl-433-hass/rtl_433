@@ -1,7 +1,7 @@
 """Per-device utility-meter calibration helpers.
 
 A calibration is a user-supplied ``{commodity, unit, scale}`` triple stored in
-the hub's per-device record (``entry.data[CONF_DEVICES][device_key]
+the receiver's per-device record (``entry.data[CONF_DEVICES][device_key]
 [DEVICE_CALIBRATION]``). It turns a unitless consumption counter into an
 Energy-dashboard-eligible sensor by attaching a real ``device_class`` (from the
 commodity), a Home-Assistant-convertible base unit, ``state_class:

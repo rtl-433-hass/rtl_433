@@ -43,7 +43,7 @@ from custom_components.rtl_433.const import (
 from custom_components.rtl_433.settings import (
     build_device_data,
     build_device_options,
-    build_hub_options,
+    build_receiver_options,
     device_defaults,
     is_motion_bearing,
 )
@@ -598,7 +598,7 @@ def test_build_device_options_leaves_other_devices_and_hub_options_alone():
 
 
 # ---------------------------------------------------------------------------
-# build_hub_options -- the hub-level save
+# build_receiver_options -- the hub-level save
 # ---------------------------------------------------------------------------
 
 
@@ -612,7 +612,7 @@ def test_build_hub_options_drops_a_stored_timeout_when_the_hub_returns_to_defaul
     entry = _entry(
         data={CONF_HOST: "rtl433.local"}, options={CONF_AVAILABILITY_TIMEOUT: 300}
     )
-    options = build_hub_options(entry, None, True)
+    options = build_receiver_options(entry, None, True)
     assert CONF_AVAILABILITY_TIMEOUT not in options
     assert options[CONF_MANAGE_SETTINGS] is True
 
@@ -624,7 +624,7 @@ def test_build_hub_options_clears_cleanly_when_no_timeout_was_stored():
     the ordinary save on most hubs.
     """
     entry = _entry(data={CONF_HOST: "rtl433.local"})
-    options = build_hub_options(entry, None, False)
+    options = build_receiver_options(entry, None, False)
     assert CONF_AVAILABILITY_TIMEOUT not in options
     assert options[CONF_MANAGE_SETTINGS] is False
 
@@ -636,7 +636,7 @@ def test_build_hub_options_stores_zero_as_a_deliberate_never_expire():
     into "use the defaults", which is close to its opposite.
     """
     entry = _entry(data={CONF_HOST: "rtl433.local"})
-    options = build_hub_options(entry, 0, True)
+    options = build_receiver_options(entry, 0, True)
     assert options[CONF_AVAILABILITY_TIMEOUT] == 0
 
 
@@ -650,7 +650,7 @@ def test_build_hub_options_keeps_the_per_device_map_and_does_not_alias_the_entry
         data={CONF_HOST: "rtl433.local"},
         options={CONF_DEVICES: {DEVICE: {DEVICE_MOTION_CLEAR_DELAY: 45}}},
     )
-    options = build_hub_options(entry, 600, True)
+    options = build_receiver_options(entry, 600, True)
     assert options[CONF_DEVICES] == {DEVICE: {DEVICE_MOTION_CLEAR_DELAY: 45}}
     assert options[CONF_AVAILABILITY_TIMEOUT] == 600
     assert options is not entry.options
