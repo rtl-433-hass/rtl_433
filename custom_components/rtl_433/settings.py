@@ -52,7 +52,7 @@ from .const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
-from .hub_settings import _explicit_hub_timeout, _hub_manage_settings
+from .receiver_settings import _explicit_hub_timeout, _hub_manage_settings
 
 if TYPE_CHECKING:
     from pyrtl_433.library import Registry
@@ -71,7 +71,7 @@ MAPPINGS_DOCS_URL = (
 def hub_defaults(entry: ConfigEntry) -> dict[str, Any]:
     """Return the hub-level form's current values.
 
-    These come straight from the resolvers :mod:`.hub_settings` uses at runtime,
+    These come straight from the resolvers :mod:`.receiver_settings` uses at runtime,
     rather than from a second copy of the options-then-data-then-default rule --
     including the int/bool coercion, so a value stored as a string still reaches
     a form as a number.

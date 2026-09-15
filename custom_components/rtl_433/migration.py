@@ -8,7 +8,7 @@ lifecycle in ``__init__.py``:
   0.1.0 per-device-entry model → the hub model) plus the minor-version bumps that
   seed user mappings, disable legacy "Last seen" sensors, drop the legacy global
   availability timeout, and strip the retired discovery toggle.
-* :func:`_migrate_hub_entry` / :func:`_rehome_device_objects` — fold legacy child
+* :func:`_migrate_receiver_entry` / :func:`_rehome_device_objects` — fold legacy child
   device entries into the hub and re-home their registry objects first.
 * :func:`_cleanup_phantom_unknown_device` /
   :func:`_migrate_motion_event_to_binary_sensor` — idempotent cleanups driven from
@@ -39,8 +39,8 @@ from .const import (
     CONF_DEVICE_KEY,
     CONF_DEVICES,
     CONF_ENTRY_TYPE,
-    CONF_HUB_ENTRY_ID,
     CONF_MODEL,
+    CONF_RECEIVER_ENTRY_ID,
     CONF_USER_MAPPINGS,
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
@@ -125,7 +125,7 @@ def _migrate_motion_event_to_binary_sensor(
     Pre-fix versions exposed motion as an ``event.*_motion`` entity; it is now a
     ``binary_sensor.*_motion``. This sweep finds this hub's ``event``-domain
     registry entries whose unique-id tail is ``:motion`` (unique-id shape
-    ``f"{hub_entry_id}:{device_key}:{object_suffix}"``), removes them, and drops
+    ``f"{receiver_entry_id}:{device_key}:{object_suffix}"``), removes them, and drops
     the ``motion`` slot from any persisted ``DEVICE_EVENT_TYPES`` so the event
     platform never recreates them. Only when at least one orphaned entity was
     removed is a single, integration-wide repairs issue raised announcing the
@@ -142,7 +142,7 @@ def _migrate_motion_event_to_binary_sensor(
             f":{_MOTION_OBJECT_SUFFIX}"
         ):
             continue
-        # unique_id is ``{hub_entry_id}:{device_key}:motion``; the middle part is
+        # unique_id is ``{receiver_entry_id}:{device_key}:motion``; the middle part is
         # the device_key (device_keys may themselves contain ``:``).
         parts = ent.unique_id.split(":")
         if len(parts) >= 3:
@@ -247,7 +247,7 @@ def _disable_existing_last_seen_sensors(
     *created*, so existing installs keep their already-enabled instances. This
     one-time sweep finds this hub's ``sensor``-domain registry entries whose
     unique-id tail is ``:last_seen`` (unique-id shape
-    ``f"{hub_entry_id}:{device_key}:{object_suffix}"``) and disables any the user
+    ``f"{receiver_entry_id}:{device_key}:{object_suffix}"``) and disables any the user
     has not already disabled, marking them ``RegistryEntryDisabler.INTEGRATION``.
 
     Driven once from :func:`async_migrate_entry` behind the minor-version 3 bump
@@ -334,7 +334,7 @@ def _read_legacy_overrides(path: str) -> dict:
 
 
 def _rehome_device_objects(
-    hass: HomeAssistant, device_entry: ConfigEntry, hub_entry_id: str
+    hass: HomeAssistant, device_entry: ConfigEntry, receiver_entry_id: str
 ) -> None:
     """Re-home a legacy device entry's registry objects onto the hub entry.
 
@@ -351,7 +351,7 @@ def _rehome_device_objects(
     ``config_entry_id`` repointed to the hub. The function is idempotent: if a
     device/entity has already been re-homed it simply finds nothing left to move.
     """
-    if hub_entry_id == device_entry.entry_id:
+    if receiver_entry_id == device_entry.entry_id:
         return
 
     dev_reg = dr.async_get(hass)
@@ -362,17 +362,17 @@ def _rehome_device_objects(
     for device in list(
         dr.async_entries_for_config_entry(dev_reg, device_entry.entry_id)
     ):
-        dev_reg.async_update_device(device.id, new_config_entry_id=hub_entry_id)
+        dev_reg.async_update_device(device.id, new_config_entry_id=receiver_entry_id)
 
     for entity in er.async_entries_for_config_entry(ent_reg, device_entry.entry_id):
-        ent_reg.async_update_entity(entity.entity_id, config_entry_id=hub_entry_id)
+        ent_reg.async_update_entity(entity.entity_id, config_entry_id=receiver_entry_id)
 
 
-async def _migrate_hub_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> None:
+async def _migrate_receiver_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> None:
     """Consolidate every legacy child device entry into the hub entry.
 
     The hub entry is the migration anchor. All legacy per-device config entries
-    that recorded this hub as their parent (``CONF_HUB_ENTRY_ID``) are folded
+    that recorded this hub as their parent (``CONF_RECEIVER_ENTRY_ID``) are folded
     into the hub's ``entry.data[CONF_DEVICES]`` map, their registry objects are
     re-homed onto the hub **before** removal, and the now-obsolete device config
     entries are removed. The end state: only the hub entry remains, its devices
@@ -385,7 +385,7 @@ async def _migrate_hub_entry(hass: HomeAssistant, hub_entry: ConfigEntry) -> Non
     children = [
         e
         for e in hass.config_entries.async_entries(DOMAIN)
-        if e.data.get(CONF_HUB_ENTRY_ID) == hub_entry.entry_id
+        if e.data.get(CONF_RECEIVER_ENTRY_ID) == hub_entry.entry_id
         and e.entry_id != hub_entry.entry_id
     ]
 
@@ -418,7 +418,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate a config entry from the 0.1.0 per-device model to the hub model.
 
     Version 1 (0.1.0) stored each RF device as its own config entry carrying a
-    ``CONF_HUB_ENTRY_ID`` back-reference. Version 2 nests all devices under the
+    ``CONF_RECEIVER_ENTRY_ID`` back-reference. Version 2 nests all devices under the
     hub entry's ``entry.data[CONF_DEVICES]`` map. This migration consolidates the
     legacy entries in place with entity_ids and history preserved.
 
@@ -462,14 +462,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # objects by re-homing them to the parent hub before anything can
             # remove this entry. The hub migration remains responsible for
             # folding the field/override state and removing this entry.
-            hub_id = entry.data.get(CONF_HUB_ENTRY_ID)
+            hub_id = entry.data.get(CONF_RECEIVER_ENTRY_ID)
             if hub_id:
                 _rehome_device_objects(hass, entry, hub_id)
             hass.config_entries.async_update_entry(entry, version=2, minor_version=2)
             return True
 
         # Hub entry: consolidate all children into the devices map.
-        await _migrate_hub_entry(hass, entry)
+        await _migrate_receiver_entry(hass, entry)
 
     if entry.version < 2 or (entry.minor_version or 1) < 2:
         # Seed this hub's stored user mappings from the legacy file (read only
