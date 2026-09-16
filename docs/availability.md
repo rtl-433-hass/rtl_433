@@ -29,7 +29,7 @@ When the connection to the rtl_433 server drops, every device that receiver was
 the only one hearing is marked `unavailable` straight away, regardless of its own
 timeout — including event-driven devices that never expire on silence, and their
 **Last seen** sensors. There is no grace period: while the socket is down the
-integration cannot hear the radio at all, so continuing to show the last reading
+integration cannot receive the radio at all, so continuing to show the last reading
 would present stale data as current. This is the same behavior an MQTT device
 gets from an availability topic and a last-will message, and what Home Assistant
 integrations do generally when a connection to a receiver is lost. With a second
@@ -87,16 +87,16 @@ A receiver **vouches** for a device when *both* of these are true **of that same
 receiver**:
 
 1. it is **connected** — its WebSocket to its rtl_433 server is up; and
-2. it **heard the device** within the device's effective timeout.
+2. it **received a frame from the device** within the device's effective timeout.
 
 **The device is available while at least one receiver vouches for it.** So a
 sensor at the edge of the garden that the garage receiver keeps missing stays
-available as long as the attic receiver hears it, and it goes `unavailable` only
+available as long as the attic receiver receives it, and it goes `unavailable` only
 when every receiver has either dropped its connection or stopped hearing the
 device.
 
 The two halves are deliberately checked together, per receiver, rather than
-separately. "Some receiver is connected" and "some receiver heard it recently"
+separately. "Some receiver is connected" and "some receiver received it recently"
 can both be true while nothing can actually hear the device — a connected garage
 receiver that is deaf to the sensor, plus an offline attic receiver holding a
 minute-old timestamp. Neither of those receivers can vouch, so the device
@@ -149,7 +149,7 @@ default for event-driven devices.
 
 The same resolved timeout is what every receiver in the location measures its own
 silence against, so a device does not have a different deadline depending on
-which server heard it.
+which server received it.
 
 **Location settings** asks which of the three you want outright — *Per-device-type
 defaults*, *Never expire*, or *a fixed timeout* — so leaving the location on the
@@ -167,7 +167,7 @@ restored silence window elapses without a fresh event.
 ## Last Seen Sensor
 
 Every device gets a diagnostic timestamp sensor per receiver, named **Last seen**
-followed by the receiver's name. It reports when *that receiver* last heard the
+followed by the receiver's name. It reports when *that receiver* last received the
 device, and restores its previous value across restarts.
 
 Last seen is enabled by default for event-driven devices because they never
@@ -179,8 +179,8 @@ silent, so it can drive staleness automations. It does go unavailable while its
 receiver's connection is down, because the timestamp then only records when the
 integration stopped listening.
 
-Last seen is one of the three per-receiver link fields, so a device heard by two
+Last seen is one of the three per-receiver link fields, so a device received by two
 receivers has a **Last seen** entity for each of them — "when did *the attic*
 last hear this sensor" is a different question from "when did *the garage*". For
-the merged, whichever-heard-it-last answer, read the device's availability, or
+the merged, whichever-received-it-last answer, read the device's availability, or
 the **Signal coverage** page.
