@@ -2242,6 +2242,117 @@ async def test_hassio_confirm_cannot_connect_reshows_form(hass):
     }
 
 
+async def test_user_step_rejects_a_server_already_keyed_by_host_and_port(hass):
+    """A receiver is already-configured under either of its two keys.
+
+    One is matched on the stored host:port, the other on the ``hub:host:port``
+    unique_id a manual add is keyed by -- and the two can disagree, because a
+    reconfigure rewrites the stored connection and leaves the original key in
+    place. Dropping the id the second guard is handed makes it look for a
+    receiver keyed on nothing, so a server reachable under its old key would be
+    offered for adding twice.
+    """
+    stale = _radio_entry(host="moved.local", port=8433, uid="hub:old.local:8433")
+    stale.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_HOST: "old.local", CONF_PORT: 8433, CONF_PATH: "/ws"},
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+
+
+async def test_hassio_adoption_drops_an_empty_orphan_holding_the_radio_id(hass):
+    """Re-keying a manual receiver clears the orphan that already owns the id.
+
+    Two receivers cannot share one stable radio id. When the id is held by a
+    location that has adopted nothing, that location is an empty leftover and is
+    removed so the real receiver can take the id. The drop is the whole point of
+    the branch: without it the re-key would create the duplicate it exists to
+    prevent.
+    """
+    manual = _radio_entry(host="core-rtl433", port=8433, uid="hub:core-rtl433:8433")
+    manual.add_to_hass(hass)
+    orphan = _radio_entry(host="elsewhere.local", port=8433, uid="serial:0123")
+    orphan.add_to_hass(hass)
+
+    await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="core-rtl433", port=8433, uid="serial:0123"),
+    )
+    await hass.async_block_till_done()
+
+    remaining = hass.config_entries.async_entries(DOMAIN)
+    assert [entry.entry_id for entry in remaining] == [manual.entry_id]
+    receiver = next(iter(manual.subentries.values()))
+    assert receiver.unique_id == "serial:0123"
+
+
+async def test_hassio_confirm_reshow_keeps_the_form_fillable(hass):
+    """The re-shown form carries its schema, not just its error.
+
+    A form re-shown without one renders no fields at all, so the user is handed
+    a dead dialog after the one failure they are most likely to hit -- a radio
+    that was briefly unreachable. The error and the placeholders are only half
+    the re-show; the fields are the half that lets them retry.
+    """
+    from custom_components.rtl_433.coordinator import CannotConnect
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_HASSIO}, data=_disc()
+    )
+    with patch(VALIDATE, side_effect=CannotConnect("nope")):
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] is FlowResultType.FORM
+    schema = result["data_schema"]
+    assert schema is not None
+    keys = {str(key) for key in schema.schema}
+    assert CONF_MANAGE_SETTINGS in keys
+    assert CONF_INITIAL_FREQUENCY in keys
+
+
+async def test_hassio_confirm_titles_the_subentry_it_adds(hass):
+    """Adopting into an existing location names the receiver it just added.
+
+    The subentry title is what every receiver-scoped surface shows -- the
+    picker, the settings page, the device page -- so a receiver added this way
+    has to carry the same name the create path would have given it. An untitled
+    one is indistinguishable from its siblings the moment a location holds two.
+    """
+    existing = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    existing.add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="new.local", port=9000, uid="radio-new"),
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"replaces": "__new__"}
+    )
+    with patch(VALIDATE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"location": existing.entry_id}
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "receiver_added"
+    added = next(
+        subentry
+        for subentry in existing.subentries.values()
+        if subentry.unique_id == "radio-new"
+    )
+    assert added.title == "rtl_433 (new.local:9000)"
+
+
 # --------------------------------------------------------------------------- #
 # Setup toggles + initial frequency (manual user step and discovery confirm).  #
 # --------------------------------------------------------------------------- #

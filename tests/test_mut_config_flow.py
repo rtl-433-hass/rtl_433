@@ -39,10 +39,12 @@ from unittest.mock import patch
 
 from pyrtl_433.library import FieldDescriptor, Registry
 import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rtl_433.calibration import COMMODITY_UNITS
 from custom_components.rtl_433.config_flow import (
     CONF_SECURE,
+    _all_receivers,
     _receiver_unique_id,
     async_rebind_receiver,
 )
@@ -74,9 +76,10 @@ from custom_components.rtl_433.const import (
     DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
+    SUBENTRY_TYPE_RECEIVER,
 )
 from custom_components.rtl_433.options_flow import CONF_DEVICE
-from homeassistant.config_entries import SOURCE_USER
+from homeassistant.config_entries import SOURCE_USER, ConfigSubentryData
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -2963,3 +2966,40 @@ async def test_rebind_receiver_sets_title_only_when_provided(hass):
         )
         await hass.async_block_till_done()
     assert receiver_subentry(entry).title == "brand-new-title"
+
+
+# ===========================================================================
+# _all_receivers
+# ===========================================================================
+
+
+async def test_all_receivers_only_scans_this_integration(hass, receiver_entry_builder):
+    """Another integration's subentries are not receivers of ours.
+
+    Every duplicate guard in the module scans this list, so it has to be the
+    rtl_433 entries and only those. ``subentry_type`` is not a namespaced value
+    -- another integration is free to call one of its own subentries
+    ``receiver`` -- so dropping the domain filter would let its rows collide
+    with ours and refuse a host the user is entitled to add.
+    """
+    receiver = receiver_entry_builder()
+    receiver.add_to_hass(hass)
+
+    foreign = MockConfigEntry(
+        domain="not_rtl_433",
+        title="something else",
+        data={},
+        subentries_data=[
+            ConfigSubentryData(
+                data={CONF_HOST: "rtl433.local", CONF_PORT: DEFAULT_PORT},
+                subentry_type=SUBENTRY_TYPE_RECEIVER,
+                title="not ours",
+                unique_id=None,
+            )
+        ],
+    )
+    foreign.add_to_hass(hass)
+
+    found = _all_receivers(hass)
+
+    assert [entry.entry_id for entry, _ in found] == [receiver.entry_id]

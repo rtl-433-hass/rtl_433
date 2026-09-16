@@ -7,6 +7,7 @@ test_lifecycle.py (receiver_entry_builder fixture, _no_socket stub, etc.).
 
 from __future__ import annotations
 
+import logging
 from types import MappingProxyType, SimpleNamespace
 from unittest.mock import patch
 
@@ -2064,3 +2065,30 @@ def test_platforms_is_a_list():
     """PLATFORMS must be a list so async_forward_entry_setups accepts it."""
     assert isinstance(PLATFORMS, list)
     assert len(PLATFORMS) > 0
+
+
+async def test_update_listener_logs_what_it_applied(
+    hass, receiver_entry_builder, caplog
+):
+    """The one line this listener leaves behind names what it just applied.
+
+    It is the only trace of the live path -- the timeout is pushed into the
+    running coordinators and nothing reloads -- so it has to say which location,
+    what timeout, and how many receivers it reached. A message or an argument
+    that drifts turns the sole diagnostic for "did my change take?" into noise.
+    """
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+
+    with caplog.at_level(logging.DEBUG, logger="custom_components.rtl_433"):
+        await _async_update_listener(hass, receiver)
+
+    # Compared whole rather than by substring: a message with padding around it
+    # still *contains* the expected text, so `in caplog.text` would not notice.
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "custom_components.rtl_433"
+    ]
+    assert (
+        f"rtl_433 location {receiver.title} options updated (timeout=600s, receivers=1)"
+    ) in messages

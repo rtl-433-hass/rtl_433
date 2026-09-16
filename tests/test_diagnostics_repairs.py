@@ -12,6 +12,7 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 from pyrtl_433 import TimePrecision
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rtl_433 import repairs
 from custom_components.rtl_433.const import (
@@ -28,7 +29,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
-from tests.conftest import receiver_id, receiver_subentry
+from tests.conftest import build_receiver_subentry, receiver_id, receiver_subentry
 
 # The coordinator's reachability validator, patched so no socket is opened.
 VALIDATE = "custom_components.rtl_433.coordinator.Rtl433Coordinator.validate_connection"
@@ -634,3 +635,80 @@ async def test_rebind_fix_flow_cannot_connect_reshows_form(
     unchanged = receiver_subentry(entry)
     assert unchanged.unique_id == "radio-old"
     assert unchanged.data[CONF_HOST] == "rtl433.local"
+
+
+# ===========================================================================
+# Per-receiver targeting: a location with two receivers
+# ===========================================================================
+
+
+def _two_receiver_location(hass) -> MockConfigEntry:
+    """A location holding two receivers, neither of them set up."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Home",
+        data={},
+        options={},
+        unique_id=None,
+        version=2,
+        subentries_data=[
+            build_receiver_subentry(host="first.local"),
+            build_receiver_subentry(host="second.local"),
+        ],
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_sample_rate_apply_widens_the_receiver_the_card_is_about(
+    hass: HomeAssistant,
+):
+    """Apply retunes the advisory's own receiver, not the location's first.
+
+    Each receiver carries its own radio settings, so an advisory raised for the
+    second one must not quietly widen the first. Looking the coordinator up
+    without the receiver id falls back to "this location's first receiver" --
+    the right default for a surface that speaks the one-server model, and the
+    wrong one here, where the flow knows exactly which receiver it is fixing.
+    """
+    from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
+
+    entry = _two_receiver_location(hass)
+    coordinators = {}
+    for index in (0, 1):
+        coordinator = Rtl433Coordinator(
+            hass, entry, receiver_subentry(entry, index), host="rtl433.local"
+        )
+        coordinator._client.connected = False
+        hass.data.setdefault(DOMAIN, {})[receiver_id(entry, index)] = coordinator
+        coordinators[index] = coordinator
+
+    flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry, 1))
+    flow.hass = hass
+
+    result = await flow.async_step_apply()
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert coordinators[1].get_desired(KEY_SAMPLE_RATE) == 1_024_000
+    assert coordinators[0].get_desired(KEY_SAMPLE_RATE) is None
+
+
+async def test_fix_flow_carries_the_receiver_named_in_the_issue_id(
+    hass: HomeAssistant,
+):
+    """The flow is handed the receiver its issue id names.
+
+    The id encodes location *and* receiver precisely so a second unreachable
+    server cannot overwrite the first one's card, which only pays off if the
+    flow is then built around that receiver: handed the wrong one -- or none at
+    all -- every step afterwards would act on a receiver the user never saw.
+    """
+    entry = _two_receiver_location(hass)
+    issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry, 1))
+
+    flow = await repairs.async_create_fix_flow(hass, issue_id, None)
+
+    assert isinstance(flow, repairs.SampleRateRepairFlow)
+    assert flow._subentry is not None
+    assert flow._subentry.subentry_id == receiver_id(entry, 1)

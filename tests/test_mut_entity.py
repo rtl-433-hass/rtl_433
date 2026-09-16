@@ -39,6 +39,7 @@ from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.entity import (
     Rtl433Entity,
     _apply_calibration,
+    _known_fields,
     _resolve_entity_category,
     async_setup_receiver_platform,
     async_upsert_device,
@@ -2375,3 +2376,53 @@ def test_a_descriptor_icon_becomes_the_entitys_icon():
 def test_a_descriptor_without_an_icon_leaves_the_choice_to_home_assistant():
     """No icon in the library means no override: core picks by device class."""
     assert _icon_entity(None).icon is None
+
+
+# ===========================================================================
+# _known_fields
+# ===========================================================================
+
+
+async def test_known_fields_unions_the_record_with_every_receiver(
+    hass, receiver_entry_builder
+):
+    """The stored record and each receiver's live view are combined, not chosen.
+
+    A device the user added long ago carries the fields it had then; a receiver
+    that has since heard a new one knows about that. Both belong to the device,
+    so the answer is their union -- keeping the stored side pins the read of the
+    record, and keeping the live side pins the read of the coordinator's map.
+    """
+    device_key = "EnergyMeter-2000-1234"
+    receiver = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        devices={device_key: {CONF_MODEL: "EnergyMeter-2000"}},
+    )
+    coordinator = _coordinator(hass, receiver)
+    coordinator.device_fields[device_key] = {"live_only"}
+
+    fields = _known_fields(hass, receiver, device_key, {DEVICE_FIELDS: ["stored_only"]})
+
+    assert fields == {"stored_only", "live_only"}
+
+
+async def test_known_fields_tolerates_a_record_with_no_fields(
+    hass, receiver_entry_builder
+):
+    """A record that has never stored a field list still reads as empty.
+
+    ``fields`` is optional in a stored device record, so the default is what
+    ``set()`` is handed. Dropping it turns the read into ``set(None)`` and the
+    union into a TypeError the moment a device is upserted.
+    """
+    device_key = "EnergyMeter-2000-1234"
+    receiver = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        devices={device_key: {CONF_MODEL: "EnergyMeter-2000"}},
+    )
+    coordinator = _coordinator(hass, receiver)
+    coordinator.device_fields[device_key] = {"live_only"}
+
+    assert _known_fields(hass, receiver, device_key, {}) == {"live_only"}
