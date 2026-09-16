@@ -195,7 +195,9 @@ async def test_frame_routing_matrix(
     # of the user that they never asked for. That is the claim this test has
     # always been making; naming the signals is what finally states it exactly.
     assert _dispatched(dispatch) == (
-        [signal_pending_update(coordinator.receiver_id)] if expect == "pending" else []
+        [signal_pending_update(coordinator.entry.entry_id)]
+        if expect == "pending"
+        else []
     )
 
 
@@ -243,7 +245,7 @@ async def test_pending_frame_touches_no_adopted_runtime_state(hass, make_coordin
     # a pending-update, which tells the discovery panel its list changed without
     # naming a device to build. No device-update, because there are no entities
     # to fan out to -- that is the regression this whole test guards.
-    assert _dispatched(dispatch) == [signal_pending_update(coordinator.receiver_id)]
+    assert _dispatched(dispatch) == [signal_pending_update(coordinator.entry.entry_id)]
 
     # Long past any timeout: the watchdog has nothing to say about a device that
     # was only ever heard.

@@ -414,11 +414,17 @@ def signal_receiver_availability(receiver_id: str) -> str:
     return SIGNAL_RECEIVER_AVAILABILITY.format(receiver_id=receiver_id)
 
 
-# Receiver-level "the pending-device list changed" signal. Fired when the *membership*
-# of the coordinator's pending map changes — a candidate appears, or one is
-# adopted, ignored, or forgotten — so the WebSocket subscription behind the
-# discovery panel can push a fresh list the moment the answer to "what is waiting
-# for me?" actually changes.
+# Location-level "the pending-device list changed" signal. Fired when the
+# *membership* of the location's merged candidate list changes — a candidate
+# appears on any receiver, or one is adopted, ignored, or forgotten — so the
+# WebSocket subscription behind the discovery panel can push a fresh list the
+# moment the answer to "what is waiting for me?" actually changes.
+#
+# Scoped to the **location**, not to the receiver that heard the frame. A sensor
+# two receivers can both hear is ONE candidate row (``aggregator.py`` merges
+# their pending maps), so there is one list and one subscription; a per-receiver
+# signal would push the same merged list once per receiver that decoded the same
+# transmission.
 #
 # Deliberately NOT fired for a repeat sighting of a candidate already on the
 # list. A busy receiver in an urban area decodes constantly, and a per-frame
@@ -427,9 +433,9 @@ def signal_receiver_availability(receiver_id: str) -> str:
 # *websocket layer* re-sends on a slow timer and only when the rendered payload
 # actually differs (see ``websocket_api.py``). Keeping that coalescing there
 # leaves the coordinator a pure state holder with no idea a UI exists.
-SIGNAL_PENDING_UPDATE: Final = "rtl_433_pending_update_{receiver_id}"
+SIGNAL_PENDING_UPDATE: Final = "rtl_433_pending_update_{location_id}"
 
 
-def signal_pending_update(receiver_id: str) -> str:
-    """Return the receiver-level pending-list-changed dispatcher signal for one receiver."""
-    return SIGNAL_PENDING_UPDATE.format(receiver_id=receiver_id)
+def signal_pending_update(location_id: str) -> str:
+    """Return the location-level pending-list-changed dispatcher signal."""
+    return SIGNAL_PENDING_UPDATE.format(location_id=location_id)

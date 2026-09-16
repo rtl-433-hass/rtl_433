@@ -77,7 +77,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
-from tests.conftest import receiver_id, receiver_subentry
+from tests.conftest import build_receiver_subentry, receiver_id, receiver_subentry
 
 # The three devices the receiver hears in the fixture below, spelled out as the
 # normalizer derives them from ``model`` + ``id`` so the assertions read the way
@@ -310,6 +310,50 @@ async def test_pending_returns_the_columns_the_panel_renders(
     assert rows[_MID_KEY]["signal"] == -8.5  # rssi, the fallback
     assert rows[_OLD_KEY]["signal"] is None  # neither reported: no reading at all
     assert rows[_OLD_KEY]["count"] == 1
+
+
+async def test_pending_merges_a_device_two_receivers_heard(
+    hass, receiver_entry_builder, hass_ws_client, no_socket
+):
+    """The payload is the location's merged list, not one receiver's.
+
+    Two servers in range of the same sensor decode the same transmission, so
+    without the merge the panel would offer the device twice and the user would
+    have to approve it twice. One row goes out instead, showing the frame that
+    arrived last and naming the receivers that heard it -- which is what lets the
+    page show coverage before anything is added.
+    """
+    entry = await _setup_receiver(
+        hass,
+        receiver_entry_builder,
+        receivers=[
+            build_receiver_subentry(host="attic.local"),
+            build_receiver_subentry(host="garage.local"),
+        ],
+    )
+    attic = hass.data[DOMAIN][receiver_id(entry, 0)]
+    garage = hass.data[DOMAIN][receiver_id(entry, 1)]
+
+    start = dt_util.utcnow()
+    with freeze_time(start):
+        _hear(attic, _NEW_FRAME)
+    with freeze_time(start + timedelta(seconds=1)):
+        _hear(garage, {**_NEW_FRAME, "power_W": 1600.0})
+    await hass.async_block_till_done()
+
+    client = await hass_ws_client(hass)
+    reply, _ = await _call(
+        client, {"type": "rtl_433/devices/pending", "entry_id": entry.entry_id}
+    )
+
+    assert reply["success"]
+    rows = reply["result"]["pending"]
+    assert [row["key"] for row in rows] == [_NEW_KEY]
+    assert rows[0]["receivers"] == [receiver_id(entry, 0), receiver_id(entry, 1)]
+    # The location heard it twice, and the row shows the last frame to arrive.
+    assert rows[0]["count"] == 2
+    readings = {reading["key"]: reading for reading in rows[0]["readings"]}
+    assert readings["power_W"]["value"] == 1600.0
 
 
 async def test_pending_readings_preview_the_entities_adoption_would_create(
