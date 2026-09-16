@@ -42,6 +42,7 @@ from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
 from homeassistant.util.enum import try_parse_enum
 
+from .aggregator import LAST_SEEN_FIELD
 from .entity import Rtl433Entity, Rtl433ReceiverEntity, async_setup_receiver_platform
 from .receiver_settings import receiver_coordinators
 
@@ -266,11 +267,12 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
 # Per-device synthetic "Last seen" timestamp sensor.                           #
 # --------------------------------------------------------------------------- #
 # Sentinel field_key that no rtl_433 event can carry, so the base's
-# field-driven _apply_value path is never triggered for this entity.
-_LAST_SEEN_FIELD = "__last_seen__"
-
+# field-driven _apply_value path is never triggered for this entity. Defined in
+# ``aggregator.py`` beside ``rssi`` and ``snr``, because it is the third member
+# of the union's exclusion set: "when did *this* receiver last hear the sensor"
+# describes the link, not the sensor.
 LAST_SEEN_DESCRIPTOR = FieldDescriptor(
-    field_key=_LAST_SEEN_FIELD,
+    field_key=LAST_SEEN_FIELD,
     platform="sensor",
     name="Last seen",
     object_suffix="last_seen",
