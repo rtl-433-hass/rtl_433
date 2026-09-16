@@ -802,7 +802,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
 
         if (entry.minor_version or 1) < 8:
-            # Discovery stopped being a toggle: every heard device waits in the
+            # Discovery stopped being a toggle: every received device waits in the
             # coordinator's pending list until the user adopts it, so the per-receiver
             # ``discovery_enabled`` flag gates nothing. Strip it from both data and
             # options so no stale value survives into diagnostics or a config-entry

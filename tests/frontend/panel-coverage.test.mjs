@@ -3,16 +3,16 @@
 //
 // What is under test is the one thing the union necessarily hides. A sensor two
 // receivers both hear becomes one device with one set of entities, which is the
-// whole point -- so *which* receiver hears it, how strongly and how recently has
+// whole point -- so *which* receiver receives it, how strongly and how recently has
 // nowhere left to show itself: `rssi` and `snr` are mapped
 // `enabled_by_default: false` and stay that way (Clarification #23), so a
 // default install has no entity carrying any of it.
 //
 // The panel therefore renders it directly, from the aggregator's own state: on
-// the union add-device page as "heard by Attic (-62 dB) / Garage (-89 dB)", and
+// the union add-device page as "received by Attic (-62 dB) / Garage (-89 dB)", and
 // on the coverage page as a row per receiver. Both are strings assembled from
 // values that are routinely absent -- a decoder that emits no level, a server
-// started without `-M level`, a receiver that has never heard the device at all
+// started without `-M level`, a receiver that has never received the device at all
 // -- and every one of those absences has to read as an absence rather than as a
 // measurement of nothing.
 import { test } from "node:test";
@@ -26,7 +26,7 @@ import { dirname, resolve } from "node:path";
 globalThis.HTMLElement = class {};
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const { STRINGS, formatFallback, formatSignal, formatHeardBy, coverageAge } =
+const { STRINGS, formatFallback, formatSignal, formatReceivedBy, coverageAge } =
   await import(
     resolve(HERE, "../../custom_components/rtl_433/frontend/rtl_433-panel.js")
   );
@@ -68,14 +68,14 @@ test("no level at all is an em dash, not a zero", () => {
   assert.equal(formatSignal(t, undefined), "—");
 });
 
-// -- Who heard this candidate -------------------------------------------------
+// -- Who received this candidate -------------------------------------------------
 
 test("two receivers read as the comparison the second receiver was bought for", () => {
   // The sentence Clarification #23 asks for, verbatim in shape: the union page
   // shows one card for the sensor and this line is the only thing on it that
-  // says two receivers heard it.
+  // says two receivers received it.
   assert.equal(
-    formatHeardBy(
+    formatReceivedBy(
       t,
       [
         coverage("attic", { rssi: -62 }),
@@ -91,7 +91,7 @@ test("a receiver that reported no level is named on its own", () => {
   // Not "Garage (—)", which reads as a measurement of nothing rather than as an
   // absence of one -- and plenty of decoders never emit a level at all.
   assert.equal(
-    formatHeardBy(
+    formatReceivedBy(
       t,
       [coverage("attic", { rssi: -62 }), coverage("garage")],
       titleFor,
@@ -99,7 +99,7 @@ test("a receiver that reported no level is named on its own", () => {
     "Attic (-62.0 dB) / Garage",
   );
   assert.equal(
-    formatHeardBy(t, [coverage("attic"), coverage("garage")], titleFor),
+    formatReceivedBy(t, [coverage("attic"), coverage("garage")], titleFor),
     "Attic / Garage",
   );
 });
@@ -109,7 +109,7 @@ test("a receiver the page cannot name still appears", () => {
   // list, which can be a moment behind it after a receiver is added. Dropping
   // the row would under-report coverage; naming it "Unknown receiver" does not.
   assert.equal(
-    formatHeardBy(t, [coverage("shed", { rssi: -70 })], titleFor),
+    formatReceivedBy(t, [coverage("shed", { rssi: -70 })], titleFor),
     "Unknown receiver (-70.0 dB)",
   );
 });
@@ -119,7 +119,7 @@ test("the whole line is receivers in the order the payload gave them", () => {
   // card lists them in. A line that sorted by signal would move under the
   // cursor every time a frame arrived.
   assert.equal(
-    formatHeardBy(
+    formatReceivedBy(
       t,
       [
         coverage("garage", { rssi: -89 }),
@@ -132,15 +132,15 @@ test("the whole line is receivers in the order the payload gave them", () => {
   // One receiver is a legal payload; the caller hides the line rather than the
   // formatter refusing it.
   assert.equal(
-    formatHeardBy(t, [coverage("attic", { rssi: -62 })], titleFor),
+    formatReceivedBy(t, [coverage("attic", { rssi: -62 })], titleFor),
     "Attic (-62.0 dB)",
   );
-  assert.equal(formatHeardBy(t, [], titleFor), "");
+  assert.equal(formatReceivedBy(t, [], titleFor), "");
 });
 
-// -- When a receiver last heard a device --------------------------------------
+// -- When a receiver last received a device --------------------------------------
 
-test("a receiver that has heard the device shows how long ago", () => {
+test("a receiver that has received the device shows how long ago", () => {
   const now = Date.parse("2026-09-12T12:00:00Z");
   assert.equal(
     coverageAge(t, coverage("attic", { lastSeen: "2026-09-12T11:59:30Z" }), now),
@@ -148,16 +148,16 @@ test("a receiver that has heard the device shows how long ago", () => {
   );
 });
 
-test("a receiver that has never heard it says so, rather than showing a dash", () => {
+test("a receiver that has never received it says so, rather than showing a dash", () => {
   // `rtl_433/devices/coverage` lists every running receiver, including one that
   // has never decoded this device -- "the garage does not hear it" is as much a
   // coverage answer as a weak signal is, and is usually the answer someone
   // comparing two receivers came to the page for. An em dash there would read
   // as a rendering failure.
   const now = Date.parse("2026-09-12T12:00:00Z");
-  assert.equal(coverageAge(t, coverage("garage"), now), "Never heard it");
+  assert.equal(coverageAge(t, coverage("garage"), now), "Never received it");
   assert.equal(
     coverageAge(t, { receiver_id: "garage" }, now),
-    "Never heard it",
+    "Never received it",
   );
 });

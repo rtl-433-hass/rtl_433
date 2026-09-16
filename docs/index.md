@@ -17,16 +17,16 @@ maps raw fields to Home Assistant sensors, binary sensors, and events through th
 
 **A receiver is a computer running rtl_433; it contains a radio.** The radio is
 the SDR dongle; the receiver is the machine running the `rtl_433` process that
-decodes what the radio hears and serves it over a WebSocket.
+decodes what the radio receives and serves it over a WebSocket.
 
 Receivers are grouped into a **location**: one integration entry holding one
 receiver per rtl_433 server. Setting the integration up creates a location and
 its first receiver together, and **Add a receiver** adds more servers to the same
 location.
 
-Everything a location's receivers hear is **unioned**. One physical sensor heard
+Everything a location's receivers receive is **unioned**. One physical sensor received
 by two receivers is one Home Assistant device with one set of entities, updating
-whenever either receiver hears it. Add a second *location* only for a genuinely
+whenever either receiver receives it. Add a second *location* only for a genuinely
 distant site, where its receivers could never hear the same transmitter as the
 first — devices never merge across locations.
 
@@ -45,9 +45,9 @@ integration can connect to any rtl_433 server with HTTP output enabled.
   YAML snippets in the Home Assistant UI, without having to wait for a new
   version of the integration. The shipped library is maintained upstream in
   [`pyrtl_433`](https://github.com/rtl-433-hass/pyrtl_433).
-- **You choose which devices to add**: every device your receivers hear is listed
+- **You choose which devices to add**: every device your receivers receive is listed
   on one page for you to add, so neighbours' sensors and bad decodes stay out of
-  Home Assistant. A sensor two receivers hear is one row, approved once for the
+  Home Assistant. A sensor two receivers receive is one row, approved once for the
   whole location. Unwanted devices can be ignored until you want them back.
 - **Union across receivers**: several rtl_433 servers in one location feed one
   device per sensor and one entity per mapped field, deduped so two decodes of
