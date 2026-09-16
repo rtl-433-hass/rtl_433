@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .entity import Rtl433ReceiverControl, async_setup_receiver_controls
 from .sdr_settings import conversion_label_to_val, conversion_val_to_label
@@ -45,11 +45,10 @@ class Rtl433SelectControl(Rtl433ReceiverControl, SelectEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        receiver_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Initialize select-specific options from the setting."""
-        super().__init__(coordinator, receiver_entry_id, setting)
+        super().__init__(coordinator, setting)
         self._attr_options = list(setting.options or ())
 
     @property
@@ -77,9 +76,9 @@ class Rtl433SelectControl(Rtl433ReceiverControl, SelectEntity):
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Register the receiver's managed Select controls (only when managing)."""
+    """Register every receiver's managed Select controls (only when managing)."""
     await async_setup_receiver_controls(
         hass, entry, async_add_entities, PLATFORM, Rtl433SelectControl
     )

@@ -23,6 +23,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import CONF_HOST, CONF_PATH, CONF_PORT, DATA_ENTRY_LIBRARY, DOMAIN
 from .coordinator import Rtl433Coordinator
+from .receiver_settings import receiver_coordinator, receiver_subentries
 
 # Keys redacted from the exported connection params. The host can reveal a
 # private network address / hostname, so it is redacted; port/path are benign.
@@ -32,11 +33,13 @@ TO_REDACT = {CONF_HOST}
 def _resolve_coordinator(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> Rtl433Coordinator | None:
-    """Return the coordinator that owns ``entry``'s runtime state, if loaded.
+    """Return the coordinator of this location's first receiver, if loaded.
 
-    Every config entry is a receiver entry that is its own coordinator.
+    A location may hold several receivers; this dump still describes one, which
+    is the honest answer for the single-receiver install every existing dump
+    comes from. The per-receiver breakdown lands with the aggregator.
     """
-    return hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    return receiver_coordinator(hass, entry)
 
 
 def _unmatched_field_keys(
@@ -79,6 +82,19 @@ async def async_get_config_entry_diagnostics(
             "data": async_redact_data(dict(entry.data), TO_REDACT),
             "options": dict(entry.options),
         },
+        # The location's receivers, as stored. The connection block further down
+        # still describes one running coordinator; this is what says how many
+        # there are and where each points, which is the first question a
+        # multi-receiver report raises.
+        "receivers": [
+            {
+                "receiver_id": subentry.subentry_id,
+                "title": subentry.title,
+                "unique_id": subentry.unique_id,
+                "data": async_redact_data(dict(subentry.data), TO_REDACT),
+            }
+            for subentry in receiver_subentries(entry)
+        ],
     }
 
     if coordinator is None:

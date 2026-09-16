@@ -7,7 +7,8 @@ test_lifecycle.py (receiver_entry_builder fixture, _no_socket stub, etc.).
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import logging
+from types import MappingProxyType, SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -47,6 +48,7 @@ from custom_components.rtl_433.const import (
     ENTRY_TYPE_DEVICE,
     ENTRY_TYPE_RECEIVER,
     PLATFORMS,
+    SUBENTRY_TYPE_RECEIVER,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
@@ -64,8 +66,15 @@ from custom_components.rtl_433.receiver_settings import (
     _receiver_manage_settings,
     _receiver_secure,
 )
+from homeassistant.config_entries import ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from tests.conftest import (
+    build_receiver_entry,
+    receiver_id,
+    receiver_scope,
+    receiver_subentry,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +97,7 @@ def _no_socket():
 def _coordinator(
     hass: HomeAssistant, receiver_entry: MockConfigEntry
 ) -> Rtl433Coordinator:
-    return hass.data[DOMAIN][receiver_entry.entry_id]
+    return hass.data[DOMAIN][receiver_id(receiver_entry)]
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
@@ -122,13 +131,29 @@ async def _setup_receiver(hass, receiver_entry_builder, *, devices=None, **kwarg
 
 
 def _make_entry(data=None, options=None):
-    """Build a minimal MockConfigEntry with given data/options."""
+    """Build a minimal location MockConfigEntry with given data/options."""
     return MockConfigEntry(
         domain=DOMAIN,
-        title="test receiver",
+        title="test location",
         data=data or {},
         options=options or {},
         version=2,
+    )
+
+
+def _make_receiver(data=None, *, unique_id=None):
+    """Build a bare receiver subentry carrying exactly ``data``.
+
+    The connection target and the radio settings live on the *subentry* now, so
+    the resolvers that read them take one of these rather than the location entry
+    -- which is the point: a per-receiver setting cannot be read off the wrong
+    object by accident.
+    """
+    return ConfigSubentry(
+        data=MappingProxyType(data or {}),
+        subentry_type=SUBENTRY_TYPE_RECEIVER,
+        title="test receiver",
+        unique_id=unique_id,
     )
 
 
@@ -136,18 +161,16 @@ def _make_entry(data=None, options=None):
 
 
 def test_receiver_secure_defaults_false():
-    entry = _make_entry(data={CONF_HOST: "h", CONF_PORT: 8433, CONF_PATH: "/ws"})
-    assert _receiver_secure(entry) is False
+    subentry = _make_receiver({CONF_HOST: "h", CONF_PORT: 8433, CONF_PATH: "/ws"})
+    assert _receiver_secure(subentry) is False
 
 
 def test_receiver_secure_true_when_set():
-    entry = _make_entry(data={"secure": True})
-    assert _receiver_secure(entry) is True
+    assert _receiver_secure(_make_receiver({"secure": True})) is True
 
 
 def test_receiver_secure_false_when_explicit_false():
-    entry = _make_entry(data={"secure": False})
-    assert _receiver_secure(entry) is False
+    assert _receiver_secure(_make_receiver({"secure": False})) is False
 
 
 # --- _receiver_availability_timeout ---------------------------------------------
@@ -188,40 +211,43 @@ def test_receiver_availability_timeout_is_int():
 
 
 def test_receiver_manage_settings_defaults_to_true():
-    entry = _make_entry(data={})
-    assert _receiver_manage_settings(entry) is True
+    assert _receiver_manage_settings(_make_entry(), _make_receiver()) is True
 
 
 def test_receiver_manage_settings_true():
     assert DEFAULT_MANAGE_SETTINGS is True
 
 
-def test_receiver_manage_settings_data_false():
-    entry = _make_entry(data={CONF_MANAGE_SETTINGS: False})
+def test_receiver_manage_settings_receiver_false():
+    """The toggle is the receiver's: it is read off the subentry."""
+    subentry = _make_receiver({CONF_MANAGE_SETTINGS: False})
+    assert _receiver_manage_settings(_make_entry(), subentry) is False
+
+
+def test_receiver_manage_settings_options_overrides_receiver():
+    """The location's options still win, until that form is re-scoped."""
+    entry = _make_entry(options={CONF_MANAGE_SETTINGS: False})
+    subentry = _make_receiver({CONF_MANAGE_SETTINGS: True})
+    assert _receiver_manage_settings(entry, subentry) is False
+
+
+def test_receiver_manage_settings_options_true_overrides_receiver_false():
+    entry = _make_entry(options={CONF_MANAGE_SETTINGS: True})
+    subentry = _make_receiver({CONF_MANAGE_SETTINGS: False})
+    assert _receiver_manage_settings(entry, subentry) is True
+
+
+def test_receiver_manage_settings_without_a_named_receiver_reads_the_first():
+    """Omitting the subentry asks the location's first receiver."""
+    entry = build_receiver_entry(manage_settings=False)
     assert _receiver_manage_settings(entry) is False
-
-
-def test_receiver_manage_settings_options_overrides_data():
-    entry = _make_entry(
-        data={CONF_MANAGE_SETTINGS: True},
-        options={CONF_MANAGE_SETTINGS: False},
-    )
-    assert _receiver_manage_settings(entry) is False
-
-
-def test_receiver_manage_settings_options_true_overrides_data_false():
-    entry = _make_entry(
-        data={CONF_MANAGE_SETTINGS: False},
-        options={CONF_MANAGE_SETTINGS: True},
-    )
-    assert _receiver_manage_settings(entry) is True
 
 
 # --- _receiver_connection -------------------------------------------------------
 
 
 def _connection_entry(**overrides):
-    """Build an entry carrying a full connection target + stable radio id."""
+    """Build a receiver carrying a full connection target + stable radio id."""
     data = {
         CONF_HOST: "rtl433.local",
         CONF_PORT: 8433,
@@ -230,13 +256,7 @@ def _connection_entry(**overrides):
     }
     unique_id = overrides.pop("unique_id", "serial:0123")
     data.update(overrides)
-    return MockConfigEntry(
-        domain=DOMAIN,
-        title="test receiver",
-        data=data,
-        unique_id=unique_id,
-        version=2,
-    )
+    return _make_receiver(data, unique_id=unique_id)
 
 
 def test_receiver_connection_reports_the_stored_target():
@@ -440,7 +460,7 @@ async def test_cleanup_phantom_leaves_receiver_device_untouched(
 
     dev_reg.async_get_or_create(
         config_entry_id=receiver.entry_id,
-        identifiers={(DOMAIN, receiver.entry_id)},
+        identifiers={(DOMAIN, receiver_scope(receiver))},
         name="Receiver",
     )
     _cleanup_phantom_unknown_device(hass, receiver, dev_reg)
@@ -448,7 +468,7 @@ async def test_cleanup_phantom_leaves_receiver_device_untouched(
     # Receiver device still exists
     assert (
         dev_reg.async_get_device_by_identifier(
-            (DOMAIN, receiver.entry_id), receiver.entry_id
+            (DOMAIN, receiver_scope(receiver)), receiver.entry_id
         )
         is not None
     )
@@ -466,7 +486,7 @@ async def test_migrate_motion_removes_event_entities(hass, receiver_entry_builde
     ent_reg = er.async_get(hass)
 
     device_key = "MySensor-42"
-    motion_uid = f"{receiver.entry_id}:{device_key}:motion"
+    motion_uid = f"{receiver_id(receiver)}:{device_key}:motion"
     ent_reg.async_get_or_create(
         "event",
         DOMAIN,
@@ -603,7 +623,7 @@ async def test_setup_entry_registers_receiver_device(hass, receiver_entry_builde
 
     dev_reg = dr.async_get(hass)
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     assert receiver_device is not None
     assert receiver_device.manufacturer == "rtl_433"
@@ -628,7 +648,7 @@ async def test_receiver_info_callback_updates_receiver_device_identity(
 
     dev_reg = dr.async_get(hass)
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     assert receiver_device.manufacturer == "Realtek"
     assert receiver_device.model == "RTL2838UHIDIR"
@@ -648,7 +668,7 @@ async def test_receiver_info_callback_noop_when_identity_empty(
 
     dev_reg = dr.async_get(hass)
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     assert receiver_device.manufacturer == "rtl_433"
     assert receiver_device.model == "rtl_433 server"
@@ -661,7 +681,7 @@ async def test_setup_entry_stores_coordinator_in_hass_data(
     """async_setup_entry puts the coordinator in hass.data[DOMAIN][entry_id]."""
     receiver = await _setup_receiver(hass, receiver_entry_builder)
 
-    coordinator = hass.data[DOMAIN][receiver.entry_id]
+    coordinator = hass.data[DOMAIN][receiver_id(receiver)]
     assert isinstance(coordinator, Rtl433Coordinator)
 
 
@@ -936,7 +956,7 @@ async def test_new_device_callback_dispatches_signal(
 
     async_dispatcher_connect(
         hass,
-        signal_new_device(receiver.entry_id),
+        signal_new_device(receiver_id(receiver)),
         lambda device_key, model: received.append((device_key, model)),
     )
 
@@ -980,12 +1000,12 @@ async def test_unload_entry_removes_coordinator_from_hass_data(
 ):
     """After unload, the coordinator is removed from hass.data[DOMAIN]."""
     receiver = await _setup_receiver(hass, receiver_entry_builder)
-    assert receiver.entry_id in hass.data[DOMAIN]
+    assert receiver_id(receiver) in hass.data[DOMAIN]
 
     await hass.config_entries.async_unload(receiver.entry_id)
     await hass.async_block_till_done()
 
-    assert receiver.entry_id not in hass.data.get(DOMAIN, {})
+    assert receiver_id(receiver) not in hass.data.get(DOMAIN, {})
 
 
 async def test_unload_entry_returns_true(hass, receiver_entry_builder):
@@ -1006,7 +1026,7 @@ async def test_unload_entry_clears_reachability_repair(hass, receiver_entry_buil
         await hass.config_entries.async_unload(receiver.entry_id)
         await hass.async_block_till_done()
 
-    clear_spy.assert_called_once_with(hass, receiver)
+    clear_spy.assert_called_once_with(hass, receiver, receiver_id(receiver))
 
 
 async def test_unload_entry_no_coordinator_in_data_branch(hass, receiver_entry_builder):
@@ -1018,14 +1038,14 @@ async def test_unload_entry_no_coordinator_in_data_branch(hass, receiver_entry_b
     """
     receiver = await _setup_receiver(hass, receiver_entry_builder)
     # Confirm the coordinator is there before unload
-    assert receiver.entry_id in hass.data[DOMAIN]
+    assert receiver_id(receiver) in hass.data[DOMAIN]
 
     # Normal unload should return True
     result = await hass.config_entries.async_unload(receiver.entry_id)
     await hass.async_block_till_done()
     assert result is True
     # After unload, coordinator is gone
-    assert receiver.entry_id not in hass.data.get(DOMAIN, {})
+    assert receiver_id(receiver) not in hass.data.get(DOMAIN, {})
 
 
 # ===========================================================================
@@ -1038,7 +1058,7 @@ async def test_remove_receiver_device_returns_false(hass, receiver_entry_builder
     receiver = await _setup_receiver(hass, receiver_entry_builder)
     dev_reg = dr.async_get(hass)
     receiver_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, receiver.entry_id), receiver.entry_id
+        (DOMAIN, receiver_scope(receiver)), receiver.entry_id
     )
     assert receiver_device is not None
 
@@ -1083,7 +1103,9 @@ async def test_reserved_marker_check_is_exact_not_a_prefix(
     )
     await hass.async_block_till_done()
 
-    fake = SimpleNamespace(identifiers={(DOMAIN, f"{receiver.entry_id}:{device_key}")})
+    fake = SimpleNamespace(
+        identifiers={(DOMAIN, f"{receiver_id(receiver)}:{device_key}")}
+    )
     assert await async_remove_config_entry_device(hass, receiver, fake) is True
     assert device_key not in receiver.data.get(CONF_DEVICES, {})
 
@@ -1113,8 +1135,8 @@ async def test_remove_unrelated_device_leaves_the_entry_alone(
 
     fake = SimpleNamespace(
         identifiers={
-            ("other_integration", f"{receiver.entry_id}:{device_key}"),
-            (DOMAIN, f"other-entry-id:{device_key}"),
+            ("other_integration", f"{receiver_id(receiver)}:{device_key}"),
+            (DOMAIN, f"other-receiver-id:{device_key}"),
         }
     )
     with patch.object(
@@ -1126,24 +1148,22 @@ async def test_remove_unrelated_device_leaves_the_entry_alone(
     forget_spy.assert_not_called()
 
 
-async def test_reserved_marker_is_read_from_the_first_segment(
+async def test_identifier_with_extra_segments_names_nothing(
     hass, receiver_entry_builder
 ):
-    """The segment right after the prefix decides, however many follow it.
+    """Only two segments name an RF device, and only three name a receiver.
 
-    ``device_key`` never contains a colon, so everything past the first one is
-    structure rather than part of the key. Reading the split from the right
-    instead would take ``{entry}:receiver:sub01:extra`` as a device_key of
-    ``receiver:sub01`` -- which is not the reserved marker -- and remove a
-    receiver as though it were an RF device.
+    ``device_key`` never contains a colon, so an identifier carrying more
+    structure than ``{receiver_id}:{device_key}`` is not a device of ours -- and
+    it is not the three-segment receiver form either. It is left alone rather
+    than decoded. Pins both length checks: relaxing either would read
+    ``{receiver}:a:b:c`` as a device_key and remove it.
     """
     receiver = await _setup_receiver(hass, receiver_entry_builder)
     before = dict(receiver.data.get(CONF_DEVICES, {}))
 
-    fake = SimpleNamespace(
-        identifiers={(DOMAIN, f"{receiver.entry_id}:receiver:sub01:extra")}
-    )
-    assert await async_remove_config_entry_device(hass, receiver, fake) is False
+    fake = SimpleNamespace(identifiers={(DOMAIN, f"{receiver_id(receiver)}:a:b:c")})
+    assert await async_remove_config_entry_device(hass, receiver, fake) is True
     assert receiver.data.get(CONF_DEVICES, {}) == before
 
 
@@ -1163,7 +1183,7 @@ async def test_remove_nested_device_keeps_the_other_devices(
         devices={keep: {CONF_MODEL: "A"}, drop: {CONF_MODEL: "B"}},
     )
 
-    fake = SimpleNamespace(identifiers={(DOMAIN, f"{receiver.entry_id}:{drop}")})
+    fake = SimpleNamespace(identifiers={(DOMAIN, f"{receiver_id(receiver)}:{drop}")})
     assert await async_remove_config_entry_device(hass, receiver, fake) is True
 
     assert drop not in receiver.data[CONF_DEVICES]
@@ -1183,7 +1203,9 @@ async def test_remove_nested_device_with_no_devices_map_stored(
     receiver = await _setup_receiver(hass, receiver_entry_builder)
     assert CONF_DEVICES not in receiver.data
 
-    fake = SimpleNamespace(identifiers={(DOMAIN, f"{receiver.entry_id}:Some-Device-1")})
+    fake = SimpleNamespace(
+        identifiers={(DOMAIN, f"{receiver_id(receiver)}:Some-Device-1")}
+    )
     assert await async_remove_config_entry_device(hass, receiver, fake) is True
     assert receiver.data.get(CONF_DEVICES) == {}
 
@@ -1200,7 +1222,7 @@ async def test_remove_nested_device_returns_true(hass, receiver_entry_builder, e
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1226,7 +1248,7 @@ async def test_remove_nested_device_drops_from_devices_map(
     assert device_key in receiver.data.get(CONF_DEVICES, {})
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1249,7 +1271,7 @@ async def test_remove_nested_device_calls_forget_device(
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1280,7 +1302,7 @@ async def test_remove_nested_device_calls_device_removers(
     coordinator.device_removers.append(removed_keys.append)
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1309,7 +1331,7 @@ async def test_remove_device_coordinator_none_branch(
     await hass.async_block_till_done()
 
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{device_key}"
+    prefix = f"{receiver_id(receiver)}:{device_key}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1398,8 +1420,9 @@ async def test_update_listener_reloads_on_connection_change(
     with patch.object(
         hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
     ) as reload_spy:
-        hass.config_entries.async_update_entry(
-            receiver, data={**receiver.data, CONF_HOST: "new.local"}
+        subentry = receiver_subentry(receiver)
+        hass.config_entries.async_update_subentry(
+            receiver, subentry, data={**subentry.data, CONF_HOST: "new.local"}
         )
         await hass.async_block_till_done()
 
@@ -1415,7 +1438,9 @@ async def test_update_listener_reloads_on_unique_id_rebind(
     with patch.object(
         hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
     ) as reload_spy:
-        hass.config_entries.async_update_entry(receiver, unique_id="serial:0123")
+        hass.config_entries.async_update_subentry(
+            receiver, receiver_subentry(receiver), unique_id="serial:0123"
+        )
         await hass.async_block_till_done()
 
     reload_spy.assert_called_once_with(receiver.entry_id)
@@ -1469,7 +1494,7 @@ async def test_update_listener_no_coordinator_returns_early(
     coordinator = _coordinator(hass, receiver)
 
     # Temporarily remove coordinator, call the listener, then restore
-    hass.data[DOMAIN].pop(receiver.entry_id, None)
+    hass.data[DOMAIN].pop(receiver_id(receiver), None)
 
     with patch.object(
         hass.config_entries, "async_reload", return_value=True
@@ -1479,7 +1504,7 @@ async def test_update_listener_no_coordinator_returns_early(
     reload_spy.assert_not_called()
 
     # Restore for proper teardown
-    hass.data[DOMAIN][receiver.entry_id] = coordinator
+    hass.data[DOMAIN][receiver_id(receiver)] = coordinator
 
 
 # ===========================================================================
@@ -1894,7 +1919,7 @@ async def test_reload_is_idempotent(hass, receiver_entry_builder):
     await hass.async_block_till_done()
 
     # Coordinator is back in hass.data
-    assert receiver.entry_id in hass.data[DOMAIN]
+    assert receiver_id(receiver) in hass.data[DOMAIN]
     coordinator = _coordinator(hass, receiver)
     assert isinstance(coordinator, Rtl433Coordinator)
 
@@ -1908,7 +1933,7 @@ async def test_setup_then_unload_then_setup_again(hass, receiver_entry_builder):
     assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
-    assert receiver.entry_id in hass.data[DOMAIN]
+    assert receiver_id(receiver) in hass.data[DOMAIN]
 
 
 # ===========================================================================
@@ -1968,7 +1993,7 @@ async def test_motion_migration_during_setup(hass, receiver_entry_builder):
     ent_reg = er.async_get(hass)
 
     # Pre-seed an orphaned event.motion entity
-    orphan_uid = f"{receiver.entry_id}:{device_key}:motion"
+    orphan_uid = f"{receiver_id(receiver)}:{device_key}:motion"
     ent_reg.async_get_or_create("event", DOMAIN, orphan_uid, config_entry=receiver)
 
     assert await hass.config_entries.async_setup(receiver.entry_id)
@@ -2040,3 +2065,30 @@ def test_platforms_is_a_list():
     """PLATFORMS must be a list so async_forward_entry_setups accepts it."""
     assert isinstance(PLATFORMS, list)
     assert len(PLATFORMS) > 0
+
+
+async def test_update_listener_logs_what_it_applied(
+    hass, receiver_entry_builder, caplog
+):
+    """The one line this listener leaves behind names what it just applied.
+
+    It is the only trace of the live path -- the timeout is pushed into the
+    running coordinators and nothing reloads -- so it has to say which location,
+    what timeout, and how many receivers it reached. A message or an argument
+    that drifts turns the sole diagnostic for "did my change take?" into noise.
+    """
+    receiver = await _setup_receiver(hass, receiver_entry_builder)
+
+    with caplog.at_level(logging.DEBUG, logger="custom_components.rtl_433"):
+        await _async_update_listener(hass, receiver)
+
+    # Compared whole rather than by substring: a message with padding around it
+    # still *contains* the expected text, so `in caplog.text` would not notice.
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "custom_components.rtl_433"
+    ]
+    assert (
+        f"rtl_433 location {receiver.title} options updated (timeout=600s, receivers=1)"
+    ) in messages
