@@ -37,13 +37,13 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
 from homeassistant.util.enum import try_parse_enum
 
-from .const import DOMAIN
 from .entity import Rtl433Entity, Rtl433ReceiverEntity, async_setup_receiver_platform
+from .receiver_settings import receiver_coordinators
 
 if TYPE_CHECKING:
     from pyrtl_433.normalizer import NormalizedEvent
@@ -577,13 +577,12 @@ class Rtl433ReceiverSensor(Rtl433ReceiverEntity, SensorEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        receiver_entry_id: str,
         desc: ReceiverSensorDesc,
     ) -> None:
         """Initialize identity and entity-description fields from ``desc``."""
-        super().__init__(coordinator, receiver_entry_id)
+        super().__init__(coordinator)
         self._desc = desc
-        self._attr_unique_id = f"{receiver_entry_id}:hub:{desc.suffix}"
+        self._attr_unique_id = f"{coordinator.receiver_identity}:{desc.suffix}"
         self._attr_name = desc.name
         self._attr_device_class = desc.device_class
         self._attr_native_unit_of_measurement = desc.native_unit
@@ -624,19 +623,25 @@ class Rtl433ReceiverSensor(Rtl433ReceiverEntity, SensorEntity):
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up rtl_433 sensors for the receiver config entry.
+    """Set up rtl_433 sensors for a location config entry.
 
-    Registers the receiver-level diagnostic sensors and then the per-device sensors.
+    Registers each receiver's diagnostic sensors -- the radio's noise floor, the
+    server's stats -- **with** that receiver's ``config_subentry_id``, because
+    they describe that server and hang off its device. The per-device sensors
+    that follow are added with none: their devices belong to the location.
     """
-    coordinator = hass.data[DOMAIN][entry.entry_id]
-    managed = coordinator.manage_settings
-    async_add_entities(
-        Rtl433ReceiverSensor(coordinator, entry.entry_id, desc)
-        for desc in RECEIVER_SENSORS
-        if not (managed and desc.folded_when_managing)
-    )
+    for receiver_id, coordinator in receiver_coordinators(hass, entry).items():
+        managed = coordinator.manage_settings
+        async_add_entities(
+            (
+                Rtl433ReceiverSensor(coordinator, desc)
+                for desc in RECEIVER_SENSORS
+                if not (managed and desc.folded_when_managing)
+            ),
+            config_subentry_id=receiver_id,
+        )
     await async_setup_receiver_platform(
         hass,
         entry,
