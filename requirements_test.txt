@@ -38,7 +38,7 @@ home-assistant-frontend==20260826.7
 # and forks once per mutant, running the pytest suite with coverage-based test
 # selection. Configured under [tool.mutmut] in pyproject.toml; the CI mutation
 # workflow and mutmut-ratchet (below) depend on it.
-mutmut==3.7.0
+mutmut==3.8.0
 
 # The mutation CI gate: PR scoping, time-balanced sharding, per-file stats, and
 # the score ratchet. Shared with the pyrtl_433 repository, which is why it is a
