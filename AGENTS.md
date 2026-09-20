@@ -73,6 +73,25 @@ The authoritative spec is [`COMPATIBILITY_CONTRACT.md`](COMPATIBILITY_CONTRACT.m
 the ordered follow-up PR sequence are tracked in
 [`CORE_UPSTREAM.md`](CORE_UPSTREAM.md).
 
+**Only core → HACS is supported, and the config-entry major is a one-way door.**
+Core is a deliberate subset, so installing this build over a core-managed entry
+works (it migrates forward), but the reverse — removing the custom component and
+letting core pick the entry back up — only works while both builds share the
+config-entry **major**. Home Assistant compares the stored major against the
+*loaded* handler's `VERSION` in `ConfigEntry.async_migrate_handler` and returns
+`False` **before** `async_migrate_entry` is resolved, so an entry written at major 3
+makes a core-only install fail with `migration_error` and core never runs enough of
+its own code to explain why or raise a repair; reinstalling the custom component is
+the user's only recovery. **So: never bump `VERSION` to 3 before a released core
+build reads major 3.** `MINOR_VERSION` is free to run ahead (core accepts any v2
+minor, with or without an `async_migrate_entry`, and every ladder step is guarded
+`if (entry.minor_version or 1) < N`), so express new schema needs as a guarded minor
+step. The rule, its checklist and the citation live in
+[`COMPATIBILITY_CONTRACT.md` §1](COMPATIBILITY_CONTRACT.md#majors-are-a-one-way-door-the-precondition-for-version--3)
+and [`CORE_UPSTREAM.md`](CORE_UPSTREAM.md#the-one-rule-worth-writing-down);
+`tests/test_migration_roundtrip.py::test_the_declared_major_version_stays_2` fails
+if the major moves without them.
+
 ## Runtime dependency (pyrtl_433)
 
 The integration has **one third-party runtime dependency**:

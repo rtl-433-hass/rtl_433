@@ -208,4 +208,9 @@ CodeQL also runs (`.github/workflows/codeql.yml`).
       [its schema](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/),
       with stable `object_suffix` values; a matching fixture under
       `tests/fixtures/` belongs in this repository.
+- [ ] Config-entry schema changes are a guarded **minor** step. Bumping the
+      config-entry major (`VERSION`) needs a released Home Assistant core build that
+      already reads the new major first — core refuses a higher-major entry before
+      `async_migrate_entry` runs, so removing this custom component would strand the
+      user. See [`COMPATIBILITY_CONTRACT.md`](COMPATIBILITY_CONTRACT.md#majors-are-a-one-way-door-the-precondition-for-version--3).
 - [ ] Docs updated if behavior or options changed.

@@ -19,7 +19,12 @@ end-to-end, and compare the before/after identity sets:
   destroying — the pre-existing registry objects;
 - **minor 7 entry**: the retired ``discovery_enabled`` toggle is stripped from
   both ``data`` and ``options`` while every adopted device, per-device override
-  and calibration survives the upgrade unchanged.
+  and calibration survives the upgrade unchanged;
+- **declared schema**: the config-entry *major* stays 2 — a major bump is the one
+  unrecoverable asymmetry in the shared-domain relationship, since core refuses a
+  higher-major entry above the integration (see COMPATIBILITY_CONTRACT.md §1,
+  "Majors are a one-way door") — and the contract constants below still match
+  ``config_flow.py``.
 
 Contract templates encoded here (see COMPATIBILITY_CONTRACT.md §2, §3):
 
@@ -37,6 +42,7 @@ from unittest.mock import patch
 
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.rtl_433.config_flow import Rtl433ConfigFlow
 from custom_components.rtl_433.const import (
     CALIBRATION_COMMODITY,
     CALIBRATION_SCALE,
@@ -108,12 +114,70 @@ def _device_identifier_map(dev_reg: dr.DeviceRegistry) -> dict[tuple[str, str], 
 
 
 # ===========================================================================
+# Declared schema: the major is a one-way door, the minor is not
+# ===========================================================================
+
+
+def test_the_declared_major_version_stays_2():
+    """``VERSION`` must not move until core reads the new major.
+
+    Both builds share the ``rtl_433`` domain, and Home Assistant loads the custom
+    component in preference to the core integration — so the entry this build writes
+    is the entry core has to read back if the custom component is ever removed.
+    ``ConfigEntry.async_migrate_handler`` compares the *stored* major against the
+    *loaded* handler's ``VERSION`` and returns ``False`` there, **before**
+    ``async_migrate_entry`` is resolved:
+
+    .. code-block:: python
+
+        if self.version > handler.VERSION:
+            self.logger.error(
+                "Config entry %s for %s has version %s which is "
+                "higher than the current version %s",
+                ...,
+            )
+            return False
+
+    An entry written at major 3 therefore leaves a core-only install in
+    ``migration_error`` with core unable to run any code of its own — it cannot log a
+    "reinstall the custom component first" hint or raise a repair, and the user's only
+    recovery is reinstalling the custom component. That is the one asymmetry in the
+    HACS↔core relationship that is unrecoverable from the UI, so the precondition for
+    writing major ``N+1`` here is a **released** core build that already reads ``N+1``.
+
+    Minors are deliberately not guarded this way: core accepts any v2 minor (with or
+    without an ``async_migrate_entry``, since the ladder's steps are all guarded
+    ``if (entry.minor_version or 1) < N``), which is why new schema needs land as
+    guarded minor steps instead.
+
+    If this test fails, the checklist in ``COMPATIBILITY_CONTRACT.md`` §1 ("Majors are
+    a one-way door") has to be satisfied and updated in the same PR — not deleted.
+    """
+    assert Rtl433ConfigFlow.VERSION == 2
+
+
+def test_the_declared_schema_matches_the_contract_constants():
+    """The flow's declared schema is what the contract tests actually seed.
+
+    ``CONTRACT_VERSION`` / ``CONTRACT_MINOR_VERSION`` are hand-transcribed from
+    ``config_flow.py`` (and from ``COMPATIBILITY_CONTRACT.md`` §1). Without this
+    assertion a ``MINOR_VERSION`` bump leaves every round-trip test below seeding a
+    *stale* entry — which still passes, because migrating an older entry forward is
+    exactly what the ladder does, so the new step would go completely uncovered here.
+    """
+    assert (Rtl433ConfigFlow.VERSION, Rtl433ConfigFlow.MINOR_VERSION) == (
+        CONTRACT_VERSION,
+        CONTRACT_MINOR_VERSION,
+    )
+
+
+# ===========================================================================
 # Round-trip: an already-latest entry is a no-op that preserves identity
 # ===========================================================================
 
 
 async def test_latest_entry_roundtrip_preserves_registry_identity(hass):
-    """A full-schema v2/m7 entry round-trips through migration untouched.
+    """A full-schema v2/m8 entry round-trips through migration untouched.
 
     Seeds the entity + device registries using the contract's exact templates,
     runs ``async_migrate_entry``, and asserts the entry stays at the latest

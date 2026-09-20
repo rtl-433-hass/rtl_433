@@ -11,10 +11,13 @@ requires a coordinated migration shipped in **both** builds simultaneously.
 The minimal Core `rtl_433` integration MUST:
 - construct every `unique_id` and device `identifiers` tuple using the **exact**
   templates in §2 and §3;
-- carry the same config-entry `VERSION` / `MINOR_VERSION` (§1) and a migration
-  path that is a **superset-tolerant, non-downgrading subset** of §1 — i.e. it
-  MUST tolerate options / `minor_version` values written by the full build, and
-  MUST NOT downgrade an entry;
+- carry the same config-entry **major** `VERSION` (§1) and a migration path that is
+  a **superset-tolerant, non-downgrading subset** of §1 — i.e. it MUST tolerate
+  options and `minor_version` values written by the full build (which will normally
+  be *ahead* of core's), and MUST NOT downgrade an entry;
+- lead on the major: the full build only writes major `N+1` once a released core
+  build already reads it (see
+  [Majors are a one-way door](#majors-are-a-one-way-door-the-precondition-for-version--3));
 - never mutate these formats without a coordinated migration in both builds.
 
 All facts below were transcribed from the current source; line citations are to
@@ -24,14 +27,14 @@ the state of the tree at authoring time.
 
 ## 1. Config-entry `version` / `minor_version` scheme + migration ladder
 
-### Declared version (`config_flow.py:137-138`)
+### Declared version (`config_flow.py:139-140`)
 
 ```python
 VERSION = 2
-MINOR_VERSION = 7
+MINOR_VERSION = 8
 ```
 
-New entries are created at `version=2, minor_version=7`.
+New entries are created at `version=2, minor_version=8`.
 
 ### Invariants
 - Migrations are **monotonic and non-destructive**: each step is guarded and only
@@ -40,54 +43,140 @@ New entries are created at `version=2, minor_version=7`.
   written by the full build (superset tolerance).
 - **No migration may downgrade.** A future schema (`version > 2`) is explicitly
   rejected, returning `False` (unsupported) rather than mutating the entry.
+- **The major is a one-way door; the minor is not.** `MINOR_VERSION` may advance in
+  this build ahead of core (core tolerates any v2 minor). `VERSION` may not: it only
+  advances once a released core build already reads the new major, because a
+  higher-major entry is refused *above* the integration and strands the user if the
+  custom component is removed. See below.
 
-### `async_migrate_entry` ladder (`migration.py:410-554`)
+### `async_migrate_entry` ladder (`migration.py:417-594`)
 
 Entry point rejects future schemas first:
 
-- **`migration.py:445-447`** — `if entry.version > 2: return False` (downgrade from
-  a future schema is unsupported).
+- **`migration.py:454-456`** — `if entry.version > 2: return False` (downgrade from
+  a future schema is unsupported). This is defence in depth rather than the live
+  guard: Home Assistant already rejects a stored major above the *loaded* handler's
+  `VERSION` before it resolves `async_migrate_entry` at all, so while this build
+  declares `VERSION = 2` the branch is only reachable by calling the function
+  directly (as the tests do). It is the *loaded* build's `VERSION` that decides
+  whether an entry can be read — see
+  [Majors are a one-way door](#majors-are-a-one-way-door-the-precondition-for-version--3).
 
-**Version 1 → 2** (`migration.py:449-463`): the 0.1.0 per-device-entry model → the
+**Version 1 → 2** (`migration.py:458-472`): the 0.1.0 per-device-entry model → the
 hub model.
-- `migration.py:449-460` — a legacy **device** entry (`CONF_ENTRY_TYPE ==
+- `migration.py:459-469` — a legacy **device** entry (`CONF_ENTRY_TYPE ==
   ENTRY_TYPE_DEVICE`) processed on its own re-homes its registry objects to the
   parent hub (`CONF_HUB_ENTRY_ID`), then sets `version=2, minor_version=2` and
   returns `True`. The hub later folds and removes it.
-- `migration.py:462-463` — a **hub** entry consolidates all child device entries
+- `migration.py:471-472` — a **hub** entry consolidates all child device entries
   into `entry.data[CONF_DEVICES]` (via `_migrate_hub_entry`), re-homing their
   registry objects before removal. Then it falls through the minor ladder below.
 
 **Minor-version ladder** — each step guarded by `if (entry.minor_version or 1) < N`:
 
-- **→ minor 2** (`migration.py:465-477`): seed this hub's
+- **→ minor 2** (`migration.py:474-486`): seed this hub's
   `entry.data[CONF_USER_MAPPINGS]` from any pre-existing legacy
   `<config>/rtl_433_mappings.yaml` (read once in the executor; never modified or
   deleted). Sets `version=2, minor_version=2`.
-- **→ minor 3** (`migration.py:479-484`): disable any already-created per-device
+- **→ minor 3** (`migration.py:488-493`): disable any already-created per-device
   "Last seen" sensors (unique-id tail `:last_seen`), which now ship
   disabled-by-default. Sets `minor_version=3`.
-- **→ minor 4** (`migration.py:486-507`): drop a hub `CONF_AVAILABILITY_TIMEOUT`
+- **→ minor 4** (`migration.py:495-516`): drop a hub `CONF_AVAILABILITY_TIMEOUT`
   option still pinned to the legacy global default
   (`LEGACY_DEFAULT_AVAILABILITY_TIMEOUT == 600`, `const.py:174`) so the new
   device-class-aware defaults apply; a user-set non-default value is preserved.
   Sets `minor_version=4`.
-- **→ minor 5** (`migration.py:509-516`): rewrite already-persisted doorbell
+- **→ minor 5** (`migration.py:518-525`): rewrite already-persisted doorbell
   `event_types` from the raw `"0"`/`"1"` strings to the standardized
   `"ring"`/`"secret_knock"` types. Removes no entity; the doorbell unique_id /
   `object_suffix` is unchanged. Sets `minor_version=5`.
-- **→ minor 6** (`migration.py:518-526`): re-enable the "Last seen" sensor for
+- **→ minor 6** (`migration.py:527-535`): re-enable the "Last seen" sensor for
   event-driven devices (which now never expire) — only instances the integration
   disabled at minor 3, not ones the user disabled. Sets `minor_version=6`.
-- **→ minor 7** (`migration.py:528-552`): repeat the minor-4 cleanup — strip a hub
+- **→ minor 7** (`migration.py:537-561`): repeat the minor-4 cleanup — strip a hub
   `CONF_AVAILABILITY_TIMEOUT` still equal to the legacy default (600) that the
   options flow used to re-persist on save. The options flow no longer writes the
   sentinel, so this heal is final. Sets `minor_version=7`.
-- **`migration.py:554`** — `return True`.
+- **→ minor 8** (`migration.py:563-591`): strip the retired `discovery_enabled` key
+  from `entry.data` and `entry.options` (discovery stopped being a toggle; a heard
+  device now waits in the pending list until the user adopts it). Deliberately
+  narrow — `entry.data[CONF_DEVICES]`, every per-device override and every
+  calibration survive byte-for-byte, and `data`/`options` are only rewritten when
+  the key was actually present. Sets `minor_version=8`.
+- **`migration.py:594`** — `return True`.
 
 > Note: the ladder is written to be idempotent and order-tolerant — a legacy device
 > entry migrated before its hub only re-homes its own registry objects and bumps to
 > minor 2; the hub folds and removes it later. Either ordering converges.
+
+### Majors are a one-way door: the precondition for `VERSION = 3`
+
+> **Rule.** The full HACS build MUST NOT write `version = N+1` until a **released**
+> Core build already *reads* major `N+1`. Today that means **`VERSION` stays 2.**
+> Minors are free and may run ahead of core; majors may not.
+
+Because both builds share the domain, Home Assistant loads
+`custom_components/rtl_433/` in preference to the core integration. The supported
+direction of travel is therefore **core → full build**: installing the HACS build
+over a core-managed entry is fine (it migrates the entry forward), and *removing*
+the HACS build hands the same entry back to core. That handback is the only place
+the version ladder can strand a user, and it is not symmetric.
+
+`ConfigEntry.async_migrate_handler` (HA's `config_entries.py`) compares the
+**stored** major against the **loaded** handler's `VERSION` *before* it looks for
+the integration's migration hook:
+
+```python
+same_major_version = self.version == handler.VERSION
+if same_major_version and self.minor_version == handler.MINOR_VERSION:
+    return True
+
+if self.version > handler.VERSION:
+    self.logger.error(
+        "Config entry %s for %s has version %s which is higher than the"
+        " current version %s", ...
+    )
+    return False          # <- before component.async_migrate_entry is resolved
+```
+
+So if this build ever writes major 3 while core still declares `VERSION = 2`:
+
+- uninstalling the HACS build leaves every entry in `migration_error`;
+- core's own `async_migrate_entry` is **never called**, so the core build cannot
+  even raise a repair or log a helpful "reinstall/upgrade the custom component
+  first" message — the refusal happens above the integration;
+- the user's only recovery is reinstalling the custom component (or hand-editing
+  `.storage/core.config_entries`). That is an unrecoverable-by-UI state, which is
+  why the major is treated as frozen rather than merely coordinated.
+
+**Minors are free**, because a same-major mismatch is explicitly tolerated by the
+snippet above:
+
+- a core build **with** `async_migrate_entry` runs its ladder; every step is guarded
+  `if (entry.minor_version or 1) < N`, so an entry written at a *higher* minor
+  no-ops and returns `True`;
+- a core build **without** any `async_migrate_entry` at all returns `True` on the
+  `same_major_version` branch (`supports_migrate` is False but the major matches).
+
+Raising `MINOR_VERSION` ahead of core is therefore safe as long as each new step
+stays additive and guarded, and any `data`/`options` key it introduces is tolerated
+by core (the superset-tolerance requirement at the top of this document).
+`tests/test_migration_roundtrip.py` covers the current `2.8` entry explicitly, and
+`test_the_declared_major_version_stays_2` fails if the major is bumped without
+updating this section.
+
+**Checklist for a future major bump** — every item must already be true before the
+bump merges here:
+
+1. the core `rtl_433` handler declares `VERSION = 3` and its `async_migrate_entry`
+   handles `2.x → 3`;
+2. that core version is **released** (not merely merged) and is recorded as the
+   minimum Home Assistant version this build supports;
+3. the identical `2.x → 3` migration ships in both builds;
+4. §1 here, `CONTRACT_VERSION` in `tests/test_migration_roundtrip.py`, and the
+   guard test are all updated in the same PR.
+
+Until then, express new schema needs as a **guarded minor step**, not a major bump.
 
 ---
 
@@ -169,5 +258,11 @@ Any change to a `version`/`minor_version` value or migration step (§1), a
 1. a forward-only, non-downgrading migration, and
 2. the identical change and migration shipped in **both** the HACS build and the
    minimal Core build at the same time.
+
+A change to the config-entry **major** `VERSION` carries one further, stricter
+requirement: the released core build must already read the new major *before* this
+build starts writing it, because core refuses a higher-major entry above the
+integration and the user cannot recover from the UI. See
+[Majors are a one-way door](#majors-are-a-one-way-door-the-precondition-for-version--3).
 
 Until then, these three surfaces are **FROZEN**.

@@ -16,6 +16,43 @@ Modules that have not yet landed upstream remain **HACS-only**: they ship in thi
 `custom_components/rtl_433/` but are not yet part of the core integration. This ledger
 tracks the delta so the long-lived core branch does not silently drift from HACS.
 
+## Supported direction of travel: core → HACS only
+
+Core is, and will remain for a long while, a **subset** of this build. That is fine in
+one direction only:
+
+- **core → HACS build** is supported. Installing the custom component over a
+  core-managed entry works: HA prefers `custom_components/rtl_433/`, and the entry
+  migrates forward through the ladder in
+  [`COMPATIBILITY_CONTRACT.md`](COMPATIBILITY_CONTRACT.md) §1.
+- **HACS build → core** is *only* supported while the two share a config-entry
+  **major**. Removing the custom component hands the entry straight back to core, and
+  core must still be able to load it.
+
+### The one rule worth writing down
+
+> **Do not bump `VERSION` to 3 before a released core build can read major 3.**
+
+This is the only asymmetry that produces an **unrecoverable** state. Home Assistant
+compares the stored major with the *loaded* handler's `VERSION` in
+`ConfigEntry.async_migrate_handler` and returns `False` there — *before*
+`async_migrate_entry` is resolved. So an entry written at major 3 makes core fail
+setup with `migration_error`, core never gets to run any code of its own (it cannot
+emit a "upgrade or reinstall the custom component first" message or raise a repair),
+and the user's only way out is reinstalling the custom component.
+
+Minors are free: core accepts any v2 minor, whether or not it ships an
+`async_migrate_entry`, and every step in the ladder is guarded
+`if (entry.minor_version or 1) < N`, so a higher minor is a no-op there.
+`tests/test_migration_roundtrip.py` covers the current `2.8` entry explicitly.
+
+**Therefore:** the precondition for this build writing major `N+1` is that core already
+reads major `N+1` in a *released* version. New schema needs land as guarded minor
+steps until then. The full checklist is in
+[`COMPATIBILITY_CONTRACT.md` §1 → "Majors are a one-way door"](COMPATIBILITY_CONTRACT.md#majors-are-a-one-way-door-the-precondition-for-version--3),
+and `tests/test_migration_roundtrip.py::test_the_declared_major_version_stays_2`
+fails if the major moves without it.
+
 Status values:
 - **in-PR** — included in an open or scoped upstream PR (see the PR tag).
 - **upstreamed** — merged into Home Assistant Core (record the landing PR/commit).
