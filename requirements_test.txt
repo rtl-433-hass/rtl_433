@@ -23,7 +23,7 @@ pytest-homeassistant-custom-component==0.13.365
 # The integration's runtime dependency (declared in manifest.json /
 # requirements.txt). Installed here so the pytest environment can import the
 # rtl_433 protocol layer under test.
-pyrtl_433==0.4.0
+pyrtl_433==0.4.1
 
 # The Home Assistant frontend bundle. Not used by any test directly, but the
 # integration declares ``panel_custom`` (and through it ``frontend``) as a
