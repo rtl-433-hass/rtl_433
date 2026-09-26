@@ -46,6 +46,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_id
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -74,7 +75,7 @@ def _no_socket():
 
 
 def _coordinator(hass: HomeAssistant, receiver) -> Rtl433Coordinator:
-    return hass.data[DOMAIN][receiver.entry_id]
+    return hass.data[DOMAIN][receiver_id(receiver)]
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
@@ -107,7 +108,7 @@ def _door_devices():
 def _motion_eid(hass, receiver):
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DEVICE_KEY}:motion"
+        "binary_sensor", DOMAIN, f"{receiver_id(receiver)}:{_DEVICE_KEY}:motion"
     )
     assert eid is not None, "Motion entity not found"
     return eid
@@ -116,7 +117,7 @@ def _motion_eid(hass, receiver):
 def _door_eid(hass, receiver):
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DOOR_KEY}:opening"
+        "binary_sensor", DOMAIN, f"{receiver_id(receiver)}:{_DOOR_KEY}:opening"
     )
     assert eid is not None, "Door opening entity not found"
     return eid
@@ -140,7 +141,7 @@ async def test_init_model_passed_to_super(hass, receiver_entry_builder):
         hass, receiver_entry_builder, devices=_door_devices()
     )
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver.entry_id}:{_DOOR_KEY}"
+    prefix = f"{receiver_id(receiver)}:{_DOOR_KEY}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
