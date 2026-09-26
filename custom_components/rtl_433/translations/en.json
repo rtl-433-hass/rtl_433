@@ -275,7 +275,7 @@
     "title": "rtl_433",
     "view": {
       "discovered": "Discovered devices",
-      "hub_settings": "Receiver settings",
+      "receiver_settings": "Receiver settings",
       "device_settings": "Device settings",
       "mappings": "Device mappings"
     },
