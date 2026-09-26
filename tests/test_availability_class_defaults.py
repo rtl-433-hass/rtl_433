@@ -150,7 +150,7 @@ async def test_never_expire_via_device_override(hass, receiver_entry_builder):
     coordinator = await _setup(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
     )
     assert watts_eid is not None
 
@@ -184,7 +184,7 @@ async def test_never_expire_via_explicit_receiver_default(hass, receiver_entry_b
     coordinator = await _setup(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
     )
 
     assert coordinator._effective_timeout(device_key) == 0

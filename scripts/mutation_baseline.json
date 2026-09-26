@@ -10,6 +10,11 @@
       "score": 0.859649,
       "total": 57
     },
+    "custom_components/rtl_433/aggregator.py": {
+      "killed": 43,
+      "score": 0.934783,
+      "total": 46
+    },
     "custom_components/rtl_433/binary_sensor.py": {
       "killed": 92,
       "score": 0.978723,

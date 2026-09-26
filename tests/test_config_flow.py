@@ -184,7 +184,7 @@ def _hear(coordinator, frame):
 
 def _device_entity_unique_ids(hass, entry, device_key) -> set[str]:
     """Return the unique_ids of every registry entity belonging to a device."""
-    prefix = f"{receiver_id(entry)}:{device_key}:"
+    prefix = f"{entry.entry_id}:{device_key}:"
     return {
         registry_entry.unique_id
         for registry_entry in er.async_get(hass).entities.values()
@@ -195,7 +195,7 @@ def _device_entity_unique_ids(hass, entry, device_key) -> set[str]:
 def _registry_device(hass, entry, device_key):
     """Return the registry device for a device key, or ``None``."""
     return dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{receiver_id(entry)}:{device_key}"), entry.entry_id
+        (DOMAIN, f"{entry.entry_id}:{device_key}"), entry.entry_id
     )
 
 
@@ -980,7 +980,7 @@ async def test_replace_options_flow_rekeys_device(
 
     ent_reg = er.async_get(hass)
     survivor = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(entry)}:{REPLACE_OLD}:T"
+        "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_OLD}:T"
     )
     assert survivor is not None
 
@@ -1015,13 +1015,13 @@ async def test_replace_options_flow_rekeys_device(
     # The row moved onto the new unique_id keeping its entity_id...
     assert (
         ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{receiver_id(entry)}:{REPLACE_NEW}:T"
+            "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_NEW}:T"
         )
         == survivor
     )
     assert (
         ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{receiver_id(entry)}:{REPLACE_OLD}:T"
+            "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_OLD}:T"
         )
         is None
     )
@@ -1150,7 +1150,7 @@ async def test_replace_target_offers_a_pending_device_and_consumes_it(
 
     ent_reg = er.async_get(hass)
     survivor = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver_id(entry)}:{REPLACE_OLD}:T"
+        "sensor", DOMAIN, f"{entry.entry_id}:{REPLACE_OLD}:T"
     )
     assert survivor is not None
 
@@ -1187,7 +1187,7 @@ async def test_replace_target_offers_a_pending_device_and_consumes_it(
     assert set(entry.data[CONF_DEVICES]) == {pending_key}
     assert (
         ent_reg.async_get_entity_id(
-            "sensor", DOMAIN, f"{receiver_id(entry)}:{pending_key}:T"
+            "sensor", DOMAIN, f"{entry.entry_id}:{pending_key}:T"
         )
         == survivor
     )
@@ -1283,7 +1283,7 @@ async def test_remove_nested_device_evicts_map_and_coordinator(
     hass.data.setdefault(DOMAIN, {})[receiver_id(entry)] = coordinator
 
     nested_device = SimpleNamespace(
-        identifiers={(DOMAIN, f"{receiver_id(entry)}:{device_key}")}
+        identifiers={(DOMAIN, f"{entry.entry_id}:{device_key}")}
     )
 
     assert await async_remove_config_entry_device(hass, entry, nested_device) is True
