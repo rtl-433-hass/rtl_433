@@ -3,7 +3,7 @@
 These exercise the three-tier resolution order wired in production:
 
 * per-device ``timeout_override`` (``entry.data[CONF_DEVICES][key]``),
-* an *explicit* hub ``availability_timeout`` (membership, so ``0`` counts), and
+* an *explicit* receiver ``availability_timeout`` (membership, so ``0`` counts), and
 * the device-class default (:func:`class_default_timeout`) from the device's
   latest cached payload when neither explicit tier is set.
 
@@ -64,8 +64,8 @@ def _no_socket():
         yield
 
 
-def _coordinator(hass, hub: MockConfigEntry) -> Rtl433Coordinator:
-    return hass.data[DOMAIN][hub.entry_id]
+def _coordinator(hass, receiver: MockConfigEntry) -> Rtl433Coordinator:
+    return hass.data[DOMAIN][receiver.entry_id]
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
@@ -73,18 +73,18 @@ def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
     coordinator._client._process_event(event)
 
 
-async def _setup(hass, hub: MockConfigEntry) -> Rtl433Coordinator:
+async def _setup(hass, receiver: MockConfigEntry) -> Rtl433Coordinator:
     """Run the real setup (wiring the production resolver) and return the coord.
 
     The connect loop is stubbed out here; the autouse
-    ``hub_connected_by_default`` fixture leaves the coordinator connected anyway,
+    ``receiver_connected_by_default`` fixture leaves the coordinator connected anyway,
     because these tests are about the *per-device* silence timeouts, which only
-    apply while the hub connection itself is up.
+    apply while the receiver connection itself is up.
     """
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
-    coordinator = _coordinator(hass, hub)
+    coordinator = _coordinator(hass, receiver)
     return coordinator
 
 
@@ -129,15 +129,15 @@ def test_class_default_timeout_empty_keyset_is_periodic():
 # ---------------------------------------------------------------------------
 
 
-async def test_never_expire_via_device_override(hass, hub_entry_builder):
+async def test_never_expire_via_device_override(hass, receiver_entry_builder):
     """A per-device override of 0 means the device never goes unavailable.
 
     With an old ``last_seen`` the watchdog must NOT flip it and the entity's
     ``available`` property must read True (it was seen at least once).
     """
     device_key = "EnergyMeter-2000-1234"
-    hub = hub_entry_builder(
-        availability_timeout=600,  # hub default is short, but the override wins
+    receiver = receiver_entry_builder(
+        availability_timeout=600,  # receiver default is short, but the override wins
         devices={
             device_key: {
                 CONF_MODEL: "EnergyMeter-2000",
@@ -146,10 +146,10 @@ async def test_never_expire_via_device_override(hass, hub_entry_builder):
             }
         },
     )
-    coordinator = await _setup(hass, hub)
+    coordinator = await _setup(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
     )
     assert watts_eid is not None
 
@@ -168,10 +168,10 @@ async def test_never_expire_via_device_override(hass, hub_entry_builder):
         assert hass.states.get(watts_eid).state != "unavailable"
 
 
-async def test_never_expire_via_explicit_hub_default(hass, hub_entry_builder):
-    """An explicit hub ``availability_timeout`` of 0 never-expires a plain device."""
+async def test_never_expire_via_explicit_receiver_default(hass, receiver_entry_builder):
+    """An explicit receiver ``availability_timeout`` of 0 never-expires a plain device."""
     device_key = "EnergyMeter-2000-1234"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=AVAILABILITY_TIMEOUT_NEVER,
         devices={
             device_key: {
@@ -180,10 +180,10 @@ async def test_never_expire_via_explicit_hub_default(hass, hub_entry_builder):
             }
         },
     )
-    coordinator = await _setup(hass, hub)
+    coordinator = await _setup(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{hub.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
     )
 
     assert coordinator._effective_timeout(device_key) == 0
@@ -201,14 +201,16 @@ async def test_never_expire_via_explicit_hub_default(hass, hub_entry_builder):
 
 
 # ---------------------------------------------------------------------------
-# Device-class defaults (no explicit override / no explicit hub default)
+# Device-class defaults (no explicit override / no explicit receiver default)
 # ---------------------------------------------------------------------------
 
 
-async def test_class_default_event_driven_device_never_expires(hass, hub_entry_builder):
+async def test_class_default_event_driven_device_never_expires(
+    hass, receiver_entry_builder
+):
     """An event-driven (motion) payload resolves to never-expire.
 
-    No per-device override and no explicit hub default, so the device-class
+    No per-device override and no explicit receiver default, so the device-class
     default applies. A motion device has no periodic check-in, so once seen it
     stays available indefinitely — the watchdog never flips it, even after days
     of silence (under the old flat 600s default it would have been wrongly
@@ -217,7 +219,7 @@ async def test_class_default_event_driven_device_never_expires(hass, hub_entry_b
     device_key = "GS-kw9c-7"
     # availability_timeout=None -> CONF_AVAILABILITY_TIMEOUT is NOT in the entry,
     # so the resolver returns None and the class default kicks in.
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=None,
         devices={
             device_key: {
@@ -226,8 +228,8 @@ async def test_class_default_event_driven_device_never_expires(hass, hub_entry_b
             }
         },
     )
-    assert CONF_AVAILABILITY_TIMEOUT not in hub.data
-    coordinator = await _setup(hass, hub)
+    assert CONF_AVAILABILITY_TIMEOUT not in receiver.data
+    coordinator = await _setup(hass, receiver)
 
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -245,14 +247,14 @@ async def test_class_default_event_driven_device_never_expires(hass, hub_entry_b
             assert coordinator.available[device_key] is True
 
 
-async def test_class_default_event_device_never_expires(hass, hub_entry_builder):
+async def test_class_default_event_device_never_expires(hass, receiver_entry_builder):
     """A ``platform: event`` device (doorbell button) also never-expires.
 
     The doorbell ``secret_knock`` field maps to ``platform: event``, which the
     classifier treats as event-driven without needing the ``event_driven`` flag.
     """
     device_key = "Honeywell-ActivLink-9"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=None,
         devices={
             device_key: {
@@ -261,7 +263,7 @@ async def test_class_default_event_device_never_expires(hass, hub_entry_builder)
             }
         },
     )
-    coordinator = await _setup(hass, hub)
+    coordinator = await _setup(hass, receiver)
 
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -279,7 +281,9 @@ async def test_class_default_event_device_never_expires(hass, hub_entry_builder)
         assert coordinator.available[device_key] is True
 
 
-async def test_event_device_silent_since_restart_never_expires(hass, hub_entry_builder):
+async def test_event_device_silent_since_restart_never_expires(
+    hass, receiver_entry_builder
+):
     """An event device silent since a restart classifies from its adopted fields.
 
     The restart regression: after a restart the coordinator's live payload cache
@@ -291,7 +295,7 @@ async def test_event_device_silent_since_restart_never_expires(hass, hub_entry_b
     the fix the classifier read only the live payload and wrongly returned 600s.
     """
     device_key = "GS-kw9c-7"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=None,
         devices={
             device_key: {
@@ -301,7 +305,7 @@ async def test_event_device_silent_since_restart_never_expires(hass, hub_entry_b
             }
         },
     )
-    coordinator = await _setup(hass, hub)
+    coordinator = await _setup(hass, receiver)
 
     # Simulate "silent since restart": the device was adopted (it is in the
     # devices map) but has not transmitted this session, so there is no live
@@ -323,10 +327,10 @@ async def test_event_device_silent_since_restart_never_expires(hass, hub_entry_b
             assert coordinator.available[device_key] is True
 
 
-async def test_class_default_periodic_device(hass, hub_entry_builder):
+async def test_class_default_periodic_device(hass, receiver_entry_builder):
     """A periodic payload resolves to 600 and goes unavailable past 600s."""
     device_key = "Acurite-606TX-42"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=None,
         devices={
             device_key: {
@@ -335,8 +339,8 @@ async def test_class_default_periodic_device(hass, hub_entry_builder):
             }
         },
     )
-    assert CONF_AVAILABILITY_TIMEOUT not in hub.data
-    coordinator = await _setup(hass, hub)
+    assert CONF_AVAILABILITY_TIMEOUT not in receiver.data
+    coordinator = await _setup(hass, receiver)
 
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -356,7 +360,7 @@ async def test_class_default_periodic_device(hass, hub_entry_builder):
 
 
 async def test_class_default_diagnostic_only_device_still_expires(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A device reporting only a tamper/battery bit stays periodic (600s).
 
@@ -364,7 +368,7 @@ async def test_class_default_diagnostic_only_device_still_expires(
     never-expire — only a genuine event-driven state/event field does.
     """
     device_key = "Acurite-606TX-43"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=None,
         devices={
             device_key: {
@@ -373,7 +377,7 @@ async def test_class_default_diagnostic_only_device_still_expires(
             }
         },
     )
-    coordinator = await _setup(hass, hub)
+    coordinator = await _setup(hass, receiver)
 
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -396,14 +400,16 @@ async def test_class_default_diagnostic_only_device_still_expires(
 # ---------------------------------------------------------------------------
 
 
-async def test_precedence_override_beats_hub_and_class(hass, hub_entry_builder):
-    """A per-device override wins over both the explicit hub default and class.
+async def test_precedence_override_beats_receiver_and_class(
+    hass, receiver_entry_builder
+):
+    """A per-device override wins over both the explicit receiver default and class.
 
-    The device is event-driven (class default would be never-expire) and the hub
+    The device is event-driven (class default would be never-expire) and the receiver
     sets an explicit 300, but the per-device override of 120 must win.
     """
     device_key = "GS-kw9c-7"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=300,
         devices={
             device_key: {
@@ -413,7 +419,7 @@ async def test_precedence_override_beats_hub_and_class(hass, hub_entry_builder):
             }
         },
     )
-    coordinator = await _setup(hass, hub)
+    coordinator = await _setup(hass, receiver)
 
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -429,14 +435,16 @@ async def test_precedence_override_beats_hub_and_class(hass, hub_entry_builder):
         assert coordinator.available[device_key] is False
 
 
-async def test_precedence_explicit_hub_number_beats_class(hass, hub_entry_builder):
-    """An explicit hub number wins over the class default for an event device.
+async def test_precedence_explicit_receiver_number_beats_class(
+    hass, receiver_entry_builder
+):
+    """An explicit receiver number wins over the class default for an event device.
 
-    Hub=300 -> the event-driven device uses 300, not the never-expire class
+    Receiver=300 -> the event-driven device uses 300, not the never-expire class
     default.
     """
     device_key = "GS-kw9c-7"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=300,
         devices={
             device_key: {
@@ -445,7 +453,7 @@ async def test_precedence_explicit_hub_number_beats_class(hass, hub_entry_builde
             }
         },
     )
-    coordinator = await _setup(hass, hub)
+    coordinator = await _setup(hass, receiver)
 
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -462,7 +470,7 @@ async def test_precedence_explicit_hub_number_beats_class(hass, hub_entry_builde
 
 
 async def test_never_seen_is_unavailable_even_when_timeout_zero(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """``last_seen is None`` reads unavailable even with a never-expire timeout.
 
@@ -471,7 +479,7 @@ async def test_never_seen_is_unavailable_even_when_timeout_zero(
     that was configured but has never transmitted reads unavailable.
     """
     device_key = "EnergyMeter-2000-1234"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=AVAILABILITY_TIMEOUT_NEVER,
         devices={
             device_key: {
@@ -480,7 +488,7 @@ async def test_never_seen_is_unavailable_even_when_timeout_zero(
             }
         },
     )
-    coordinator = await _setup(hass, hub)
+    coordinator = await _setup(hass, receiver)
 
     # Model "never transmitted": ensure no last_seen baseline for this device.
     coordinator.last_seen.pop(device_key, None)
@@ -492,7 +500,7 @@ async def test_never_seen_is_unavailable_even_when_timeout_zero(
     # ...but this entity has never been seen, so available is False regardless.
     sensor = Rtl433Sensor(
         coordinator,
-        hub.entry_id,
+        receiver.entry_id,
         device_key,
         "EnergyMeter-2000",
         FieldDescriptor(
@@ -516,18 +524,18 @@ async def test_never_seen_is_unavailable_even_when_timeout_zero(
 
 
 async def test_no_cached_payload_falls_back_to_periodic_default(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A device in last_seen but absent from ``devices`` falls back to 600.
 
-    No explicit override / hub default, and no cached NormalizedEvent payload, so
+    No explicit override / receiver default, and no cached NormalizedEvent payload, so
     the class default classifier sees ``None`` and returns the safe periodic
     default without raising.
     """
     device_key = "Phantom-1"
-    hub = hub_entry_builder(availability_timeout=None)
-    assert CONF_AVAILABILITY_TIMEOUT not in hub.data
-    coordinator = await _setup(hass, hub)
+    receiver = receiver_entry_builder(availability_timeout=None)
+    assert CONF_AVAILABILITY_TIMEOUT not in receiver.data
+    coordinator = await _setup(hass, receiver)
 
     # Present in last_seen, but never processed -> not in coordinator.devices.
     coordinator.last_seen[device_key] = dt_util.utcnow()
@@ -551,15 +559,15 @@ def _timeout_lines(caplog) -> list[str]:
     return [m for m in caplog.messages if "availability timeout=" in m]
 
 
-async def test_watchdog_logs_finite_timeout_once(hass, hub_entry_builder, caplog):
+async def test_watchdog_logs_finite_timeout_once(hass, receiver_entry_builder, caplog):
     """A periodic reporter logs ``timeout=<N>s`` once; an unchanged tick is silent.
 
-    The explicit hub default (600s) resolves via the ``hub-default`` tier and is
+    The explicit receiver default (600s) resolves via the ``receiver-default`` tier and is
     logged on the first watchdog resolution, then suppressed while unchanged.
     """
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
     device_key = "Acurite-606TX-42"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=600,
         # Adopted, so the fed frame reaches the runtime state the watchdog reads.
         devices={
@@ -569,7 +577,7 @@ async def test_watchdog_logs_finite_timeout_once(hass, hub_entry_builder, caplog
             }
         },
     )
-    coordinator = await _setup(hass, hub)
+    coordinator = await _setup(hass, receiver)
 
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -582,9 +590,9 @@ async def test_watchdog_logs_finite_timeout_once(hass, hub_entry_builder, caplog
     assert len(lines) == 1
     assert device_key in lines[0]
     assert "timeout=600s" in lines[0]
-    # The real setup wires an ``effective_timeout_resolver``; an explicit hub
-    # default of 600 resolves through it as the ``override-or-hub`` tier.
-    assert "source=override-or-hub" in lines[0]
+    # The real setup wires an ``effective_timeout_resolver``; an explicit receiver
+    # default of 600 resolves through it as the ``override-or-receiver`` tier.
+    assert "source=override-or-receiver" in lines[0]
 
     # A second tick with the same resolved timeout must NOT re-log.
     caplog.clear()
@@ -595,7 +603,7 @@ async def test_watchdog_logs_finite_timeout_once(hass, hub_entry_builder, caplog
 
 
 async def test_watchdog_logs_never_timeout_for_event_device(
-    hass, hub_entry_builder, caplog
+    hass, receiver_entry_builder, caplog
 ):
     """An event-driven device logs ``timeout=never`` (source=class-default).
 
@@ -604,7 +612,7 @@ async def test_watchdog_logs_never_timeout_for_event_device(
     """
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
     device_key = "GS-kw9c-7"
-    hub = hub_entry_builder(
+    receiver = receiver_entry_builder(
         availability_timeout=None,
         devices={
             device_key: {
@@ -613,8 +621,8 @@ async def test_watchdog_logs_never_timeout_for_event_device(
             }
         },
     )
-    assert CONF_AVAILABILITY_TIMEOUT not in hub.data
-    coordinator = await _setup(hass, hub)
+    assert CONF_AVAILABILITY_TIMEOUT not in receiver.data
+    coordinator = await _setup(hass, receiver)
 
     start = dt_util.utcnow()
     with freeze_time(start):
@@ -630,25 +638,27 @@ async def test_watchdog_logs_never_timeout_for_event_device(
     assert "source=class-default" in lines[0]
 
 
-async def test_log_timeout_change_relogs_on_change(hass, hub_entry_builder, caplog):
+async def test_log_timeout_change_relogs_on_change(
+    hass, receiver_entry_builder, caplog
+):
     """Calling ``_log_timeout_change`` directly logs once, then only on change.
 
     A heavy watchdog setup is unnecessary to lock the dedupe-and-relog contract:
     the same timeout is suppressed, a changed timeout re-logs (with its source).
     """
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
     key = "Acurite-606TX-42"
 
-    coordinator._log_timeout_change(key, 600, "hub-default")
-    coordinator._log_timeout_change(key, 600, "hub-default")  # unchanged: silent
-    coordinator._log_timeout_change(key, 300, "override-or-hub")  # changed: re-log
+    coordinator._log_timeout_change(key, 600, "receiver-default")
+    coordinator._log_timeout_change(key, 600, "receiver-default")  # unchanged: silent
+    coordinator._log_timeout_change(key, 300, "override-or-receiver")  # changed: re-log
 
     lines = _timeout_lines(caplog)
     assert len(lines) == 2
     assert "timeout=600s" in lines[0]
-    assert "source=hub-default" in lines[0]
+    assert "source=receiver-default" in lines[0]
     assert "timeout=300s" in lines[1]
-    assert "source=override-or-hub" in lines[1]
+    assert "source=override-or-receiver" in lines[1]

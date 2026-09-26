@@ -92,7 +92,7 @@ filterwarnings = [
     # middleware (``http/const.py``) -- and aiohttp warns on any key that is not
     # an ``AppKey`` / ``RequestKey``. The integration now declares ``http`` (via
     # ``websocket_api`` / ``panel_custom``) as a manifest dependency, so every
-    # test that sets up a hub entry sets that component up, and every test that
+    # test that sets up a receiver entry sets that component up, and every test that
     # makes a request through it hits the second one. Both are core's code and
     # core's decision, nothing this repository can fix, and under "error" they
     # fail the suite outright -- so they are ignored narrowly, by their exact
@@ -233,7 +233,7 @@ escalate_paths = [
 # surely as by a flow-driving test.
 "tests/test_translations.py" = ["config_flow.py", "options_flow.py"]
 "tests/test_mut_init.py" = ["__init__.py", "migration.py", "receiver_settings.py"]
-# ``settings.py`` holds the sentinel rules behind the hub / device / mapping
+# ``settings.py`` holds the sentinel rules behind the receiver / device / mapping
 # forms, and both the options flow and the panel's WebSocket commands are only
 # presentation over it -- so a change to either flow test has to reach it.
 "tests/test_config_flow.py" = ["config_flow.py", "options_flow.py", "settings.py"]
@@ -275,8 +275,8 @@ escalate_paths = [
 "tests/test_mut_repairs_floor.py" = ["repairs.py"]
 # The connection-backed availability gate: the coordinator half (the outage
 # clock, the gate itself, the repaint dispatch) plus every entity type that reads
-# it. ``hub_availability`` has no module of its own to auto-resolve to.
-"tests/test_hub_availability.py" = [
+# it. ``receiver_availability`` has no module of its own to auto-resolve to.
+"tests/test_receiver_availability.py" = [
     "coordinator/_watchdog.py",
     "coordinator/base.py",
     "entity.py",
