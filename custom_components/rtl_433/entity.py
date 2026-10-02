@@ -5,10 +5,10 @@ hub config entry derives from :class:`Rtl433Entity`. The base centralizes the
 four concerns the platforms would otherwise duplicate:
 
 * **Device registry** — a single :class:`DeviceInfo` keyed by
-  ``{hub_entry_id}:{device_key}`` and linked to the hub device via
+  ``{receiver_entry_id}:{device_key}`` and linked to the hub device via
   ``via_device_id`` so every device groups under its hub.
 * **Dispatcher subscription** — each entity subscribes to the per-device signal
-  ``signal_device_update(hub_entry_id, device_key)`` that the coordinator fans a
+  ``signal_device_update(receiver_entry_id, device_key)`` that the coordinator fans a
   :class:`~pyrtl_433.normalizer.NormalizedEvent` out on, and
   unsubscribes in ``async_will_remove_from_hass``.
 * **Availability** — computed from the coordinator's ``last_seen`` timestamp
@@ -18,7 +18,7 @@ four concerns the platforms would otherwise duplicate:
 * **State restoration** — via :class:`RestoreEntity`; the field-specific
   subclasses pull the last state in their own ``async_added_to_hass``.
 
-The module also hosts :func:`async_setup_hub_platform`, the shared
+The module also hosts :func:`async_setup_receiver_platform`, the shared
 ``async_setup_entry`` body used by both the ``sensor`` and ``binary_sensor``
 platforms. It runs once on the single hub config entry and: creates entities for
 every device recorded in ``entry.data[CONF_DEVICES]`` (unioned with the fields
@@ -65,9 +65,9 @@ from .const import (
     DOMAIN,
     MANUFACTURER,
     signal_device_update,
-    signal_hub_availability,
-    signal_hub_update,
     signal_new_device,
+    signal_receiver_availability,
+    signal_receiver_update,
 )
 from .sdr_settings import SDR_SETTINGS
 
@@ -131,20 +131,22 @@ class Rtl433Entity(RestoreEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         device_key: str,
         model: str,
         descriptor: FieldDescriptor,
     ) -> None:
         """Initialize identity, device info, and entity description fields."""
         self._coordinator = coordinator
-        self._hub_entry_id = hub_entry_id
+        self._hub_entry_id = receiver_entry_id
         self._device_key = device_key
         self._descriptor = descriptor
 
         # Instance-scoped unique_id: scoping by the parent hub entry id means two
         # hubs observing the same model+id never collide.
-        self._attr_unique_id = f"{hub_entry_id}:{device_key}:{descriptor.object_suffix}"
+        self._attr_unique_id = (
+            f"{receiver_entry_id}:{device_key}:{descriptor.object_suffix}"
+        )
 
         # Per-field entity metadata common to both platforms. ``_attr_name`` is a
         # device-relative name because ``_attr_has_entity_name`` is set. A
@@ -162,7 +164,7 @@ class Rtl433Entity(RestoreEntity):
 
         device_name = display_name(model, device_key)
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{hub_entry_id}:{device_key}")},
+            identifiers={(DOMAIN, f"{receiver_entry_id}:{device_key}")},
             name=device_name,
             model=model or None,
             serial_number=identity_suffix(model, device_key),
@@ -172,8 +174,8 @@ class Rtl433Entity(RestoreEntity):
             # (the identifier tuple) is deprecated and gone from ``DeviceInfo``.
             via_device_id=dr.async_get_device_id_by_identifier(
                 coordinator.hass,
-                (DOMAIN, hub_entry_id),
-                config_entry_id=hub_entry_id,
+                (DOMAIN, receiver_entry_id),
+                config_entry_id=receiver_entry_id,
             ),
         )
 
@@ -189,7 +191,7 @@ class Rtl433Entity(RestoreEntity):
 
         Two gates, both owned by the coordinator (see ``coordinator/_watchdog.py``):
 
-        * **Hub connection.** ``hub_available`` is ``False`` the moment the
+        * **Hub connection.** ``receiver_available`` is ``False`` the moment the
           hub's WebSocket drops — no grace window. The integration is then
           hearing nothing at all, so no device's cached state means anything and
           every entity behind the hub reads unavailable — including never-expire
@@ -207,7 +209,7 @@ class Rtl433Entity(RestoreEntity):
         device-class-aware resolution (and never-expire) is identical to the
         watchdog's.
         """
-        if not self._coordinator.hub_available:
+        if not self._coordinator.receiver_available:
             return False
         last_seen = self._coordinator.last_seen.get(self._device_key)
         if last_seen is None:
@@ -247,7 +249,7 @@ class Rtl433Entity(RestoreEntity):
         # write per entity per outage.
         self._unsub_hub_availability = async_dispatcher_connect(
             self.hass,
-            signal_hub_availability(self._hub_entry_id),
+            signal_receiver_availability(self._hub_entry_id),
             self._handle_hub_availability,
         )
 
@@ -303,14 +305,14 @@ class Rtl433Entity(RestoreEntity):
         raise NotImplementedError
 
 
-class Rtl433HubEntity(Entity):
+class Rtl433ReceiverEntity(Entity):
     """Base for statically-registered entities on the hub device itself.
 
     Unlike :class:`Rtl433Entity` (one per device field, availability gated by the
     per-device timeout), hub entities are one-per-hub, attach to the hub device,
-    and re-read the coordinator's hub state on every ``signal_hub_update``.
+    and re-read the coordinator's hub state on every ``signal_receiver_update``.
 
-    They also subscribe to ``signal_hub_availability``, which fires only when the
+    They also subscribe to ``signal_receiver_availability``, which fires only when the
     hub-connection gate flips (see ``coordinator/_watchdog.py``), so a
     connection-gated hub entity repaints on exactly the edge where its
     ``available`` changes. Subclasses that do not read the gate (the connectivity
@@ -320,12 +322,12 @@ class Rtl433HubEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, coordinator: Rtl433Coordinator, hub_entry_id: str) -> None:
+    def __init__(self, coordinator: Rtl433Coordinator, receiver_entry_id: str) -> None:
         """Attach to the hub device and remember the coordinator."""
         self._coordinator = coordinator
-        self._hub_entry_id = hub_entry_id
+        self._hub_entry_id = receiver_entry_id
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hub_entry_id)},
+            identifiers={(DOMAIN, receiver_entry_id)},
         )
         self._unsub_hub: Callable[[], None] | None = None
         self._unsub_hub_availability: Callable[[], None] | None = None
@@ -335,12 +337,12 @@ class Rtl433HubEntity(Entity):
         await super().async_added_to_hass()
         self._unsub_hub = async_dispatcher_connect(
             self.hass,
-            signal_hub_update(self._hub_entry_id),
+            signal_receiver_update(self._hub_entry_id),
             self._handle_hub_update,
         )
         self._unsub_hub_availability = async_dispatcher_connect(
             self.hass,
-            signal_hub_availability(self._hub_entry_id),
+            signal_receiver_availability(self._hub_entry_id),
             self._handle_hub_update,
         )
 
@@ -359,21 +361,21 @@ class Rtl433HubEntity(Entity):
         self.async_write_ha_state()
 
 
-class Rtl433HubControl(Rtl433HubEntity):
+class Rtl433ReceiverControl(Rtl433ReceiverEntity):
     """Shared base for the managed SDR control entities on the hub device.
 
     The ``number`` / ``select`` / ``switch`` control platforms each subclass this
     (alongside the matching HA entity mixin) so the four concerns common to every
     control live in one place: attachment to the hub device (inherited from
-    :class:`Rtl433HubEntity`), the :data:`EntityCategory.CONFIG` category, the
-    stable unique_id ``f"{hub_entry_id}:hub:{object_suffix}"``, and the
+    :class:`Rtl433ReceiverEntity`), the :data:`EntityCategory.CONFIG` category, the
+    stable unique_id ``f"{receiver_entry_id}:hub:{object_suffix}"``, and the
     device-relative entity name — all sourced from the field's
     :class:`~custom_components.rtl_433.sdr_settings.SdrSetting`.
 
-    Read-back/repaint is inherited too: :class:`Rtl433HubEntity` subscribes to
-    ``signal_hub_update`` and its ``_handle_hub_update`` calls
+    Read-back/repaint is inherited too: :class:`Rtl433ReceiverEntity` subscribes to
+    ``signal_receiver_update`` and its ``_handle_hub_update`` calls
     ``async_write_ha_state``, so after a write the coordinator's post-read-back
-    ``signal_hub_update`` repaints the control with the server's actual value.
+    ``signal_receiver_update`` repaints the control with the server's actual value.
     """
 
     _attr_entity_category = EntityCategory.CONFIG
@@ -381,20 +383,20 @@ class Rtl433HubControl(Rtl433HubEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Attach to the hub device and adopt the setting's identity/name."""
-        super().__init__(coordinator, hub_entry_id)
+        super().__init__(coordinator, receiver_entry_id)
         self._setting = setting
-        self._attr_unique_id = f"{hub_entry_id}:hub:{setting.object_suffix}"
+        self._attr_unique_id = f"{receiver_entry_id}:hub:{setting.object_suffix}"
         self._attr_name = setting.name
 
     @property
     def available(self) -> bool:
         """Apply the setting's runtime availability gate to the current meta.
 
-        Re-evaluated on every ``signal_hub_update`` (inherited repaint), so a
+        Re-evaluated on every ``signal_receiver_update`` (inherited repaint), so a
         control like ``hop_interval`` / ``center_frequency`` appears or hides as
         the server's frequency configuration changes. Defaults to available.
         """
@@ -406,7 +408,7 @@ async def async_setup_hub_controls(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
     platform: str,
-    control_cls: Callable[[Rtl433Coordinator, str, SdrSetting], Rtl433HubControl],
+    control_cls: Callable[[Rtl433Coordinator, str, SdrSetting], Rtl433ReceiverControl],
 ) -> None:
     """Register the hub's managed controls for one control platform.
 
@@ -513,7 +515,7 @@ async def async_upsert_event_types(
 # --------------------------------------------------------------------------- #
 # Hub-wide platform setup (sensor + binary_sensor use the same flow).          #
 # --------------------------------------------------------------------------- #
-async def async_setup_hub_platform(
+async def async_setup_receiver_platform(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,

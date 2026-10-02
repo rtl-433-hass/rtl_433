@@ -120,7 +120,7 @@ class TestSampleRateLooksLow:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow.async_step_confirm — form schema defaults
+# ReceiverRadioReplaceRepairFlow.async_step_confirm — form schema defaults
 # ---------------------------------------------------------------------------
 
 
@@ -141,7 +141,7 @@ class TestHubRadioReplaceFlowFormDefaults:
         """The init step returns a form with step_id='confirm'."""
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_init()
@@ -157,7 +157,7 @@ class TestHubRadioReplaceFlowFormDefaults:
         """
         entry = hub_entry_builder(host="rtl433.local")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -175,7 +175,7 @@ class TestHubRadioReplaceFlowFormDefaults:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -184,7 +184,7 @@ class TestHubRadioReplaceFlowFormDefaults:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow.async_step_confirm — CannotConnect error path
+# ReceiverRadioReplaceRepairFlow.async_step_confirm — CannotConnect error path
 # ---------------------------------------------------------------------------
 
 
@@ -204,7 +204,7 @@ class TestHubRadioReplaceFlowCannotConnect:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -231,7 +231,7 @@ class TestHubRadioReplaceFlowCannotConnect:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -257,7 +257,7 @@ class TestHubRadioReplaceFlowCannotConnect:
         """
         entry = hub_entry_builder(host="rtl433.local")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -279,7 +279,7 @@ class TestHubRadioReplaceFlowCannotConnect:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — validate_connection call arguments
+# ReceiverRadioReplaceRepairFlow — validate_connection call arguments
 # ---------------------------------------------------------------------------
 
 
@@ -300,7 +300,7 @@ class TestHubRadioReplaceFlowValidateArgs:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -349,7 +349,7 @@ class TestHubRadioReplaceFlowValidateArgs:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -384,7 +384,7 @@ class TestHubRadioReplaceFlowValidateArgs:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -419,7 +419,7 @@ class TestHubRadioReplaceFlowValidateArgs:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -454,7 +454,7 @@ class TestHubRadioReplaceFlowValidateArgs:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -482,7 +482,7 @@ class TestHubRadioReplaceFlowValidateArgs:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — new_uid computation
+# ReceiverRadioReplaceRepairFlow — new_uid computation
 # ---------------------------------------------------------------------------
 
 
@@ -506,7 +506,7 @@ class TestHubRadioReplaceFlowNewUid:
         entry.add_to_hass(hass)
         hass.config_entries.async_update_entry(entry, unique_id="radio-existing")
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -525,7 +525,7 @@ class TestHubRadioReplaceFlowNewUid:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(
@@ -548,7 +548,7 @@ class TestHubRadioReplaceFlowNewUid:
         entry.add_to_hass(hass)
         hass.config_entries.async_update_entry(entry, unique_id="radio-kept")
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -567,7 +567,7 @@ class TestHubRadioReplaceFlowNewUid:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(
@@ -587,7 +587,7 @@ class TestHubRadioReplaceFlowNewUid:
         entry.add_to_hass(hass)
         hass.config_entries.async_update_entry(entry, unique_id="radio-old")
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -606,7 +606,7 @@ class TestHubRadioReplaceFlowNewUid:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(
@@ -620,12 +620,12 @@ class TestHubRadioReplaceFlowNewUid:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — rebind title format
+# ReceiverRadioReplaceRepairFlow — rebind title format
 # ---------------------------------------------------------------------------
 
 
 class TestHubRadioReplaceFlowRebindTitle:
-    """Assert async_rebind_hub is called with the correct title string.
+    """Assert async_rebind_receiver is called with the correct title string.
 
     Kills mutmut_88 (title=None) and mutmut_93 (title omitted).
     """
@@ -633,10 +633,10 @@ class TestHubRadioReplaceFlowRebindTitle:
     async def test_rebind_title_is_rtl433_with_host(
         self, hass: HomeAssistant, hub_entry_builder
     ):
-        """async_rebind_hub title must be 'rtl_433 (<host>)' not None/omitted."""
+        """async_rebind_receiver title must be 'rtl_433 (<host>)' not None/omitted."""
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -655,7 +655,7 @@ class TestHubRadioReplaceFlowRebindTitle:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(
@@ -670,7 +670,7 @@ class TestHubRadioReplaceFlowRebindTitle:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — already_configured error path
+# ReceiverRadioReplaceRepairFlow — already_configured error path
 # ---------------------------------------------------------------------------
 
 
@@ -693,7 +693,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -707,7 +707,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="already_configured"),
             ),
         ):
@@ -725,7 +725,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -739,7 +739,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="already_configured"),
             ),
         ):
@@ -763,7 +763,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         """
         entry = hub_entry_builder(host="rtl433.local")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -777,7 +777,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="already_configured"),
             ),
         ):
@@ -799,7 +799,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -813,7 +813,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="already_configured"),
             ),
         ):
@@ -823,7 +823,7 @@ class TestHubRadioReplaceFlowAlreadyConfigured:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — success path CREATE_ENTRY
+# ReceiverRadioReplaceRepairFlow — success path CREATE_ENTRY
 # ---------------------------------------------------------------------------
 
 
@@ -843,7 +843,7 @@ class TestHubRadioReplaceFlowSuccess:
         """
         entry = hub_entry_builder()
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -857,7 +857,7 @@ class TestHubRadioReplaceFlowSuccess:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 AsyncMock(return_value="ok"),
             ),
             patch(
@@ -996,14 +996,14 @@ class TestAsyncCreateFixFlow:
     """Test that async_create_fix_flow passes the correct entry to flow objects.
 
     Kills survivors:
-    - mutmut_8: HubRadioReplaceRepairFlow(None) instead of HubRadioReplaceRepairFlow(entry)
+    - mutmut_8: ReceiverRadioReplaceRepairFlow(None) instead of ReceiverRadioReplaceRepairFlow(entry)
     - mutmut_16: SampleRateRepairFlow(None) instead of SampleRateRepairFlow(entry)
     """
 
     async def test_unreachable_flow_has_correct_entry(
         self, hass: HomeAssistant, hub_entry_builder
     ):
-        """HubRadioReplaceRepairFlow must hold a reference to the real entry, not None.
+        """ReceiverRadioReplaceRepairFlow must hold a reference to the real entry, not None.
 
         Kills mutmut_8.
         """
@@ -1013,7 +1013,7 @@ class TestAsyncCreateFixFlow:
         flow = await repairs.async_create_fix_flow(
             hass, repairs._unreachable_issue_id(entry), None
         )
-        assert isinstance(flow, repairs.HubRadioReplaceRepairFlow)
+        assert isinstance(flow, repairs.ReceiverRadioReplaceRepairFlow)
         assert flow._entry is entry
 
     async def test_sample_rate_flow_has_correct_entry(
@@ -1191,7 +1191,7 @@ class TestAsyncTrackSampleRateInitialEval:
 
     If the coordinator.meta is already in the flagged state when the tracker
     is wired, the issue should be raised immediately (without waiting for a
-    signal_hub_update). This tests the ``_evaluate()`` call at the end of
+    signal_receiver_update). This tests the ``_evaluate()`` call at the end of
     async_track_sample_rate.
     """
 
@@ -1237,7 +1237,7 @@ class TestAsyncTrackSampleRateInitialEval:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — form schema contents (defaults from entry data)
+# ReceiverRadioReplaceRepairFlow — form schema contents (defaults from entry data)
 # ---------------------------------------------------------------------------
 
 
@@ -1265,7 +1265,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         """
         entry = hub_entry_builder(host="special-host.local")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1302,7 +1302,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         """
         entry = hub_entry_builder(port=9876)
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1338,7 +1338,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         """
         entry = hub_entry_builder(path="/specialpath")
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1374,7 +1374,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         """
         entry = hub_entry_builder(secure=True)
         entry.add_to_hass(hass)
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1411,7 +1411,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         entry.add_to_hass(hass)
         hass.config_entries.async_update_entry(entry, unique_id="my-radio-id")
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1456,7 +1456,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1482,7 +1482,7 @@ class TestHubRadioReplaceFlowSchemaDefaults:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — schema defaults when entry data keys missing
+# ReceiverRadioReplaceRepairFlow — schema defaults when entry data keys missing
 # ---------------------------------------------------------------------------
 
 
@@ -1515,7 +1515,7 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1556,7 +1556,7 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1594,7 +1594,7 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1637,7 +1637,7 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         result = await flow.async_step_confirm(None)
@@ -1660,7 +1660,7 @@ class TestHubRadioReplaceFlowSchemaFallbacks:
 
 
 # ---------------------------------------------------------------------------
-# HubRadioReplaceRepairFlow — new_uid fallback when unique_id is None
+# ReceiverRadioReplaceRepairFlow — new_uid fallback when unique_id is None
 # ---------------------------------------------------------------------------
 
 
@@ -1689,7 +1689,7 @@ class TestHubRadioReplaceFlowNewUidNoneUniqueId:
         )
         entry.add_to_hass(hass)
 
-        flow = repairs.HubRadioReplaceRepairFlow(entry)
+        flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
         flow.hass = hass
 
         user_input = {
@@ -1708,7 +1708,7 @@ class TestHubRadioReplaceFlowNewUidNoneUniqueId:
         with (
             patch(VALIDATE, AsyncMock(return_value=True)),
             patch(
-                "custom_components.rtl_433.repairs.async_rebind_hub",
+                "custom_components.rtl_433.repairs.async_rebind_receiver",
                 side_effect=_capture_rebind,
             ),
             patch(

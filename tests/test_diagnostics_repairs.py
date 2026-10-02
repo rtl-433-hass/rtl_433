@@ -43,7 +43,7 @@ class _FakeCoordinator:
         self.secure = False
         self.connected = True
         # Connection-backed availability gate: connected, so no outage clock.
-        self.hub_available = True
+        self.receiver_available = True
         self.disconnected_since = None
         self.availability_timeout = 600
         self.seen_fields = {"temperature_C", "humidity", "made_up_field"}
@@ -182,7 +182,7 @@ async def test_sample_rate_advisory_edge_triggered(
     hass: HomeAssistant, hub_entry_builder
 ):
     """The advisory raises on entering the flagged state and clears on leaving."""
-    from custom_components.rtl_433.const import signal_hub_update
+    from custom_components.rtl_433.const import signal_receiver_update
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
     entry = hub_entry_builder()
@@ -199,7 +199,7 @@ async def test_sample_rate_advisory_edge_triggered(
 
     # Retune into the high band at the default rate -> advisory raised.
     coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     issue = issue_reg.async_get_issue(DOMAIN, issue_id)
     assert issue is not None
@@ -208,16 +208,16 @@ async def test_sample_rate_advisory_edge_triggered(
 
     # A user dismissing it while still on a low rate must not re-raise it.
     repairs.async_clear_sample_rate_low(hass, entry)
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     # Raising the sample rate, then dropping back, re-triggers the edge.
     coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 1_024_000}
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
@@ -231,7 +231,7 @@ async def test_event_time_advisory_edge_triggered(
     hass: HomeAssistant, hub_entry_builder
 ):
     """The advisory raises only for UNUSABLE, and clears when stamps return."""
-    from custom_components.rtl_433.const import signal_hub_update
+    from custom_components.rtl_433.const import signal_receiver_update
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
     entry = hub_entry_builder()
@@ -250,7 +250,7 @@ async def test_event_time_advisory_edge_triggered(
 
     # The operator turns timestamps off -> replay suppression is dead -> advise.
     coordinator._client.time_precision = TimePrecision.UNUSABLE
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     issue = issue_reg.async_get_issue(DOMAIN, issue_id)
     assert issue is not None
@@ -259,16 +259,16 @@ async def test_event_time_advisory_edge_triggered(
 
     # Dismissing the card while still unusable must not immediately re-raise it.
     repairs.async_clear_event_time_unusable(hass, entry)
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     # Timestamps come back, then go away again: the edge re-triggers.
     coordinator._client.time_precision = TimePrecision.MICROSECOND
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     coordinator._client.time_precision = TimePrecision.UNUSABLE
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
@@ -281,7 +281,7 @@ async def test_dismissed_event_time_advisory_is_not_re_raised(
     """A persisted acknowledgement survives the restart the tracker's state does not."""
     from custom_components.rtl_433.const import (
         CONF_EVENT_TIME_DISMISSED,
-        signal_hub_update,
+        signal_receiver_update,
     )
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -301,7 +301,7 @@ async def test_dismissed_event_time_advisory_is_not_re_raised(
     # The immediate wire-up evaluation stays silent despite the flagged state.
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
     unsub()
@@ -320,7 +320,7 @@ async def test_create_fix_flow_routes_by_issue_id(
     unreachable = await repairs.async_create_fix_flow(
         hass, repairs._unreachable_issue_id(entry), None
     )
-    assert isinstance(unreachable, repairs.HubRadioReplaceRepairFlow)
+    assert isinstance(unreachable, repairs.ReceiverRadioReplaceRepairFlow)
 
     sample_rate = await repairs.async_create_fix_flow(
         hass, repairs._sample_rate_issue_id(entry), None
@@ -477,7 +477,7 @@ async def test_dismissed_advisory_is_not_re_raised(
     """
     from custom_components.rtl_433.const import (
         CONF_SAMPLE_RATE_DISMISSED,
-        signal_hub_update,
+        signal_receiver_update,
     )
     from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -499,7 +499,7 @@ async def test_dismissed_advisory_is_not_re_raised(
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     # A later meta refresh in the flagged state must also stay silent.
-    async_dispatcher_send(hass, signal_hub_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
     unsub()
@@ -525,7 +525,7 @@ async def test_rebind_fix_flow_repoints_hub_and_clears_issue(
     issue_id = repairs._unreachable_issue_id(entry)
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
-    flow = repairs.HubRadioReplaceRepairFlow(entry)
+    flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
     flow.hass = hass
 
     # The init step just shows the confirm form.
@@ -541,7 +541,7 @@ async def test_rebind_fix_flow_repoints_hub_and_clears_issue(
         repairs.CONF_SECURE: False,
     }
     # Patch both the reachability check (no socket) and entry setup (no real
-    # coordinator) so async_rebind_hub's in-place reload is a no-op.
+    # coordinator) so async_rebind_receiver's in-place reload is a no-op.
     with (
         patch(VALIDATE, AsyncMock(return_value=True)),
         patch(
@@ -573,7 +573,7 @@ async def test_rebind_fix_flow_cannot_connect_reshows_form(
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(entry, unique_id="radio-old")
 
-    flow = repairs.HubRadioReplaceRepairFlow(entry)
+    flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
     flow.hass = hass
 
     user_input = {

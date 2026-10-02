@@ -45,7 +45,7 @@ from custom_components.rtl_433.calibration import COMMODITY_UNITS
 from custom_components.rtl_433.config_flow import (
     CONF_SECURE,
     _hub_unique_id,
-    async_rebind_hub,
+    async_rebind_receiver,
 )
 from custom_components.rtl_433.const import (
     CALIBRATION_COMMODITY,
@@ -2737,7 +2737,7 @@ async def test_pr34_mappings_form_prefilled_with_current(hass, hub_entry_builder
 
 
 # ---------------------------------------------------------------------------
-# async_rebind_hub: additive-only property — nested ids are byte-identical.
+# async_rebind_receiver: additive-only property — nested ids are byte-identical.
 # ---------------------------------------------------------------------------
 
 
@@ -2796,7 +2796,7 @@ async def test_rebind_preserves_nested_device_and_entity_unique_ids(hass):
 
     # Re-point the entry at a brand-new radio unique_id (the rebind under test).
     with patch.object(hass.config_entries, "async_reload"):
-        status = await async_rebind_hub(
+        status = await async_rebind_receiver(
             hass,
             entry,
             "radio-new",
@@ -2848,7 +2848,7 @@ async def test_rebind_hub_sets_title_only_when_provided(hass):
 
     # No title -> the existing title is preserved (guard must skip the body).
     with patch.object(hass.config_entries, "async_reload"):
-        status = await async_rebind_hub(
+        status = await async_rebind_receiver(
             hass, entry, "radio-mid", {CONF_HOST: "mid.local"}
         )
         await hass.async_block_till_done()
@@ -2857,7 +2857,7 @@ async def test_rebind_hub_sets_title_only_when_provided(hass):
 
     # Explicit title -> applied verbatim (body must run with the real value).
     with patch.object(hass.config_entries, "async_reload"):
-        await async_rebind_hub(
+        await async_rebind_receiver(
             hass, entry, "radio-new", {CONF_HOST: "new.local"}, title="brand-new-title"
         )
         await hass.async_block_till_done()

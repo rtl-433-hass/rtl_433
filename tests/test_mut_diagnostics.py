@@ -55,7 +55,7 @@ class _FakeCoordinator:
         self.secure = False
         self.connected = True
         # Connection-backed availability gate: connected, so no outage clock.
-        self.hub_available = True
+        self.receiver_available = True
         self.disconnected_since = None
         self.availability_timeout = 600
         self.seen_fields: set[str] = {"temperature_C", "humidity", "made_up_field"}

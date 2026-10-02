@@ -75,11 +75,6 @@
       "score": 1.0,
       "total": 69
     },
-    "custom_components/rtl_433/hub_settings.py": {
-      "killed": 47,
-      "score": 0.94,
-      "total": 50
-    },
     "custom_components/rtl_433/library.py": {
       "killed": 37,
       "score": 1.0,
@@ -99,6 +94,11 @@
       "killed": 688,
       "score": 0.945055,
       "total": 728
+    },
+    "custom_components/rtl_433/receiver_settings.py": {
+      "killed": 47,
+      "score": 0.94,
+      "total": 50
     },
     "custom_components/rtl_433/repairs.py": {
       "killed": 263,
@@ -239,7 +239,7 @@
         "survived": 0,
         "total": 4
       },
-      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433HubConnectivity\u01c1__init__": {
+      "custom_components.rtl_433.binary_sensor.x\u01c1Rtl433ReceiverConnectivity\u01c1__init__": {
         "killed": 5,
         "score": 1.0,
         "survived": 0,
@@ -267,7 +267,7 @@
       }
     },
     "custom_components/rtl_433/config_flow.py": {
-      "custom_components.rtl_433.config_flow.x_async_rebind_hub": {
+      "custom_components.rtl_433.config_flow.x_async_rebind_receiver": {
         "killed": 22,
         "score": 0.956522,
         "survived": 1,
@@ -335,18 +335,6 @@
         "survived": 0,
         "total": 4
       },
-      "custom_components.rtl_433.const.x_signal_hub_availability": {
-        "killed": 1,
-        "score": 1.0,
-        "survived": 0,
-        "total": 1
-      },
-      "custom_components.rtl_433.const.x_signal_hub_update": {
-        "killed": 1,
-        "score": 1.0,
-        "survived": 0,
-        "total": 1
-      },
       "custom_components.rtl_433.const.x_signal_new_device": {
         "killed": 1,
         "score": 1.0,
@@ -357,6 +345,18 @@
         "killed": 0,
         "score": 0.0,
         "survived": 1,
+        "total": 1
+      },
+      "custom_components.rtl_433.const.x_signal_receiver_availability": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
+        "total": 1
+      },
+      "custom_components.rtl_433.const.x_signal_receiver_update": {
+        "killed": 1,
+        "score": 1.0,
+        "survived": 0,
         "total": 1
       }
     },
@@ -669,7 +669,7 @@
         "survived": 0,
         "total": 12
       },
-      "custom_components.rtl_433.entity.x_async_setup_hub_platform": {
+      "custom_components.rtl_433.entity.x_async_setup_receiver_platform": {
         "killed": 134,
         "score": 0.87013,
         "survived": 20,
@@ -711,25 +711,25 @@
         "survived": 0,
         "total": 4
       },
-      "custom_components.rtl_433.entity.x\u01c1Rtl433HubControl\u01c1__init__": {
+      "custom_components.rtl_433.entity.x\u01c1Rtl433ReceiverControl\u01c1__init__": {
         "killed": 6,
         "score": 0.857143,
         "survived": 1,
         "total": 7
       },
-      "custom_components.rtl_433.entity.x\u01c1Rtl433HubEntity\u01c1__init__": {
+      "custom_components.rtl_433.entity.x\u01c1Rtl433ReceiverEntity\u01c1__init__": {
         "killed": 4,
         "score": 0.666667,
         "survived": 2,
         "total": 6
       },
-      "custom_components.rtl_433.entity.x\u01c1Rtl433HubEntity\u01c1async_added_to_hass": {
+      "custom_components.rtl_433.entity.x\u01c1Rtl433ReceiverEntity\u01c1async_added_to_hass": {
         "killed": 16,
         "score": 1.0,
         "survived": 0,
         "total": 16
       },
-      "custom_components.rtl_433.entity.x\u01c1Rtl433HubEntity\u01c1async_will_remove_from_hass": {
+      "custom_components.rtl_433.entity.x\u01c1Rtl433ReceiverEntity\u01c1async_will_remove_from_hass": {
         "killed": 4,
         "score": 1.0,
         "survived": 0,
@@ -754,50 +754,6 @@
         "score": 1.0,
         "survived": 0,
         "total": 15
-      }
-    },
-    "custom_components/rtl_433/hub_settings.py": {
-      "custom_components.rtl_433.hub_settings.x__calibration_map": {
-        "killed": 11,
-        "score": 0.916667,
-        "survived": 1,
-        "total": 12
-      },
-      "custom_components.rtl_433.hub_settings.x__explicit_hub_timeout": {
-        "killed": 4,
-        "score": 1.0,
-        "survived": 0,
-        "total": 4
-      },
-      "custom_components.rtl_433.hub_settings.x__hub_availability_timeout": {
-        "killed": 3,
-        "score": 1.0,
-        "survived": 0,
-        "total": 3
-      },
-      "custom_components.rtl_433.hub_settings.x__hub_connection": {
-        "killed": 4,
-        "score": 1.0,
-        "survived": 0,
-        "total": 4
-      },
-      "custom_components.rtl_433.hub_settings.x__hub_ignored_devices": {
-        "killed": 5,
-        "score": 1.0,
-        "survived": 0,
-        "total": 5
-      },
-      "custom_components.rtl_433.hub_settings.x__hub_manage_settings": {
-        "killed": 9,
-        "score": 1.0,
-        "survived": 0,
-        "total": 9
-      },
-      "custom_components.rtl_433.hub_settings.x__hub_secure": {
-        "killed": 6,
-        "score": 0.75,
-        "survived": 2,
-        "total": 8
       }
     },
     "custom_components/rtl_433/library.py": {
@@ -839,17 +795,17 @@
         "survived": 1,
         "total": 40
       },
-      "custom_components.rtl_433.migration.x__migrate_hub_entry": {
-        "killed": 47,
-        "score": 0.979167,
-        "survived": 1,
-        "total": 48
-      },
       "custom_components.rtl_433.migration.x__migrate_motion_event_to_binary_sensor": {
         "killed": 47,
         "score": 0.810345,
         "survived": 11,
         "total": 58
+      },
+      "custom_components.rtl_433.migration.x__migrate_receiver_entry": {
+        "killed": 47,
+        "score": 0.979167,
+        "survived": 1,
+        "total": 48
       },
       "custom_components.rtl_433.migration.x__read_legacy_overrides": {
         "killed": 14,
@@ -994,6 +950,50 @@
         "total": 121
       }
     },
+    "custom_components/rtl_433/receiver_settings.py": {
+      "custom_components.rtl_433.receiver_settings.x__calibration_map": {
+        "killed": 11,
+        "score": 0.916667,
+        "survived": 1,
+        "total": 12
+      },
+      "custom_components.rtl_433.receiver_settings.x__explicit_hub_timeout": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.receiver_settings.x__hub_availability_timeout": {
+        "killed": 3,
+        "score": 1.0,
+        "survived": 0,
+        "total": 3
+      },
+      "custom_components.rtl_433.receiver_settings.x__hub_connection": {
+        "killed": 4,
+        "score": 1.0,
+        "survived": 0,
+        "total": 4
+      },
+      "custom_components.rtl_433.receiver_settings.x__hub_ignored_devices": {
+        "killed": 5,
+        "score": 1.0,
+        "survived": 0,
+        "total": 5
+      },
+      "custom_components.rtl_433.receiver_settings.x__hub_manage_settings": {
+        "killed": 9,
+        "score": 1.0,
+        "survived": 0,
+        "total": 9
+      },
+      "custom_components.rtl_433.receiver_settings.x__hub_secure": {
+        "killed": 6,
+        "score": 0.75,
+        "survived": 2,
+        "total": 8
+      }
+    },
     "custom_components/rtl_433/repairs.py": {
       "custom_components.rtl_433.repairs.x__advisory_dismissed": {
         "killed": 2,
@@ -1055,13 +1055,13 @@
         "survived": 0,
         "total": 25
       },
-      "custom_components.rtl_433.repairs.x\u01c1HubRadioReplaceRepairFlow\u01c1__init__": {
+      "custom_components.rtl_433.repairs.x\u01c1ReceiverRadioReplaceRepairFlow\u01c1__init__": {
         "killed": 1,
         "score": 1.0,
         "survived": 0,
         "total": 1
       },
-      "custom_components.rtl_433.repairs.x\u01c1HubRadioReplaceRepairFlow\u01c1async_step_confirm": {
+      "custom_components.rtl_433.repairs.x\u01c1ReceiverRadioReplaceRepairFlow\u01c1async_step_confirm": {
         "killed": 131,
         "score": 1.0,
         "survived": 0,
@@ -1157,12 +1157,6 @@
         "survived": 0,
         "total": 23
       },
-      "custom_components.rtl_433.sensor.x\u01c1Rtl433HubSensor\u01c1__init__": {
-        "killed": 9,
-        "score": 0.9,
-        "survived": 1,
-        "total": 10
-      },
       "custom_components.rtl_433.sensor.x\u01c1Rtl433LastSeenSensor\u01c1__init__": {
         "killed": 13,
         "score": 0.764706,
@@ -1174,6 +1168,12 @@
         "score": 0.722222,
         "survived": 5,
         "total": 18
+      },
+      "custom_components.rtl_433.sensor.x\u01c1Rtl433ReceiverSensor\u01c1__init__": {
+        "killed": 9,
+        "score": 0.9,
+        "survived": 1,
+        "total": 10
       },
       "custom_components.rtl_433.sensor.x\u01c1Rtl433Sensor\u01c1__init__": {
         "killed": 27,

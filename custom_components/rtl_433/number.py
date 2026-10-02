@@ -11,9 +11,9 @@ correction (ppm), gain (dB), and hop interval.
 
 Optimistic-then-confirmed state: ``async_set_native_value`` writes the desired
 value via ``coordinator.set_sdr`` (which persists, sends the ``/cmd``, then
-reads the server back and emits ``signal_hub_update``). Until that read-back
+reads the server back and emits ``signal_receiver_update``). Until that read-back
 arrives ``native_value`` shows the just-set desired value (optimistic); the
-inherited ``signal_hub_update`` subscription then repaints the control with the
+inherited ``signal_receiver_update`` subscription then repaints the control with the
 server's confirmed value.
 """
 
@@ -26,7 +26,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .entity import Rtl433HubControl, async_setup_hub_controls
+from .entity import Rtl433ReceiverControl, async_setup_hub_controls
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
@@ -36,17 +36,17 @@ if TYPE_CHECKING:
 PLATFORM = "number"
 
 
-class Rtl433NumberControl(Rtl433HubControl, NumberEntity):
+class Rtl433NumberControl(Rtl433ReceiverControl, NumberEntity):
     """A managed numeric SDR setting exposed as a hub-device Number entity."""
 
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Initialize number-specific description fields from the setting."""
-        super().__init__(coordinator, hub_entry_id, setting)
+        super().__init__(coordinator, receiver_entry_id, setting)
         self._attr_native_min_value = setting.native_min
         self._attr_native_max_value = setting.native_max
         self._attr_native_step = setting.native_step
