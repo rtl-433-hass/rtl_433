@@ -283,7 +283,7 @@ LAST_SEEN_DESCRIPTOR = FieldDescriptor(
 
 
 class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
-    """Per-device diagnostic timestamp of when the device was last heard from.
+    """Per-device diagnostic timestamp of when the device was last received from.
 
     Synthetic (not field-driven): holds its own ``native_value``, seeded from a
     real event when one exists, restored otherwise, and updated on dispatch.

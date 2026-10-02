@@ -227,7 +227,7 @@ async def test_replace_adopts_new_key_with_no_record(
     """Adopting a key the devices map never registered transfers the record whole.
 
     This is the discovery-disabled case the docs recommend for urban areas: the
-    coordinator hears the replacement but never registers it, so there is no
+    coordinator receives the replacement but never registers it, so there is no
     record and no duplicate device to free. The old record must simply move.
     """
     receiver = await _setup_receiver(
@@ -361,11 +361,11 @@ HUMIDITY_SUFFIX = "H"
 
 
 async def _two_locations(hass, receiver_entry_builder, *, shared_only: bool = False):
-    """Set up two locations that both heard ``SHARED_KEY``, target first.
+    """Set up two locations that both received ``SHARED_KEY``, target first.
 
     The target is created first so it is the location holding the earliest-added
     receiver — the one whose entity survives a collision. Unless ``shared_only``,
-    the source also carries a device the target never heard, so the test can see
+    the source also carries a device the target never received, so the test can see
     a clean move alongside the forced merge.
     """
     target = await _setup_receiver(
@@ -456,7 +456,7 @@ async def test_consolidation_moves_the_receiver_and_its_unshared_device(
 ):
     """Everything that does not collide is re-keyed in place, not recreated.
 
-    A device only the absorbed location heard has no counterpart to lose to, so
+    A device only the absorbed location received has no counterpart to lose to, so
     it moves wholesale: same registry row, same ``entity_id``, re-keyed onto the
     surviving location's scope. The receiver subentry moves with its id intact —
     that is what keeps its radio controls and its managed-settings store — and
@@ -815,7 +815,7 @@ async def test_consolidation_folds_the_stored_state_of_both_locations(
 def test_fold_devices_tolerates_records_with_no_fields_or_model():
     """A record missing ``fields`` or ``model`` folds to the empty values, not ``None``.
 
-    Both keys are optional in a stored record — a device heard once but never
+    Both keys are optional in a stored record — a device received once but never
     decoded has no fields, and one whose model was never learned has no model —
     so the fold has to read them with real empty defaults. ``None`` would
     propagate into the devices map and blow up the next platform build.

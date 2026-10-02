@@ -261,7 +261,7 @@ async def test_migration_removes_event_entity_and_raises_issue(
     receiver.add_to_hass(hass)
 
     # Pre-seed the orphaned pre-fix ``event.*_motion`` registry entry, under the
-    # receiver that heard the device (which is what scopes a device's identity).
+    # receiver that received the device (which is what scopes a device's identity).
     ent_reg = er.async_get(hass)
     motion_unique_id = f"{receiver.entry_id}:{_DEVICE_KEY}:motion"
     event_entry = ent_reg.async_get_or_create(

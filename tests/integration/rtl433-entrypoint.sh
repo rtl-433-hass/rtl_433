@@ -100,7 +100,7 @@ trap 'kill "$RTL_PID" 2>/dev/null || true; rm -f "$FIFO"; exit 0' INT TERM
 # would keep the receiver permanently "loud": the noise estimate creeps up to the
 # replayed burst level and settles, so `-Y autolevel` never sees a shift over
 # 1 dB and never logs an adjustment (the source of the receiver's minimum-detection-
-# level sensor). The silence gap is also what a real receiver mostly hears — it
+# level sensor). The silence gap is also what a real receiver mostly receives — it
 # makes the noise floor genuinely move, so both "Auto Level" message forms are
 # emitted from real measurements. If the decoder dies, stop so the container
 # exits and the orchestrator notices.

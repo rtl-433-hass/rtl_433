@@ -14,7 +14,7 @@ tests pin what the integration does with that:
   between one receiver and the sensor, so they are partitioned out on the way in
   and neither unioned nor deduped;
 * **merged availability** -- a receiver *vouches* for a device when it is
-  connected AND heard it inside the timeout, and the device is available when at
+  connected AND received it inside the timeout, and the device is available when at
   least one receiver vouches. The full cross-product is asserted because the row
   an independent OR of the two gates gets wrong (connected-but-deaf plus
   offline-but-fresh) is the whole reason the rule is shaped this way;
@@ -25,10 +25,10 @@ tests pin what the integration does with that:
   state so nothing has to be enabled to see it; and
 * **receiver removal** -- deleting a receiver takes its own device and its signal
   entities, keeps every merged device and its history, and leaves a device only
-  that receiver ever heard unavailable rather than deleted;
-* **the merged candidate list** -- a sensor two receivers hear is ONE row on the
+  that receiver ever received unavailable rather than deleted;
+* **the merged candidate list** -- a sensor two receivers receive is ONE row on the
   add-device page, showing the last frame to *arrive* (no debounce, unlike the
-  adopted-value rule above) and naming who heard it, with each receiver's
+  adopted-value rule above) and naming who received it, with each receiver's
   replay / backlog gate applied before the merge and the candidate cap applied
   after it; and
 * **location-scoped adoption** -- adopting or ignoring a device once applies to
@@ -278,7 +278,7 @@ async def test_a_clearly_newer_frame_advances_the_value(hass):
 
 
 async def test_a_near_duplicate_from_the_other_receiver_applies_exactly_once(hass):
-    """The same transmission heard twice moves the value once: first wins.
+    """The same transmission received twice moves the value once: first wins.
 
     The second receiver's copy carries a slightly different decoded value here
     purely so the assertion can *see* which one was taken; a real pair would
@@ -590,11 +590,13 @@ def _merged_entity(hass, location):
 @pytest.mark.parametrize(
     ("attic", "garage", "expected"),
     [
-        # (connected, heard-recently) per receiver -> merged availability.
+        # (connected, received-recently) per receiver -> merged availability.
         pytest.param((True, True), (True, True), True, id="both-vouch"),
         pytest.param((True, True), (False, True), True, id="attic-vouches-alone"),
         pytest.param((False, True), (True, True), True, id="garage-vouches-alone"),
-        pytest.param((True, True), (True, False), True, id="garage-deaf-attic-hears"),
+        pytest.param(
+            (True, True), (True, False), True, id="garage-deaf-attic-receives"
+        ),
         # The bug the naive merge introduces: "some receiver connected" AND "some
         # last_seen fresh" both hold, yet no single receiver can hear the device.
         pytest.param(
@@ -608,12 +610,12 @@ def _merged_entity(hass, location):
 async def test_merged_availability_is_the_or_of_per_receiver_vouches(
     hass, attic, garage, expected
 ):
-    """A device is available exactly while some receiver both hears and is heard.
+    """A device is available exactly while some receiver both receives and is received.
 
     The cross-product is spelled out rather than sampled because the whole point
     of evaluating the pair per receiver is the one row an independent OR of the
     two gates gets wrong: a connected receiver that is deaf to the sensor plus an
-    offline receiver that heard it a minute ago satisfies "a receiver is
+    offline receiver that received it a minute ago satisfies "a receiver is
     connected" and "a last_seen is fresh" while nothing can actually hear the
     device.
     """
@@ -681,7 +683,7 @@ async def test_the_running_aggregator_is_found_by_its_location_id(hass):
     )
 
 
-async def test_a_receiver_that_never_heard_the_device_cannot_vouch(hass):
+async def test_a_receiver_that_never_received_the_device_cannot_vouch(hass):
     """No ``last_seen`` at all is not "fresh", however healthy the socket is."""
     location = await _setup_two_receivers(hass)
     entity = _merged_entity(hass, location)
@@ -695,7 +697,7 @@ async def test_never_expire_still_needs_a_connected_receiver(hass):
     """The never-expire exemption is from silence, not from the transport.
 
     An event-driven device never expires on silence, but a receiver with its
-    socket down hears nothing at all, so it cannot vouch -- and with no other
+    socket down receives nothing at all, so it cannot vouch -- and with no other
     receiver the merged device is unavailable. The exemption itself is unchanged:
     reconnect the receiver and the same stale timestamp vouches again.
     """
@@ -775,7 +777,7 @@ async def test_the_non_building_receivers_edge_is_the_one_that_flips_it(hass):
     with freeze_time(_NOW):
         _feed(garage, _frame(21.4, 0))
         await hass.async_block_till_done()
-        # Only garage has heard it; attic holds nothing but its startup baseline,
+        # Only garage has received it; attic holds nothing but its startup baseline,
         # which is cleared here so garage is unambiguously the sole voucher.
         attic.last_seen.pop(_DEVICE_KEY, None)
         assert hass.states.get(eid).state == "21.4"
@@ -786,7 +788,7 @@ async def test_the_non_building_receivers_edge_is_the_one_that_flips_it(hass):
 
 
 async def test_a_link_entity_reads_only_its_own_receiver(hass):
-    """``RSSI Attic`` goes unavailable with Attic, whatever Garage still hears.
+    """``RSSI Attic`` goes unavailable with Attic, whatever Garage still receives.
 
     The merged OR would be wrong here: another receiver hearing the sensor says
     nothing about whether *this* receiver's signal reading is current.
@@ -983,7 +985,7 @@ async def test_one_receivers_frame_never_moves_the_others_signal_reading(hass):
         await hass.async_block_till_done()
         assert hass.states.get(attic_eid).state == "-62.0"
 
-        # The same transmission, heard by the other receiver a second later and
+        # The same transmission, received by the other receiver a second later and
         # much more weakly. The temperature is deduped away; the RSSI is not
         # shared.
         _feed(garage, _frame(21.4, 11, rssi=-89.0))
@@ -996,7 +998,7 @@ async def test_one_receivers_frame_never_moves_the_others_signal_reading(hass):
 async def test_the_coverage_map_serves_the_comparison_without_any_entity(hass):
     """The A-vs-B comparison comes off aggregator state, entities all disabled.
 
-    That is what lets the panel show "heard by Attic (-62) / Garage (-89)" while
+    That is what lets the panel show "received by Attic (-62) / Garage (-89)" while
     ``rssi`` / ``snr`` stay disabled-by-default.
     """
     location = await _setup_two_receivers(hass)
@@ -1025,7 +1027,7 @@ async def test_the_coverage_map_serves_the_comparison_without_any_entity(hass):
 
 
 async def test_coverage_distinguishes_offline_from_deaf(hass):
-    """ "Garage is down" and "Garage cannot hear this sensor" are different answers."""
+    """ "Garage is down" and "Garage cannot receive this sensor" are different answers."""
     location = await _setup_two_receivers(hass)
     aggregator = hass.data[DOMAIN][DATA_AGGREGATOR][location.entry_id]
     attic, garage = _coordinators(hass, location)
@@ -1033,7 +1035,7 @@ async def test_coverage_distinguishes_offline_from_deaf(hass):
         _feed(attic, _frame(21.4, 0, rssi=-62.0))
         await hass.async_block_till_done()
 
-    # Garage is up but has never heard this sensor: connected, does not vouch.
+    # Garage is up but has never received this sensor: connected, does not vouch.
     by_receiver = {e.receiver_id: e for e in aggregator.coverage(_DEVICE_KEY)}
     deaf = by_receiver[receiver_id(location, 1)]
     assert (deaf.connected, deaf.vouches, deaf.last_seen, deaf.rssi) == (
@@ -1093,7 +1095,7 @@ _GARAGE_ONLY_KEY = "Acurite-606TX-77"
 
 
 async def _setup_for_removal(hass):
-    """Two receivers; one sensor both hear, one only the garage ever hears."""
+    """Two receivers; one sensor both hear, one only the garage ever receives."""
     location = build_receiver_entry(
         availability_timeout=600,
         devices={
@@ -1252,7 +1254,7 @@ async def test_a_device_only_the_removed_receiver_heard_goes_unavailable_not_del
 
     # The surviving receiver baselines a missing last_seen to "now" on add
     # ("restore then time out"), so the honest answer arrives once that elapses:
-    # no remaining receiver has ever heard this sensor, so none can vouch.
+    # no remaining receiver has ever received this sensor, so none can vouch.
     with freeze_time(dt_util.utcnow() + timedelta(seconds=6000)):
         assert entity.available is False
 
@@ -1300,7 +1302,7 @@ def _heard(
     )
 
 
-async def test_one_sensor_heard_by_both_receivers_is_one_candidate(hass):
+async def test_one_sensor_received_by_both_receivers_is_one_candidate(hass):
     """Two receivers, one sensor, ONE row to approve.
 
     The regression the union exists to prevent: without the merge the same
@@ -1322,8 +1324,8 @@ async def test_one_sensor_heard_by_both_receivers_is_one_candidate(hass):
 
     candidates = merged_candidates(hass, location)
     assert [candidate.key for candidate in candidates] == [_CANDIDATE_KEY]
-    # The location heard it twice, which is the count a user judges a candidate
-    # by -- a real sensor keeps checking in, a bad decode is heard once.
+    # The location received it twice, which is the count a user judges a candidate
+    # by -- a real sensor keeps checking in, a bad decode is received once.
     assert candidates[0].record.count == 2
     assert candidates[0].record.first_seen == _dt(0)
     assert candidates[0].record.last_seen == _dt(1)
@@ -1384,7 +1386,7 @@ async def test_the_merged_row_records_which_receivers_heard_it(hass):
     The aggregator's ``coverage`` map cannot answer this: it is fed by the
     per-device dispatch, and a device nobody has adopted dispatches nothing. So
     the candidate's own records supply it -- and only the receivers that actually
-    heard the sensor appear, because before adoption that is the whole question.
+    received the sensor appear, because before adoption that is the whole question.
     """
     location = await _setup_two_receivers(hass)
     attic, garage = _coordinators(hass, location)
@@ -1419,7 +1421,7 @@ async def test_a_replayed_or_backlog_frame_never_joins_the_merge(hass):
     Each receiver classifies its own frames against its own connection, so the
     gate cannot move to the merge without losing what it is measuring. Applying
     it first is what keeps one receiver's reconnect from refilling the *location's*
-    candidate list with devices that were heard and dismissed hours ago.
+    candidate list with devices that were received and dismissed hours ago.
     """
     location = await _setup_two_receivers(hass)
     attic, garage = _coordinators(hass, location)
@@ -1436,7 +1438,7 @@ async def test_a_replayed_or_backlog_frame_never_joins_the_merge(hass):
     assert garage.pending == {}
     candidate = merged_candidate(hass, location, _CANDIDATE_KEY)
     assert candidate is not None
-    # One row, from the receiver that genuinely heard it, with none of the
+    # One row, from the receiver that genuinely received it, with none of the
     # backlog's values anywhere in it.
     assert candidate.receivers == (receiver_id(location, 0),)
     assert candidate.record.count == 1
@@ -1453,7 +1455,7 @@ async def test_the_candidate_cap_is_enforced_on_the_merged_list(hass):
     be holding 601 of them.
 
     The eviction is coldest-first across the merge, so the key both receivers
-    heard *first* goes, and it goes from **both** of their maps -- leaving it in
+    received *first* goes, and it goes from **both** of their maps -- leaving it in
     one would put the row straight back on the next merge.
     """
     location = await _setup_two_receivers(hass)
@@ -1483,7 +1485,7 @@ async def test_an_evicted_candidate_says_so_in_the_log(hass, caplog):
     """The merged eviction names the key it dropped and the cap that forced it.
 
     A candidate that disappears from the add-device page with nothing in the log
-    is indistinguishable from one that was never heard, which is the first thing
+    is indistinguishable from one that was never received, which is the first thing
     a "my sensor never shows up" report has to rule out -- and the *merged*
     eviction is the one with no other explanation, because neither receiver is
     anywhere near its own ceiling here. The record is matched to
@@ -1514,7 +1516,7 @@ async def test_an_evicted_candidate_says_so_in_the_log(hass, caplog):
 
 
 async def test_the_candidate_list_announces_on_one_location_scoped_signal(hass):
-    """One list, one signal -- whichever receiver heard the device.
+    """One list, one signal -- whichever receiver received the device.
 
     The panel subscribes once per location, so both receivers announce on the
     *location's* signal rather than each on its own: a subscriber has exactly one
@@ -1586,9 +1588,9 @@ async def test_candidates_are_offered_most_recently_discovered_first(hass):
 
     The panel draws a card per candidate and re-renders every few seconds, and
     the options form renders the same list, so the order is decided once -- by
-    when the *location* first heard each device, which (unlike last-seen) does
+    when the *location* first received each device, which (unlike last-seen) does
     not move every time a sensor transmits. The key breaks a tie so two devices
-    first heard in the same instant still have a stable order.
+    first received in the same instant still have a stable order.
     """
     location = await _setup_two_receivers(hass)
     attic, garage = _coordinators(hass, location)
@@ -1598,7 +1600,7 @@ async def test_candidates_are_offered_most_recently_discovered_first(hass):
     with freeze_time(_dt(1)):
         _heard(garage, key="Bresser-3CH-2", model="Bresser-3CH")
     with freeze_time(_dt(2)):
-        # Heard in the same instant by different receivers: the tie-break is the
+        # Received in the same instant by different receivers: the tie-break is the
         # key, not whichever map was iterated first.
         _heard(attic, key="Bresser-3CH-4", model="Bresser-3CH")
         _heard(garage, key="Bresser-3CH-3", model="Bresser-3CH")
@@ -1689,7 +1691,7 @@ def _entity_ids_for(hass, location, device_key) -> list[str]:
 
 
 async def test_adopting_once_adds_the_device_for_the_whole_location(hass):
-    """One click, one device -- not one per receiver that heard the sensor."""
+    """One click, one device -- not one per receiver that received the sensor."""
     location = await _setup_two_receivers(hass)
     attic, garage = _coordinators(hass, location)
 
@@ -1702,7 +1704,7 @@ async def test_adopting_once_adds_the_device_for_the_whole_location(hass):
     with freeze_time(_dt(2)):
         result = await async_adopt_devices(hass, location, [_CANDIDATE_KEY])
         await hass.async_block_till_done()
-        # Seeded from what was actually heard, so the device arrives carrying a
+        # Seeded from what was actually received, so the device arrives carrying a
         # real reading rather than an unavailable placeholder waiting for the
         # next transmission.
         entity_ids = _entity_ids_for(hass, location, _CANDIDATE_KEY)
@@ -1728,7 +1730,7 @@ async def test_adopting_once_adds_the_device_for_the_whole_location(hass):
 
 
 async def test_adopting_seeds_from_the_merged_record(hass):
-    """The device is built from what the *location* heard, not one receiver.
+    """The device is built from what the *location* received, not one receiver.
 
     A field only the garage ever decoded still creates its entity, because the
     record adoption seeds from is the merged one the user was looking at.
@@ -1749,7 +1751,7 @@ async def test_adopting_seeds_from_the_merged_record(hass):
     assert len(_entity_ids_for(hass, location, _CANDIDATE_KEY)) == 2
 
 
-async def test_adopting_reaches_a_receiver_that_never_heard_the_device(hass):
+async def test_adopting_reaches_a_receiver_that_never_received_the_device(hass):
     """The deaf receiver adopts the key too, and stops re-queueing the sensor.
 
     Otherwise the first frame it ever decodes for an already-added device would
@@ -1765,8 +1767,8 @@ async def test_adopting_reaches_a_receiver_that_never_heard_the_device(hass):
     await hass.async_block_till_done()
 
     assert _CANDIDATE_KEY in garage.adopted
-    # No liveness is invented for a receiver that has not heard it: a faked
-    # last_seen would let the garage vouch for a sensor it cannot hear.
+    # No liveness is invented for a receiver that has not received it: a faked
+    # last_seen would let the garage vouch for a sensor it cannot receive.
     assert _CANDIDATE_KEY not in garage.last_seen
 
     with freeze_time(_dt(1)):
@@ -1856,7 +1858,7 @@ async def test_ignore_reads_both_halves_of_the_locations_adopted_answer(hass):
 
     The two disagree in both directions for a beat: a device adopted a moment ago
     is in the mirrors before the entry write lands, and a device adopted in an
-    earlier session is in the stored map before any receiver has heard it this
+    earlier session is in the stored map before any receiver has received it this
     process. Reading only one of them would let an ignore land on an adopted
     device -- a persisted contradiction the event path would then ignore, since
     it checks ``adopted`` first.
