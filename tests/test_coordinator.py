@@ -31,7 +31,7 @@ import pytest
 
 from custom_components.rtl_433.const import signal_device_update, signal_pending_update
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
-from custom_components.rtl_433.coordinator._events import _MAX_PENDING_CANDIDATES
+from custom_components.rtl_433.coordinator._events import MAX_PENDING_CANDIDATES
 from homeassistant.util import dt as dt_util
 from tests.conftest import receiver_subentry
 
@@ -328,7 +328,7 @@ def test_forget_device_evicts_runtime_state(hass, coordinator):
         coordinator._on_client_event(_event())
     assert key not in coordinator.devices
     assert coordinator.pending[key].count == 1
-    assert _dispatched(dispatch) == [signal_pending_update(coordinator.receiver_id)]
+    assert _dispatched(dispatch) == [signal_pending_update(coordinator.entry.entry_id)]
 
     # forget on an unknown key is a safe no-op.
     coordinator.forget_device("nonexistent-key")
@@ -445,7 +445,7 @@ def test_pending_candidate_cap_is_the_documented_value():
     above what a busy receiver hears, and the whole point is that it is generous
     enough never to touch a real install.
     """
-    assert _MAX_PENDING_CANDIDATES == 512
+    assert MAX_PENDING_CANDIDATES == 512
 
 
 def _assert_nothing_tracks(coordinator, key):
@@ -484,21 +484,21 @@ def test_spurious_decodes_do_not_grow_the_list_without_bound(hass, coordinator):
     every one would be rendered into the payload pushed to every open panel.
     """
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES + 10)
+        _flood(coordinator, MAX_PENDING_CANDIDATES + 10)
 
     # Exactly at the cap: dropping further would discard candidates nothing
     # asked us to discard.
-    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert len(coordinator.pending) == MAX_PENDING_CANDIDATES
     assert "Noise-0" not in coordinator.pending
-    assert f"Noise-{_MAX_PENDING_CANDIDATES + 9}" in coordinator.pending
+    assert f"Noise-{MAX_PENDING_CANDIDATES + 9}" in coordinator.pending
 
 
 def test_nothing_is_dropped_at_exactly_the_cap(hass, coordinator):
     """The ceiling is a maximum to stay at, not one to fall below."""
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES)
+        _flood(coordinator, MAX_PENDING_CANDIDATES)
 
-    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert len(coordinator.pending) == MAX_PENDING_CANDIDATES
     assert "Noise-0" in coordinator.pending
 
 
@@ -510,7 +510,7 @@ def test_a_candidate_heard_again_is_no_longer_the_coldest(hass, coordinator):
     of one that stopped long ago.
     """
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES)
+        _flood(coordinator, MAX_PENDING_CANDIDATES)
         # The oldest key transmits again, so the *second* oldest is now coldest.
         coordinator._on_client_event(_event(key="Noise-0", model="Noise"))
         coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
@@ -527,12 +527,12 @@ def test_the_candidate_just_heard_is_never_the_one_dropped(hass, coordinator):
     most likely waiting to see.
     """
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES)
+        _flood(coordinator, MAX_PENDING_CANDIDATES)
         coordinator._on_client_event(_event(key="Noise-fresh", model="Noise"))
 
     assert "Noise-fresh" in coordinator.pending
     assert "Noise-0" not in coordinator.pending
-    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert len(coordinator.pending) == MAX_PENDING_CANDIDATES
 
 
 def test_a_dropped_candidate_leaves_nothing_behind(hass, coordinator):
@@ -542,7 +542,7 @@ def test_a_dropped_candidate_leaves_nothing_behind(hass, coordinator):
     only ever supposed to exist in ``pending``, and this is what says so.
     """
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES + 1)
+        _flood(coordinator, MAX_PENDING_CANDIDATES + 1)
 
     _assert_nothing_tracks(coordinator, "Noise-0")
 
@@ -551,12 +551,12 @@ def test_dropping_a_candidate_logs_the_key_and_the_cap(hass, coordinator, caplog
     """The DEBUG line names what went and why, or it explains nothing."""
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
     with patch(DISPATCH):
-        _flood(coordinator, _MAX_PENDING_CANDIDATES + 1)
+        _flood(coordinator, MAX_PENDING_CANDIDATES + 1)
 
     lines = [m for m in caplog.messages if m.startswith("rtl_433 dropping the coldest")]
     assert len(lines) == 1
     assert "Noise-0" in lines[0]
-    assert str(_MAX_PENDING_CANDIDATES) in lines[0]
+    assert str(MAX_PENDING_CANDIDATES) in lines[0]
 
 
 def test_adopted_devices_are_out_of_the_caps_reach(hass, coordinator):
@@ -573,12 +573,12 @@ def test_adopted_devices_are_out_of_the_caps_reach(hass, coordinator):
 
     with patch(DISPATCH):
         coordinator._on_client_event(_event(key=adopted_key))
-        _flood(coordinator, _MAX_PENDING_CANDIDATES + 10)
+        _flood(coordinator, MAX_PENDING_CANDIDATES + 10)
 
     assert adopted_key in coordinator.devices
     assert adopted_key in coordinator.last_seen
     assert adopted_key not in coordinator.pending
-    assert len(coordinator.pending) == _MAX_PENDING_CANDIDATES
+    assert len(coordinator.pending) == MAX_PENDING_CANDIDATES
 
 
 def test_forget_device_clears_the_log_once_memos(hass, coordinator):

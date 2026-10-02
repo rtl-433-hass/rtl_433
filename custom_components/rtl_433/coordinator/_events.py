@@ -53,12 +53,21 @@ from homeassistant.util import dt as dt_util
 
 from ..const import LOGGER
 
-# Hard cap on how many candidates one receiver holds at once. "One entry per device
-# the receiver hears" is not self-limiting: 433 MHz is a shared band that
-# produces spurious decodes with arbitrary ids, and several real protocols roll
-# their id on a battery change, so an uncapped list grows for the life of the
-# config entry -- and every entry in it is rendered into the payload pushed to
-# every open panel.
+# Hard cap on how many candidates are held at once. "One entry per device the
+# receiver hears" is not self-limiting: 433 MHz is a shared band that produces
+# spurious decodes with arbitrary ids, and several real protocols roll their id
+# on a battery change, so an uncapped list grows for the life of the config
+# entry -- and every entry in it is rendered into the payload pushed to every
+# open panel.
+#
+# The cap that actually binds is applied to the location's **merged** candidate
+# list (``aggregator.enforce_pending_cap``), so a location cannot hold N x this
+# many candidates by having N receivers: the same 512 covers all of them. This
+# module keeps applying it per receiver as well, which is what bounds a
+# coordinator running before its location's aggregator has started (or one
+# driven on its own by a test). Since every receiver's map is a subset of the
+# merged list, the merged enforcement is the one that fires first in a running
+# location and the per-receiver pass is the floor underneath it.
 #
 # Only candidates are capped. A device the user has adopted has entities behind
 # it and keeps its state for as long as it exists in Home Assistant; it is never
@@ -69,7 +78,7 @@ from ..const import LOGGER
 # Distinct from ``pyrtl_433.client._MAX_TRACKED_DEVICES``, the identically-sized
 # cap the library puts on its own replay bookkeeping for the same reason.
 # Raising one does not raise the other.
-_MAX_PENDING_CANDIDATES = 512
+MAX_PENDING_CANDIDATES = 512
 
 
 @dataclass(slots=True)
@@ -212,12 +221,12 @@ class _EventProcessingMixin:
         The frame just taken is safe by construction: it has just been moved to
         the fresh end, and the cap is far above one.
         """
-        while len(self.pending) > _MAX_PENDING_CANDIDATES:
+        while len(self.pending) > MAX_PENDING_CANDIDATES:
             key, _record = self.pending.popitem(last=False)
             LOGGER.debug(
                 "rtl_433 dropping the coldest candidate %s (over the %d key cap)",
                 key,
-                _MAX_PENDING_CANDIDATES,
+                MAX_PENDING_CANDIDATES,
             )
 
     def _trace_unmapped_fields(self, key: str, field_keys: set[str]) -> None:
