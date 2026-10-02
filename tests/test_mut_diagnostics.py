@@ -63,7 +63,7 @@ class _FakeCoordinator:
         self.device_fields: dict = {}
         self.last_seen: dict = {}
         self.available: dict = {}
-        # Hub state as of the last event frame; ``None`` before the first one.
+        # Receiver state as of the last event frame; ``None`` before the first one.
         self.time_precision = TimePrecision.SECOND
 
     @property
@@ -130,10 +130,10 @@ def test_to_redact_does_not_contain_path() -> None:
 
 
 async def test_resolve_coordinator_returns_coordinator_when_present(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """_resolve_coordinator returns the coordinator stored under hass.data[DOMAIN][entry_id]."""
-    entry = hub_entry_builder(entry_id="test-entry-123")
+    entry = receiver_entry_builder(entry_id="test-entry-123")
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     hass.data[DOMAIN] = {entry.entry_id: coordinator}
@@ -142,10 +142,10 @@ async def test_resolve_coordinator_returns_coordinator_when_present(
 
 
 async def test_resolve_coordinator_returns_none_when_domain_absent(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """_resolve_coordinator returns None when DOMAIN not in hass.data."""
-    entry = hub_entry_builder(entry_id="test-entry-456")
+    entry = receiver_entry_builder(entry_id="test-entry-456")
     entry.add_to_hass(hass)
     # Ensure DOMAIN is not in hass.data
     hass.data.pop(DOMAIN, None)
@@ -154,10 +154,10 @@ async def test_resolve_coordinator_returns_none_when_domain_absent(
 
 
 async def test_resolve_coordinator_returns_none_when_entry_absent(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """_resolve_coordinator returns None when entry_id not in domain data."""
-    entry = hub_entry_builder(entry_id="test-entry-789")
+    entry = receiver_entry_builder(entry_id="test-entry-789")
     entry.add_to_hass(hass)
     hass.data[DOMAIN] = {"other-entry": _FakeCoordinator()}
     result = _resolve_coordinator(hass, entry)
@@ -165,10 +165,10 @@ async def test_resolve_coordinator_returns_none_when_entry_absent(
 
 
 async def test_resolve_coordinator_uses_domain_key(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Coordinator must be stored under DOMAIN, not any other key."""
-    entry = hub_entry_builder(entry_id="test-entry-domain")
+    entry = receiver_entry_builder(entry_id="test-entry-domain")
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     # Store under a wrong key — must not be found
@@ -265,30 +265,30 @@ def test_unmatched_field_keys_skip_keys_is_exact_set() -> None:
 
 
 async def test_diag_coordinator_absent_has_false_flag(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """coordinator_loaded must be False when coordinator is absent."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["coordinator_loaded"] is False
 
 
 async def test_diag_coordinator_absent_has_no_connection_block(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """No 'connection' key when coordinator is absent."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert "connection" not in diag
 
 
 async def test_diag_coordinator_absent_entry_block_has_entry_id(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """entry block must include key 'entry_id' with the entry's id value."""
-    entry = hub_entry_builder(entry_id="specific-id-for-test")
+    entry = receiver_entry_builder(entry_id="specific-id-for-test")
     entry.add_to_hass(hass)
     diag = await async_get_config_entry_diagnostics(hass, entry)
     # Must use key "entry_id" not "XXentry_idXX" or "ENTRY_ID"
@@ -297,10 +297,10 @@ async def test_diag_coordinator_absent_entry_block_has_entry_id(
 
 
 async def test_diag_coordinator_absent_entry_block_has_title(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """entry block must include key 'title' with the entry's title value."""
-    entry = hub_entry_builder(host="somehost.local")
+    entry = receiver_entry_builder(host="somehost.local")
     entry.add_to_hass(hass)
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert "title" in diag["entry"]
@@ -308,10 +308,10 @@ async def test_diag_coordinator_absent_entry_block_has_title(
 
 
 async def test_diag_coordinator_absent_entry_block_has_options(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """entry block must include key 'options' with the entry's options dict."""
-    entry = hub_entry_builder(options={"some_opt": 42})
+    entry = receiver_entry_builder(options={"some_opt": 42})
     entry.add_to_hass(hass)
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert "options" in diag["entry"]
@@ -319,7 +319,7 @@ async def test_diag_coordinator_absent_entry_block_has_options(
 
 
 async def test_diag_coordinator_absent_uses_domain_key(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Domain data must be read with DOMAIN, not None or other key.
 
@@ -329,7 +329,7 @@ async def test_diag_coordinator_absent_uses_domain_key(
     though it shouldn't matter here. Validate the coordinator is correctly
     resolved (not found) so the absent path fires.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     # Store coordinator under DOMAIN — if DOMAIN key is wrong, None is returned
     coordinator = _FakeCoordinator()
@@ -340,7 +340,7 @@ async def test_diag_coordinator_absent_uses_domain_key(
 
 
 async def test_diag_data_library_key_used(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Registry must be read using the per-entry DATA_ENTRY_LIBRARY key, not None.
 
@@ -350,7 +350,7 @@ async def test_diag_data_library_key_used(
     yields a None registry so every seen field appears unmatched, whereas the real
     code excludes fields that resolve against the registry.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.seen_fields = {"synthetic_test_known_field_xyz"}
@@ -377,10 +377,10 @@ async def test_diag_data_library_key_used(
 
 
 async def test_diag_coordinator_loaded_true(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """coordinator_loaded must be True when coordinator is present."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     _setup_hass_with_coordinator(hass, entry, coordinator)
@@ -389,13 +389,13 @@ async def test_diag_coordinator_loaded_true(
 
 
 async def test_diag_connected_key_exact_name_and_value(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """diagnostics['connected'] must equal coordinator.connected (True).
 
     Kills mutmut_56 (value=None), mutmut_57 ('XXconnectedXX'), mutmut_58 ('CONNECTED').
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.connected = True
@@ -406,10 +406,10 @@ async def test_diag_connected_key_exact_name_and_value(
 
 
 async def test_diag_connected_false_value(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """diagnostics['connected'] must equal coordinator.connected (False)."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.connected = False
@@ -419,14 +419,14 @@ async def test_diag_connected_false_value(
 
 
 async def test_diag_availability_timeout_key_exact_name_and_value(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """diagnostics['availability_timeout'] must equal coordinator.availability_timeout.
 
     Kills mutmut_62 (value=None), mutmut_63 ('XXavailability_timeoutXX'),
     mutmut_64 ('AVAILABILITY_TIMEOUT').
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.availability_timeout = 300
@@ -437,14 +437,14 @@ async def test_diag_availability_timeout_key_exact_name_and_value(
 
 
 async def test_diag_seen_field_keys_exact_name_sorted(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """diagnostics['seen_field_keys'] must be sorted(coordinator.seen_fields).
 
     Kills mutmut_86 (value=None), mutmut_87 ('XXseen_field_keysXX'),
     mutmut_88 ('SEEN_FIELD_KEYS').
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.seen_fields = {"z_raw", "a_raw", "m_raw"}
@@ -460,13 +460,13 @@ async def test_diag_seen_field_keys_exact_name_sorted(
 
 
 async def test_diag_connection_secure_key_exact(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """connection block must use key 'secure', not 'XXsecureXX' or 'SECURE'.
 
     Kills mutmut_49, mutmut_50.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.secure = True
@@ -478,10 +478,10 @@ async def test_diag_connection_secure_key_exact(
 
 
 async def test_diag_connection_port_present_and_not_redacted(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """connection block must include port (not redacted)."""
-    entry = hub_entry_builder(port=9999)
+    entry = receiver_entry_builder(port=9999)
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.port = 9999
@@ -492,10 +492,10 @@ async def test_diag_connection_port_present_and_not_redacted(
 
 
 async def test_diag_connection_path_present_and_not_redacted(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """connection block must include path (not redacted)."""
-    entry = hub_entry_builder(path="/custom/ws")
+    entry = receiver_entry_builder(path="/custom/ws")
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.path = "/custom/ws"
@@ -506,10 +506,10 @@ async def test_diag_connection_path_present_and_not_redacted(
 
 
 async def test_diag_connection_host_is_redacted(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Host must be redacted in the connection block."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.host = "private-host.internal"
@@ -519,10 +519,10 @@ async def test_diag_connection_host_is_redacted(
 
 
 async def test_diag_connection_ws_url_is_redacted(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """ws_url must be redacted (it embeds the host)."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.host = "private-host.internal"
@@ -536,13 +536,15 @@ async def test_diag_connection_ws_url_is_redacted(
 # ---------------------------------------------------------------------------
 
 
-async def test_diag_devices_key_is_dict(hass: HomeAssistant, hub_entry_builder) -> None:
+async def test_diag_devices_key_is_dict(
+    hass: HomeAssistant, receiver_entry_builder
+) -> None:
     """diagnostics['devices'] must be a dict (not None).
 
     Kills mutmut_65 (devices=None), mutmut_66 ('XXdevicesXX'),
     mutmut_67 ('DEVICES').
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.devices = {}
@@ -553,13 +555,13 @@ async def test_diag_devices_key_is_dict(hass: HomeAssistant, hub_entry_builder) 
 
 
 async def test_diag_devices_model_key_exact(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Device entry must use key 'model', not 'XXmodelXX' or 'MODEL'.
 
     Kills mutmut_68, mutmut_69.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     normalized = _FakeNormalized(model="Acurite-606TX", identity={"id": 42})
@@ -575,13 +577,13 @@ async def test_diag_devices_model_key_exact(
 
 
 async def test_diag_devices_identity_key_exact(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Device entry must use key 'identity', not 'XXidentityXX' or 'IDENTITY'.
 
     Kills mutmut_70, mutmut_71.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     identity = {"id": 7, "channel": 2}
@@ -598,7 +600,7 @@ async def test_diag_devices_identity_key_exact(
 
 
 async def test_diag_devices_fields_key_exact_and_sorted(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Device entry must use key 'fields' with sorted device_fields value.
 
@@ -607,7 +609,7 @@ async def test_diag_devices_fields_key_exact_and_sorted(
     mutmut_76 (get(device_key,None)), mutmut_77 (get(set())),
     mutmut_78 (get(device_key,)).
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     normalized = _FakeNormalized(model="FooBar", identity={})
@@ -625,13 +627,13 @@ async def test_diag_devices_fields_key_exact_and_sorted(
 
 
 async def test_diag_devices_fields_empty_when_not_present(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """fields defaults to [] (from empty set) when device has no device_fields entry.
 
     Kills mutmut_76 (default=None instead of set()) and mutmut_78 (no default).
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     device_key = "DeviceWithNoFields"
@@ -647,14 +649,14 @@ async def test_diag_devices_fields_empty_when_not_present(
 
 
 async def test_diag_devices_available_key_exact_and_value(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Device entry must use key 'available' from coordinator.available[device_key].
 
     Kills mutmut_79 ('XXavailableXX'), mutmut_80 ('AVAILABLE'),
     mutmut_81 (get(None) instead of get(device_key)).
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     device_key = "SomeDevice"
@@ -671,7 +673,7 @@ async def test_diag_devices_available_key_exact_and_value(
 
 
 async def test_diag_devices_last_seen_key_exact_and_iso_format(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Device entry must use key 'last_seen' with ISO 8601 datetime string.
 
@@ -679,7 +681,7 @@ async def test_diag_devices_last_seen_key_exact_and_iso_format(
     mutmut_84 (get(None) instead of get(device_key)),
     mutmut_85 (is None instead of is not None).
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     device_key = "TimedDevice"
@@ -698,7 +700,7 @@ async def test_diag_devices_last_seen_key_exact_and_iso_format(
 
 
 async def test_diag_devices_last_seen_none_when_never_seen(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Device 'last_seen' is None when device_key not in coordinator.last_seen.
 
@@ -706,7 +708,7 @@ async def test_diag_devices_last_seen_none_when_never_seen(
     to the isoformat string when the key is ABSENT (which would crash), and
     None when the key IS present. This test verifies the None case.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     device_key = "NeverSeenDevice"
@@ -722,7 +724,7 @@ async def test_diag_devices_last_seen_none_when_never_seen(
 
 
 async def test_diag_devices_last_seen_uses_device_key_not_none(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """last_seen lookup must use device_key, not None as the key.
 
@@ -730,7 +732,7 @@ async def test_diag_devices_last_seen_uses_device_key_not_none(
     looking up None in last_seen returns None even when device_key is present,
     so last_seen would be None instead of the ISO string.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     device_key = "DeviceA"
@@ -748,14 +750,14 @@ async def test_diag_devices_last_seen_uses_device_key_not_none(
 
 
 async def test_diag_devices_available_uses_device_key_not_none(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """available lookup must use device_key, not None.
 
     mutmut_81 replaces get(device_key) with get(None). With that mutation,
     available would always be None even when device_key is present.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     device_key = "DeviceB"
@@ -772,14 +774,14 @@ async def test_diag_devices_available_uses_device_key_not_none(
 
 
 async def test_diag_devices_fields_uses_device_key_not_none(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """device_fields.get must use device_key, not None.
 
     mutmut_75 replaces get(device_key, set()) with get(None, set()),
     returning empty list even when device_key has fields.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     device_key = "dev01"
@@ -801,7 +803,7 @@ async def test_diag_devices_fields_uses_device_key_not_none(
 
 
 async def test_diag_unmatched_field_keys_uses_registry_not_none(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """unmatched_field_keys must be called with registry, not None.
 
@@ -810,7 +812,7 @@ async def test_diag_unmatched_field_keys_uses_registry_not_none(
     field in a custom registry that is NOT in the shipped library so the
     mutation changes the result.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.seen_fields = {"synthetic_test_known_field_xyz"}
@@ -834,10 +836,10 @@ async def test_diag_unmatched_field_keys_uses_registry_not_none(
 
 
 async def test_diag_full_structure_coordinator_present(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Full structure test for coordinator-present path with a device."""
-    entry = hub_entry_builder(host="myhost.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="myhost.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     coordinator = _FakeCoordinator()
     coordinator.host = "myhost.local"
@@ -904,10 +906,10 @@ async def test_diag_full_structure_coordinator_present(
 
 
 async def test_diag_full_structure_coordinator_absent(
-    hass: HomeAssistant, hub_entry_builder
+    hass: HomeAssistant, receiver_entry_builder
 ) -> None:
     """Full structure test for coordinator-absent path."""
-    entry = hub_entry_builder(options={"opt_key": "opt_val"})
+    entry = receiver_entry_builder(options={"opt_key": "opt_val"})
     entry.add_to_hass(hass)
     diag = await async_get_config_entry_diagnostics(hass, entry)
 

@@ -216,9 +216,11 @@ async def _device_settings(hass, entry, device_key: str):
 DEVICE_KEY = "Acurite-606TX-42"
 
 
-def _entry_with_device(hub_entry_builder, record: dict[str, Any] | None = None, **kw):
+def _entry_with_device(
+    receiver_entry_builder, record: dict[str, Any] | None = None, **kw
+):
     """A hub whose devices map holds exactly ``DEVICE_KEY``."""
-    return hub_entry_builder(
+    return receiver_entry_builder(
         devices={
             DEVICE_KEY: record
             or {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
@@ -227,7 +229,9 @@ def _entry_with_device(hub_entry_builder, record: dict[str, Any] | None = None, 
     )
 
 
-async def test_device_settings_names_the_device_it_is_about(hass, hub_entry_builder):
+async def test_device_settings_names_the_device_it_is_about(
+    hass, receiver_entry_builder
+):
     """The settings form has no other clue which device it is editing.
 
     The picker is a separate step, so by the time these knobs are on screen the
@@ -236,7 +240,7 @@ async def test_device_settings_names_the_device_it_is_about(hass, hub_entry_buil
     Acurites has no way to tell which one they are about to give a ten-minute
     timeout to.
     """
-    entry = _entry_with_device(hub_entry_builder)
+    entry = _entry_with_device(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _device_settings(hass, entry, DEVICE_KEY)
@@ -249,7 +253,7 @@ async def test_device_settings_names_the_device_it_is_about(hass, hub_entry_buil
 
 
 async def test_device_settings_offers_every_commodity_including_none(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The commodity dropdown must offer "none", or a calibration is unclearable.
 
@@ -260,7 +264,7 @@ async def test_device_settings_offers_every_commodity_including_none(
     display text up from that, and a picker that lost the key would show a user
     four untranslated strings.
     """
-    entry = _entry_with_device(hub_entry_builder)
+    entry = _entry_with_device(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _device_settings(hass, entry, DEVICE_KEY)
@@ -275,7 +279,7 @@ async def test_device_settings_offers_every_commodity_including_none(
 
 
 async def test_device_settings_pre_fills_the_stored_timeout_as_a_suggestion(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The timeout is *suggested*, not defaulted, so clearing it can mean clear it.
 
@@ -285,7 +289,7 @@ async def test_device_settings_pre_fills_the_stored_timeout_as_a_suggestion(
     absent key, which the submit path reads as "fall back to the hub default".
     """
     entry = _entry_with_device(
-        hub_entry_builder,
+        receiver_entry_builder,
         {
             CONF_MODEL: "Acurite-606TX",
             DEVICE_FIELDS: ["temperature_C"],
@@ -302,7 +306,7 @@ async def test_device_settings_pre_fills_the_stored_timeout_as_a_suggestion(
 
 
 async def test_device_settings_leaves_the_timeout_blank_when_nothing_is_stored(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A device with no override shows an empty box, not the hub's number.
 
@@ -311,7 +315,7 @@ async def test_device_settings_leaves_the_timeout_blank_when_nothing_is_stored(
     then freeze that number onto the device — so a later change to the hub
     default would silently stop applying to it.
     """
-    entry = _entry_with_device(hub_entry_builder)
+    entry = _entry_with_device(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _device_settings(hass, entry, DEVICE_KEY)
@@ -320,7 +324,7 @@ async def test_device_settings_leaves_the_timeout_blank_when_nothing_is_stored(
 
 
 async def test_device_settings_accepts_zero_as_the_never_expire_timeout(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Zero seconds means "never mark this device unavailable", and must be storable.
 
@@ -329,7 +333,7 @@ async def test_device_settings_accepts_zero_as_the_never_expire_timeout(
     sensor as unavailable. A lower bound that excluded zero would take that
     escape hatch away.
     """
-    entry = _entry_with_device(hub_entry_builder)
+    entry = _entry_with_device(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _device_settings(hass, entry, DEVICE_KEY)
@@ -343,7 +347,7 @@ async def test_device_settings_accepts_zero_as_the_never_expire_timeout(
     assert entry.data[CONF_DEVICES][DEVICE_KEY][DEVICE_TIMEOUT_OVERRIDE] == 0
 
 
-async def test_device_settings_refuses_a_negative_timeout(hass, hub_entry_builder):
+async def test_device_settings_refuses_a_negative_timeout(hass, receiver_entry_builder):
     """A negative timeout is meaningless and is rejected at the form, not stored.
 
     The watchdog compares "seconds since last seen" against this number; a
@@ -351,7 +355,7 @@ async def test_device_settings_refuses_a_negative_timeout(hass, hub_entry_builde
     keeps it out of ``entry.data`` rather than letting the coordinator discover
     it at runtime.
     """
-    entry = _entry_with_device(hub_entry_builder)
+    entry = _entry_with_device(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _device_settings(hass, entry, DEVICE_KEY)
@@ -363,7 +367,7 @@ async def test_device_settings_refuses_a_negative_timeout(hass, hub_entry_builde
 
 
 async def test_device_settings_submitted_empty_clears_the_stored_override(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Emptying the timeout box and saving is how a user gives the override back.
 
@@ -374,7 +378,7 @@ async def test_device_settings_submitted_empty_clears_the_stored_override(
     again, which is the whole point of an override being removable.
     """
     entry = _entry_with_device(
-        hub_entry_builder,
+        receiver_entry_builder,
         {
             CONF_MODEL: "Acurite-606TX",
             DEVICE_FIELDS: ["temperature_C"],
@@ -392,7 +396,7 @@ async def test_device_settings_submitted_empty_clears_the_stored_override(
 
 
 async def test_device_settings_commodity_none_clears_a_stored_calibration(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Choosing "none" is the only way to take a mis-set calibration back off.
 
@@ -402,7 +406,7 @@ async def test_device_settings_commodity_none_clears_a_stored_calibration(
     the bad reading survives the correction.
     """
     entry = _entry_with_device(
-        hub_entry_builder,
+        receiver_entry_builder,
         {
             CONF_MODEL: "Acurite-606TX",
             DEVICE_FIELDS: ["consumption_data"],
@@ -426,7 +430,7 @@ async def test_device_settings_commodity_none_clears_a_stored_calibration(
 
 
 async def test_device_settings_finishes_without_renaming_the_entry(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """An options save must not retitle the hub in the user's integrations page.
 
@@ -434,7 +438,7 @@ async def test_device_settings_finishes_without_renaming_the_entry(
     non-empty title would overwrite the hub's own title with it, so the device a
     user happened to edit last would become the hub's name.
     """
-    entry = _entry_with_device(hub_entry_builder)
+    entry = _entry_with_device(receiver_entry_builder)
     entry.add_to_hass(hass)
     title = entry.title
 
@@ -452,9 +456,9 @@ async def test_device_settings_finishes_without_renaming_the_entry(
 MOTION_KEY = "GenericMotion-X1-7"
 
 
-def _motion_entry(hub_entry_builder, **record):
+def _motion_entry(receiver_entry_builder, **record):
     """A hub with one motion-bearing device, optionally carrying overrides."""
-    return hub_entry_builder(
+    return receiver_entry_builder(
         devices={
             MOTION_KEY: {
                 CONF_MODEL: "GenericMotion-X1",
@@ -466,7 +470,7 @@ def _motion_entry(hub_entry_builder, **record):
 
 
 async def test_device_settings_accepts_a_one_second_clear_delay(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """One second is the shortest useful clear delay and must not be rejected.
 
@@ -475,7 +479,7 @@ async def test_device_settings_accepts_a_one_second_clear_delay(
     "clear" almost immediately after the last frame. A lower bound above one
     would make that unreachable through the UI.
     """
-    entry = _motion_entry(hub_entry_builder)
+    entry = _motion_entry(receiver_entry_builder)
     entry.add_to_hass(hass)
     _install_motion_library(hass)
 
@@ -491,7 +495,7 @@ async def test_device_settings_accepts_a_one_second_clear_delay(
     assert entry.options[CONF_DEVICES][MOTION_KEY][DEVICE_MOTION_CLEAR_DELAY] == 1
 
 
-async def test_device_settings_refuses_a_zero_clear_delay(hass, hub_entry_builder):
+async def test_device_settings_refuses_a_zero_clear_delay(hass, receiver_entry_builder):
     """Zero seconds would clear motion in the same instant it was detected.
 
     The delay exists because an RF motion sensor reports detections, never the
@@ -499,7 +503,7 @@ async def test_device_settings_refuses_a_zero_clear_delay(hass, hub_entry_builde
     off, so no automation could ever trigger on it. The form rejects it rather
     than storing a setting that breaks the entity.
     """
-    entry = _motion_entry(hub_entry_builder)
+    entry = _motion_entry(receiver_entry_builder)
     entry.add_to_hass(hass)
     _install_motion_library(hass)
 
@@ -512,14 +516,14 @@ async def test_device_settings_refuses_a_zero_clear_delay(hass, hub_entry_builde
 
 
 async def test_device_settings_pre_fills_the_clear_delay_from_the_stored_override(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Re-opening the form must show the delay in force, not the library default.
 
     A user who set 45 seconds and comes back to adjust it would otherwise see 90
     and, saving without touching the field, silently double their own setting.
     """
-    entry = _motion_entry(hub_entry_builder, **{DEVICE_MOTION_CLEAR_DELAY: 45})
+    entry = _motion_entry(receiver_entry_builder, **{DEVICE_MOTION_CLEAR_DELAY: 45})
     entry.add_to_hass(hass)
     _install_motion_library(hass)
 
@@ -529,7 +533,7 @@ async def test_device_settings_pre_fills_the_clear_delay_from_the_stored_overrid
 
 
 async def test_device_settings_clear_delay_falls_back_to_the_constant(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """With nothing stored the field shows the shipped default, never a blank.
 
@@ -537,7 +541,7 @@ async def test_device_settings_clear_delay_falls_back_to_the_constant(
     blank default would make the first save of a motion device fail validation
     rather than persist the sensible value the integration already ships.
     """
-    entry = _motion_entry(hub_entry_builder)
+    entry = _motion_entry(receiver_entry_builder)
     entry.add_to_hass(hass)
     _install_motion_library(hass)
 
@@ -547,7 +551,7 @@ async def test_device_settings_clear_delay_falls_back_to_the_constant(
 
 
 async def test_device_settings_hides_the_clear_delay_for_a_non_motion_device(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A thermometer must not be offered a motion setting that can never apply.
 
@@ -555,7 +559,7 @@ async def test_device_settings_hides_the_clear_delay_for_a_non_motion_device(
     temperature sensor would offer a user a setting that does nothing —  and
     persist a value into options for a device that will never read it.
     """
-    entry = _entry_with_device(hub_entry_builder)
+    entry = _entry_with_device(receiver_entry_builder)
     entry.add_to_hass(hass)
     _install_motion_library(hass)
 
@@ -565,7 +569,7 @@ async def test_device_settings_hides_the_clear_delay_for_a_non_motion_device(
 
 
 async def test_device_settings_carries_the_timeout_and_delay_through_calibration(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Choosing a commodity must not throw away the other two knobs on the form.
 
@@ -575,7 +579,7 @@ async def test_device_settings_carries_the_timeout_and_delay_through_calibration
     who calibrates a meter silently loses the availability timeout they set in
     the same breath.
     """
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             MOTION_KEY: {
                 CONF_MODEL: "GenericMotion-X1",
@@ -610,7 +614,7 @@ async def test_device_settings_carries_the_timeout_and_delay_through_calibration
 
 
 async def test_device_settings_carries_a_cleared_timeout_through_calibration(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Blanking the timeout while calibrating must clear it, not resurrect the old one.
 
@@ -618,7 +622,7 @@ async def test_device_settings_carries_a_cleared_timeout_through_calibration(
     to the stored record instead of to the submitted absence would make the
     override impossible to remove for any device the user also calibrates.
     """
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             DEVICE_KEY: {
                 CONF_MODEL: "Acurite-606TX",
@@ -645,7 +649,7 @@ async def test_device_settings_carries_a_cleared_timeout_through_calibration(
 
 
 async def test_device_settings_pre_fills_the_commodity_from_a_stored_calibration(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A device already calibrated as gas comes back to the form saying so.
 
@@ -654,7 +658,7 @@ async def test_device_settings_pre_fills_the_commodity_from_a_stored_calibration
     delete the calibration they set up earlier.
     """
     entry = _entry_with_device(
-        hub_entry_builder,
+        receiver_entry_builder,
         {
             CONF_MODEL: "Acurite-606TX",
             DEVICE_FIELDS: ["consumption_data"],
@@ -680,7 +684,9 @@ IGNORED_B = "GenericDoor-X1-88"
 IGNORED_C = "ZWeather-9-3"
 
 
-async def test_ignored_devices_lists_the_keys_alphabetically(hass, hub_entry_builder):
+async def test_ignored_devices_lists_the_keys_alphabetically(
+    hass, receiver_entry_builder
+):
     """The un-ignore picker is sorted, not in the order the user ignored things.
 
     The stored list grows in ignore order, which is meaningless months later. A
@@ -688,7 +694,7 @@ async def test_ignored_devices_lists_the_keys_alphabetically(hass, hub_entry_bui
     can only scan for it if the rows are in a predictable order, so the step
     sorts rather than rendering the raw list.
     """
-    entry = hub_entry_builder(ignored_devices=[IGNORED_C, IGNORED_A, IGNORED_B])
+    entry = receiver_entry_builder(ignored_devices=[IGNORED_C, IGNORED_A, IGNORED_B])
     entry.add_to_hass(hass)
     _install(hass, entry, _StubCoordinator())
 
@@ -702,7 +708,7 @@ async def test_ignored_devices_lists_the_keys_alphabetically(hass, hub_entry_bui
 
 
 async def test_ignored_devices_names_a_row_by_its_key_when_no_model_is_stored(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """An ignored device usually has no record, and its key must stand alone.
 
@@ -711,7 +717,7 @@ async def test_ignored_devices_names_a_row_by_its_key_when_no_model_is_stored(
     prefixed onto it would render as " (Acurite-606TX-11)", which reads like a
     bug in the picker.
     """
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={IGNORED_B: {CONF_MODEL: "GenericDoor-X1", DEVICE_FIELDS: ["closed"]}},
         ignored_devices=[IGNORED_A, IGNORED_B],
     )
@@ -727,7 +733,7 @@ async def test_ignored_devices_names_a_row_by_its_key_when_no_model_is_stored(
 
 
 async def test_ignored_devices_renders_an_empty_multi_select_list(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Nothing is already selected, and several rows can be un-ignored in one pass.
 
@@ -736,7 +742,7 @@ async def test_ignored_devices_renders_an_empty_multi_select_list(
     selecting rows would un-ignore everything for a user who just wanted to look
     at the list and press cancel-by-save.
     """
-    entry = hub_entry_builder(ignored_devices=[IGNORED_A, IGNORED_B])
+    entry = receiver_entry_builder(ignored_devices=[IGNORED_A, IGNORED_B])
     entry.add_to_hass(hass)
     _install(hass, entry, _StubCoordinator())
 
@@ -749,7 +755,7 @@ async def test_ignored_devices_renders_an_empty_multi_select_list(
 
 
 async def test_ignored_devices_submitted_with_nothing_selected_writes_nothing(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Opening the list and saving it unchanged must not un-ignore anything.
 
@@ -757,7 +763,7 @@ async def test_ignored_devices_submitted_with_nothing_selected_writes_nothing(
     only wanted to see what was on the list does. Reading an absent selection as
     anything other than "none" would empty a hub's whole ignore list by accident.
     """
-    entry = hub_entry_builder(ignored_devices=[IGNORED_A, IGNORED_B])
+    entry = receiver_entry_builder(ignored_devices=[IGNORED_A, IGNORED_B])
     entry.add_to_hass(hass)
     coordinator = _install(hass, entry, _StubCoordinator())
     coordinator.ignored = {IGNORED_A, IGNORED_B}
@@ -772,7 +778,7 @@ async def test_ignored_devices_submitted_with_nothing_selected_writes_nothing(
 
 
 async def test_ignored_devices_finish_preserves_every_unrelated_option(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Un-ignoring writes ``entry.data``; the options it hands back must be intact.
 
@@ -785,7 +791,9 @@ async def test_ignored_devices_finish_preserves_every_unrelated_option(
         CONF_MANAGE_SETTINGS: True,
         CONF_DEVICES: {IGNORED_B: {DEVICE_MOTION_CLEAR_DELAY: 42}},
     }
-    entry = hub_entry_builder(ignored_devices=[IGNORED_A, IGNORED_B], options=options)
+    entry = receiver_entry_builder(
+        ignored_devices=[IGNORED_A, IGNORED_B], options=options
+    )
     entry.add_to_hass(hass)
     _install(hass, entry, _StubCoordinator())
     snapshot = deepcopy(options)
@@ -803,7 +811,7 @@ async def test_ignored_devices_finish_preserves_every_unrelated_option(
 
 
 async def test_ignored_devices_checks_the_hub_is_loaded_before_the_empty_list(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """An unloaded hub with nothing ignored still reports the loading problem.
 
@@ -812,13 +820,13 @@ async def test_ignored_devices_checks_the_hub_is_loaded_before_the_empty_list(
     send them looking for a list that is actually there, so the coordinator guard
     is checked first.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     result = await _menu(hass, entry, "ignored_devices")
 
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "hub_not_loaded"
+    assert result["reason"] == "receiver_not_loaded"
 
 
 # --------------------------------------------------------------------------- #
@@ -835,7 +843,7 @@ GOOD_MAPPING = {
 
 
 async def test_mappings_form_offers_the_docs_link_and_no_problems_yet(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The YAML editor is unusable without the link to the schema it expects.
 
@@ -844,7 +852,7 @@ async def test_mappings_form_offers_the_docs_link_and_no_problems_yet(
     user has already got it wrong. The problems slot starts empty so the
     description does not open with a stray separator.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     result = await _menu(hass, entry, "mappings")
@@ -858,7 +866,7 @@ async def test_mappings_form_offers_the_docs_link_and_no_problems_yet(
 
 
 async def test_mappings_form_pre_fills_the_overrides_already_stored(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Editing overrides means editing them, not retyping them from scratch.
 
@@ -866,7 +874,7 @@ async def test_mappings_form_pre_fills_the_overrides_already_stored(
     make every change a full rewrite — and a user who added one field and saved
     would delete every other override on the hub.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_USER_MAPPINGS: GOOD_MAPPING}
@@ -877,7 +885,9 @@ async def test_mappings_form_pre_fills_the_overrides_already_stored(
     assert _default(result, CONF_USER_MAPPINGS) == GOOD_MAPPING
 
 
-async def test_mappings_rejection_names_the_problems_it_found(hass, hub_entry_builder):
+async def test_mappings_rejection_names_the_problems_it_found(
+    hass, receiver_entry_builder
+):
     """A rejected override has to say what was wrong with it, in the dialog.
 
     The editor holds free-form YAML, so "invalid" on its own leaves a user
@@ -888,7 +898,7 @@ async def test_mappings_rejection_names_the_problems_it_found(hass, hub_entry_bu
     lands under ``base`` because the fault is with the object as a whole rather
     than with one form field.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     snapshot = deepcopy(dict(entry.data))
 
@@ -917,7 +927,7 @@ async def test_mappings_rejection_names_the_problems_it_found(hass, hub_entry_bu
 
 
 async def test_mappings_rejection_re_renders_the_rejected_text_to_fix(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A rejected submit must not throw the user's YAML away.
 
@@ -926,7 +936,7 @@ async def test_mappings_rejection_re_renders_the_rejected_text_to_fix(
     state, and the previously stored overrides are still there to work from
     rather than an empty box.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_USER_MAPPINGS: GOOD_MAPPING}
@@ -941,7 +951,9 @@ async def test_mappings_rejection_re_renders_the_rejected_text_to_fix(
     assert _default(result, CONF_USER_MAPPINGS) == GOOD_MAPPING
 
 
-async def test_mappings_submitted_empty_clears_every_override(hass, hub_entry_builder):
+async def test_mappings_submitted_empty_clears_every_override(
+    hass, receiver_entry_builder
+):
     """Emptying the editor is how a user removes an override they no longer want.
 
     The submitted object arrives as ``None`` when the editor is cleared, and that
@@ -949,7 +961,7 @@ async def test_mappings_submitted_empty_clears_every_override(hass, hub_entry_bu
     rather than as "no change". Otherwise a bad override could never be taken
     back off a hub except by deleting and re-adding it.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     hass.config_entries.async_update_entry(
         entry, data={**entry.data, CONF_USER_MAPPINGS: GOOD_MAPPING}
@@ -965,7 +977,7 @@ async def test_mappings_submitted_empty_clears_every_override(hass, hub_entry_bu
     assert entry.data[CONF_USER_MAPPINGS] == {}
 
 
-async def test_mappings_save_leaves_the_hub_options_alone(hass, hub_entry_builder):
+async def test_mappings_save_leaves_the_hub_options_alone(hass, receiver_entry_builder):
     """Saving mappings writes ``entry.data``; options must survive untouched.
 
     As with the approval steps, finishing an options flow replaces
@@ -974,7 +986,7 @@ async def test_mappings_save_leaves_the_hub_options_alone(hass, hub_entry_builde
     edited a mapping would be a very hard bug to attribute.
     """
     options = {CONF_MANAGE_SETTINGS: True}
-    entry = hub_entry_builder(options=options)
+    entry = receiver_entry_builder(options=options)
     entry.add_to_hass(hass)
     snapshot = deepcopy(options)
 
@@ -996,7 +1008,7 @@ async def test_mappings_save_leaves_the_hub_options_alone(hass, hub_entry_builde
 
 
 async def test_add_devices_renders_one_selector_shape_for_both_columns(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Add and ignore must offer the same rows, multi-select, nothing pre-picked.
 
@@ -1005,7 +1017,7 @@ async def test_add_devices_renders_one_selector_shape_for_both_columns(
     selection, opening the step and saving would adopt or bury every device the
     hub had heard.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     _install(
         hass,
@@ -1026,7 +1038,7 @@ async def test_add_devices_renders_one_selector_shape_for_both_columns(
 
 
 async def test_add_devices_submitted_with_nothing_selected_just_closes(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Looking at the candidate list and saving it must adopt and ignore nothing.
 
@@ -1034,7 +1046,7 @@ async def test_add_devices_submitted_with_nothing_selected_just_closes(
     as anything but two empty lists that would adopt — or permanently bury — the
     whole pending list of a user who only came to look.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _install(
         hass,
@@ -1055,7 +1067,7 @@ async def test_add_devices_submitted_with_nothing_selected_just_closes(
 
 
 async def test_add_devices_checks_the_hub_is_loaded_before_the_pending_list(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """An unloaded hub is reported as unloaded, not as "nothing has transmitted".
 
@@ -1063,17 +1075,17 @@ async def test_add_devices_checks_the_hub_is_loaded_before_the_pending_list(
     has no list to show at all — telling the user that nothing has been heard
     would send them to check their antenna instead of their hub connection.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     result = await _menu(hass, entry, "add_devices")
 
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "hub_not_loaded"
+    assert result["reason"] == "receiver_not_loaded"
 
 
 async def test_add_devices_aborts_when_the_hub_has_heard_nothing(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """An empty pending list aborts with an explanation, not a form with no rows.
 
@@ -1081,7 +1093,7 @@ async def test_add_devices_aborts_when_the_hub_has_heard_nothing(
     shortly after a reload is normal. A form with two empty pickers would read as
     a broken dialog; the abort says what is actually going on.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     _install(hass, entry, _StubCoordinator())
 
@@ -1091,7 +1103,9 @@ async def test_add_devices_aborts_when_the_hub_has_heard_nothing(
     assert result["reason"] == "no_pending_devices"
 
 
-async def test_add_devices_conflict_error_lands_under_base(hass, hub_entry_builder):
+async def test_add_devices_conflict_error_lands_under_base(
+    hass, receiver_entry_builder
+):
     """The add/ignore contradiction is a form-wide error, not a field one.
 
     Neither multi-select is individually wrong — it is the pair that contradicts
@@ -1099,7 +1113,7 @@ async def test_add_devices_conflict_error_lands_under_base(hass, hub_entry_build
     form. Attached to a field it would point at one of two equally innocent
     lists, and nothing at all is written either way.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _install(
         hass,
@@ -1263,7 +1277,9 @@ def test_replacement_model_degrades_to_empty_for_a_device_nobody_can_name():
 # --------------------------------------------------------------------------- #
 
 
-async def test_add_devices_applies_both_halves_of_one_submit(hass, hub_entry_builder):
+async def test_add_devices_applies_both_halves_of_one_submit(
+    hass, receiver_entry_builder
+):
     """One pass down a long candidate list adopts some devices and buries others.
 
     The reporter in issue #128 heard 77 devices in a day; working that list a
@@ -1275,7 +1291,7 @@ async def test_add_devices_applies_both_halves_of_one_submit(hass, hub_entry_bui
     """
     keep, bury = "Acurite-606TX-11", "GenericDoor-X1-88"
     options = {CONF_MANAGE_SETTINGS: True}
-    entry = hub_entry_builder(options=options)
+    entry = receiver_entry_builder(options=options)
     entry.add_to_hass(hass)
     coordinator = _install(
         hass,
@@ -1306,7 +1322,7 @@ async def test_add_devices_applies_both_halves_of_one_submit(hass, hub_entry_bui
 
 
 async def test_add_devices_shrugs_off_a_key_that_stopped_being_pending(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A stale selection closes the dialog instead of erroring at the user.
 
@@ -1316,7 +1332,7 @@ async def test_add_devices_shrugs_off_a_key_that_stopped_being_pending(
     renders next time is rebuilt from live state anyway.
     """
     gone = "Acurite-606TX-11"
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     coordinator = _install(
         hass, entry, _StubCoordinator({gone: _pending(gone, "Acurite-606TX")})
@@ -1339,7 +1355,7 @@ async def test_add_devices_shrugs_off_a_key_that_stopped_being_pending(
 # --------------------------------------------------------------------------- #
 
 
-async def test_hub_step_reads_the_plain_default_as_unset(hass, hub_entry_builder):
+async def test_hub_step_reads_the_plain_default_as_unset(hass, receiver_entry_builder):
     """Saving the hub form untouched must not freeze 600 seconds onto the entry.
 
     The timeout field is required and pre-filled, so it echoes a number back on
@@ -1349,10 +1365,10 @@ async def test_hub_step_reads_the_plain_default_as_unset(hass, hub_entry_builder
     unavailable on silence. The plain default is therefore read as "unset" and
     the key is dropped.
     """
-    entry = hub_entry_builder(options={CONF_AVAILABILITY_TIMEOUT: 1800})
+    entry = receiver_entry_builder(options={CONF_AVAILABILITY_TIMEOUT: 1800})
     entry.add_to_hass(hass)
 
-    result = await _menu(hass, entry, "hub")
+    result = await _menu(hass, entry, "receiver")
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
@@ -1367,17 +1383,17 @@ async def test_hub_step_reads_the_plain_default_as_unset(hass, hub_entry_builder
     assert entry.options[CONF_MANAGE_SETTINGS] is True
 
 
-async def test_hub_step_stores_zero_as_never_expire(hass, hub_entry_builder):
+async def test_hub_step_stores_zero_as_never_expire(hass, receiver_entry_builder):
     """Zero is a real hub-wide choice — "never mark anything unavailable".
 
     It is the setting for a hub full of event-driven sensors, and it is not the
     sentinel: only the plain default means "unset". A lower bound that excluded
     zero, or a sentinel check that swallowed it, would take the choice away.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
-    result = await _menu(hass, entry, "hub")
+    result = await _menu(hass, entry, "receiver")
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {CONF_AVAILABILITY_TIMEOUT: 0, CONF_MANAGE_SETTINGS: False},
@@ -1389,17 +1405,17 @@ async def test_hub_step_stores_zero_as_never_expire(hass, hub_entry_builder):
     assert entry.options[CONF_MANAGE_SETTINGS] is False
 
 
-async def test_hub_step_refuses_a_negative_timeout(hass, hub_entry_builder):
+async def test_hub_step_refuses_a_negative_timeout(hass, receiver_entry_builder):
     """A negative hub timeout would expire every device the moment it transmitted.
 
     The watchdog subtracts the last sighting from now and compares; a negative
     budget is always exceeded, so the whole hub would report unavailable. The
     form rejects it rather than letting it reach the coordinator.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
-    result = await _menu(hass, entry, "hub")
+    result = await _menu(hass, entry, "receiver")
     with pytest.raises(InvalidData):
         await hass.config_entries.options.async_configure(
             result["flow_id"],
@@ -1408,7 +1424,7 @@ async def test_hub_step_refuses_a_negative_timeout(hass, hub_entry_builder):
 
 
 async def test_hub_step_keeps_the_per_device_options_it_does_not_own(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The hub form owns two keys; the per-device sub-map has to survive it.
 
@@ -1416,12 +1432,12 @@ async def test_hub_step_keeps_the_per_device_options_it_does_not_own(
     settings, so a hub save that rebuilt options from its two fields alone would
     silently reset every motion sensor on the hub to the library default.
     """
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         options={CONF_DEVICES: {MOTION_KEY: {DEVICE_MOTION_CLEAR_DELAY: 42}}}
     )
     entry.add_to_hass(hass)
 
-    result = await _menu(hass, entry, "hub")
+    result = await _menu(hass, entry, "receiver")
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {CONF_AVAILABILITY_TIMEOUT: 1800, CONF_MANAGE_SETTINGS: True},
@@ -1445,9 +1461,9 @@ async def _calibration_form(hass, entry, device_key, commodity):
     )
 
 
-def _meter_entry(hub_entry_builder):
+def _meter_entry(receiver_entry_builder):
     """A hub with one device carrying a consumption field."""
-    return hub_entry_builder(
+    return receiver_entry_builder(
         devices={
             DEVICE_KEY: {
                 CONF_MODEL: "Acurite-606TX",
@@ -1458,7 +1474,7 @@ def _meter_entry(hub_entry_builder):
 
 
 async def test_calibration_offers_only_units_the_commodity_can_convert(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A gas meter must not be offered kilowatt-hours.
 
@@ -1467,7 +1483,7 @@ async def test_calibration_offers_only_units_the_commodity_can_convert(
     convertible for the sensor's device class. Offering a unit outside that set
     produces a sensor the dashboard silently refuses.
     """
-    entry = _meter_entry(hub_entry_builder)
+    entry = _meter_entry(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _calibration_form(hass, entry, DEVICE_KEY, COMMODITY_GAS)
@@ -1481,7 +1497,7 @@ async def test_calibration_offers_only_units_the_commodity_can_convert(
 
 
 async def test_calibration_scale_is_a_free_typed_positive_number(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The scale is typed, not dragged, and fractions of a unit are the normal case.
 
@@ -1490,7 +1506,7 @@ async def test_calibration_scale_is_a_free_typed_positive_number(
     units, and it has to be a box rather than a slider for a number with no
     meaningful upper bound to drag along.
     """
-    entry = _meter_entry(hub_entry_builder)
+    entry = _meter_entry(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _calibration_form(hass, entry, DEVICE_KEY, COMMODITY_GAS)
@@ -1501,14 +1517,14 @@ async def test_calibration_scale_is_a_free_typed_positive_number(
     assert config["min"] == 0
 
 
-async def test_calibration_rejects_a_negative_scale(hass, hub_entry_builder):
+async def test_calibration_rejects_a_negative_scale(hass, receiver_entry_builder):
     """A negative multiplier would make a consumption meter count backwards.
 
     Consumption statistics must be monotonic for the Energy dashboard to accept
     them, so a sign flip does not produce a wrong number — it produces a sensor
     the dashboard rejects outright, long after the user set it.
     """
-    entry = _meter_entry(hub_entry_builder)
+    entry = _meter_entry(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _calibration_form(hass, entry, DEVICE_KEY, COMMODITY_GAS)
@@ -1523,7 +1539,7 @@ async def test_calibration_rejects_a_negative_scale(hass, hub_entry_builder):
 
 
 async def test_calibration_writes_the_commodity_chosen_on_the_previous_step(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The commodity is carried from the settings form, not re-read from storage.
 
@@ -1532,7 +1548,7 @@ async def test_calibration_writes_the_commodity_chosen_on_the_previous_step(
     nothing stored to fall back on, which is exactly when losing it would write a
     meter with no commodity at all.
     """
-    entry = _meter_entry(hub_entry_builder)
+    entry = _meter_entry(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _calibration_form(hass, entry, DEVICE_KEY, COMMODITY_WATER)
@@ -1558,14 +1574,14 @@ async def test_calibration_writes_the_commodity_chosen_on_the_previous_step(
 # --------------------------------------------------------------------------- #
 
 
-async def test_options_menu_is_the_init_step(hass, hub_entry_builder):
+async def test_options_menu_is_the_init_step(hass, receiver_entry_builder):
     """The options dialog opens on ``init``, which is what Home Assistant asks for.
 
     ``async_init`` calls ``async_step_init`` by name and the rendered menu has to
     identify itself as that step; a menu under any other id leaves the frontend
     unable to route the user's choice back into the flow.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -1575,7 +1591,7 @@ async def test_options_menu_is_the_init_step(hass, hub_entry_builder):
     assert result["menu_options"] == [
         "add_devices",
         "ignored_devices",
-        "hub",
+        "receiver",
         "device",
         "mappings",
         "replace",
@@ -1590,7 +1606,7 @@ TWO_DEVICES = {
 
 @pytest.mark.parametrize("step", ["device", "replace"])
 async def test_device_pickers_list_devices_alphabetically(
-    hass, hub_entry_builder, step
+    hass, receiver_entry_builder, step
 ):
     """Both pickers sort, so the same hub reads the same way on either page.
 
@@ -1599,7 +1615,7 @@ async def test_device_pickers_list_devices_alphabetically(
     hardware, and a user who saw it in two different orders would have to check
     each row rather than reaching for a position they remember.
     """
-    entry = hub_entry_builder(devices=TWO_DEVICES)
+    entry = receiver_entry_builder(devices=TWO_DEVICES)
     entry.add_to_hass(hass)
 
     result = await _menu(hass, entry, step)
@@ -1614,7 +1630,7 @@ async def test_device_pickers_list_devices_alphabetically(
 
 @pytest.mark.parametrize("step", ["device", "replace"])
 async def test_device_pickers_abort_on_a_hub_with_no_devices(
-    hass, hub_entry_builder, step
+    hass, receiver_entry_builder, step
 ):
     """A hub that has adopted nothing says so rather than showing an empty dropdown.
 
@@ -1622,7 +1638,7 @@ async def test_device_pickers_abort_on_a_hub_with_no_devices(
     offer before the first device is added. The abort points the user back at the
     add-devices step; an empty dropdown would look like the list failed to load.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     result = await _menu(hass, entry, step)
@@ -1644,7 +1660,7 @@ async def _replace_target(hass, entry, old_key):
     )
 
 
-async def test_replace_target_names_the_device_being_kept(hass, hub_entry_builder):
+async def test_replace_target_names_the_device_being_kept(hass, receiver_entry_builder):
     """The target form must say whose history is about to be re-keyed.
 
     Picking the wrong row here merges a working sensor's history onto the wrong
@@ -1652,7 +1668,7 @@ async def test_replace_target_names_the_device_being_kept(hass, hub_entry_builde
     ``device`` placeholder is the only reminder on screen of which device is
     being kept.
     """
-    entry = hub_entry_builder(devices=TWO_DEVICES)
+    entry = receiver_entry_builder(devices=TWO_DEVICES)
     entry.add_to_hass(hass)
 
     result = await _replace_target(hass, entry, "Acurite-606TX-42")
@@ -1665,14 +1681,16 @@ async def test_replace_target_names_the_device_being_kept(hass, hub_entry_builde
     assert _selector(result, CONF_DEVICE).config["mode"] == "dropdown"
 
 
-async def test_replace_target_excludes_the_device_being_kept(hass, hub_entry_builder):
+async def test_replace_target_excludes_the_device_being_kept(
+    hass, receiver_entry_builder
+):
     """A device cannot replace itself, so it must not be in its own candidate list.
 
     Picking it would ask :func:`async_replace_device` to re-key a device onto its
     own identity; keeping it out of the list is what makes that unreachable
     rather than merely ill-advised.
     """
-    entry = hub_entry_builder(devices=TWO_DEVICES)
+    entry = receiver_entry_builder(devices=TWO_DEVICES)
     entry.add_to_hass(hass)
 
     result = await _replace_target(hass, entry, "Acurite-606TX-42")
@@ -1681,7 +1699,7 @@ async def test_replace_target_excludes_the_device_being_kept(hass, hub_entry_bui
 
 
 async def test_replace_target_sorts_by_key_when_the_kept_device_has_no_model(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """An unnamed device must not drag every other unnamed device to the top.
 
@@ -1693,7 +1711,7 @@ async def test_replace_target_sorts_by_key_when_the_kept_device_has_no_model(
     order.
     """
     old_key = "Mystery-0"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             old_key: {DEVICE_FIELDS: ["temperature_C"]},
             "Apple-1": {CONF_MODEL: "AppleModel", DEVICE_FIELDS: ["temperature_C"]},
@@ -1710,7 +1728,9 @@ async def test_replace_target_sorts_by_key_when_the_kept_device_has_no_model(
     ]
 
 
-async def test_replace_target_puts_same_model_candidates_first(hass, hub_entry_builder):
+async def test_replace_target_puts_same_model_candidates_first(
+    hass, receiver_entry_builder
+):
     """A battery swap keeps the model, so the matching rows lead the list.
 
     The replacement for a sensor whose transmitter id changed is almost always
@@ -1718,7 +1738,7 @@ async def test_replace_target_puts_same_model_candidates_first(hass, hub_entry_b
     the right row the first one on a hub with dozens of devices.
     """
     old_key = "Acurite-606TX-42"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             old_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]},
             "AAA-1": {CONF_MODEL: "Other-Model", DEVICE_FIELDS: ["temperature_C"]},
@@ -1733,7 +1753,7 @@ async def test_replace_target_puts_same_model_candidates_first(hass, hub_entry_b
 
 
 async def test_replace_target_marks_a_pending_candidate_as_not_added_yet(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Adopting a never-added device onto another's history needs saying out loud.
 
@@ -1745,7 +1765,7 @@ async def test_replace_target_marks_a_pending_candidate_as_not_added_yet(
     """
     old_key = "Acurite-606TX-42"
     new_key = "Acurite-606TX-9999"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             old_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
         }
@@ -1763,14 +1783,16 @@ async def test_replace_target_marks_a_pending_candidate_as_not_added_yet(
     assert labels[new_key].endswith(" — not added yet")
 
 
-async def test_replace_target_aborts_on_a_single_device_hub(hass, hub_entry_builder):
+async def test_replace_target_aborts_on_a_single_device_hub(
+    hass, receiver_entry_builder
+):
     """With nothing to replace it with, the step says so instead of offering nothing.
 
     A one-device hub whose coordinator has heard nothing new has an empty
     candidate set. A dropdown with no rows is a dead end the user cannot leave
     except by cancelling; the abort explains why.
     """
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             DEVICE_KEY: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
         }
@@ -1784,7 +1806,7 @@ async def test_replace_target_aborts_on_a_single_device_hub(hass, hub_entry_buil
 
 
 async def test_replace_target_reports_a_failed_replace_as_a_form_error(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A stale picker is a user-facing outcome, not a traceback in the log.
 
@@ -1793,7 +1815,7 @@ async def test_replace_target_reports_a_failed_replace_as_a_form_error(
     the world moved. Re-showing the form with the list rebuilt is what lets the
     user simply pick again; an escaping exception would leave the dialog dead.
     """
-    entry = hub_entry_builder(devices=TWO_DEVICES)
+    entry = receiver_entry_builder(devices=TWO_DEVICES)
     entry.add_to_hass(hass)
 
     result = await _replace_target(hass, entry, "Acurite-606TX-42")
@@ -1813,7 +1835,7 @@ async def test_replace_target_reports_a_failed_replace_as_a_form_error(
 
 
 async def test_replace_target_finish_hands_back_the_options_untouched(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The helper already wrote ``entry.data``; the flow only has to close cleanly.
 
@@ -1823,7 +1845,7 @@ async def test_replace_target_finish_hands_back_the_options_untouched(
     settings as a side effect of a battery-swap recovery.
     """
     options = {CONF_MANAGE_SETTINGS: True, CONF_AVAILABILITY_TIMEOUT: 1800}
-    entry = hub_entry_builder(devices=TWO_DEVICES, options=options)
+    entry = receiver_entry_builder(devices=TWO_DEVICES, options=options)
     entry.add_to_hass(hass)
     snapshot = deepcopy(options)
 
@@ -1843,7 +1865,7 @@ async def test_replace_target_finish_hands_back_the_options_untouched(
 
 
 async def test_replace_target_survives_a_coordinator_that_is_not_loaded(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """With the hub unloaded the stored devices map alone is the candidate set.
 
@@ -1852,7 +1874,7 @@ async def test_replace_target_survives_a_coordinator_that_is_not_loaded(
     degrade to empty rather than raising, or a user whose server is unreachable
     cannot even see the replace dialog.
     """
-    entry = hub_entry_builder(devices=TWO_DEVICES)
+    entry = receiver_entry_builder(devices=TWO_DEVICES)
     entry.add_to_hass(hass)
 
     result = await _replace_target(hass, entry, "Acurite-606TX-42")
@@ -1861,7 +1883,7 @@ async def test_replace_target_survives_a_coordinator_that_is_not_loaded(
     assert [value for value, _ in _options(result, CONF_DEVICE)] == ["ZWeather-9-3"]
 
 
-async def test_hub_step_refuses_a_fractional_timeout(hass, hub_entry_builder):
+async def test_hub_step_refuses_a_fractional_timeout(hass, receiver_entry_builder):
     """The availability timeout is whole seconds, and the form says so.
 
     The number is compared against a second-resolution "last seen" age and is
@@ -1870,10 +1892,10 @@ async def test_hub_step_refuses_a_fractional_timeout(hass, hub_entry_builder):
     back looking like a typo. The field takes an integer and rejects anything
     else rather than quietly truncating it.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
-    result = await _menu(hass, entry, "hub")
+    result = await _menu(hass, entry, "receiver")
     with pytest.raises(InvalidData):
         await hass.config_entries.options.async_configure(
             result["flow_id"],
@@ -1881,14 +1903,16 @@ async def test_hub_step_refuses_a_fractional_timeout(hass, hub_entry_builder):
         )
 
 
-async def test_device_settings_refuses_a_fractional_timeout(hass, hub_entry_builder):
+async def test_device_settings_refuses_a_fractional_timeout(
+    hass, receiver_entry_builder
+):
     """A per-device timeout override is whole seconds too, for the same reason.
 
     It overrides the hub value and is read by the same watchdog, so a form that
     accepted a float here would let one device carry a setting shaped unlike
     every other timeout in the entry.
     """
-    entry = _entry_with_device(hub_entry_builder)
+    entry = _entry_with_device(receiver_entry_builder)
     entry.add_to_hass(hass)
 
     result = await _device_settings(hass, entry, DEVICE_KEY)
@@ -1900,7 +1924,7 @@ async def test_device_settings_refuses_a_fractional_timeout(hass, hub_entry_buil
 
 
 async def test_device_settings_refuses_a_fractional_clear_delay(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The motion clear delay is whole seconds: it schedules a timer callback.
 
@@ -1908,7 +1932,7 @@ async def test_device_settings_refuses_a_fractional_clear_delay(
     themselves arrive seconds apart — and would persist a value that reads back
     from the options store looking like a mistake.
     """
-    entry = _motion_entry(hub_entry_builder)
+    entry = _motion_entry(receiver_entry_builder)
     entry.add_to_hass(hass)
     _install_motion_library(hass)
 

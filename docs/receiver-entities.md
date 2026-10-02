@@ -1,17 +1,17 @@
-# Hub Entities
+# Receiver Entities
 
-Each hub exposes diagnostic entities on the hub device so you can observe the
+Each receiver exposes diagnostic entities on the receiver device so you can observe the
 rtl_433 server itself.
 
 ## Connectivity
 
-The **Connectivity** binary sensor is on while the hub's WebSocket connection is
+The **Connectivity** binary sensor is on while the receiver's WebSocket connection is
 open and off otherwise. It flips off immediately when the server announces a
 shutdown instead of waiting for a silence timeout.
 
 ## SDR and Meta Diagnostics
 
-Read-only diagnostic sensors report the receiver's current configuration:
+Read-only diagnostic sensors report the radio's current configuration:
 
 - Center frequency.
 - Sample rate.
@@ -23,12 +23,12 @@ Read-only diagnostic sensors report the receiver's current configuration:
 The configured `frequencies` and `hop_times` arrays appear as attributes on the
 center-frequency sensor.
 
-## Receiver Noise
+## Radio Noise
 
-Two diagnostic sensors track the receiver's noise floor, so you can graph RF
+Two diagnostic sensors track the radio's noise floor, so you can graph RF
 noise over time and alert when it climbs high enough to drown out your devices:
 
-- **Noise level** — the receiver's estimated noise level in dB.
+- **Noise level** — the radio's estimated noise level in dB.
 - **Minimum detection level** — the auto-adjusted pulse-detection threshold in
   dB; transmissions weaker than this are not decoded.
 
@@ -57,20 +57,20 @@ estimated noise sits more than 3 dB below the configured `minlevel` (default
 current one by more than 1 dB. Two consequences are worth knowing before you go
 debugging:
 
-- On a receiver whose noise floor is above about -15 dB, `autolevel` never
+- On a radio whose noise floor is above about -15 dB, `autolevel` never
   engages and **Minimum detection level** stays `unknown` however long you wait.
   Check **Noise level** first: it decides whether the threshold can move at all.
 - rtl_433 fires a burst of adjustments while it converges at startup, then goes
   quiet. The event stream carries no backlog, so a server that settled before
   Home Assistant connected leaves the sensor `unknown` until the noise floor
-  drifts by more than 1 dB. To force an update, nudge the hub's **Gain** number
+  drifts by more than 1 dB. To force an update, nudge the receiver's **Gain** number
   entity far enough to move the floor, then set it back.
 
 Unlike the sensors below, this data arrives over the event stream itself
 (rtl_433 ≥ 23.11), so it works even when `/cmd` is proxied away behind a
 WebSocket-only proxy.
 
-![The hub device's Diagnostic card: Noise level -36.4 dB and Minimum detection level -33.4 dB alongside Connectivity Connected, with the sensors fetched over /cmd reading Unknown](images/14-hub-noise.png)
+![The receiver device's Diagnostic card: Noise level -36.4 dB and Minimum detection level -33.4 dB alongside Connectivity Connected, with the sensors fetched over /cmd reading Unknown](images/14-receiver-noise.png)
 
 That capture is from a server reachable only over its WebSocket stream, which is
 why the two noise sensors report while the `/cmd`-sourced sensors described below
@@ -82,24 +82,24 @@ Server statistics include cumulative decoded events, OOK frames, FSK frames, and
 enabled decoders. Per-protocol `stats[]` and the `since` timestamp appear as
 attributes on the decoded-events sensor.
 
-Hub observability data is fetched over HTTP from the rtl_433 server's `/cmd`
+Receiver observability data is fetched over HTTP from the rtl_433 server's `/cmd`
 endpoint at the server root, `http(s)://host:port/cmd`, independent of the
 configured WebSocket path. If a reverse proxy exposes only the WebSocket path and
 not `/cmd`, these sensors degrade to `unknown` while the event stream and
 connectivity sensor keep working.
 
 Because those values come from the server, the diagnostic and statistics sensors
-go `unavailable` as soon as the hub connection drops — the same gate that applies
-to the devices, see [Availability](availability.md#hub-connection). Otherwise they
+go `unavailable` as soon as the receiver connection drops — the same gate that applies
+to the devices, see [Availability](availability.md#receiver-connection). Otherwise they
 would keep showing a frozen reading. The Connectivity sensor stays available
 throughout, and so do the SDR controls below: those are settings you write, not
 readings you trust.
 
 ## Managing SDR Settings from Home Assistant
 
-By default a new hub adopts and manages the receiver's SDR settings. With
-**Manage rtl_433 settings from Home Assistant** enabled, the hub exposes controls
-under the hub device in the config entity category:
+By default a new receiver adopts and manages the radio's SDR settings. With
+**Manage rtl_433 settings from Home Assistant** enabled, the receiver exposes controls
+under the receiver device in the config entity category:
 
 - **Center frequency** number in MHz, available only for single-frequency setups.
 - **Sample rate** number in Hz.
@@ -136,12 +136,12 @@ To pick up direct rtl_433 config edits:
 
 - The `/cmd` endpoint must be reachable at the server root.
 - Hopping setups keep center frequency unmanaged so Home Assistant never pins a
-  receiver to one frequency.
+  radio to one frequency.
 - The frequency list itself can only be set in the rtl_433 config.
 - Multi-stage gain strings are not supported by the single gain control.
 - Retuning does not widen the sample rate automatically; high-frequency bands may
   require manually increasing sample rate.
 
 Turning management off removes the controls, stops Home Assistant from sending
-commands, and clears its stored desired state. The receiver's settings are left
+commands, and clears its stored desired state. The radio's settings are left
 untouched.

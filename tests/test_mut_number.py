@@ -42,7 +42,7 @@ def _setting(key):
 
 
 def _build(key):
-    return Rtl433NumberControl(_RecordingCoordinator(), "hubX", _setting(key))
+    return Rtl433NumberControl(_RecordingCoordinator(), "receiverX", _setting(key))
 
 
 # --- __init__ attribute propagation (kills "= None" mutants 7-13) --------------
@@ -86,16 +86,16 @@ def test_init_mode_falls_back_to_box():
 # --- super().__init__ wiring (kills arg mutants 1-6) ---------------------------
 
 
-def test_init_wires_coordinator_and_setting_and_hub_id():
+def test_init_wires_coordinator_and_setting_and_receiver_id():
     coord = _RecordingCoordinator()
-    ent = Rtl433NumberControl(coord, "hubXYZ", _setting(KEY_PPM_ERROR))
+    ent = Rtl433NumberControl(coord, "receiverXYZ", _setting(KEY_PPM_ERROR))
     # coordinator wired (super arg 1 -> None mutant)
     assert ent._coordinator is coord
     # setting wired (super arg 3 -> None / dropped mutant)
     assert ent._setting is _setting(KEY_PPM_ERROR)
     # receiver_entry_id flows into unique_id (super arg 2 -> None mutant)
-    assert "hubXYZ" in ent.unique_id
-    assert ent.unique_id == f"hubXYZ:hub:{_setting(KEY_PPM_ERROR).object_suffix}"
+    assert "receiverXYZ" in ent.unique_id
+    assert ent.unique_id == f"receiverXYZ:hub:{_setting(KEY_PPM_ERROR).object_suffix}"
 
 
 # --- async_set_native_value (kills set_sdr arg mutants 1-4) --------------------
@@ -103,7 +103,7 @@ def test_init_wires_coordinator_and_setting_and_hub_id():
 
 async def test_set_native_value_passes_exact_key_and_value():
     coord = _RecordingCoordinator()
-    ent = Rtl433NumberControl(coord, "hubX", _setting(KEY_HOP_INTERVAL))
+    ent = Rtl433NumberControl(coord, "receiverX", _setting(KEY_HOP_INTERVAL))
     await ent.async_set_native_value(42.0)
     # Kills set_sdr(None, value), set_sdr(key, None), set_sdr(value),
     # and the dropped-second-arg variant.
@@ -112,7 +112,7 @@ async def test_set_native_value_passes_exact_key_and_value():
 
 async def test_set_native_value_negative_value_exact():
     coord = _RecordingCoordinator()
-    ent = Rtl433NumberControl(coord, "hubX", _setting(KEY_PPM_ERROR))
+    ent = Rtl433NumberControl(coord, "receiverX", _setting(KEY_PPM_ERROR))
     await ent.async_set_native_value(-7.0)
     assert coord.calls == [(KEY_PPM_ERROR, -7.0)]
     assert coord.calls[0][0] == KEY_PPM_ERROR
@@ -124,14 +124,14 @@ async def test_set_native_value_negative_value_exact():
 
 def test_native_value_prefers_desired_including_zero():
     coord = _RecordingCoordinator()
-    ent = Rtl433NumberControl(coord, "hubX", _setting(KEY_PPM_ERROR))
+    ent = Rtl433NumberControl(coord, "receiverX", _setting(KEY_PPM_ERROR))
     coord._desired[KEY_PPM_ERROR] = 0  # falsy but not None -> must be returned
     assert ent.native_value == 0
 
 
 def test_native_value_falls_back_to_meta_when_no_desired():
     coord = _RecordingCoordinator(meta={KEY_PPM_ERROR: 12})
-    ent = Rtl433NumberControl(coord, "hubX", _setting(KEY_PPM_ERROR))
+    ent = Rtl433NumberControl(coord, "receiverX", _setting(KEY_PPM_ERROR))
     # No desired set -> reads the setting from coordinator.meta.
     assert ent.native_value == 12
 
@@ -144,12 +144,12 @@ def _number_setting_count(meta):
 
 
 class _FakeEntry:
-    entry_id = "hubE"
+    entry_id = "receiverE"
 
 
 def _make_hass(coordinator):
     class _Hass:
-        data = {DOMAIN: {"hubE": coordinator}}
+        data = {DOMAIN: {"receiverE": coordinator}}
 
     return _Hass()
 
@@ -169,7 +169,7 @@ async def test_setup_entry_creates_only_number_controls():
     assert len(created) == _number_setting_count({})
 
 
-async def test_setup_entry_entities_wired_to_real_coordinator_and_hub_id():
+async def test_setup_entry_entities_wired_to_real_coordinator_and_receiver_id():
     coord = _RecordingCoordinator(meta={})
     created: list = []
     await number_mod.async_setup_entry(
@@ -179,7 +179,7 @@ async def test_setup_entry_entities_wired_to_real_coordinator_and_hub_id():
     # coordinator=None mutant (construction arg) and hass.data->None mutant.
     assert all(e._coordinator is coord for e in created)
     # entry.entry_id flows into each unique_id (entry_id->None mutant).
-    assert all(e.unique_id.startswith("hubE:hub:") for e in created)
+    assert all(e.unique_id.startswith("receiverE:hub:") for e in created)
     # setting positional arg present (setting->None / dropped mutant).
     assert all(e._setting is not None for e in created)
 

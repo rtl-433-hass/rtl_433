@@ -1,14 +1,14 @@
-"""Tests for the rtl_433 config and options flows (single-hub model).
+"""Tests for the rtl_433 config and options flows (single-receiver model).
 
 The connectivity check is patched throughout (no sockets are opened). Coverage:
-the hub user step (success + ``cannot_connect``), the approval steps that turn a
+the receiver user step (success + ``cannot_connect``), the approval steps that turn a
 heard device into a Home Assistant device (``add_devices`` / ``ignored_devices``:
 the add / ignore / un-ignore round trip, the conflict rejection, and the empty
-and hub-not-loaded aborts), the hub options step (availability timeout persisted
+and receiver-not-loaded aborts), the receiver options step (availability timeout persisted
 to ``entry.options``), the device options step (set/clear a per-device
 ``timeout_override`` in ``entry.data["devices"]``, plus the ``no_devices``
 abort), the replace pair, and a direct unit test of
-``async_remove_config_entry_device`` (False for the hub device, True +
+``async_remove_config_entry_device`` (False for the receiver device, True +
 map/coordinator eviction for a nested device).
 
 The approval tests populate the pending list by feeding real frames through the
@@ -85,8 +85,8 @@ def _schema_keys(result) -> set[str]:
     return keys
 
 
-async def test_user_step_success_creates_hub(hass):
-    """A reachable server produces a hub entry with the connection data."""
+async def test_user_step_success_creates_receiver(hass):
+    """A reachable server produces a receiver entry with the connection data."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
@@ -109,7 +109,7 @@ async def test_user_step_success_creates_hub(hass):
     assert result["title"] == "rtl_433 (rtl433.local)"
     assert result["data"][CONF_HOST] == "rtl433.local"
     assert result["data"][CONF_PORT] == 8433
-    # No per-device entry_type discriminator in the single-hub model.
+    # No per-device entry_type discriminator in the single-receiver model.
     assert "entry_type" not in result["data"]
 
 
@@ -139,7 +139,7 @@ async def test_user_step_cannot_connect_shows_error(hass):
 # --------------------------------------------------------------------------- #
 # Options flow — add / ignore discovered devices (the approval steps).         #
 # --------------------------------------------------------------------------- #
-# The three devices the hub hears in the fixtures below. Keys are what the
+# The three devices the receiver hears in the fixtures below. Keys are what the
 # normalizer derives from ``model`` + ``id``; they are spelled out here so the
 # assertions read as the user's picker does.
 PENDING_OLD = "Acurite-606TX-42"
@@ -150,7 +150,7 @@ PENDING_MID_FRAME = {"model": "GenericDoor-X1", "id": 88, "closed": 0, "battery_
 
 
 def _coordinator(hass, entry):
-    """Return the running coordinator for a loaded hub entry."""
+    """Return the running coordinator for a loaded receiver entry."""
     return hass.data[DOMAIN][entry.entry_id]
 
 
@@ -185,8 +185,8 @@ def _registry_device(hass, entry, device_key):
     )
 
 
-async def _hub_hearing_three_devices(hass, hub_entry_builder, **kwargs):
-    """Set up a hub that has heard three devices at three distinct times.
+async def _receiver_hearing_three_devices(hass, receiver_entry_builder, **kwargs):
+    """Set up a receiver that has heard three devices at three distinct times.
 
     The sightings are frozen a minute apart so "most recently seen first" is a
     real ordering rather than an artefact of insertion order (a stable sort over
@@ -195,7 +195,7 @@ async def _hub_hearing_three_devices(hass, hub_entry_builder, **kwargs):
     others'. Only that newest device reports a signal level, which is what makes
     the "omit the level when the device does not report one" branch observable.
     """
-    entry = hub_entry_builder(availability_timeout=600, **kwargs)
+    entry = receiver_entry_builder(availability_timeout=600, **kwargs)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -231,7 +231,7 @@ async def _open_add_devices(hass, entry):
 
 
 async def test_options_menu_leads_with_the_two_approval_steps(
-    hass, hub_entry_builder, no_socket
+    hass, receiver_entry_builder, no_socket
 ):
     """The menu offers add_devices and ignored_devices, in that order, first.
 
@@ -239,7 +239,7 @@ async def test_options_menu_leads_with_the_two_approval_steps(
     Assistant at all, so the pair leads the menu; the settings steps keep their
     established order behind them.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -249,7 +249,7 @@ async def test_options_menu_leads_with_the_two_approval_steps(
     assert result["menu_options"] == [
         "add_devices",
         "ignored_devices",
-        "hub",
+        "receiver",
         "device",
         "mappings",
         "replace",
@@ -257,7 +257,7 @@ async def test_options_menu_leads_with_the_two_approval_steps(
 
 
 async def test_add_devices_adds_ignores_and_leaves_the_rest_pending(
-    hass, hub_entry_builder, no_socket
+    hass, receiver_entry_builder, no_socket
 ):
     """The whole approval workflow: three heard, one added, one ignored, one left.
 
@@ -270,7 +270,7 @@ async def test_add_devices_adds_ignores_and_leaves_the_rest_pending(
     only things that let a user tell a real sensor from a one-off bad decode
     without leaving the page.
     """
-    entry = await _hub_hearing_three_devices(hass, hub_entry_builder)
+    entry = await _receiver_hearing_three_devices(hass, receiver_entry_builder)
 
     result = await _open_add_devices(hass, entry)
     assert result["step_id"] == "add_devices"
@@ -329,7 +329,7 @@ async def test_add_devices_adds_ignores_and_leaves_the_rest_pending(
 
 
 async def test_ignored_device_survives_a_reload_and_never_returns_to_pending(
-    hass, hub_entry_builder, no_socket
+    hass, receiver_entry_builder, no_socket
 ):
     """Ignoring sticks: across a reload, and against the device's next frame.
 
@@ -339,7 +339,7 @@ async def test_ignored_device_survives_a_reload_and_never_returns_to_pending(
     transmission after the reload is what proves the reloaded coordinator seeded
     ``ignored`` from the entry rather than starting clean.
     """
-    entry = await _hub_hearing_three_devices(hass, hub_entry_builder)
+    entry = await _receiver_hearing_three_devices(hass, receiver_entry_builder)
 
     result = await _open_add_devices(hass, entry)
     result = await hass.config_entries.options.async_configure(
@@ -364,7 +364,7 @@ async def test_ignored_device_survives_a_reload_and_never_returns_to_pending(
 
 
 async def test_add_and_ignore_conflict_reshows_the_form_and_applies_nothing(
-    hass, hub_entry_builder, no_socket
+    hass, receiver_entry_builder, no_socket
 ):
     """A key in both lists writes nothing at all — not even the unambiguous half.
 
@@ -374,7 +374,7 @@ async def test_add_and_ignore_conflict_reshows_the_form_and_applies_nothing(
     correct and resubmit, so the whole submit is discarded and the form comes
     back with its full candidate list intact.
     """
-    entry = await _hub_hearing_three_devices(hass, hub_entry_builder)
+    entry = await _receiver_hearing_three_devices(hass, receiver_entry_builder)
 
     result = await _open_add_devices(hass, entry)
     result = await hass.config_entries.options.async_configure(
@@ -410,7 +410,7 @@ async def test_add_and_ignore_conflict_reshows_the_form_and_applies_nothing(
 
 
 async def test_approval_steps_abort_when_there_is_nothing_to_show(
-    hass, hub_entry_builder, no_socket
+    hass, receiver_entry_builder, no_socket
 ):
     """Empty lists abort with an explanation instead of a form with no choices.
 
@@ -418,7 +418,7 @@ async def test_approval_steps_abort_when_there_is_nothing_to_show(
     is rebuilt from live traffic), so the abort has to say so rather than look
     like a broken form.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -435,17 +435,19 @@ async def test_approval_steps_abort_when_there_is_nothing_to_show(
         assert result["reason"] == reason
 
 
-async def test_approval_steps_abort_when_the_hub_is_not_loaded(hass, hub_entry_builder):
-    """Both steps degrade to ``hub_not_loaded`` rather than raising.
+async def test_approval_steps_abort_when_the_receiver_is_not_loaded(
+    hass, receiver_entry_builder
+):
+    """Both steps degrade to ``receiver_not_loaded`` rather than raising.
 
     The options flow can be opened while the entry is not loaded (an unreachable
-    server, a disabled hub), and both steps need the running coordinator — the
+    server, a disabled receiver), and both steps need the running coordinator — the
     pending list lives only in its memory, and un-ignoring has to reach its
     mirrored ``ignored`` set to take effect before a reload. The entry carries a
     non-empty ignore list so the guard is provably checked *before* the
     empty-list abort rather than being masked by it.
     """
-    entry = hub_entry_builder(ignored_devices=[PENDING_MID])
+    entry = receiver_entry_builder(ignored_devices=[PENDING_MID])
     entry.add_to_hass(hass)  # deliberately never set up
 
     for step in ("add_devices", "ignored_devices"):
@@ -454,11 +456,11 @@ async def test_approval_steps_abort_when_the_hub_is_not_loaded(hass, hub_entry_b
             result["flow_id"], {"next_step_id": step}
         )
         assert result["type"] is FlowResultType.ABORT
-        assert result["reason"] == "hub_not_loaded"
+        assert result["reason"] == "receiver_not_loaded"
 
 
 async def test_ignored_devices_step_unignores_in_entry_data_and_coordinator(
-    hass, hub_entry_builder, no_socket
+    hass, receiver_entry_builder, no_socket
 ):
     """Un-ignoring clears both stores, and takes effect without a reload.
 
@@ -468,7 +470,7 @@ async def test_ignored_devices_step_unignores_in_entry_data_and_coordinator(
     user wait for a reload. Feeding the device's next transmission afterwards is
     what distinguishes the two.
     """
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         # The ignored device that was once adopted has a stored record, so its
         # row can be named; the other was ignored while pending and never had one.
         devices={
@@ -511,23 +513,23 @@ async def test_ignored_devices_step_unignores_in_entry_data_and_coordinator(
 
 
 # --------------------------------------------------------------------------- #
-# Options flow — hub step.                                                     #
+# Options flow — receiver step.                                                     #
 # --------------------------------------------------------------------------- #
-async def test_hub_options_step_persists_timeout(hass, hub_entry_builder):
-    """The hub options step persists the availability timeout to options."""
-    entry = hub_entry_builder()
+async def test_receiver_options_step_persists_timeout(hass, receiver_entry_builder):
+    """The receiver options step persists the availability timeout to options."""
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "init"
 
-    # Pick the hub step from the menu.
+    # Pick the receiver step from the menu.
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
+        result["flow_id"], {"next_step_id": "receiver"}
     )
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "hub"
+    assert result["step_id"] == "receiver"
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -538,12 +540,12 @@ async def test_hub_options_step_persists_timeout(hass, hub_entry_builder):
     assert entry.options[CONF_AVAILABILITY_TIMEOUT] == 120
 
 
-async def test_hub_options_step_prefills_the_timeout_it_will_read_back(
-    hass, hub_entry_builder
+async def test_receiver_options_step_prefills_the_timeout_it_will_read_back(
+    hass, receiver_entry_builder
 ):
     """The field opens on the stored timeout, or on the value that means "unset".
 
-    This form has no way to say "no hub timeout": the field is ``vol.Required``
+    This form has no way to say "no receiver timeout": the field is ``vol.Required``
     and must open on *a* number. So an entry with nothing stored opens on the
     same ``DEFAULT_AVAILABILITY_TIMEOUT`` the submit path reads back as "use the
     per-device-type defaults" — the round trip a user who only came to flip the
@@ -554,50 +556,52 @@ async def test_hub_options_step_prefills_the_timeout_it_will_read_back(
     async def timeout_field_default(entry):
         result = await hass.config_entries.options.async_init(entry.entry_id)
         result = await hass.config_entries.options.async_configure(
-            result["flow_id"], {"next_step_id": "hub"}
+            result["flow_id"], {"next_step_id": "receiver"}
         )
         keys = [
             key
             for key in result["data_schema"].schema
             if key == CONF_AVAILABILITY_TIMEOUT
         ]
-        assert keys, "the hub step has no availability-timeout field"
+        assert keys, "the receiver step has no availability-timeout field"
         return keys[0].default()
 
-    unset = hub_entry_builder()
+    unset = receiver_entry_builder()
     unset.add_to_hass(hass)
     assert await timeout_field_default(unset) == DEFAULT_AVAILABILITY_TIMEOUT
 
     # A stored timeout that is *not* the plain default, so the assertion cannot
     # pass on the fallback by accident.
-    stored = hub_entry_builder(availability_timeout=45)
+    stored = receiver_entry_builder(availability_timeout=45)
     stored.add_to_hass(hass)
     assert await timeout_field_default(stored) == 45
 
     # And zero, which is a real stored choice that reads as falsy: a fallback
     # written with `or` rather than an `is None` test turns "never expire" back
     # into ten minutes here.
-    never = hub_entry_builder(availability_timeout=0)
+    never = receiver_entry_builder(availability_timeout=0)
     never.add_to_hass(hass)
     assert await timeout_field_default(never) == 0
 
 
-async def test_hub_options_step_drops_default_timeout(hass, hub_entry_builder):
-    """Submitting the plain-default timeout does not persist it as an explicit hub
+async def test_receiver_options_step_drops_default_timeout(
+    hass, receiver_entry_builder
+):
+    """Submitting the plain-default timeout does not persist it as an explicit receiver
     default.
 
     The availability-timeout field is pre-filled with ``DEFAULT_AVAILABILITY_TIMEOUT``,
     so a user who only toggles another setting and saves echoes that default back.
     Persisting it would mask the device-class defaults and wrongly expire
     event-driven devices (doorbells/motion/contacts), so the key is dropped — the
-    entry carries no explicit hub timeout and the per-device-type defaults apply.
+    entry carries no explicit receiver timeout and the per-device-type defaults apply.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"next_step_id": "hub"}
+        result["flow_id"], {"next_step_id": "receiver"}
     )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
@@ -617,11 +621,11 @@ async def test_hub_options_step_drops_default_timeout(hass, hub_entry_builder):
 # Options flow — device step.                                                  #
 # --------------------------------------------------------------------------- #
 async def test_device_options_step_sets_and_clears_timeout_override(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """The device step writes, then clears, a per-device timeout override."""
     device_key = "Acurite-606TX-42"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "Acurite-606TX",
@@ -667,9 +671,9 @@ async def test_device_options_step_sets_and_clears_timeout_override(
     assert DEVICE_TIMEOUT_OVERRIDE not in entry.data[CONF_DEVICES][device_key]
 
 
-async def test_device_options_step_aborts_when_no_devices(hass, hub_entry_builder):
+async def test_device_options_step_aborts_when_no_devices(hass, receiver_entry_builder):
     """With an empty devices map the device step aborts with no_devices."""
-    entry = hub_entry_builder()  # no devices seeded
+    entry = receiver_entry_builder()  # no devices seeded
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -684,7 +688,7 @@ async def test_device_options_step_aborts_when_no_devices(hass, hub_entry_builde
 # Options flow — per-device calibration (device step -> calibration step).     #
 # --------------------------------------------------------------------------- #
 async def test_calibration_round_trip_writes_into_device_record(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A water calibration drives device -> calibration step and is persisted.
 
@@ -693,7 +697,7 @@ async def test_calibration_round_trip_writes_into_device_record(
     into ``entry.data[CONF_DEVICES][device_key]["calibration"]``.
     """
     device_key = "ERT-SCM-9001"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {
                 CONF_MODEL: "ERT-SCM",
@@ -740,11 +744,11 @@ async def test_calibration_round_trip_writes_into_device_record(
 
 
 async def test_device_step_none_commodity_finishes_without_calibration(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Commodity ``none`` writes the record (no calibration) and finishes."""
     device_key = "ERT-SCM-9001"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "ERT-SCM", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -775,7 +779,7 @@ def _seed_coordinator_last_event(hass, entry, fields_by_device):
 
     The device-settings step reads ``coordinator.devices[device_key].fields`` to
     pre-fill the commodity, so a SimpleNamespace coordinator with the right shape
-    is enough to exercise the pre-fill path without a full hub setup.
+    is enough to exercise the pre-fill path without a full receiver setup.
     """
     coordinator = SimpleNamespace(
         devices={
@@ -802,10 +806,10 @@ async def _open_device_settings(hass, entry, device_key):
     )
 
 
-async def test_commodity_prefill_from_meter_type_string(hass, hub_entry_builder):
+async def test_commodity_prefill_from_meter_type_string(hass, receiver_entry_builder):
     """A last event with ``MeterType: "Gas"`` pre-fills the commodity to gas."""
     device_key = "IDM-1234"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={device_key: {CONF_MODEL: "IDM", DEVICE_FIELDS: ["consumption"]}}
     )
     entry.add_to_hass(hass)
@@ -816,14 +820,14 @@ async def test_commodity_prefill_from_meter_type_string(hass, hub_entry_builder)
     assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_GAS
 
 
-async def test_commodity_prefill_from_ert_type_low_nibble(hass, hub_entry_builder):
+async def test_commodity_prefill_from_ert_type_low_nibble(hass, receiver_entry_builder):
     """An ``ert_type`` whose low nibble denotes gas pre-fills the commodity to gas.
 
     ``ert_type & 0x0f == 2`` is a gas commodity; 0x12 exercises that the high
     nibble is ignored.
     """
     device_key = "ERT-SCM-9001"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "ERT-SCM", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -835,10 +839,12 @@ async def test_commodity_prefill_from_ert_type_low_nibble(hass, hub_entry_builde
     assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_GAS
 
 
-async def test_commodity_prefill_defaults_to_none_without_hint(hass, hub_entry_builder):
+async def test_commodity_prefill_defaults_to_none_without_hint(
+    hass, receiver_entry_builder
+):
     """With no MeterType/ert_type hint, the commodity default stays ``none``."""
     device_key = "ERT-SCM-9001"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "ERT-SCM", DEVICE_FIELDS: ["consumption_data"]}
         }
@@ -850,17 +856,17 @@ async def test_commodity_prefill_defaults_to_none_without_hint(hass, hub_entry_b
     assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_NONE
 
 
-async def test_commodity_prefill_reflects_selected_device_on_multi_device_hub(
-    hass, hub_entry_builder
+async def test_commodity_prefill_reflects_selected_device_on_multi_device_receiver(
+    hass, receiver_entry_builder
 ):
     """With several meters, the pre-fill follows the *selected* device.
 
-    Regression test: the commodity default used to be derived only when the hub
-    had exactly one device, so a hub with two SCMplus meters silently fell back
+    Regression test: the commodity default used to be derived only when the receiver
+    had exactly one device, so a receiver with two SCMplus meters silently fell back
     to ``none`` and the per-device calibration looked like it did not apply.
     """
     gas_key, water_key = "SCMplus-1", "SCMplus-2"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             gas_key: {CONF_MODEL: "SCMplus", DEVICE_FIELDS: ["Consumption"]},
             water_key: {CONF_MODEL: "SCMplus", DEVICE_FIELDS: ["Consumption"]},
@@ -883,14 +889,14 @@ async def test_commodity_prefill_reflects_selected_device_on_multi_device_hub(
     assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_WATER
 
 
-async def test_device_picker_labels_detected_commodity(hass, hub_entry_builder):
+async def test_device_picker_labels_detected_commodity(hass, receiver_entry_builder):
     """The picker annotates a device whose commodity was detected from the signal.
 
     This is what makes the per-device calibration discoverable before the user
     has selected anything.
     """
     gas_key, plain_key = "SCMplus-1", "Acurite-1"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             gas_key: {CONF_MODEL: "SCMplus", DEVICE_FIELDS: ["Consumption"]},
             plain_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]},
@@ -930,7 +936,9 @@ def _seen_models(hass, entry, models):
     )
 
 
-async def test_replace_options_flow_rekeys_device(hass, hub_entry_builder, no_socket):
+async def test_replace_options_flow_rekeys_device(
+    hass, receiver_entry_builder, no_socket
+):
     """init -> replace -> replace_target re-keys the device and keeps entity_ids.
 
     The end-to-end flow assertion: the survivor's ``entity_id`` is untouched (so
@@ -938,7 +946,7 @@ async def test_replace_options_flow_rekeys_device(hass, hub_entry_builder, no_so
     unioned, and the flow finishes without clobbering ``entry.options`` — the
     helper has already written ``entry.data``.
     """
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             REPLACE_OLD: {
                 CONF_MODEL: REPLACE_MODEL,
@@ -1012,9 +1020,9 @@ async def test_replace_options_flow_rekeys_device(hass, hub_entry_builder, no_so
     assert entry.options == {CONF_MANAGE_SETTINGS: True}
 
 
-async def test_replace_step_aborts_when_no_devices(hass, hub_entry_builder):
+async def test_replace_step_aborts_when_no_devices(hass, receiver_entry_builder):
     """With an empty devices map there is nothing to keep, so the step aborts."""
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -1025,12 +1033,12 @@ async def test_replace_step_aborts_when_no_devices(hass, hub_entry_builder):
     assert result["reason"] == "no_devices"
 
 
-async def test_replace_target_aborts_without_candidates(hass, hub_entry_builder):
-    """A single-device hub has nothing to adopt, so the target step aborts.
+async def test_replace_target_aborts_without_candidates(hass, receiver_entry_builder):
+    """A single-device receiver has nothing to adopt, so the target step aborts.
 
     Better than a dead-end dropdown: the only known device is the one being kept.
     """
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             REPLACE_OLD: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]}
         }
@@ -1049,7 +1057,7 @@ async def test_replace_target_aborts_without_candidates(hass, hub_entry_builder)
 
 
 async def test_replace_target_offers_unregistered_devices_same_model_first(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Candidates union the devices map with the coordinator's own device keys.
 
@@ -1066,7 +1074,7 @@ async def test_replace_target_offers_unregistered_devices_same_model_first(
     # model-first ordering is distinguishable from a plain sort.
     other_key = "Aaa-Sensor-1"
     unknown_key = "Zz-Unknown-7"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             REPLACE_OLD: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]},
             other_key: {CONF_MODEL: "Aaa-Sensor", DEVICE_FIELDS: ["temperature_C"]},
@@ -1095,7 +1103,7 @@ async def test_replace_target_offers_unregistered_devices_same_model_first(
 
 
 async def test_replace_target_offers_a_pending_device_and_consumes_it(
-    hass, hub_entry_builder, no_socket
+    hass, receiver_entry_builder, no_socket
 ):
     """A battery swap's new identity is *pending*, so replace must still offer it.
 
@@ -1116,7 +1124,7 @@ async def test_replace_target_offers_a_pending_device_and_consumes_it(
     before the replace was discarded by the reload.
     """
     pending_key = "Acurite-986-9999"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         availability_timeout=600,
         devices={
             REPLACE_OLD: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]}
@@ -1175,7 +1183,7 @@ async def test_replace_target_offers_a_pending_device_and_consumes_it(
 
 
 async def test_replace_target_shows_error_when_the_picker_goes_stale(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A replace that can no longer run re-shows the form with ``replace_failed``.
 
@@ -1184,7 +1192,7 @@ async def test_replace_target_shows_error_when_the_picker_goes_stale(
     from the map. That is a user-facing outcome, so it is rendered as a form
     error rather than escaping as a traceback.
     """
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             REPLACE_OLD: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]},
             REPLACE_NEW: {CONF_MODEL: REPLACE_MODEL, DEVICE_FIELDS: ["temperature_C"]},
@@ -1228,20 +1236,22 @@ async def test_replace_target_shows_error_when_the_picker_goes_stale(
 # --------------------------------------------------------------------------- #
 # async_remove_config_entry_device (direct unit test).                         #
 # --------------------------------------------------------------------------- #
-async def test_remove_hub_device_is_refused(hass, hub_entry_builder):
-    """Removing the hub device itself returns False (cannot be deleted)."""
-    entry = hub_entry_builder()
+async def test_remove_receiver_device_is_refused(hass, receiver_entry_builder):
+    """Removing the receiver device itself returns False (cannot be deleted)."""
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
-    hub_device = SimpleNamespace(identifiers={(DOMAIN, entry.entry_id)})
+    receiver_device = SimpleNamespace(identifiers={(DOMAIN, entry.entry_id)})
 
-    assert await async_remove_config_entry_device(hass, entry, hub_device) is False
+    assert await async_remove_config_entry_device(hass, entry, receiver_device) is False
 
 
-async def test_remove_nested_device_evicts_map_and_coordinator(hass, hub_entry_builder):
+async def test_remove_nested_device_evicts_map_and_coordinator(
+    hass, receiver_entry_builder
+):
     """Removing a nested device returns True and drops it from map + coordinator."""
     device_key = "Acurite-606TX-42"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
         }
@@ -1263,7 +1273,7 @@ async def test_remove_nested_device_evicts_map_and_coordinator(hass, hub_entry_b
     )
 
     assert await async_remove_config_entry_device(hass, entry, nested_device) is True
-    # The device_key is gone from the hub devices map...
+    # The device_key is gone from the receiver devices map...
     assert device_key not in entry.data.get(CONF_DEVICES, {})
     # ...and the coordinator was told to forget it, and the platform removers ran.
     assert forgotten == [device_key]
@@ -1273,7 +1283,9 @@ async def test_remove_nested_device_evicts_map_and_coordinator(hass, hub_entry_b
 # --------------------------------------------------------------------------- #
 # Reconfigure flow.                                                            #
 # --------------------------------------------------------------------------- #
-async def test_reconfigure_updates_data_and_preserves_devices(hass, hub_entry_builder):
+async def test_reconfigure_updates_data_and_preserves_devices(
+    hass, receiver_entry_builder
+):
     """A changed-and-reachable target updates entry.data in place.
 
     The same flow exercise proves the headline guarantees: aborts with
@@ -1285,7 +1297,7 @@ async def test_reconfigure_updates_data_and_preserves_devices(hass, hub_entry_bu
     seeded_devices = {
         device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
     }
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         host="old.local",
         port=8433,
         path="/ws",
@@ -1341,11 +1353,13 @@ async def test_reconfigure_updates_data_and_preserves_devices(hass, hub_entry_bu
     assert entry.title == "rtl_433 (new.local)"
 
 
-async def test_reconfigure_cannot_connect_keeps_form_and_data(hass, hub_entry_builder):
+async def test_reconfigure_cannot_connect_keeps_form_and_data(
+    hass, receiver_entry_builder
+):
     """An unreachable target re-shows the form and leaves entry.data unchanged."""
     from custom_components.rtl_433.coordinator import CannotConnect
 
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     data_snapshot = deepcopy(dict(entry.data))
     unique_id_snapshot = entry.unique_id
@@ -1375,11 +1389,11 @@ async def test_reconfigure_cannot_connect_keeps_form_and_data(hass, hub_entry_bu
 
 
 async def test_reconfigure_collision_aborts_and_mutates_neither(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
-    """Reconfiguring one hub onto another's host:port aborts as already_configured."""
-    entry_a = hub_entry_builder(host="a.local", port=8433, path="/ws")
-    entry_b = hub_entry_builder(host="b.local", port=9000, path="/ws")
+    """Reconfiguring one receiver onto another's host:port aborts as already_configured."""
+    entry_a = receiver_entry_builder(host="a.local", port=8433, path="/ws")
+    entry_b = receiver_entry_builder(host="b.local", port=9000, path="/ws")
     entry_a.add_to_hass(hass)
     entry_b.add_to_hass(hass)
 
@@ -1414,18 +1428,18 @@ async def test_reconfigure_collision_aborts_and_mutates_neither(
 
 
 async def test_reconfigure_reloads_entry_exactly_once(
-    hass, hub_entry_builder, no_socket, caplog
+    hass, receiver_entry_builder, no_socket, caplog
 ):
-    """A successful reconfigure reloads the running hub exactly once.
+    """A successful reconfigure reloads the running receiver exactly once.
 
     The flow deliberately uses the *non*-reloading ``async_update_and_abort``:
     Home Assistant deprecated combining a config-entry update listener with the
     reloading flow helpers (it double-reloads and races; breaks in 2026.12). The
-    write alone re-points the hub — ``_async_update_listener`` sees the changed
+    write alone re-points the receiver — ``_async_update_listener`` sees the changed
     connection target and performs the single reload — and no deprecation report
     is logged.
     """
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+    entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -1457,15 +1471,15 @@ async def test_reconfigure_reloads_entry_exactly_once(
 
 
 # --------------------------------------------------------------------------- #
-# Options flow — mappings step (per-hub user-mapping overrides).               #
+# Options flow — mappings step (per-receiver user-mapping overrides).               #
 # --------------------------------------------------------------------------- #
 async def test_mappings_step_invalid_submit_reshows_form_and_stores_nothing(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A schema-invalid mappings object re-shows the form and stores nothing."""
     from custom_components.rtl_433.const import CONF_USER_MAPPINGS
 
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     data_snapshot = deepcopy(dict(entry.data))
 
@@ -1490,13 +1504,13 @@ async def test_mappings_step_invalid_submit_reshows_form_and_stores_nothing(
 
 
 async def test_mappings_step_valid_submit_writes_data_leaves_options_and_devices(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """A valid mappings object lands in entry.data, leaving options + devices intact."""
     from custom_components.rtl_433.const import CONF_USER_MAPPINGS
 
     device_key = "Acurite-606TX-42"
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             device_key: {CONF_MODEL: "Acurite-606TX", DEVICE_FIELDS: ["temperature_C"]}
         },
@@ -1506,7 +1520,7 @@ async def test_mappings_step_valid_submit_writes_data_leaves_options_and_devices
     options_snapshot = deepcopy(dict(entry.options))
     devices_snapshot = deepcopy(entry.data[CONF_DEVICES])
 
-    # The update listener reloads the hub when CONF_USER_MAPPINGS changes; the
+    # The update listener reloads the receiver when CONF_USER_MAPPINGS changes; the
     # entry is not actually set up here, so suppress the scheduled reload.
     with patch.object(hass.config_entries, "async_schedule_reload"):
         result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -1560,7 +1574,7 @@ def _disc(host="core-rtl433", port=8433, uid="serial:0123"):
 
 
 def _radio_entry(host="core-rtl433", port=8433, uid="serial:0123", devices=None):
-    """Build a discovered-style hub entry keyed by a stable radio unique_id.
+    """Build a discovered-style receiver entry keyed by a stable radio unique_id.
 
     ``devices`` (when given) seeds ``data["devices"]`` so collision/orphan and
     rebind-preservation scenarios can assert the nested-device map survives (or
@@ -1708,9 +1722,9 @@ async def test_hassio_discovery_missing_unique_id_aborts(hass):
     assert result["reason"] == "invalid_discovery_info"
 
 
-async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
+async def test_hassio_discovery_adopts_manual_entry(hass, receiver_entry_builder):
     """Discovery of a manually-added host:port re-keys it to the radio id and aborts."""
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         host="core-rtl433", port=8433, path="/ws", availability_timeout=42
     )
     entry.add_to_hass(hass)
@@ -1745,12 +1759,12 @@ async def test_hassio_discovery_adopts_manual_entry(hass, hub_entry_builder):
     # Connection data refreshed from discovery...
     assert adopted.data[CONF_PATH] == "/ws2"
     assert adopted.data["secure"] is True
-    # ...while pre-existing keys (the manual entry's hub timeout) survive.
+    # ...while pre-existing keys (the manual entry's receiver timeout) survive.
     assert adopted.data[CONF_AVAILABILITY_TIMEOUT] == 42
 
 
-async def test_hassio_readvertisement_reloads_running_hub(hass, no_socket, caplog):
-    """A re-advertised radio on a new host reloads the running hub, once.
+async def test_hassio_readvertisement_reloads_running_receiver(hass, no_socket, caplog):
+    """A re-advertised radio on a new host reloads the running receiver, once.
 
     The discovery step passes ``reload_on_update=False`` (core scheduling a reload
     here *and* an update listener is the deprecated combination), so the reload is
@@ -1805,7 +1819,7 @@ async def test_hassio_discovery_does_not_rekey_populated_different_radio(hass):
 
 
 async def test_hassio_discovery_adopt_aborts_on_unique_id_collision(
-    hass, hub_entry_builder
+    hass, receiver_entry_builder
 ):
     """Adopting onto a stable id already owned by a populated entry creates no duplicate.
 
@@ -1813,7 +1827,7 @@ async def test_hassio_discovery_adopt_aborts_on_unique_id_collision(
     populated entry already owns the radio's stable id (on a different host:port).
     The adopt must abort without re-keying, so no two entries share a unique_id.
     """
-    placeholder = hub_entry_builder(host="core-rtl433", port=8433)
+    placeholder = receiver_entry_builder(host="core-rtl433", port=8433)
     placeholder.add_to_hass(hass)
     assert placeholder.unique_id == "hub:core-rtl433:8433"
 
@@ -1839,9 +1853,9 @@ async def test_hassio_discovery_adopt_aborts_on_unique_id_collision(
 
 
 async def test_hassio_discovery_distinct_port_can_become_new_radio(hass):
-    """With a hub present, an unknown radio offers replace; '__new__' adds it new.
+    """With a receiver present, an unknown radio offers replace; '__new__' adds it new.
 
-    When a hub already exists, discovery of an unknown radio on a distinct
+    When a receiver already exists, discovery of an unknown radio on a distinct
     host:port routes to the guided ``hassio_replace`` step (the "replacement
     landed on a new host:port" case). Choosing ``__new__`` preserves the original
     behavior — the distinct-port unknown radio still becomes its own new entry.
@@ -1850,7 +1864,7 @@ async def test_hassio_discovery_distinct_port_can_become_new_radio(hass):
     entry.add_to_hass(hass)
 
     # Same host, different port, different stable id -> no host:port match, but a
-    # hub already exists, so the flow offers the replace choice first.
+    # receiver already exists, so the flow offers the replace choice first.
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": SOURCE_HASSIO},
@@ -2098,17 +2112,19 @@ async def test_reconfigure_rebind_collision_with_empty_orphan_succeeds(hass):
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
 
-async def test_hassio_replace_rebinds_chosen_hub(hass):
-    """Discovery of an unknown radio while a hub exists rebinds the chosen hub.
+async def test_hassio_replace_rebinds_chosen_receiver(hass):
+    """Discovery of an unknown radio while a receiver exists rebinds the chosen receiver.
 
-    The replace step lists the existing hub; submitting its entry_id rebinds that
-    hub onto the discovered radio id and connection target, in place.
+    The replace step lists the existing receiver; submitting its entry_id rebinds that
+    receiver onto the discovered radio id and connection target, in place.
     """
     devices = {"Foo-1": {CONF_MODEL: "Foo", DEVICE_FIELDS: ["temperature_C"]}}
-    hub = _radio_entry(host="old.local", port=8433, uid="radio-old", devices=devices)
-    hub.add_to_hass(hass)
-    hub_id = hub.entry_id
-    devices_snapshot = deepcopy(hub.data[CONF_DEVICES])
+    receiver = _radio_entry(
+        host="old.local", port=8433, uid="radio-old", devices=devices
+    )
+    receiver.add_to_hass(hass)
+    receiver_id = receiver.entry_id
+    devices_snapshot = deepcopy(receiver.data[CONF_DEVICES])
 
     # An unknown radio on a distinct host:port -> the replace step is shown.
     result = await hass.config_entries.flow.async_init(
@@ -2124,15 +2140,15 @@ async def test_hassio_replace_rebinds_chosen_hub(hass):
         patch.object(hass.config_entries, "async_reload"),
     ):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"replaces": hub_id}
+            result["flow_id"], {"replaces": receiver_id}
         )
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "rebind_successful"
 
-    # The same hub entry was rebound onto the new radio + connection target.
-    rebound = hass.config_entries.async_get_entry(hub_id)
+    # The same receiver entry was rebound onto the new radio + connection target.
+    rebound = hass.config_entries.async_get_entry(receiver_id)
     assert rebound is not None
     assert rebound.unique_id == "radio-new"
     assert rebound.data[CONF_HOST] == "new.local"
@@ -2141,15 +2157,17 @@ async def test_hassio_replace_rebinds_chosen_hub(hass):
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
 
-async def test_legacy_hub_reconfigure_rebinds_via_host_port(hass, hub_entry_builder):
-    """A legacy hub: entry still rebinds its unique_id via host:port on reconfigure."""
-    entry = hub_entry_builder(host="old.local", port=8433, path="/ws")
+async def test_legacy_receiver_reconfigure_rebinds_via_host_port(
+    hass, receiver_entry_builder
+):
+    """A legacy receiver: entry still rebinds its unique_id via host:port on reconfigure."""
+    entry = receiver_entry_builder(host="old.local", port=8433, path="/ws")
     entry.add_to_hass(hass)
     assert entry.unique_id == "hub:old.local:8433"
 
     result = await entry.start_reconfigure_flow(hass)
     assert result["step_id"] == "reconfigure"
-    # No radio_id field is offered for a legacy hub: entry.
+    # No radio_id field is offered for a legacy receiver: entry.
     assert CONF_RADIO_ID not in _schema_keys(result)
 
     with (
@@ -2307,10 +2325,10 @@ def _select_options(result, key: str) -> list[tuple[str, str]]:
     raise AssertionError(f"no select field {key!r} in schema")
 
 
-async def test_hassio_replace_form_lists_hubs_and_new_option(hass):
-    """The replace form offers each existing hub (id->title) plus an 'add new' choice."""
-    hub = _radio_entry(host="old.local", port=8433, uid="radio-old")
-    hub.add_to_hass(hass)
+async def test_hassio_replace_form_lists_receivers_and_new_option(hass):
+    """The replace form offers each existing receiver (id->title) plus an 'add new' choice."""
+    receiver = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    receiver.add_to_hass(hass)
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -2325,19 +2343,19 @@ async def test_hassio_replace_form_lists_hubs_and_new_option(hass):
         "host": "new.local",
         "port": "9000",
     }
-    # Options: the existing hub keyed by entry_id->title, then the new-radio choice.
+    # Options: the existing receiver keyed by entry_id->title, then the new-radio choice.
     options = _select_options(result, "replaces")
-    assert (hub.entry_id, "rtl_433 (old.local)") in options
+    assert (receiver.entry_id, "rtl_433 (old.local)") in options
     assert ("__new__", "It's a new radio") in options
-    # The form defaults to "add as new" so a careless submit never rebinds a hub.
+    # The form defaults to "add as new" so a careless submit never rebinds a receiver.
     assert _schema_default(result, "replaces") == "__new__"
 
 
 async def test_hassio_replace_rebind_sets_title_to_new_host(hass):
-    """Rebinding via the replace step retitles the hub to the new host."""
-    hub = _radio_entry(host="old.local", port=8433, uid="radio-old")
-    hub.add_to_hass(hass)
-    hub_id = hub.entry_id
+    """Rebinding via the replace step retitles the receiver to the new host."""
+    receiver = _radio_entry(host="old.local", port=8433, uid="radio-old")
+    receiver.add_to_hass(hass)
+    receiver_id = receiver.entry_id
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -2349,11 +2367,11 @@ async def test_hassio_replace_rebind_sets_title_to_new_host(hass):
         patch.object(hass.config_entries, "async_reload"),
     ):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"replaces": hub_id}
+            result["flow_id"], {"replaces": receiver_id}
         )
         await hass.async_block_till_done()
 
-    rebound = hass.config_entries.async_get_entry(hub_id)
+    rebound = hass.config_entries.async_get_entry(receiver_id)
     assert rebound.unique_id == "radio-new"
     assert rebound.title == "rtl_433 (new.local)"
 
@@ -2424,7 +2442,7 @@ async def test_reconfigure_rebind_strips_whitespace_and_sets_title(hass):
     assert entry.title == "rtl_433 (new.local)"
 
 
-async def test_reconfigure_empty_unique_id_uses_legacy_hub_scheme(hass):
+async def test_reconfigure_empty_unique_id_uses_legacy_receiver_scheme(hass):
     """An entry with no unique_id reconfigures via the legacy hub:host:port scheme."""
     entry = MockConfigEntry(
         domain=DOMAIN,

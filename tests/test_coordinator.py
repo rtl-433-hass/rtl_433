@@ -58,8 +58,8 @@ def _run(hass, coro):
 
 
 @pytest.fixture
-async def coordinator(hass, hub_entry_builder):
-    """Build a coordinator wired to a hub entry, with a 600s timeout.
+async def coordinator(hass, receiver_entry_builder):
+    """Build a coordinator wired to a receiver entry, with a 600s timeout.
 
     Async so construction runs inside the event loop: the coordinator now builds
     its :class:`pyrtl_433.Rtl433Client` in ``__init__`` (injecting HA's shared
@@ -70,7 +70,7 @@ async def coordinator(hass, hub_entry_builder):
     watchdog, dispatch. A device the user has not adopted never reaches any of
     that; it lands in the pending list instead, which is a separate contract.
     """
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
     return Rtl433Coordinator(
         hass,
@@ -277,8 +277,8 @@ def test_watchdog_flips_unavailable_then_recovers(hass, coordinator):
     assert coordinator.available[key] is True
 
 
-def test_per_device_override_beats_hub_default(hass, coordinator):
-    """The effective timeout uses the per-device resolver over the hub default."""
+def test_per_device_override_beats_receiver_default(hass, coordinator):
+    """The effective timeout uses the per-device resolver over the receiver default."""
     key = "Acurite-606TX-42"
     coordinator.effective_timeout_resolver = lambda dk: 60 if dk == key else 600
     assert coordinator._effective_timeout(key) == 60
@@ -287,14 +287,14 @@ def test_per_device_override_beats_hub_default(hass, coordinator):
     with freeze_time(start), patch(DISPATCH):
         coordinator._on_client_event(_event())
 
-    # 90s of silence exceeds the 60s override (but not the 600s hub default).
+    # 90s of silence exceeds the 60s override (but not the 600s receiver default).
     with freeze_time(start + timedelta(seconds=90)), patch(DISPATCH):
         _run(hass, coordinator._async_watchdog(dt_util.utcnow()))
     assert coordinator.available[key] is False
 
 
 def test_effective_timeout_falls_back_on_resolver_error(hass, coordinator):
-    """A throwing resolver falls back to the hub default instead of crashing."""
+    """A throwing resolver falls back to the receiver default instead of crashing."""
 
     def boom(_dk: str) -> int:
         raise RuntimeError("resolver exploded")
@@ -408,7 +408,7 @@ def test_validate_connection_delegates_to_client(hass):
 # --------------------------------------------------------------------------- #
 # The client is given HA's configured zone for naive-timestamp classification. #
 # --------------------------------------------------------------------------- #
-async def test_client_receives_ha_configured_event_tz(hass, hub_entry_builder):
+async def test_client_receives_ha_configured_event_tz(hass, receiver_entry_builder):
     """The coordinator passes HA's configured zone as the client's event_tz.
 
     Regression guard: an offset-less rtl_433 ``time`` stamp must be classified in
@@ -418,7 +418,7 @@ async def test_client_receives_ha_configured_event_tz(hass, hub_entry_builder):
     """
     await hass.config.async_set_time_zone("America/New_York")
     configured = dt_util.get_default_time_zone()
-    entry = hub_entry_builder(availability_timeout=600)
+    entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
 
     coordinator = Rtl433Coordinator(
@@ -585,7 +585,7 @@ def test_forget_device_clears_the_log_once_memos(hass, coordinator):
     key = "Acurite-606TX-42"
     with patch(DISPATCH):
         coordinator._on_client_event(_event(key=key, fields={"made_up_field": 1}))
-    coordinator._log_timeout_change(key, 600, "hub")
+    coordinator._log_timeout_change(key, 600, "receiver")
     assert coordinator._logged_unmapped.get(key)
     assert key in coordinator._logged_timeouts
 

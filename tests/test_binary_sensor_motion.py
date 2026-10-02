@@ -6,7 +6,7 @@ Motion moved off the ``event`` platform and is now a detect-only
 clear-delay (default 90s, per-device overridable). These tests drive the timer
 lifecycle, the override resolution, the cancel-on-remove path, and the one-shot
 ``event.*_motion`` -> ``binary_sensor.*_motion`` registry migration through the
-live hub harness (reusing ``_setup_hub`` / ``_feed`` from the lifecycle suite).
+live receiver harness (reusing ``_setup_receiver`` / ``_feed`` from the lifecycle suite).
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.repairs import ISSUE_MOTION_MOVED
 from homeassistant.helpers import entity_registry as er, issue_registry as ir
 from homeassistant.util import dt as dt_util
-from tests.test_lifecycle import _coordinator, _feed, _setup_hub
+from tests.test_lifecycle import _coordinator, _feed, _setup_receiver
 
 # A PIR/occupancy device whose only field is ``motion`` (raw value 1 on detect).
 _MODEL = "GenericPIR-Z1"
@@ -55,11 +55,11 @@ def _motion_devices(**record):
     return {_DEVICE_KEY: {CONF_MODEL: _MODEL, DEVICE_FIELDS: ["motion"], **record}}
 
 
-def _motion_eid(hass, hub):
+def _motion_eid(hass, receiver):
     """Resolve the device's motion ``binary_sensor`` entity_id (must exist)."""
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{hub.entry_id}:{_DEVICE_KEY}:motion"
+        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DEVICE_KEY}:motion"
     )
     assert eid is not None
     return eid
@@ -80,14 +80,16 @@ async def _advance_to(hass, start, seconds):
 # --------------------------------------------------------------------------- #
 # Detection turns on; the synthesized off fires after the clear delay.         #
 # --------------------------------------------------------------------------- #
-async def test_detection_turns_on_then_auto_off(hass, hub_entry_builder):
+async def test_detection_turns_on_then_auto_off(hass, receiver_entry_builder):
     """A detection sets the motion sensor ``on``; the delay synthesizes ``off``."""
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    eid = _motion_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    eid = _motion_eid(hass, receiver)
     assert hass.states.get(eid).attributes["device_class"] == "occupancy"
 
     start = dt_util.utcnow()
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
@@ -103,11 +105,13 @@ async def test_detection_turns_on_then_auto_off(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 # A second detection within the window reschedules the off.                    #
 # --------------------------------------------------------------------------- #
-async def test_retrigger_reschedules_off(hass, hub_entry_builder):
+async def test_retrigger_reschedules_off(hass, receiver_entry_builder):
     """Two detections within the window keep it on; off only after a quiet window."""
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    coordinator = _coordinator(hass, hub)
-    eid = _motion_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    coordinator = _coordinator(hass, receiver)
+    eid = _motion_eid(hass, receiver)
 
     # Drive the whole flow under a single frozen, ticking clock so the re-armed
     # ``async_call_later`` (which anchors its fire instant to ``utcnow()`` at
@@ -146,18 +150,18 @@ async def test_retrigger_reschedules_off(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 # Per-device override: the resolver honors the device's clear delay.           #
 # --------------------------------------------------------------------------- #
-async def test_per_device_override_drives_off(hass, hub_entry_builder):
+async def test_per_device_override_drives_off(hass, receiver_entry_builder):
     """With a per-device override, the off fires on the override, not the default."""
     override = 15  # much shorter than the 90s default
-    hub = await _setup_hub(
+    receiver = await _setup_receiver(
         hass,
-        hub_entry_builder,
+        receiver_entry_builder,
         devices=_motion_devices(**{DEVICE_MOTION_CLEAR_DELAY: override}),
     )
-    eid = _motion_eid(hass, hub)
+    eid = _motion_eid(hass, receiver)
 
     start = dt_util.utcnow()
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
@@ -175,7 +179,7 @@ async def test_per_device_override_drives_off(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 # A clear-delay saved through a settings form (entry.options) also takes effect.#
 # --------------------------------------------------------------------------- #
-async def test_options_clear_delay_drives_off(hass, hub_entry_builder):
+async def test_options_clear_delay_drives_off(hass, receiver_entry_builder):
     """An override stored in ``entry.options`` drives the auto-off, not the default.
 
     The two settings surfaces write this knob to ``entry.options[CONF_DEVICES]``
@@ -187,16 +191,16 @@ async def test_options_clear_delay_drives_off(hass, hub_entry_builder):
     the stored value and the behaviour are the same thing.
     """
     override = 15  # much shorter than the 90s default
-    hub = await _setup_hub(
+    receiver = await _setup_receiver(
         hass,
-        hub_entry_builder,
+        receiver_entry_builder,
         devices=_motion_devices(),
         options={CONF_DEVICES: {_DEVICE_KEY: {DEVICE_MOTION_CLEAR_DELAY: override}}},
     )
-    eid = _motion_eid(hass, hub)
+    eid = _motion_eid(hass, receiver)
 
     start = dt_util.utcnow()
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
@@ -211,13 +215,15 @@ async def test_options_clear_delay_drives_off(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 # Removing the entity with a timer pending must not write or raise later.      #
 # --------------------------------------------------------------------------- #
-async def test_remove_cancels_pending_timer(hass, hub_entry_builder):
+async def test_remove_cancels_pending_timer(hass, receiver_entry_builder):
     """Removing the entity with a pending timer produces no late write / error."""
-    hub = await _setup_hub(hass, hub_entry_builder, devices=_motion_devices())
-    eid = _motion_eid(hass, hub)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, devices=_motion_devices()
+    )
+    eid = _motion_eid(hass, receiver)
 
     start = dt_util.utcnow()
-    _feed(_coordinator(hass, hub), _MOTION_EVENT)
+    _feed(_coordinator(hass, receiver), _MOTION_EVENT)
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == "on"
 
@@ -236,7 +242,9 @@ async def test_remove_cancels_pending_timer(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 # Migration: a seeded ``event.*_motion`` entity is swept and announced.        #
 # --------------------------------------------------------------------------- #
-async def test_migration_removes_event_entity_and_raises_issue(hass, hub_entry_builder):
+async def test_migration_removes_event_entity_and_raises_issue(
+    hass, receiver_entry_builder
+):
     """A pre-seeded ``event.*_motion`` registry entry is removed at setup.
 
     Afterward: that event entity is gone, ``motion`` is dropped from the persisted
@@ -244,13 +252,13 @@ async def test_migration_removes_event_entity_and_raises_issue(hass, hub_entry_b
     exists, and no ``event.*_motion`` entity is (re)created — only the
     ``binary_sensor.*_motion`` remains.
     """
-    entry_id = "motionmighub01"
-    hub = hub_entry_builder(
+    entry_id = "motionmigreceiver01"
+    receiver = receiver_entry_builder(
         availability_timeout=600,
         entry_id=entry_id,
         devices=_motion_devices(**{DEVICE_EVENT_TYPES: {"motion": ["1"]}}),
     )
-    hub.add_to_hass(hass)
+    receiver.add_to_hass(hass)
 
     # Pre-seed the orphaned pre-fix ``event.*_motion`` registry entry.
     ent_reg = er.async_get(hass)
@@ -259,11 +267,11 @@ async def test_migration_removes_event_entity_and_raises_issue(hass, hub_entry_b
         "event",
         DOMAIN,
         motion_unique_id,
-        config_entry=hub,
+        config_entry=receiver,
     )
     seeded_event_eid = event_entry.entity_id
 
-    assert await hass.config_entries.async_setup(hub.entry_id)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
 
     # The orphaned event entity is gone (removed by the migration sweep).
@@ -271,7 +279,7 @@ async def test_migration_removes_event_entity_and_raises_issue(hass, hub_entry_b
     assert ent_reg.async_get_entity_id("event", DOMAIN, motion_unique_id) is None
 
     # ``motion`` was dropped from the persisted event-type slots.
-    entry = hass.config_entries.async_get_entry(hub.entry_id)
+    entry = hass.config_entries.async_get_entry(receiver.entry_id)
     persisted = entry.data[CONF_DEVICES][_DEVICE_KEY].get(DEVICE_EVENT_TYPES, {})
     assert "motion" not in persisted
 

@@ -30,15 +30,15 @@
  *   file, that is a decision to take deliberately rather than to drift into.
  *
  * The backend contract lives in `custom_components/rtl_433/websocket_api.py`:
- * `rtl_433/hubs` names the receivers, `rtl_433/devices/subscribe` pushes one
- * hub's `{pending, ignored}` state whenever it changes, and
+ * `rtl_433/receivers` names the receivers, `rtl_433/devices/subscribe` pushes one
+ * receiver's `{pending, ignored}` state whenever it changes, and
  * `rtl_433/devices/add` / `.../ignore` / `.../unignore` are the three actions,
  * and `rtl_433/devices/replace` re-points an existing device onto a candidate.
  * None of the adopt/ignore/replace *logic* is reimplemented here; every button
  * is one command call, so this panel cannot drift from what the integration
  * does. The same holds for the three settings pages: `rtl_433/settings/get`
  * answers with everything they render -- including which units are valid for
- * which commodity -- and `.../hub`, `.../device` and `.../mappings` store it.
+ * which commodity -- and `.../receiver`, `.../device` and `.../mappings` store it.
  * A form here knows how to lay a control out and nothing about what a value
  * means, which is why the panel cannot store a setting the integration would
  * refuse.
@@ -55,7 +55,7 @@
 /**
  * How often the rendered relative timestamps ("12s ago") are recomputed.
  *
- * The subscription only pushes when the payload changes, so on an idle hub
+ * The subscription only pushes when the payload changes, so on an idle receiver
  * "2s ago" would otherwise stay on screen indefinitely and quietly lie about
  * how long it has been since anything was heard. Re-rendering is cheap because
  * rendering reconciles the existing cards rather than rebuilding them.
@@ -63,14 +63,14 @@
 const CLOCK_INTERVAL_MS = 15000;
 
 /**
- * How long to keep waiting for a hub that is mid-reload, and how often to look.
+ * How long to keep waiting for a receiver that is mid-reload, and how often to look.
  *
  * Saving a calibration, a mapping override or the manage-settings toggle
- * reloads the hub, and for a moment afterwards it is genuinely not loaded --
+ * reloads the receiver, and for a moment afterwards it is genuinely not loaded --
  * the subscription this page depends on cannot be opened against it. That is a
  * wait, not a failure, and reporting it as one would put an error banner in
  * front of the user at the exact moment their save succeeded. Ten seconds is
- * far longer than a reload takes and still short enough that a hub which is
+ * far longer than a reload takes and still short enough that a receiver which is
  * really unreachable says so rather than spinning.
  */
 const RELOAD_RETRY_MS = 1000;
@@ -136,7 +136,7 @@ export const STRINGS = {
   "common.loading": "Loading…",
   "common.unknown_model": "Unknown model",
   "common.unknown_error": "Unknown error",
-  "status.no_hubs": "No rtl_433 hubs are configured.",
+  "status.no_receivers": "No rtl_433 receivers are configured.",
   "status.waiting_for_reload": "Waiting for the receiver to reload…",
   "status.online": "Online",
   "status.connecting": "Connecting…",
@@ -150,7 +150,7 @@ export const STRINGS = {
   "overview.entity_count.one": "{count} entity",
   "overview.entity_count.other": "{count} entities",
   "overview.add_device": "Add or replace device",
-  "overview.hub_settings_description":
+  "overview.receiver_settings_description":
     "Availability timeout and whether Home Assistant manages the receiver",
   "overview.device_settings_description":
     "Per-device timeout overrides and utility-meter calibration",
@@ -195,7 +195,7 @@ export const STRINGS = {
   "replace.intro":
     "{device} ({key}) is new to Home Assistant. If it is a device you already have — the same sensor after a battery change, say — pick it below. Its history, settings and entity ids move across to the new transmitter id, and the candidate is merged into it.",
   "settings.saved": "Settings saved.",
-  "settings.hub_intro":
+  "settings.receiver_intro":
     "Settings for this receiver as a whole. Individual devices can override the timeout.",
   "settings.device_intro":
     "Overrides for one device. Blank means “use the receiver's setting”.",
@@ -380,7 +380,7 @@ function pluralCandidates(key, args, language) {
 export const VIEWS = {
   "": { view: "overview", title: "title" },
   discovered: { view: "discovered", title: "view.discovered" },
-  options: { view: "settings", title: "view.receiver_settings", form: "hub" },
+  options: { view: "settings", title: "view.receiver_settings", form: "receiver" },
   "device-settings": {
     view: "settings",
     title: "view.device_settings",
@@ -447,7 +447,7 @@ const ICON_MAPPINGS =
 const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
 
 /**
- * How the hub's availability timeout is chosen, as three named choices.
+ * How the receiver's availability timeout is chosen, as three named choices.
  *
  * The timeout has three states and only one of them is a number: "let each
  * device type decide", "never expire", and a count of seconds. A bare number
@@ -465,7 +465,7 @@ const ICON_PLUS = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z";
 export const TIMEOUT_MODES = ["defaults", "never", "custom"];
 
 /**
- * Which of `TIMEOUT_MODES` a stored hub timeout is in.
+ * Which of `TIMEOUT_MODES` a stored receiver timeout is in.
  *
  * `null` is "nothing stored", which is what leaves the per-device-type defaults
  * in charge; `0` is the stored value that means never-expire. Every other number
@@ -483,7 +483,7 @@ export function timeoutMode(explicit) {
  * What to send for a mode and the seconds beside it: `null`, `0`, or a count.
  *
  * A blank or unparseable custom field falls back to `null` rather than to a
- * number of its own: "defaults" is the state the hub was in before anyone opened
+ * number of its own: "defaults" is the state the receiver was in before anyone opened
  * the form, so an empty field cannot silently pin a timeout onto every device.
  */
 export function timeoutValue(mode, seconds) {
@@ -539,7 +539,7 @@ export function backAction(segment, pushed, historyLength) {
  * The overview describes the *integration*, not one radio: its counts and its
  * links cover every receiver, so the card above them has to as well. One
  * receiver online and a second one down is the case that makes this matter --
- * a card that read "Online" there would be reporting the hub the panel happens
+ * a card that read "Online" there would be reporting the receiver the panel happens
  * to be subscribed to as though it were the whole installation.
  *
  * `states` is one entry per receiver: `true` connected, `false` not, and `null`
@@ -627,7 +627,7 @@ export function formatAge(t, iso, now) {
  *
  * Built once at module scope rather than per call. `toLocaleString()`
  * constructs a fresh `Intl.DateTimeFormat` every time it runs, and this is
- * called for every card of every render -- on a hub with dozens of candidates
+ * called for every card of every render -- on a receiver with dozens of candidates
  * that is a lot of formatter construction to produce a string nobody may ever
  * hover over.
  */
@@ -756,7 +756,7 @@ class Rtl433Panel extends HTMLElement {
     // handed to the module-scope formatters without allocating per call.
     this._t = this._t.bind(this);
 
-    this._hubs = [];
+    this._receivers = [];
     this._entryId = null;
     // Whether this panel pushed a history entry to reach the view it is on,
     // and therefore owes an unwind when it goes back up.
@@ -772,7 +772,7 @@ class Rtl433Panel extends HTMLElement {
     // The receiver a settings path names, when it names one.
     this._segmentEntry = null;
     // Which receiver the cached settings payload belongs to, so a page for a
-    // different one refetches rather than showing the wrong hub's values.
+    // different one refetches rather than showing the wrong receiver's values.
     this._settingsFor = null;
     // The form + receiver whose payload has been asked for, so a repaint does
     // not ask again (see `_openSettings`).
@@ -784,7 +784,7 @@ class Rtl433Panel extends HTMLElement {
     this._data = null;
     this._unsubscribe = null;
     this._clock = null;
-    // A scheduled re-attempt at subscribing to a hub that was mid-reload, and
+    // A scheduled re-attempt at subscribing to a receiver that was mid-reload, and
     // how many have been made. Both are reset by every deliberate subscribe.
     this._retry = null;
     this._retries = 0;
@@ -827,7 +827,7 @@ class Rtl433Panel extends HTMLElement {
 
     // `key -> area_id` for adds whose area has not been applied yet.
     //
-    // Adoption writes the hub's device map; the device *registry* entry only
+    // Adoption writes the receiver's device map; the device *registry* entry only
     // appears once the platforms have built the entities, which is a later turn
     // of the event loop. Rather than poll for it, these are drained whenever a
     // new `hass` arrives (see the setter) -- the registry landing is itself one
@@ -898,7 +898,7 @@ class Rtl433Panel extends HTMLElement {
    *
    * A settings page names the receiver it configures -- `options/<entry_id>` --
    * because with more than one receiver the page is otherwise ambiguous: a
-   * reload or a bookmark would land on whichever hub happened to resolve first
+   * reload or a bookmark would land on whichever receiver happened to resolve first
    * and quietly configure the wrong radio. The id is optional, so links written
    * before this still work and fall back to the selected receiver.
    */
@@ -938,7 +938,7 @@ class Rtl433Panel extends HTMLElement {
   _settingsEntryId() {
     if (
       this._segmentEntry &&
-      this._hubs.some((hub) => hub.entry_id === this._segmentEntry)
+      this._receivers.some((receiver) => receiver.entry_id === this._segmentEntry)
     ) {
       return this._segmentEntry;
     }
@@ -1086,12 +1086,12 @@ class Rtl433Panel extends HTMLElement {
    * re-attach begin again from the top.
    */
   async _begin() {
-    // The strings and the hub list are independent round trips, so they are
+    // The strings and the receiver list are independent round trips, so they are
     // asked for together rather than one behind the other: what the page says
     // and what it has to show have nothing to do with each other, and waiting
     // out the first before sending the second would put a whole extra round
     // trip between opening the panel and seeing a device.
-    const hubs = settled(this._call({ type: "rtl_433/hubs" }));
+    const receivers = settled(this._call({ type: "rtl_433/hubs" }));
     await this._loadStrings();
     if (!this.isConnected) {
       this._started = false;
@@ -1101,7 +1101,7 @@ class Rtl433Panel extends HTMLElement {
     this._status = this._t("common.loading");
     this._render();
     this._startClock();
-    this._loadHubs(hubs);
+    this._loadReceivers(receivers);
     this._loadBrandLogo();
   }
 
@@ -1211,11 +1211,11 @@ class Rtl433Panel extends HTMLElement {
       this._clock = window.setInterval(() => {
         // With several receivers the overview reports all of them, and only the
         // subscribed one pushes. So while that card is on screen the tick
-        // re-asks for the hub list, which is what keeps the other receivers'
+        // re-asks for the receiver list, which is what keeps the other receivers'
         // connections from being as old as the page. One receiver needs none of
         // this: its state arrives on the subscription.
-        if (this._hubs.length > 1 && !this._segment) {
-          this._refreshHubs();
+        if (this._receivers.length > 1 && !this._segment) {
+          this._refreshReceivers();
         } else if (this._data) {
           this._render();
         }
@@ -1242,9 +1242,9 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * Re-read the hub list, without disturbing the subscription.
+   * Re-read the receiver list, without disturbing the subscription.
    *
-   * Deliberately not `_loadHubs`: that one *chooses* a receiver and subscribes
+   * Deliberately not `_loadReceivers`: that one *chooses* a receiver and subscribes
    * to it, which is right once and wrong every fifteen seconds -- it would tear
    * down and reopen the subscription on every tick. This only refreshes what
    * the overview reports about the receivers it is not subscribed to.
@@ -1254,7 +1254,7 @@ class Rtl433Panel extends HTMLElement {
    * page opened simply leaves the list, and one added joins it -- which is also
    * how a second receiver's settings card appears without a reload.
    */
-  async _refreshHubs() {
+  async _refreshReceivers() {
     let result;
     try {
       result = await this._call({ type: "rtl_433/hubs" });
@@ -1264,12 +1264,12 @@ class Rtl433Panel extends HTMLElement {
     if (!this.isConnected || !this._el) {
       return;
     }
-    this._hubs = result.hubs || [];
-    if (!this._hubs.length) {
+    this._receivers = result.hubs || [];
+    if (!this._receivers.length) {
       // Every receiver removed while the page sat open. Saying so is better
       // than a page of empty counts with nothing to explain them.
-      this._status = this._t("status.no_hubs");
-    } else if (!this._hubs.some((hub) => hub.entry_id === this._entryId)) {
+      this._status = this._t("status.no_receivers");
+    } else if (!this._receivers.some((receiver) => receiver.entry_id === this._entryId)) {
       // The receiver this page was subscribed to is the one that was removed,
       // so it is re-pointed at a surviving one -- the same choice the first
       // load makes, and `_subscribe` renders on its way through.
@@ -1285,23 +1285,23 @@ class Rtl433Panel extends HTMLElement {
   /**
    * Which receiver this page opens on, and falls back to.
    *
-   * Prefer a loaded hub: with one healthy receiver and one mid-reload, the
+   * Prefer a loaded receiver: with one healthy receiver and one mid-reload, the
    * healthy one is the one worth opening on.
    */
   _pickEntry() {
-    return (this._hubs.find((hub) => hub.loaded) || this._hubs[0]).entry_id;
+    return (this._receivers.find((receiver) => receiver.loaded) || this._receivers[0]).entry_id;
   }
 
-  async _loadHubs(pending) {
+  async _loadReceivers(pending) {
     const { value: result, error } = await pending;
     if (error) {
       this._status = "";
       this._setBanner(this._describeError(error), "error");
       return;
     }
-    this._hubs = result.hubs || [];
-    if (!this._hubs.length) {
-      this._status = this._t("status.no_hubs");
+    this._receivers = result.hubs || [];
+    if (!this._receivers.length) {
+      this._status = this._t("status.no_receivers");
       this._render();
       return;
     }
@@ -1332,15 +1332,15 @@ class Rtl433Panel extends HTMLElement {
     this._retries = 0;
     this._data = null;
     this._banner = null;
-    // The green cards describe adoptions made against *this* hub, so they are
+    // The green cards describe adoptions made against *this* receiver, so they are
     // meaningless once the panel is pointed at another one.
     this._added.clear();
     // Left behind, a queued key can never drain: `_deviceFor` builds its
-    // identifier from the *current* entry, so an entry from the old hub would
+    // identifier from the *current* entry, so an entry from the old receiver would
     // never match, and the `hass` setter would scan the whole device registry
     // on every state change in the instance for the life of the page.
     this._pendingAreas.clear();
-    // The settings payload describes *a* hub, and every device key in it
+    // The settings payload describes *a* receiver, and every device key in it
     // belongs to that one. Carried across a switch it would offer the previous
     // receiver's devices under this receiver's name.
     this._settings = null;
@@ -1351,10 +1351,10 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * Open the subscription, waiting out a hub that is mid-reload.
+   * Open the subscription, waiting out a receiver that is mid-reload.
    *
    * Split from `_subscribe` so a retry re-attempts only the *connection*. The
-   * resets above describe "the user pointed this page at a hub", which happens
+   * resets above describe "the user pointed this page at a receiver", which happens
    * once; this can happen several times for that one intent, and clearing the
    * status on each attempt would flicker the page while it waits.
    */
@@ -1365,8 +1365,8 @@ class Rtl433Panel extends HTMLElement {
     try {
       unsubscribe = await this._hass.connection.subscribeMessage(
         (payload) => {
-          // A push from a hub the user has since switched away from must not
-          // paint over the hub they are now looking at.
+          // A push from a receiver the user has since switched away from must not
+          // paint over the receiver they are now looking at.
           if (this._entryId !== entryId) {
             return;
           }
@@ -1380,7 +1380,7 @@ class Rtl433Panel extends HTMLElement {
       if (this._entryId !== entryId) {
         return;
       }
-      // A `not_loaded` error means the hub is reloading, so retry rather than
+      // A `not_loaded` error means the receiver is reloading, so retry rather than
       // report it. It is the expected answer for a second or so after saving a
       // setting that requires a reload -- exactly when an error banner would be
       // most confusing, since the save actually worked.
@@ -1401,7 +1401,7 @@ class Rtl433Panel extends HTMLElement {
       return;
     }
 
-    // Awaiting gave the user time to switch hubs or navigate away; either way
+    // Awaiting gave the user time to switch receivers or navigate away; either way
     // this subscription is already unwanted, so close it instead of storing it.
     if (this._entryId !== entryId || !this.isConnected) {
       Promise.resolve()
@@ -1418,7 +1418,7 @@ class Rtl433Panel extends HTMLElement {
    * The device registry entry adoption created for `key`, or `null`.
    *
    * Matched on the identifier the entities are built with
-   * (`entity.py`: `(DOMAIN, f"{receiver_entry_id}:{device_key}")`), which is the only
+   * (`entity.py`: `(DOMAIN, f"{location_entry_id}:{device_key}")`), which is the only
    * stable join between a pending candidate and the device it becomes.
    *
    * `hass.devices` is read defensively: it is a documented part of the frontend
@@ -1487,7 +1487,7 @@ class Rtl433Panel extends HTMLElement {
    * Run one action against one device key.
    *
    * The buttons are disabled while the call is in flight and re-enabled
-   * whatever happens, so a slow hub cannot be double-clicked into two adoptions
+   * whatever happens, so a slow receiver cannot be double-clicked into two adoptions
    * and a failure never leaves a dead control on screen.
    *
    * `onApplied` runs only when the backend confirms this key was one it acted
@@ -1944,30 +1944,30 @@ class Rtl433Panel extends HTMLElement {
   }
 
   /**
-   * One settings card per receiver, rebuilt when the hub list changes.
+   * One settings card per receiver, rebuilt when the receiver list changes.
    *
    * Built here rather than in the skeleton because the receivers are not known
-   * until `rtl_433/hubs` answers. With one receiver the card is unheaded and
-   * reads exactly as before; with several, each is headed by its own hub title,
+   * until `rtl_433/receivers` answers. With one receiver the card is unheaded and
+   * reads exactly as before; with several, each is headed by its own receiver title,
    * which is what says *which* radio a row configures -- so the pages
    * themselves do not have to repeat it.
    */
   _renderSettingsCards(root) {
-    const key = this._hubs.map((hub) => `${hub.entry_id}:${hub.title}`).join("|");
+    const key = this._receivers.map((receiver) => `${receiver.entry_id}:${receiver.title}`).join("|");
     if (key === this._settingsCardsKey) {
       return;
     }
     this._settingsCardsKey = key;
     const slot = root.querySelector(".page-actions");
     slot.textContent = "";
-    const several = this._hubs.length > 1;
-    for (const hub of this._hubs) {
+    const several = this._receivers.length > 1;
+    for (const receiver of this._receivers) {
       const rows = [
         {
-          className: "open-hub-settings",
+          className: "open-receiver-settings",
           icon: ICON_RECEIVER,
           headline: this._t("view.receiver_settings"),
-          supporting: this._t("overview.hub_settings_description"),
+          supporting: this._t("overview.receiver_settings_description"),
           segment: "options",
         },
         {
@@ -1993,14 +1993,14 @@ class Rtl433Panel extends HTMLElement {
           // The receiver goes in the URL even with one of them, so a link is
           // unambiguous the moment a second is added.
           onClick: () =>
-            this._navigate(row.segment, { entry: hub.entry_id }),
+            this._navigate(row.segment, { entry: receiver.entry_id }),
         })
       );
       this._buildCard(
         slot,
         "settings-card",
         rows,
-        several ? hub.title : null
+        several ? receiver.title : null
       );
     }
   }
@@ -2015,7 +2015,7 @@ class Rtl433Panel extends HTMLElement {
    * same way, so what a user reads is what they land on.
    */
   _openConfigPage(which) {
-    if (!this._hubs.length) {
+    if (!this._receivers.length) {
       return;
     }
     const path = configPagePath(which);
@@ -2084,7 +2084,7 @@ class Rtl433Panel extends HTMLElement {
       viewDiscovered: root.querySelector(".view-discovered"),
       viewSettings: root.querySelector(".view-settings"),
       settingsIntro: root.querySelector(".settings-intro"),
-      settingsHub: root.querySelector(".settings-hub"),
+      settingsReceiver: root.querySelector(".settings-receiver"),
       settingsProblem: root.querySelector(".settings-problem"),
       settingsBody: root.querySelector(".settings-body"),
       settingsActions: null,
@@ -2205,7 +2205,7 @@ class Rtl433Panel extends HTMLElement {
     this._text(this._el.title, this._t(view.title));
 
     if (view.form) {
-      this._showSettingsHub();
+      this._showSettingsReceiver();
       // Fetching the payload is asynchronous, so this is fired and forgotten:
       // it re-renders on its own when the form is built.
       this._openSettings(view.form);
@@ -2504,7 +2504,7 @@ class Rtl433Panel extends HTMLElement {
     const busy = this._busy.has(card.key);
     parts.add.hidden = card.added;
     parts.ignore.hidden = card.added;
-    // Replace needs something to replace. On a hub whose first device this is,
+    // Replace needs something to replace. On a receiver whose first device this is,
     // the button would open a dialog with an empty list, so it is not offered.
     parts.replace.hidden = card.added || !this._replaceTargets().length;
     parts.add.disabled = busy;
@@ -2628,12 +2628,12 @@ class Rtl433Panel extends HTMLElement {
    */
   _renderOverview() {
     // The two rows open Home Assistant's own pages filtered to the integration,
-    // so they wait only for the hub list; the FAB leads to the discovered
+    // so they wait only for the receiver list; the FAB leads to the discovered
     // devices of the subscribed receiver, so it waits for one to resolve. The
     // settings rows wait for neither: they are built per receiver, from the
     // same list, once `rtl_433/hubs` has answered.
     for (const row of [this._el.rowDevices, this._el.rowEntities]) {
-      row.disabled = !this._hubs.length;
+      row.disabled = !this._receivers.length;
     }
     this._el.fab.disabled = !this._entryId;
 
@@ -2641,10 +2641,10 @@ class Rtl433Panel extends HTMLElement {
     // `_render` reaches here on every push from the receiver and on the clock
     // tick, and the registry is the user's whole instance -- thousands of
     // entries on a big one -- so walking it once per count added up.
-    const deviceIds = this._hubDeviceIds();
+    const deviceIds = this._receiverDeviceIds();
     const devices = deviceIds === null ? null : deviceIds.length;
     const status = this._el.status0;
-    const { connected, key, args } = overviewStatus(this._hubConnections());
+    const { connected, key, args } = overviewStatus(this._receiverConnections());
     status.glyph.className = "status-icon";
     if (status.glyph.localName === "ha-svg-icon") {
       status.glyph.path = connected ? ICON_ONLINE : ICON_OFFLINE;
@@ -2671,22 +2671,22 @@ class Rtl433Panel extends HTMLElement {
    * off the live payload -- the connection as the receiver reports it, not "is
    * my subscription working?", which stays true through an outage -- and it is
    * the freshest thing on the page, since losing the socket pushes a payload.
-   * The rest come from the hub list, which the clock re-asks for while several
+   * The rest come from the receiver list, which the clock re-asks for while several
    * receivers are configured (see `_startClock`), so their rows cannot sit on a
    * stale "Online" either.
    *
-   * A hub list that predates the `connected` field falls back to `loaded`: an
+   * A receiver list that predates the `connected` field falls back to `loaded`: an
    * entry that is not set up has no open socket by definition, which is the
    * half of the answer that matters on that row.
    */
-  _hubConnections() {
-    return this._hubs.map((hub) => {
-      if (hub.entry_id === this._entryId) {
+  _receiverConnections() {
+    return this._receivers.map((receiver) => {
+      if (receiver.entry_id === this._entryId) {
         return this._data === null ? null : Boolean(this._data.connected);
       }
-      return typeof hub.connected === "boolean"
-        ? hub.connected
-        : Boolean(hub.loaded);
+      return typeof receiver.connected === "boolean"
+        ? receiver.connected
+        : Boolean(receiver.loaded);
     });
   }
 
@@ -2713,7 +2713,7 @@ class Rtl433Panel extends HTMLElement {
    * `hass.devices` is keyed by device id and each entry names the single config
    * entry that owns it (`config_entry_id`; the older `config_entries` list is
    * deprecated and goes away in Home Assistant 2027.8), so this is a filter
-   * rather than a lookup. The hub list is what says which entries are rtl_433's
+   * rather than a lookup. The receiver list is what says which entries are rtl_433's
    * -- the registry a panel is handed carries no domain -- so a count is only
    * possible once `rtl_433/hubs` has answered, and until then there is none.
    *
@@ -2723,12 +2723,12 @@ class Rtl433Panel extends HTMLElement {
    * receivers' own devices are *included* for the same reason -- that list
    * includes them.
    */
-  _hubDeviceIds() {
+  _receiverDeviceIds() {
     const devices = this._hass && this._hass.devices;
-    if (!devices || !this._hubs.length) {
+    if (!devices || !this._receivers.length) {
       return null;
     }
-    const entries = new Set(this._hubs.map((hub) => hub.entry_id));
+    const entries = new Set(this._receivers.map((receiver) => receiver.entry_id));
     return Object.values(devices)
       .filter((device) => entries.has(device.config_entry_id))
       .map((device) => device.id);
@@ -2852,7 +2852,7 @@ class Rtl433Panel extends HTMLElement {
     this._settingsAttempt = attempt;
     this._el.settingsProblem.hidden = true;
     // A cached payload belongs to the receiver it was fetched for; opening a
-    // different one has to refetch or the form would show another hub's values
+    // different one has to refetch or the form would show another receiver's values
     // and save them over this one's.
     if (this._settingsFor !== entryId) {
       this._settings = null;
@@ -2946,16 +2946,16 @@ class Rtl433Panel extends HTMLElement {
    *
    * All three settings pages are per receiver, and the toolbar can only name the
    * page -- so with two receivers configured, "Receiver settings" was two
-   * identical-looking screens editing different hubs. The receiver is in the
+   * identical-looking screens editing different receivers. The receiver is in the
    * URL, it just was not on the page. One receiver needs no heading: there is
    * nothing to tell it apart from.
    */
-  _showSettingsHub() {
-    const heading = this._el.settingsHub;
+  _showSettingsReceiver() {
+    const heading = this._el.settingsReceiver;
     const entryId = this._settingsEntryId();
-    const hub = this._hubs.find((entry) => entry.entry_id === entryId);
-    const show = this._hubs.length > 1 && Boolean(hub);
-    heading.textContent = show ? hub.title : "";
+    const receiver = this._receivers.find((entry) => entry.entry_id === entryId);
+    const show = this._receivers.length > 1 && Boolean(receiver);
+    heading.textContent = show ? receiver.title : "";
     heading.hidden = !show;
   }
 
@@ -3004,7 +3004,7 @@ class Rtl433Panel extends HTMLElement {
 
   _settingsSchema(kind) {
     const settings = this._settings;
-    if (kind === "hub") {
+    if (kind === "receiver") {
       // The seconds field belongs to one of the three modes, so it appears with
       // it rather than sitting there greyed out -- the same recompute-on-change
       // the device form uses for its unit and scale.
@@ -3112,7 +3112,7 @@ class Rtl433Panel extends HTMLElement {
   _settingsCopy(name) {
     return [
       this._t(`settings.data.${name}`) || name,
-      // The hub's defaults *are* the arguments: a description that wants to
+      // The receiver's defaults *are* the arguments: a description that wants to
       // name one cites it by its own name (`{motion_clear_delay}`), and a new
       // one becomes citable without a line changing here.
       this._t(`settings.data_description.${name}`, this._settings.defaults),
@@ -3122,7 +3122,7 @@ class Rtl433Panel extends HTMLElement {
   /** The values the open form starts from. */
   _settingsDefaults(kind) {
     const settings = this._settings;
-    if (kind === "hub") {
+    if (kind === "receiver") {
       const explicit = settings.hub.availability_timeout;
       const mode = timeoutMode(explicit);
       return {
@@ -3183,8 +3183,8 @@ class Rtl433Panel extends HTMLElement {
     this._showSettingsSave(true);
     this._settingsForm = kind;
 
-    if (kind === "hub") {
-      this._el.settingsIntro.textContent = this._t("settings.hub_intro");
+    if (kind === "receiver") {
+      this._el.settingsIntro.textContent = this._t("settings.receiver_intro");
     } else if (kind === "device") {
       if (!this._settings.devices.length) {
         this._el.settingsIntro.textContent = this._t("settings.device_empty");
@@ -3346,7 +3346,7 @@ class Rtl433Panel extends HTMLElement {
   _onSettingsChanged(next) {
     const previous = this._settingsData;
     if (
-      this._settingsForm === "hub" &&
+      this._settingsForm === "receiver" &&
       next.availability_mode !== previous.availability_mode
     ) {
       // Only "a fixed timeout" has a seconds field, so the schema changes.
@@ -3394,7 +3394,7 @@ class Rtl433Panel extends HTMLElement {
    * overview's banner is not where the user is standing, and navigating away on
    * a refusal would throw away what they typed. On success the payload is
    * dropped so the next visit re-reads it, the panel returns to the overview,
-   * and the subscription is re-established -- a hub
+   * and the subscription is re-established -- a receiver
    * reloads when its calibration, mappings or manage-settings toggle changes,
    * and the old subscription would then be pushing a replaced coordinator's
    * state.
@@ -3410,7 +3410,7 @@ class Rtl433Panel extends HTMLElement {
     // is what the backend reads as "clear it".
     const number = (name) => (data[name] === undefined ? null : data[name]);
     let message;
-    if (kind === "hub") {
+    if (kind === "receiver") {
       message = {
         type: "rtl_433/settings/hub",
         entry_id: this._settingsEntryId(),
@@ -3461,7 +3461,7 @@ class Rtl433Panel extends HTMLElement {
 
     this._settings = null;
     this._goUp();
-    // Re-subscribe *before* the banner, not after. A hub reloads when its
+    // Re-subscribe *before* the banner, not after. A receiver reloads when its
     // calibration, mappings or manage-settings toggle changes, and the old
     // subscription would go on pushing a replaced coordinator's state -- but
     // `_subscribe` also clears the banner on its way past, so a "saved" set
@@ -3475,7 +3475,7 @@ class Rtl433Panel extends HTMLElement {
   /**
    * The devices this candidate could be standing in for.
    *
-   * Everything the hub already has, minus the candidate itself -- a device
+   * Everything the receiver already has, minus the candidate itself -- a device
    * cannot replace itself, and `async_replace_device` rejects that anyway.
    */
   _replaceTargets(exceptKey) {
@@ -3566,7 +3566,7 @@ class Rtl433Panel extends HTMLElement {
    * The card disappears on its own: the merge reloads the entry, which rebuilds
    * the pending list without this candidate in it, and that arrives as an
    * ordinary push. Nothing is hidden optimistically here -- the panel shows what
-   * the hub says.
+   * the receiver says.
    */
   async _confirmReplace() {
     const row = this._replaceFor;
@@ -3670,7 +3670,7 @@ const SKELETON = `
     <p class="settings-intro"></p>
     <div class="settings-card-slot">
       <div class="card-content">
-        <h2 class="settings-hub" hidden></h2>
+        <h2 class="settings-receiver" hidden></h2>
         <div class="settings-problem" hidden></div>
         <div class="settings-body"></div>
       </div>
@@ -4133,7 +4133,7 @@ const STYLES = `
    */
   button.nav-devices,
   button.nav-entities,
-  button.open-hub-settings,
+  button.open-receiver-settings,
   button.open-device-settings,
   button.open-mappings {
     display: flex;
@@ -4150,7 +4150,7 @@ const STYLES = `
   }
   button.nav-devices .row-headline,
   button.nav-entities .row-headline,
-  button.open-hub-settings .row-headline,
+  button.open-receiver-settings .row-headline,
   button.open-device-settings .row-headline,
   button.open-mappings .row-headline { font-size: 16px; }
 
@@ -4209,12 +4209,12 @@ const STYLES = `
    * one to confuse it with -- which is the same rule, and the same heading, the
    * overview's own per-receiver cards use.
    */
-  .settings-hub {
+  .settings-receiver {
     margin: 0 0 16px;
     font-size: 20px;
     font-weight: 400;
   }
-  .settings-hub[hidden] { display: none; }
+  .settings-receiver[hidden] { display: none; }
 
   /*
    * The native fallback's form controls, for a frontend with no ha-form. Sized

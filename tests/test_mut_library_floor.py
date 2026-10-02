@@ -55,7 +55,9 @@ def _make_registry(
 
 
 def _make_entry(
-    entry_id: str = "test-hub-entry-id", user_mappings=None, title: str = "Test hub"
+    entry_id: str = "test-receiver-entry-id",
+    user_mappings=None,
+    title: str = "Test receiver",
 ):
     """Build a minimal mock ConfigEntry."""
     entry = MagicMock()
@@ -227,7 +229,7 @@ def test_merge_entry_library_none_user_mappings_uses_empty_dict():
 
 
 def _call_merge_fallback(
-    entry_id: str = "hub-fallback-id",
+    entry_id: str = "receiver-fallback-id",
     flat_keys: list[str] | None = None,
     model_map: dict[str, list[str]] | None = None,
     skip_keys: set[str] | None = None,
@@ -276,8 +278,8 @@ def test_fallback_logs_warning_called():
     mock_logger.warning.assert_called_once()
 
 
-def test_fallback_warning_message_contains_hub_phrasing():
-    """The warning message template starts with 'Failed to merge user mappings for hub'."""
+def test_fallback_warning_message_contains_receiver_phrasing():
+    """The warning message template starts with 'Failed to merge user mappings for receiver'."""
     with (
         patch("custom_components.rtl_433.library.LOGGER") as mock_logger,
         patch(
@@ -293,7 +295,7 @@ def test_fallback_warning_message_contains_hub_phrasing():
     call_args = mock_logger.warning.call_args
     msg_template = call_args[0][0]
     # The exact template from the source
-    assert "Failed to merge user mappings for hub" in msg_template
+    assert "Failed to merge user mappings for receiver" in msg_template
     assert "using shipped library" in msg_template
 
 
@@ -337,9 +339,9 @@ def test_fallback_warning_message_template_not_none():
     assert isinstance(msg_template, str)
 
 
-def test_fallback_warning_passes_hub_title_as_second_arg():
-    """The hub title is passed as the second positional arg to LOGGER.warning."""
-    title = "My unique hub"
+def test_fallback_warning_passes_receiver_title_as_second_arg():
+    """The receiver title is passed as the second positional arg to LOGGER.warning."""
+    title = "My unique receiver"
     with (
         patch("custom_components.rtl_433.library.LOGGER") as mock_logger,
         patch(
@@ -353,12 +355,12 @@ def test_fallback_warning_passes_hub_title_as_second_arg():
         _merge_entry_library(hass, entry, shipped_registry, set())
 
     positional_args = mock_logger.warning.call_args[0]
-    # positional_args[0] = message template, [1] = hub title
+    # positional_args[0] = message template, [1] = receiver title
     assert positional_args[1] == title
 
 
-def test_fallback_warning_hub_title_not_none():
-    """The hub-title arg passed to LOGGER.warning is not None."""
+def test_fallback_warning_receiver_title_not_none():
+    """The receiver-title arg passed to LOGGER.warning is not None."""
     with (
         patch("custom_components.rtl_433.library.LOGGER") as mock_logger,
         patch(
@@ -368,7 +370,7 @@ def test_fallback_warning_hub_title_not_none():
     ):
         hass = MagicMock()
         shipped_registry = _make_registry()
-        entry = _make_entry(title="Real hub")
+        entry = _make_entry(title="Real receiver")
         _merge_entry_library(hass, entry, shipped_registry, set())
 
     positional_args = mock_logger.warning.call_args[0]

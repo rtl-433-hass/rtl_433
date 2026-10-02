@@ -41,11 +41,11 @@ _CONNECTED_AT = dt_util.parse_datetime("2026-05-25T10:00:00+00:00")
 
 
 @pytest.fixture
-def make_coordinator(hass, hub_entry_builder):
+def make_coordinator(hass, receiver_entry_builder):
     """A coordinator with a chosen adopted/ignored state and a connect anchor."""
 
     def _make(*, adopted: set[str] | None = None, ignored: set[str] | None = None):
-        entry = hub_entry_builder(availability_timeout=600)
+        entry = receiver_entry_builder(availability_timeout=600)
         entry.add_to_hass(hass)
         coordinator = Rtl433Coordinator(
             hass,
@@ -85,7 +85,7 @@ def _event(
 async def test_seen_fields_accumulates_across_devices(hass, make_coordinator):
     """``seen_fields`` is a union over every device, not the latest frame's set.
 
-    Diagnostics reports it as every field this hub has decoded, and it is what
+    Diagnostics reports it as every field this receiver has decoded, and it is what
     surfaces unmatched keys. Assigning instead of unioning would still look right
     for a single device and quietly forget the first one as soon as a second
     reported anything different -- so this sends two devices with disjoint
@@ -263,7 +263,7 @@ async def test_a_new_candidate_is_announced_with_its_key_and_model(
 
     assert (
         f"rtl_433 heard a new device {_KEY} (model {_MODEL}); add it from the "
-        "hub's options to create it in Home Assistant" in caplog.text
+        "receiver's options to create it in Home Assistant" in caplog.text
     )
     # Announced on the first sighting only; a repeat is not news.
     assert caplog.text.count("heard a new device") == 1
@@ -275,7 +275,9 @@ async def test_an_ignored_key_says_why_it_was_dropped(hass, make_coordinator, ca
     with patch(DISPATCH), caplog.at_level(logging.DEBUG, logger=LOG):
         coordinator._on_client_event(_event())
 
-    assert f"rtl_433 ignoring device {_KEY} (on the hub's ignore list)" in caplog.text
+    assert (
+        f"rtl_433 ignoring device {_KEY} (on the receiver's ignore list)" in caplog.text
+    )
     assert coordinator.pending == {}
 
 

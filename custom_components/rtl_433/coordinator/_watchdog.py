@@ -5,18 +5,18 @@ Device availability has two independent gates, both owned here:
 *Per-device silence.* rtl_433 devices do not announce going offline, so
 availability is inferred from silence: a periodic watchdog flips a device
 unavailable once its last-seen age exceeds the device's effective timeout. This
-module holds the timeout-resolution ladder (per-device override → hub default →
+module holds the timeout-resolution ladder (per-device override → receiver default →
 device-class default), the event-driven vs periodic classification that supplies
 the class default, and the watchdog tick itself.
 
-*Hub connection.* The silence gate is only meaningful while the integration is
+*Receiver connection.* The silence gate is only meaningful while the integration is
 listening. Once the WebSocket to the rtl_433 server is down the integration
 hears nothing at all, so no device's cached state can be trusted — the same
 situation an MQTT availability topic covers with an LWT, and the same gate
 ``zwave_js`` applies when its driver connection drops. :meth:`receiver_available` is
 that gate, and like every Home Assistant integration that gates on a live
 connection flag it flips **immediately**: ``True`` exactly while the socket is
-open. With it closed, *every* device behind the hub reads unavailable regardless
+open. With it closed, *every* device behind the receiver reads unavailable regardless
 of its own timeout — including the never-expire event-driven devices, whose
 exemption is about silence, not about the transport being gone.
 
@@ -36,7 +36,7 @@ replay is flagged ``is_replay`` and ``Rtl433Event`` drops it before firing (see
 
 The gate is evaluated lazily by the entities (like the silence gate), so it is
 always correct. The coordinator only has to *repaint*: ``base.py`` calls
-:meth:`_async_sync_hub_availability` on both connection edges and the watchdog
+:meth:`_async_sync_receiver_availability` on both connection edges and the watchdog
 tick calls it as a backstop. That method dispatches ``signal_receiver_availability``
 exactly once per flip.
 
@@ -72,18 +72,18 @@ _WATCHDOG_INTERVAL = timedelta(seconds=30)
 
 
 class _AvailabilityMixin:
-    """Effective-timeout resolution, the hub-connection gate, and the watchdog."""
+    """Effective-timeout resolution, the receiver-connection gate, and the watchdog."""
 
     # ------------------------------------------------------------------ #
-    # Hub-connection availability gate                                   #
+    # Receiver-connection availability gate                                   #
     # ------------------------------------------------------------------ #
     @property
     def receiver_available(self) -> bool:
-        """Whether the integration can currently hear this hub at all.
+        """Whether the integration can currently hear this receiver at all.
 
         Exactly the socket state: no grace window, no debounce. While the
         WebSocket is down the integration receives nothing, so no device's cached
-        reading means anything and every entity behind the hub reads unavailable.
+        reading means anything and every entity behind the receiver reads unavailable.
 
         Evaluated lazily — entities read it in their own ``available`` — so it is
         correct between the repaint edges too.
@@ -108,13 +108,13 @@ class _AvailabilityMixin:
         if self._ever_connected:
             LOGGER.info(
                 "rtl_433 lost the connection to %s; reconnecting, and marking "
-                "all %d device(s) behind this hub unavailable until it is back",
+                "all %d device(s) behind this receiver unavailable until it is back",
                 self.ws_url,
                 self._gated_device_count(),
             )
         else:
             LOGGER.debug("rtl_433 waiting for the first connection to %s", self.ws_url)
-        self._async_sync_hub_availability()
+        self._async_sync_receiver_availability()
 
     @callback
     def _async_note_connected(self) -> None:
@@ -128,11 +128,11 @@ class _AvailabilityMixin:
                 (dt_util.utcnow() - since).total_seconds(),
             )
         self._ever_connected = True
-        self._async_sync_hub_availability()
+        self._async_sync_receiver_availability()
 
     @callback
-    def _async_sync_hub_availability(self) -> None:
-        """Dispatch a repaint when the hub-connection gate flips.
+    def _async_sync_receiver_availability(self) -> None:
+        """Dispatch a repaint when the receiver-connection gate flips.
 
         Idempotent: it compares the live gate against the last dispatched value
         and returns without a dispatch when nothing changed, so both connection
@@ -144,7 +144,7 @@ class _AvailabilityMixin:
         self._devices_offline = offline
         if not offline:
             LOGGER.info(
-                "rtl_433 connection to %s restored; devices behind this hub are "
+                "rtl_433 connection to %s restored; devices behind this receiver are "
                 "available again as they report in",
                 self.ws_url,
             )
@@ -225,12 +225,12 @@ class _AvailabilityMixin:
     def _resolve_timeout(self, device_key: str) -> tuple[int, str]:
         """Resolve the effective timeout and the tier that produced it.
 
-        Resolution order: per-device override → explicit hub default → device-class
+        Resolution order: per-device override → explicit receiver default → device-class
         default (from the latest payload) → ``DEFAULT_AVAILABILITY_TIMEOUT``. The
         resolver returns a concrete int for the two explicit tiers (including
         ``0`` = never-expire) or ``None`` when neither is set, in which case the
         device-class default applies. The second element is a short, DEBUG-only
-        label of which tier won (the resolver collapses override and hub default
+        label of which tier won (the resolver collapses override and receiver default
         into one ``int`` so they cannot be told apart here).
         """
         if self.effective_timeout_resolver is not None:
@@ -244,9 +244,9 @@ class _AvailabilityMixin:
                 )
             else:
                 if resolved is not None:
-                    return resolved, "override-or-hub"
+                    return resolved, "override-or-receiver"
                 return self._class_default_timeout(device_key), "class-default"
-        return self.availability_timeout, "hub-default"
+        return self.availability_timeout, "receiver-default"
 
     def _effective_timeout(self, device_key: str) -> int:
         """Resolve the effective timeout for a device (see :meth:`_resolve_timeout`)."""
@@ -272,11 +272,11 @@ class _AvailabilityMixin:
     async def _async_watchdog(self, _now: datetime) -> None:
         """Mark devices unavailable when their last-seen exceeds the timeout.
 
-        Re-checks the hub-connection gate first, as a backstop in case a
+        Re-checks the receiver-connection gate first, as a backstop in case a
         connection edge was ever missed: whatever the individual timeouts say, an
-        unreachable hub takes every device with it.
+        unreachable receiver takes every device with it.
         """
-        self._async_sync_hub_availability()
+        self._async_sync_receiver_availability()
         now = dt_util.utcnow()
         for device_key, seen in list(self.last_seen.items()):
             timeout, source = self._resolve_timeout(device_key)

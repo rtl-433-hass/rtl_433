@@ -1,6 +1,6 @@
-"""Resolvers for a hub config entry's effective settings.
+"""Resolvers for a receiver config entry's effective settings.
 
-Small pure accessors that read a hub ``ConfigEntry``'s data/options and apply the
+Small pure accessors that read a receiver ``ConfigEntry``'s data/options and apply the
 "options override data, then default" precedence. ``__init__`` (setup + the
 options-update listener) uses these to build and reconfigure the coordinator;
 kept here so that wiring stays readable.
@@ -27,21 +27,21 @@ from .const import (
 )
 
 
-def _hub_secure(entry: ConfigEntry) -> bool:
-    """Return the hub entry's ``secure`` (wss) flag, defaulting to False."""
+def _receiver_secure(entry: ConfigEntry) -> bool:
+    """Return the receiver entry's ``secure`` (wss) flag, defaulting to False."""
     return bool(entry.data.get("secure", False))
 
 
-def _hub_ignored_devices(entry: ConfigEntry) -> list[str]:
-    """Return the hub's persisted ignore list, as a list of device keys.
+def _receiver_ignored_devices(entry: ConfigEntry) -> list[str]:
+    """Return the receiver's persisted ignore list, as a list of device keys.
 
     Read from ``entry.data`` alone -- unlike the timeout and manage-settings
     resolvers there is no options-level override, because ignoring a device is
-    not a hub setting the user tunes on a form but a record the approval surfaces
+    not a receiver setting the user tunes on a form but a record the approval surfaces
     append to. A copy is returned so a caller can append to it without mutating
     the entry's stored list in place.
 
-    It lives here, with the other "read a hub setting off the entry" accessors,
+    It lives here, with the other "read a receiver setting off the entry" accessors,
     because five callers across four modules need it -- the coordinator seed and
     the update listener in ``__init__``, both approval surfaces, and the shared
     adoption service -- and each of them spelling out the ``.get`` with its own
@@ -50,12 +50,12 @@ def _hub_ignored_devices(entry: ConfigEntry) -> list[str]:
     return list(entry.data.get(CONF_IGNORED_DEVICES, []))
 
 
-def _explicit_hub_timeout(entry: ConfigEntry) -> int | None:
-    """Return the hub's *explicitly set* availability timeout, or ``None``.
+def _explicit_receiver_timeout(entry: ConfigEntry) -> int | None:
+    """Return the receiver's *explicitly set* availability timeout, or ``None``.
 
-    Unlike :func:`_hub_availability_timeout`, this distinguishes "user set a hub
+    Unlike :func:`_receiver_availability_timeout`, this distinguishes "user set a receiver
     default" from "unset" by testing membership (``in``) rather than ``.get`` with
-    a default. ``None`` means no hub default was configured, letting the resolver
+    a default. ``None`` means no receiver default was configured, letting the resolver
     fall through to the device-class default. An explicit ``0`` is a real value
     (never-expire) and is returned as ``0``, never treated as unset.
     """
@@ -66,14 +66,14 @@ def _explicit_hub_timeout(entry: ConfigEntry) -> int | None:
     return None
 
 
-def _hub_availability_timeout(entry: ConfigEntry) -> int:
-    """Resolve the hub's default availability timeout (options > data > default)."""
-    explicit = _explicit_hub_timeout(entry)
+def _receiver_availability_timeout(entry: ConfigEntry) -> int:
+    """Resolve the receiver's default availability timeout (options > data > default)."""
+    explicit = _explicit_receiver_timeout(entry)
     return DEFAULT_AVAILABILITY_TIMEOUT if explicit is None else explicit
 
 
-def _hub_manage_settings(entry: ConfigEntry) -> bool:
-    """Resolve the hub's manage-settings toggle (options > data > default)."""
+def _receiver_manage_settings(entry: ConfigEntry) -> bool:
+    """Resolve the receiver's manage-settings toggle (options > data > default)."""
     return bool(
         entry.options.get(
             CONF_MANAGE_SETTINGS,
@@ -83,7 +83,7 @@ def _hub_manage_settings(entry: ConfigEntry) -> bool:
 
 
 def _calibration_map(entry: ConfigEntry) -> dict[str, dict]:
-    """Build the per-device calibration map from the hub's devices map.
+    """Build the per-device calibration map from the receiver's devices map.
 
     Returns ``{device_key: {commodity, unit, scale}}`` for every device that
     carries a *valid* calibration (via :func:`normalize_calibration`, which drops
@@ -102,13 +102,13 @@ def _calibration_map(entry: ConfigEntry) -> dict[str, dict]:
     return result
 
 
-def _hub_connection(entry: ConfigEntry) -> tuple[Any, ...]:
-    """Return the hub's connection target and stable identity, as a tuple.
+def _receiver_connection(entry: ConfigEntry) -> tuple[Any, ...]:
+    """Return the receiver's connection target and stable identity, as a tuple.
 
     ``(host, port, path, secure, unique_id)`` — everything the coordinator's
     WebSocket connection is built from, plus the stable radio id a rebind
     re-points the entry at. Captured as the coordinator's setup snapshot so the
-    update listener can reload the hub when a reconfigure / discovery / rebind
+    update listener can reload the receiver when a reconfigure / discovery / rebind
     writes a new target into ``entry.data``: those flows deliberately do not
     reload the entry themselves, because Home Assistant forbids combining a
     config-entry update listener with the reloading config-flow helpers. Only
@@ -118,6 +118,6 @@ def _hub_connection(entry: ConfigEntry) -> tuple[Any, ...]:
         entry.data.get(CONF_HOST),
         entry.data.get(CONF_PORT),
         entry.data.get(CONF_PATH),
-        _hub_secure(entry),
+        _receiver_secure(entry),
         entry.unique_id,
     )

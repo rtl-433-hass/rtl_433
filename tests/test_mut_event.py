@@ -59,7 +59,7 @@ def _persisted(event_types: list[str]) -> dict[str, Any]:
 
 
 @pytest.fixture
-async def build_event(hass, hub_entry_builder):
+async def build_event(hass, receiver_entry_builder):
     """Return a factory building one ``Rtl433Event`` against a real hub entry.
 
     The constructor reads the descriptor and ``coordinator.entry.data``, and the
@@ -71,7 +71,7 @@ async def build_event(hass, hub_entry_builder):
         descriptor: FieldDescriptor | None = None,
         devices: dict[str, Any] | None = None,
     ) -> Rtl433Event:
-        entry = hub_entry_builder(devices=devices)
+        entry = receiver_entry_builder(devices=devices)
         entry.add_to_hass(hass)
         dr.async_get(hass).async_get_or_create(
             config_entry_id=entry.entry_id, identifiers={(DOMAIN, entry.entry_id)}
@@ -236,16 +236,18 @@ async def test_the_entity_forwards_its_identity_to_the_base_entity(build_event):
     the old entity id, name and automations point at nothing.
     """
     entity = build_event()
-    hub_entry_id = entity._hub_entry_id
+    receiver_entry_id = entity._receiver_entry_id
 
-    assert entity.unique_id == f"{hub_entry_id}:{_DEVICE_KEY}:{_SUFFIX}"
+    assert entity.unique_id == f"{receiver_entry_id}:{_DEVICE_KEY}:{_SUFFIX}"
     device_info = entity.device_info
-    assert device_info["identifiers"] == {(DOMAIN, f"{hub_entry_id}:{_DEVICE_KEY}")}
+    assert device_info["identifiers"] == {
+        (DOMAIN, f"{receiver_entry_id}:{_DEVICE_KEY}")
+    }
     assert device_info["model"] == _MODEL
     assert device_info["via_device_id"] == dr.async_get_device_id_by_identifier(
         entity._coordinator.hass,
-        (DOMAIN, hub_entry_id),
-        config_entry_id=hub_entry_id,
+        (DOMAIN, receiver_entry_id),
+        config_entry_id=receiver_entry_id,
     )
     assert entity.name == "Secret knock"
 

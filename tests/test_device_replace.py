@@ -68,31 +68,32 @@ NEW_RECORD: dict[str, Any] = {
 }
 
 
-async def _setup_hub(hass, hub_entry_builder, devices):
-    """Set up a hub entry seeded with ``devices`` and return it."""
-    hub = hub_entry_builder(availability_timeout=600, devices=devices)
-    hub.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(hub.entry_id)
+async def _setup_receiver(hass, receiver_entry_builder, devices):
+    """Set up a receiver entry seeded with ``devices`` and return it."""
+    receiver = receiver_entry_builder(availability_timeout=600, devices=devices)
+    receiver.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
-    return hub
+    return receiver
 
 
-def _rows(hass, hub, device_key) -> dict[str, tuple[str, str]]:
+def _rows(hass, receiver, device_key) -> dict[str, tuple[str, str]]:
     """Map ``unique_id -> (entity_id, registry row id)`` for one nested device."""
     ent_reg = er.async_get(hass)
-    prefix = f"{hub.entry_id}:{device_key}:"
+    prefix = f"{receiver.entry_id}:{device_key}:"
     return {
         entry.unique_id: (entry.entity_id, entry.id)
-        for entry in er.async_entries_for_config_entry(ent_reg, hub.entry_id)
+        for entry in er.async_entries_for_config_entry(ent_reg, receiver.entry_id)
         if entry.unique_id.startswith(prefix)
     }
 
 
-def _row_ids(hass, hub) -> set[str]:
-    """Every registry row id currently owned by the hub entry."""
+def _row_ids(hass, receiver) -> set[str]:
+    """Every registry row id currently owned by the receiver entry."""
     ent_reg = er.async_get(hass)
     return {
-        entry.id for entry in er.async_entries_for_config_entry(ent_reg, hub.entry_id)
+        entry.id
+        for entry in er.async_entries_for_config_entry(ent_reg, receiver.entry_id)
     }
 
 
@@ -100,7 +101,7 @@ def _row_ids(hass, hub) -> set[str]:
 # Happy path: the survivors keep their rows, the duplicate loses its claim.    #
 # --------------------------------------------------------------------------- #
 async def test_replace_preserves_entity_rows_and_repoints_device(
-    hass, hub_entry_builder, no_socket
+    hass, receiver_entry_builder, no_socket
 ):
     """Every survivor keeps its ``entity_id`` *and* its registry row id.
 
@@ -110,38 +111,38 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
     every real replace looks like, and freeing those duplicates is the step the
     rewrite depends on.
     """
-    hub = await _setup_hub(
-        hass, hub_entry_builder, {OLD_KEY: OLD_RECORD, NEW_KEY: NEW_RECORD}
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, {OLD_KEY: OLD_RECORD, NEW_KEY: NEW_RECORD}
     )
     dev_reg = dr.async_get(hass)
 
-    before_old = _rows(hass, hub, OLD_KEY)
-    before_new = _rows(hass, hub, NEW_KEY)
+    before_old = _rows(hass, receiver, OLD_KEY)
+    before_new = _rows(hass, receiver, NEW_KEY)
     # Sanity: the state under test really is the collision case.
     assert before_old
     assert before_new
     old_device_id = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{hub.entry_id}:{OLD_KEY}"), hub.entry_id
+        (DOMAIN, f"{receiver.entry_id}:{OLD_KEY}"), receiver.entry_id
     ).id
     duplicate_device_id = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{hub.entry_id}:{NEW_KEY}"), hub.entry_id
+        (DOMAIN, f"{receiver.entry_id}:{NEW_KEY}"), receiver.entry_id
     ).id
     assert old_device_id != duplicate_device_id
 
-    await async_replace_device(hass, hub, OLD_KEY, NEW_KEY)
+    await async_replace_device(hass, receiver, OLD_KEY, NEW_KEY)
     await hass.async_block_till_done()
 
-    after = _rows(hass, hub, NEW_KEY)
+    after = _rows(hass, receiver, NEW_KEY)
 
     # Each survivor moved from ':{OLD_KEY}:{suffix}' to ':{NEW_KEY}:{suffix}'
     # with the suffix byte-for-byte unchanged, and the *same* row carried it.
-    old_prefix = f"{hub.entry_id}:{OLD_KEY}:"
+    old_prefix = f"{receiver.entry_id}:{OLD_KEY}:"
     for old_unique_id, (entity_id, row_id) in before_old.items():
         suffix = old_unique_id[len(old_prefix) :]
-        assert after[f"{hub.entry_id}:{NEW_KEY}:{suffix}"] == (entity_id, row_id)
+        assert after[f"{receiver.entry_id}:{NEW_KEY}:{suffix}"] == (entity_id, row_id)
 
     # Nothing is left behind on the old key.
-    assert _rows(hass, hub, OLD_KEY) == {}
+    assert _rows(hass, receiver, OLD_KEY) == {}
 
     # The duplicate rows that contested a survivor's unique_id are gone: the
     # survivor's row, not the throwaway, now holds each contested unique_id.
@@ -149,11 +150,11 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
     # -- are not part of the rewrite; Home Assistant restores those rows itself
     # when the platforms rebuild, which is its behaviour to define, not ours.)
     survivor_unique_ids = {
-        f"{hub.entry_id}:{NEW_KEY}:{uid[len(old_prefix) :]}" for uid in before_old
+        f"{receiver.entry_id}:{NEW_KEY}:{uid[len(old_prefix) :]}" for uid in before_old
     }
     contested = survivor_unique_ids & set(before_new)
     assert contested, "expected the duplicate to have claimed a survivor's unique_id"
-    live_row_ids = _row_ids(hass, hub)
+    live_row_ids = _row_ids(hass, receiver)
     for unique_id in contested:
         assert before_new[unique_id][1] != after[unique_id][1]
         assert before_new[unique_id][1] not in live_row_ids
@@ -165,13 +166,13 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
     # The device row was re-pointed in place, not recreated: same row id, new
     # identifiers, and the serial number now reports the new transmitter id.
     new_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{hub.entry_id}:{NEW_KEY}"), hub.entry_id
+        (DOMAIN, f"{receiver.entry_id}:{NEW_KEY}"), receiver.entry_id
     )
     assert new_device.id == old_device_id
     assert new_device.serial_number == "9f3c"
     assert (
         dev_reg.async_get_device_by_identifier(
-            (DOMAIN, f"{hub.entry_id}:{OLD_KEY}"), hub.entry_id
+            (DOMAIN, f"{receiver.entry_id}:{OLD_KEY}"), receiver.entry_id
         )
         is None
     )
@@ -180,16 +181,18 @@ async def test_replace_preserves_entity_rows_and_repoints_device(
 # --------------------------------------------------------------------------- #
 # The record fold.                                                             #
 # --------------------------------------------------------------------------- #
-async def test_replace_folds_settings_onto_new_key(hass, hub_entry_builder, no_socket):
+async def test_replace_folds_settings_onto_new_key(
+    hass, receiver_entry_builder, no_socket
+):
     """The user's settings survive under the new key; ``fields`` is the union."""
-    hub = await _setup_hub(
-        hass, hub_entry_builder, {OLD_KEY: OLD_RECORD, NEW_KEY: NEW_RECORD}
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, {OLD_KEY: OLD_RECORD, NEW_KEY: NEW_RECORD}
     )
 
-    await async_replace_device(hass, hub, OLD_KEY, NEW_KEY)
+    await async_replace_device(hass, receiver, OLD_KEY, NEW_KEY)
     await hass.async_block_till_done()
 
-    devices = hub.data[CONF_DEVICES]
+    devices = receiver.data[CONF_DEVICES]
     assert OLD_KEY not in devices
     record = devices[NEW_KEY]
 
@@ -205,7 +208,7 @@ async def test_replace_folds_settings_onto_new_key(hass, hub_entry_builder, no_s
 
 
 async def test_replace_adopts_new_key_with_no_record(
-    hass, hub_entry_builder, no_socket
+    hass, receiver_entry_builder, no_socket
 ):
     """Adopting a key the devices map never registered transfers the record whole.
 
@@ -213,20 +216,22 @@ async def test_replace_adopts_new_key_with_no_record(
     coordinator hears the replacement but never registers it, so there is no
     record and no duplicate device to free. The old record must simply move.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, {OLD_KEY: OLD_RECORD})
-    before_old = _rows(hass, hub, OLD_KEY)
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, {OLD_KEY: OLD_RECORD}
+    )
+    before_old = _rows(hass, receiver, OLD_KEY)
 
-    await async_replace_device(hass, hub, OLD_KEY, NEW_KEY)
+    await async_replace_device(hass, receiver, OLD_KEY, NEW_KEY)
     await hass.async_block_till_done()
 
-    assert hub.data[CONF_DEVICES] == {NEW_KEY: dict(OLD_RECORD)}
+    assert receiver.data[CONF_DEVICES] == {NEW_KEY: dict(OLD_RECORD)}
 
     # The rows still moved in place even with nothing to free first.
-    after = _rows(hass, hub, NEW_KEY)
-    old_prefix = f"{hub.entry_id}:{OLD_KEY}:"
+    after = _rows(hass, receiver, NEW_KEY)
+    old_prefix = f"{receiver.entry_id}:{OLD_KEY}:"
     for old_unique_id, row in before_old.items():
         suffix = old_unique_id[len(old_prefix) :]
-        assert after[f"{hub.entry_id}:{NEW_KEY}:{suffix}"] == row
+        assert after[f"{receiver.entry_id}:{NEW_KEY}:{suffix}"] == row
 
 
 @pytest.mark.parametrize(
@@ -237,7 +242,7 @@ async def test_replace_adopts_new_key_with_no_record(
     ],
 )
 async def test_replace_model_fallback_when_old_record_has_none(
-    hass, hub_entry_builder, no_socket, new_record, expected_model
+    hass, receiver_entry_builder, no_socket, new_record, expected_model
 ):
     """A model-less old record inherits the model the replacement was seen with.
 
@@ -250,12 +255,12 @@ async def test_replace_model_fallback_when_old_record_has_none(
     devices = {OLD_KEY: {CONF_MODEL: "", DEVICE_FIELDS: ["temperature_C"]}}
     if new_record is not None:
         devices[NEW_KEY] = new_record
-    hub = await _setup_hub(hass, hub_entry_builder, devices)
+    receiver = await _setup_receiver(hass, receiver_entry_builder, devices)
 
-    await async_replace_device(hass, hub, OLD_KEY, NEW_KEY)
+    await async_replace_device(hass, receiver, OLD_KEY, NEW_KEY)
     await hass.async_block_till_done()
 
-    assert hub.data[CONF_DEVICES][NEW_KEY][CONF_MODEL] == expected_model
+    assert receiver.data[CONF_DEVICES][NEW_KEY][CONF_MODEL] == expected_model
 
 
 # --------------------------------------------------------------------------- #
@@ -292,7 +297,7 @@ async def test_replace_model_fallback_when_old_record_has_none(
     ],
 )
 async def test_replace_rejects_invalid_keys(
-    hass, hub_entry_builder, no_socket, old_key, new_key, message
+    hass, receiver_entry_builder, no_socket, old_key, new_key, message
 ):
     """Bad input raises ``DeviceReplaceError`` and leaves the devices map alone.
 
@@ -300,29 +305,31 @@ async def test_replace_rejects_invalid_keys(
     lands in the log — a guard that raised the wrong reason would send a user
     hunting the wrong problem.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, {OLD_KEY: OLD_RECORD})
-    before = dict(hub.data[CONF_DEVICES])
+    receiver = await _setup_receiver(
+        hass, receiver_entry_builder, {OLD_KEY: OLD_RECORD}
+    )
+    before = dict(receiver.data[CONF_DEVICES])
 
     with pytest.raises(DeviceReplaceError, match=re.escape(message)):
-        await async_replace_device(hass, hub, old_key, new_key)
+        await async_replace_device(hass, receiver, old_key, new_key)
 
-    assert hub.data[CONF_DEVICES] == before
-    assert _rows(hass, hub, OLD_KEY)
+    assert receiver.data[CONF_DEVICES] == before
+    assert _rows(hass, receiver, OLD_KEY)
 
 
-async def test_replace_rejects_a_hub_with_no_devices_map(
-    hass, hub_entry_builder, no_socket
+async def test_replace_rejects_a_receiver_with_no_devices_map(
+    hass, receiver_entry_builder, no_socket
 ):
-    """A hub that never stored a devices map has nothing to replace.
+    """A receiver that never stored a devices map has nothing to replace.
 
-    ``entry.data`` carries no devices map at all on a hub where the user has
+    ``entry.data`` carries no devices map at all on a receiver where the user has
     never added a device, so the lookup must tolerate its absence rather than
     blow up.
     """
-    hub = await _setup_hub(hass, hub_entry_builder, None)
-    assert CONF_DEVICES not in hub.data
+    receiver = await _setup_receiver(hass, receiver_entry_builder, None)
+    assert CONF_DEVICES not in receiver.data
 
     with pytest.raises(
         DeviceReplaceError, match=re.escape(f"Unknown device key: {OLD_KEY}")
     ):
-        await async_replace_device(hass, hub, OLD_KEY, NEW_KEY)
+        await async_replace_device(hass, receiver, OLD_KEY, NEW_KEY)
