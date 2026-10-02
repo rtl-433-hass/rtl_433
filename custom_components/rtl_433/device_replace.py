@@ -25,9 +25,13 @@ The step order in :func:`async_replace_device` is load-bearing:
    a new ``entity_id`` (or a ``_2`` suffix) and orphan its history.
 
 Only the ``device_key`` *value* a row carries changes: the entity ``unique_id``
-template ``f"{receiver_entry_id}:{device_key}:{object_suffix}"`` and the device
-identifiers template ``(DOMAIN, f"{receiver_entry_id}:{device_key}")`` are re-emitted
-verbatim, so nothing in ``COMPATIBILITY_CONTRACT.md`` moves.
+template ``f"{receiver_id}:{device_key}:{object_suffix}"`` and the device
+identifiers template ``(DOMAIN, f"{receiver_id}:{device_key}")`` are re-emitted
+verbatim.
+
+A location may hold several receivers, and each of them mints its own identity
+for the same physical sensor, so the rewrite runs **once per receiver**: a device
+only one receiver ever heard simply finds nothing to rewrite under the others.
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from .const import CONF_DEVICES, CONF_MODEL, DEVICE_FIELDS, DOMAIN
+from .receiver_settings import receiver_subentries
 
 
 class DeviceReplaceError(Exception):
@@ -82,45 +87,48 @@ async def async_replace_device(
 
     ent_reg = er.async_get(hass)
     dev_reg = dr.async_get(hass)
-    old_prefix = f"{entry.entry_id}:{old_key}:"
-    new_prefix = f"{entry.entry_id}:{new_key}:"
 
-    # Step 1 — free the duplicate. The registry's entry view is live, so snapshot
-    # it with ``list(...)`` before removing anything.
-    for regent in list(er.async_entries_for_config_entry(ent_reg, entry.entry_id)):
-        if regent.unique_id.startswith(new_prefix):
-            ent_reg.async_remove(regent.entity_id)
+    for subentry in receiver_subentries(entry):
+        receiver_id = subentry.subentry_id
+        old_prefix = f"{receiver_id}:{old_key}:"
+        new_prefix = f"{receiver_id}:{new_key}:"
 
-    duplicate = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{entry.entry_id}:{new_key}"), entry.entry_id
-    )
-    if duplicate is not None:
-        dev_reg.async_remove_device(duplicate.id)
+        # Step 1 — free the duplicate. The registry's entry view is live, so
+        # snapshot it with ``list(...)`` before removing anything.
+        for regent in list(er.async_entries_for_config_entry(ent_reg, entry.entry_id)):
+            if regent.unique_id.startswith(new_prefix):
+                ent_reg.async_remove(regent.entity_id)
 
-    # Step 2 — re-key the survivors onto the now-free unique_ids. Re-read the
-    # entries because step 1 mutated the registry. The suffix is sliced by
-    # ``len(old_prefix)`` rather than split on ":" so it is carried across
-    # byte-for-byte, matching the frozen unique_id template exactly.
-    for regent in list(er.async_entries_for_config_entry(ent_reg, entry.entry_id)):
-        if not regent.unique_id.startswith(old_prefix):
-            continue
-        object_suffix = regent.unique_id[len(old_prefix) :]
-        ent_reg.async_update_entity(
-            regent.entity_id, new_unique_id=f"{new_prefix}{object_suffix}"
+        duplicate = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{receiver_id}:{new_key}"), entry.entry_id
         )
+        if duplicate is not None:
+            dev_reg.async_remove_device(duplicate.id)
 
-    # Step 3 — re-point the device row itself. ``name`` is deliberately untouched:
-    # a user-assigned ``name_by_user`` is a separate registry field that must be
-    # preserved, and the generated name is recomputed from the new key when the
-    # entities are rebuilt after the reload.
-    old_device = dev_reg.async_get_device_by_identifier(
-        (DOMAIN, f"{entry.entry_id}:{old_key}"), entry.entry_id
-    )
-    if old_device is not None:
-        dev_reg.async_update_device(
-            old_device.id,
-            new_identifiers={(DOMAIN, f"{entry.entry_id}:{new_key}")},
+        # Step 2 — re-key the survivors onto the now-free unique_ids. Re-read the
+        # entries because step 1 mutated the registry. The suffix is sliced by
+        # ``len(old_prefix)`` rather than split on ":" so it is carried across
+        # byte-for-byte, matching the frozen unique_id template exactly.
+        for regent in list(er.async_entries_for_config_entry(ent_reg, entry.entry_id)):
+            if not regent.unique_id.startswith(old_prefix):
+                continue
+            object_suffix = regent.unique_id[len(old_prefix) :]
+            ent_reg.async_update_entity(
+                regent.entity_id, new_unique_id=f"{new_prefix}{object_suffix}"
+            )
+
+        # Step 3 — re-point the device row itself. ``name`` is deliberately
+        # untouched: a user-assigned ``name_by_user`` is a separate registry field
+        # that must be preserved, and the generated name is recomputed from the new
+        # key when the entities are rebuilt after the reload.
+        old_device = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, f"{receiver_id}:{old_key}"), entry.entry_id
         )
+        if old_device is not None:
+            dev_reg.async_update_device(
+                old_device.id,
+                new_identifiers={(DOMAIN, f"{receiver_id}:{new_key}")},
+            )
 
     # Step 4 — fold the stored record onto the new key. Deep-copy the map the way
     # ``async_upsert_device`` does so nested dicts are never shared with

@@ -68,6 +68,7 @@ from custom_components.rtl_433.options_flow import (
 from custom_components.rtl_433.settings import MAPPINGS_DOCS_URL
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_id
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                      #
@@ -173,7 +174,7 @@ def _pending(key: str, model: str, *, count: int = 1, last_seen=None, **fields):
 
 def _install(hass, entry, coordinator: _StubCoordinator) -> _StubCoordinator:
     """Publish a coordinator where ``Rtl433OptionsFlow._coordinator`` looks."""
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {})[receiver_id(entry)] = coordinator
     return coordinator
 
 

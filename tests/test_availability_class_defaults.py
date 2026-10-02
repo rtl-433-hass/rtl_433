@@ -47,6 +47,7 @@ from custom_components.rtl_433.coordinator.base import Rtl433Client
 from custom_components.rtl_433.sensor import Rtl433Sensor
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_id, receiver_subentry
 
 # Event-driven field keys derived from the shipped library (no user mappings) —
 # the same set the production coordinator computes at setup.
@@ -65,7 +66,7 @@ def _no_socket():
 
 
 def _coordinator(hass, receiver: MockConfigEntry) -> Rtl433Coordinator:
-    return hass.data[DOMAIN][receiver.entry_id]
+    return hass.data[DOMAIN][receiver_id(receiver)]
 
 
 def _feed(coordinator: Rtl433Coordinator, event: dict) -> None:
@@ -149,7 +150,7 @@ async def test_never_expire_via_device_override(hass, receiver_entry_builder):
     coordinator = await _setup(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
     assert watts_eid is not None
 
@@ -183,7 +184,7 @@ async def test_never_expire_via_explicit_receiver_default(hass, receiver_entry_b
     coordinator = await _setup(hass, receiver)
     ent_reg = er.async_get(hass)
     watts_eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:watts"
+        "sensor", DOMAIN, f"{receiver_id(receiver)}:{device_key}:watts"
     )
 
     assert coordinator._effective_timeout(device_key) == 0
@@ -649,7 +650,9 @@ async def test_log_timeout_change_relogs_on_change(
     caplog.set_level(logging.DEBUG, logger=_TRACE_LOGGER)
     entry = receiver_entry_builder(availability_timeout=600)
     entry.add_to_hass(hass)
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     key = "Acurite-606TX-42"
 
     coordinator._log_timeout_change(key, 600, "receiver-default")

@@ -102,7 +102,11 @@ from .const import (
 from .coordinator import Rtl433Coordinator
 from .device_replace import DeviceReplaceError, async_replace_device
 from .entity import resolve_event_type
-from .receiver_settings import _receiver_ignored_devices
+from .receiver_settings import (
+    _receiver_ignored_devices,
+    receiver_coordinator,
+    receiver_coordinators,
+)
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,
@@ -191,7 +195,10 @@ def _async_get_coordinator(
         )
         return None
 
-    coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(entry_id)
+    # A location's first receiver: these commands still speak the one-server
+    # model, and re-scoping them onto a location plus a receiver id is its own
+    # change. A single-receiver location -- every install today -- has exactly one.
+    coordinator = receiver_coordinator(hass, entry)
     if coordinator is None or entry.state is not ConfigEntryState.LOADED:
         connection.send_error(
             msg["id"],
@@ -612,18 +619,20 @@ def ws_receivers(
 
 @callback
 def _hub_connected(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Whether this hub's socket is open, for a hub that may not be set up.
+    """Whether this location has a receiver on the air, set up or not.
 
-    An entry that is not loaded has no coordinator on ``hass.data`` to ask, and
-    one mid-teardown may have been removed from it already, so both are read
-    rather than assumed.
+    True while *any* of its receivers holds an open socket, because that is the
+    answer the entry-level row is asked for: a location with two radios and one
+    of them down is still receiving. An entry that is not loaded has no
+    coordinators to ask, and one mid-teardown may have been emptied already, so
+    both are read rather than assumed.
     """
     if entry.state is not ConfigEntryState.LOADED:
         return False
-    coordinator: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(
-        entry.entry_id
+    return any(
+        coordinator.connected
+        for coordinator in receiver_coordinators(hass, entry).values()
     )
-    return coordinator is not None and coordinator.connected
 
 
 @websocket_api.websocket_command(
@@ -860,7 +869,7 @@ def ws_subscribe_devices(
         rather than absorbed by a second wrapper per trigger.
         """
         nonlocal last_sent
-        live: Rtl433Coordinator | None = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        live = receiver_coordinator(hass, entry)
         if live is None:
             return
         payload = _pending_payload(hass, entry, live)
@@ -870,7 +879,7 @@ def ws_subscribe_devices(
         connection.send_message(websocket_api.event_message(msg["id"], payload))
 
     remove_signal = async_dispatcher_connect(
-        hass, signal_pending_update(entry.entry_id), _push_if_changed
+        hass, signal_pending_update(coordinator.receiver_id), _push_if_changed
     )
     remove_timer = async_track_time_interval(
         hass,

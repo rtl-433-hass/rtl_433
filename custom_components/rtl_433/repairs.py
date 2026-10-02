@@ -39,7 +39,7 @@ from pyrtl_433 import TimePrecision
 import voluptuous as vol
 
 from homeassistant.components.repairs import ConfirmRepairFlow, RepairsFlow
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -60,6 +60,7 @@ from .const import (
     signal_receiver_update,
 )
 from .coordinator import CannotConnect, Rtl433Coordinator
+from .receiver_settings import receiver_coordinator
 from .sdr_settings import KEY_SAMPLE_RATE
 
 # How often reachability is evaluated. Aligned to be responsive without being
@@ -104,76 +105,90 @@ _LOW_SAMPLE_RATE_MAX_HZ = 250_000
 _SUGGESTED_SAMPLE_RATE_HZ = 1_024_000
 
 
-def _issue_id(prefix: str, entry: ConfigEntry) -> str:
-    """Return a per-receiver issue id: the issue's prefix, then the entry id.
+def _issue_id(prefix: str, entry: ConfigEntry, receiver_id: str) -> str:
+    """Return a per-receiver issue id: prefix, then location entry, then receiver.
+
+    Every advisory here is about one *receiver*, and a location may hold several,
+    so the receiver's subentry id has to be in the id or a second unreachable
+    server would silently overwrite the first one's card. The colon separates the
+    two ids because neither an entry id nor a subentry id (both ULIDs) can
+    contain one.
 
     The one definition of an encoding that :func:`async_create_fix_flow` has to
     read back the other way, by prefix length.
     """
-    return f"{prefix}_{entry.entry_id}"
+    return f"{prefix}_{entry.entry_id}:{receiver_id}"
 
 
-def _unreachable_issue_id(entry: ConfigEntry) -> str:
+def _unreachable_issue_id(entry: ConfigEntry, receiver_id: str) -> str:
     """Return the per-receiver issue id for the unreachable-server repair."""
-    return _issue_id(ISSUE_UNREACHABLE, entry)
+    return _issue_id(ISSUE_UNREACHABLE, entry, receiver_id)
 
 
-def _sample_rate_issue_id(entry: ConfigEntry) -> str:
+def _sample_rate_issue_id(entry: ConfigEntry, receiver_id: str) -> str:
     """Return the per-receiver issue id for the low-sample-rate advisory."""
-    return _issue_id(ISSUE_SAMPLE_RATE_LOW, entry)
+    return _issue_id(ISSUE_SAMPLE_RATE_LOW, entry, receiver_id)
 
 
-def _event_time_issue_id(entry: ConfigEntry) -> str:
+def _event_time_issue_id(entry: ConfigEntry, receiver_id: str) -> str:
     """Return the per-receiver issue id for the unusable-event-time advisory."""
-    return _issue_id(ISSUE_EVENT_TIME_UNUSABLE, entry)
+    return _issue_id(ISSUE_EVENT_TIME_UNUSABLE, entry, receiver_id)
 
 
-def _advisory_dismissed(entry: ConfigEntry, flag: str) -> bool:
+def _advisory_dismissed(subentry: ConfigSubentry, flag: str) -> bool:
     """Return whether the user silenced an advisory for this receiver.
 
-    Read from ``entry.data`` (absent / falsey means "not dismissed"), so the
-    choice survives the restarts and reloads that reset a tracker's in-memory
-    state.
+    Read from the receiver subentry's ``data`` (absent / falsey means "not
+    dismissed"), so the choice survives the restarts and reloads that reset a
+    tracker's in-memory state -- and so silencing one receiver's advisory says
+    nothing about the other receivers in the same location.
     """
-    return bool(entry.data.get(flag))
+    return bool(subentry.data.get(flag))
 
 
 @callback
-def _async_dismiss_advisory(hass: HomeAssistant, entry: ConfigEntry, flag: str) -> None:
+def _async_dismiss_advisory(
+    hass: HomeAssistant, entry: ConfigEntry, subentry: ConfigSubentry, flag: str
+) -> None:
     """Durably record that the user silenced an advisory for this receiver.
 
-    Written to ``entry.data`` so an edge-triggered tracker stays quiet across
-    restarts. The flag changes none of the reload-triggering settings, so the
-    write does not tear the receiver down, and it is skipped entirely when the flag is
-    already set — which keeps the entry-update listener from firing for nothing.
+    Written to the receiver subentry's ``data`` so an edge-triggered tracker stays
+    quiet across restarts. The flag is none of the values the update listener
+    reloads on, so the write does not tear the location down, and it is skipped
+    entirely when the flag is already set — which keeps the entry-update listener
+    from firing for nothing.
     """
-    if _advisory_dismissed(entry, flag):
+    if _advisory_dismissed(subentry, flag):
         return
-    hass.config_entries.async_update_entry(entry, data={**entry.data, flag: True})
+    hass.config_entries.async_update_subentry(
+        entry, subentry, data={**subentry.data, flag: True}
+    )
 
 
-def _sample_rate_advisory_dismissed(entry: ConfigEntry) -> bool:
+def _sample_rate_advisory_dismissed(subentry: ConfigSubentry) -> bool:
     """Return whether the user chose to keep the lower rate for this receiver."""
-    return _advisory_dismissed(entry, CONF_SAMPLE_RATE_DISMISSED)
+    return _advisory_dismissed(subentry, CONF_SAMPLE_RATE_DISMISSED)
 
 
 @callback
 def _async_dismiss_sample_rate_advisory(
-    hass: HomeAssistant, entry: ConfigEntry
+    hass: HomeAssistant, entry: ConfigEntry, subentry: ConfigSubentry
 ) -> None:
     """Durably record that the user accepted the lower rate for this receiver."""
-    _async_dismiss_advisory(hass, entry, CONF_SAMPLE_RATE_DISMISSED)
+    _async_dismiss_advisory(hass, entry, subentry, CONF_SAMPLE_RATE_DISMISSED)
 
 
-def _event_time_advisory_dismissed(entry: ConfigEntry) -> bool:
+def _event_time_advisory_dismissed(subentry: ConfigSubentry) -> bool:
     """Return whether the user acknowledged unusable event timestamps for this receiver."""
-    return _advisory_dismissed(entry, CONF_EVENT_TIME_DISMISSED)
+    return _advisory_dismissed(subentry, CONF_EVENT_TIME_DISMISSED)
 
 
 @callback
-def _async_dismiss_event_time_advisory(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def _async_dismiss_event_time_advisory(
+    hass: HomeAssistant, entry: ConfigEntry, subentry: ConfigSubentry
+) -> None:
     """Durably record that the user accepted unusable event timestamps."""
-    _async_dismiss_advisory(hass, entry, CONF_EVENT_TIME_DISMISSED)
+    _async_dismiss_advisory(hass, entry, subentry, CONF_EVENT_TIME_DISMISSED)
 
 
 def _sample_rate_looks_low(meta: dict[str, Any]) -> bool:
@@ -214,7 +229,10 @@ def async_raise_motion_moved(hass: HomeAssistant) -> None:
 
 @callback
 def async_raise_sample_rate_low(
-    hass: HomeAssistant, entry: ConfigEntry, meta: dict[str, Any]
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    subentry: ConfigSubentry,
+    meta: dict[str, Any],
 ) -> None:
     """Raise the dismissible low-sample-rate advisory for a receiver.
 
@@ -227,13 +245,13 @@ def async_raise_sample_rate_low(
     ir.async_create_issue(
         hass,
         DOMAIN,
-        _sample_rate_issue_id(entry),
+        _sample_rate_issue_id(entry, subentry.subentry_id),
         is_fixable=True,
         is_persistent=False,
         severity=ir.IssueSeverity.WARNING,
         translation_key=ISSUE_SAMPLE_RATE_LOW,
         translation_placeholders={
-            "title": entry.title,
+            "title": subentry.title,
             "frequency": freq_mhz,
             "sample_rate": str(int(meta.get("samp_rate", 0))),
             "suggested": str(_SUGGESTED_SAMPLE_RATE_HZ),
@@ -242,9 +260,11 @@ def async_raise_sample_rate_low(
 
 
 @callback
-def async_clear_sample_rate_low(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def async_clear_sample_rate_low(
+    hass: HomeAssistant, entry: ConfigEntry, receiver_id: str
+) -> None:
     """Delete the low-sample-rate advisory for a receiver (no-op if absent)."""
-    ir.async_delete_issue(hass, DOMAIN, _sample_rate_issue_id(entry))
+    ir.async_delete_issue(hass, DOMAIN, _sample_rate_issue_id(entry, receiver_id))
 
 
 @callback
@@ -266,13 +286,15 @@ def async_track_sample_rate(
 
     @callback
     def _evaluate(*_: Any) -> None:
-        if _sample_rate_advisory_dismissed(entry):
+        if _sample_rate_advisory_dismissed(coordinator.subentry):
             # User deliberately keeps the lower rate; never nag for this receiver.
             return
         low = _sample_rate_looks_low(coordinator.meta)
         if low and not state["flagged"]:
             state["flagged"] = True
-            async_raise_sample_rate_low(hass, entry, coordinator.meta)
+            async_raise_sample_rate_low(
+                hass, entry, coordinator.subentry, coordinator.meta
+            )
         elif not low:
             # Cleared without consulting ``flagged``: the issue outlives a
             # config-entry reload but this closure does not, so a card raised
@@ -281,16 +303,18 @@ def async_track_sample_rate(
             # ``flagged`` still governs the raise, which is what stops a card the
             # user dismissed coming straight back while the condition persists.
             state["flagged"] = False
-            async_clear_sample_rate_low(hass, entry)
+            async_clear_sample_rate_low(hass, entry, coordinator.receiver_id)
 
     _evaluate()  # meta may already be populated by the time we wire up
     return async_dispatcher_connect(
-        hass, signal_receiver_update(entry.entry_id), _evaluate
+        hass, signal_receiver_update(coordinator.receiver_id), _evaluate
     )
 
 
 @callback
-def async_raise_event_time_unusable(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def async_raise_event_time_unusable(
+    hass: HomeAssistant, entry: ConfigEntry, subentry: ConfigSubentry
+) -> None:
     """Raise the dismissible unusable-event-time advisory for a receiver.
 
     ``is_fixable`` so the card carries the explanation and an acknowledgement;
@@ -300,19 +324,21 @@ def async_raise_event_time_unusable(hass: HomeAssistant, entry: ConfigEntry) -> 
     ir.async_create_issue(
         hass,
         DOMAIN,
-        _event_time_issue_id(entry),
+        _event_time_issue_id(entry, subentry.subentry_id),
         is_fixable=True,
         is_persistent=False,
         severity=ir.IssueSeverity.WARNING,
         translation_key=ISSUE_EVENT_TIME_UNUSABLE,
-        translation_placeholders={"title": entry.title},
+        translation_placeholders={"title": subentry.title},
     )
 
 
 @callback
-def async_clear_event_time_unusable(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def async_clear_event_time_unusable(
+    hass: HomeAssistant, entry: ConfigEntry, receiver_id: str
+) -> None:
     """Delete the unusable-event-time advisory for a receiver (no-op if absent)."""
-    ir.async_delete_issue(hass, DOMAIN, _event_time_issue_id(entry))
+    ir.async_delete_issue(hass, DOMAIN, _event_time_issue_id(entry, receiver_id))
 
 
 @callback
@@ -338,45 +364,49 @@ def async_track_event_time_precision(
 
     @callback
     def _evaluate(*_: Any) -> None:
-        if _event_time_advisory_dismissed(entry):
+        if _event_time_advisory_dismissed(coordinator.subentry):
             # User deliberately runs without parseable stamps; never nag again.
             return
         unusable = coordinator.time_precision is TimePrecision.UNUSABLE
         if unusable and not state["flagged"]:
             state["flagged"] = True
-            async_raise_event_time_unusable(hass, entry)
+            async_raise_event_time_unusable(hass, entry, coordinator.subentry)
         elif not unusable:
             # Unconditional for the reload reason given in
             # :func:`async_track_sample_rate`, and here the card's own text
             # promises it clears itself once timestamps start arriving.
             state["flagged"] = False
-            async_clear_event_time_unusable(hass, entry)
+            async_clear_event_time_unusable(hass, entry, coordinator.receiver_id)
 
     _evaluate()  # a precision may already have been observed by the time we wire up
     return async_dispatcher_connect(
-        hass, signal_receiver_update(entry.entry_id), _evaluate
+        hass, signal_receiver_update(coordinator.receiver_id), _evaluate
     )
 
 
 @callback
-def async_raise_receiver_unreachable(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def async_raise_receiver_unreachable(
+    hass: HomeAssistant, entry: ConfigEntry, subentry: ConfigSubentry
+) -> None:
     """Create (or refresh) the "server unreachable" repair issue for a receiver."""
     ir.async_create_issue(
         hass,
         DOMAIN,
-        _unreachable_issue_id(entry),
+        _unreachable_issue_id(entry, subentry.subentry_id),
         is_fixable=True,
         is_persistent=False,
         severity=ir.IssueSeverity.ERROR,
         translation_key=ISSUE_UNREACHABLE,
-        translation_placeholders={"title": entry.title},
+        translation_placeholders={"title": subentry.title},
     )
 
 
 @callback
-def async_clear_receiver_unreachable(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def async_clear_receiver_unreachable(
+    hass: HomeAssistant, entry: ConfigEntry, receiver_id: str
+) -> None:
     """Delete the "server unreachable" repair issue for a receiver (no-op if absent)."""
-    ir.async_delete_issue(hass, DOMAIN, _unreachable_issue_id(entry))
+    ir.async_delete_issue(hass, DOMAIN, _unreachable_issue_id(entry, receiver_id))
 
 
 @callback
@@ -402,10 +432,10 @@ def async_track_receiver_reachability(
             if state["disconnected_since"] is not None:
                 LOGGER.debug(
                     "rtl_433 receiver %s reachable again; clearing repair issue",
-                    entry.title,
+                    coordinator.subentry.title,
                 )
             state["disconnected_since"] = None
-            async_clear_receiver_unreachable(hass, entry)
+            async_clear_receiver_unreachable(hass, entry, coordinator.receiver_id)
             return
 
         if state["disconnected_since"] is None:
@@ -413,13 +443,13 @@ def async_track_receiver_reachability(
             return
 
         if now - state["disconnected_since"] >= _UNREACHABLE_GRACE:
-            async_raise_receiver_unreachable(hass, entry)
+            async_raise_receiver_unreachable(hass, entry, coordinator.subentry)
 
     return async_track_time_interval(
         hass,
         _poll,
         _REACHABILITY_INTERVAL,
-        name=f"rtl_433 reachability {entry.entry_id}",
+        name=f"rtl_433 reachability {coordinator.receiver_id}",
     )
 
 
@@ -432,18 +462,20 @@ class ReceiverRadioReplaceRepairFlow(RepairsFlow):
     devices/entities/history survive) via the shared rebind helper.
     """
 
-    def __init__(self, entry: ConfigEntry) -> None:
+    def __init__(self, entry: ConfigEntry, subentry: ConfigSubentry) -> None:
         self._entry = entry
+        self._subentry = subentry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
         return await self.async_step_confirm()
 
     async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> Any:
         entry = self._entry
-        data = entry.data
+        subentry = self._subentry
+        data = subentry.data
         schema = vol.Schema(
             {
-                vol.Optional(CONF_RADIO_ID, default=entry.unique_id or ""): str,
+                vol.Optional(CONF_RADIO_ID, default=subentry.unique_id or ""): str,
                 vol.Required(CONF_HOST, default=data.get(CONF_HOST, "")): str,
                 vol.Required(CONF_PORT, default=data.get(CONF_PORT, DEFAULT_PORT)): int,
                 vol.Required(CONF_PATH, default=data.get(CONF_PATH, DEFAULT_PATH)): str,
@@ -464,14 +496,15 @@ class ReceiverRadioReplaceRepairFlow(RepairsFlow):
                     step_id="confirm",
                     data_schema=schema,
                     errors={"base": "cannot_connect"},
-                    description_placeholders={"title": entry.title},
+                    description_placeholders={"title": subentry.title},
                 )
             new_uid = (user_input.get(CONF_RADIO_ID) or "").strip() or (
-                entry.unique_id or ""
+                subentry.unique_id or ""
             )
             status = await async_rebind_receiver(
                 self.hass,
                 entry,
+                subentry,
                 new_uid,
                 {
                     CONF_HOST: host,
@@ -486,15 +519,15 @@ class ReceiverRadioReplaceRepairFlow(RepairsFlow):
                     step_id="confirm",
                     data_schema=schema,
                     errors={"base": "id_in_use"},
-                    description_placeholders={"title": entry.title},
+                    description_placeholders={"title": subentry.title},
                 )
-            async_clear_receiver_unreachable(self.hass, entry)
+            async_clear_receiver_unreachable(self.hass, entry, subentry.subentry_id)
             return self.async_create_entry(title="", data={})
 
         return self.async_show_form(
             step_id="confirm",
             data_schema=schema,
-            description_placeholders={"title": entry.title},
+            description_placeholders={"title": subentry.title},
         )
 
 
@@ -520,33 +553,32 @@ class SampleRateRepairFlow(RepairsFlow):
     are belt-and-suspenders for the offline/degraded paths.
     """
 
-    def __init__(self, entry: ConfigEntry) -> None:
+    def __init__(self, entry: ConfigEntry, subentry: ConfigSubentry) -> None:
         self._entry = entry
+        self._subentry = subentry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
         return self.async_show_menu(
             step_id="init",
             menu_options=["apply", "ignore"],
             description_placeholders={
-                "title": self._entry.title,
+                "title": self._subentry.title,
                 "suggested": str(_SUGGESTED_SAMPLE_RATE_HZ),
             },
         )
 
     async def async_step_apply(self, user_input: dict[str, Any] | None = None) -> Any:
         entry = self._entry
-        coordinator: Rtl433Coordinator | None = self.hass.data.get(DOMAIN, {}).get(
-            entry.entry_id
-        )
+        coordinator = receiver_coordinator(self.hass, entry, self._subentry.subentry_id)
         if coordinator is not None:
             await coordinator.set_sdr(KEY_SAMPLE_RATE, _SUGGESTED_SAMPLE_RATE_HZ)
-        async_clear_sample_rate_low(self.hass, entry)
+        async_clear_sample_rate_low(self.hass, entry, self._subentry.subentry_id)
         return self.async_create_entry(title="", data={})
 
     async def async_step_ignore(self, user_input: dict[str, Any] | None = None) -> Any:
         entry = self._entry
-        _async_dismiss_sample_rate_advisory(self.hass, entry)
-        async_clear_sample_rate_low(self.hass, entry)
+        _async_dismiss_sample_rate_advisory(self.hass, entry, self._subentry)
+        async_clear_sample_rate_low(self.hass, entry, self._subentry.subentry_id)
         return self.async_create_entry(title="", data={})
 
 
@@ -563,8 +595,9 @@ class EventTimeRepairFlow(RepairsFlow):
     timestamps.
     """
 
-    def __init__(self, entry: ConfigEntry) -> None:
+    def __init__(self, entry: ConfigEntry, subentry: ConfigSubentry) -> None:
         self._entry = entry
+        self._subentry = subentry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> Any:
         return await self.async_step_confirm()
@@ -574,10 +607,12 @@ class EventTimeRepairFlow(RepairsFlow):
             return self.async_show_form(
                 step_id="confirm",
                 data_schema=vol.Schema({}),
-                description_placeholders={"title": self._entry.title},
+                description_placeholders={"title": self._subentry.title},
             )
-        _async_dismiss_event_time_advisory(self.hass, self._entry)
-        async_clear_event_time_unusable(self.hass, self._entry)
+        _async_dismiss_event_time_advisory(self.hass, self._entry, self._subentry)
+        async_clear_event_time_unusable(
+            self.hass, self._entry, self._subentry.subentry_id
+        )
         return self.async_create_entry(title="", data={})
 
 
@@ -607,9 +642,13 @@ async def async_create_fix_flow(
         if not issue_id.startswith(prefix):
             continue
         # The other half of :func:`_issue_id`, and the only place that undoes it.
-        entry = hass.config_entries.async_get_entry(issue_id[len(prefix) + 1 :])
-        if entry is not None:
-            return flow(entry)
+        entry_id, _, receiver_id = issue_id[len(prefix) + 1 :].partition(":")
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None:
+            break
+        subentry = entry.subentries.get(receiver_id)
+        if subentry is not None:
+            return flow(entry, subentry)
     return ConfirmRepairFlow()
 
 
