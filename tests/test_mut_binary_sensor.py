@@ -108,7 +108,7 @@ def _door_devices():
 def _motion_eid(hass, receiver):
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver_id(receiver)}:{_DEVICE_KEY}:motion"
+        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DEVICE_KEY}:motion"
     )
     assert eid is not None, "Motion entity not found"
     return eid
@@ -117,7 +117,7 @@ def _motion_eid(hass, receiver):
 def _door_eid(hass, receiver):
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver_id(receiver)}:{_DOOR_KEY}:opening"
+        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DOOR_KEY}:opening"
     )
     assert eid is not None, "Door opening entity not found"
     return eid
@@ -141,7 +141,7 @@ async def test_init_model_passed_to_super(hass, receiver_entry_builder):
         hass, receiver_entry_builder, devices=_door_devices()
     )
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{_DOOR_KEY}"
+    prefix = f"{receiver.entry_id}:{_DOOR_KEY}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )

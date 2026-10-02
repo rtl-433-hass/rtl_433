@@ -38,14 +38,19 @@ _FIELD_KEY = "secret_knock"
 async def event_entity(hass, receiver_entry_builder) -> Rtl433Event:
     """A doorbell ``secret_knock`` event entity wired to a bare coordinator.
 
-    ``__init__`` reads ``coordinator.entry.data``, the descriptor and the receiver
-    device's registry id (for ``via_device_id``), so a plain coordinator plus the
-    receiver device ``async_setup_entry`` always registers first is enough; the
-    dispatch hooks are patched per-test.
+    ``__init__`` reads ``coordinator.entry.data``, the descriptor and the
+    *location* device's registry id (for ``via_device_id``), so a plain
+    coordinator plus the location and receiver devices ``async_setup_entry``
+    always registers first is enough; the dispatch hooks are patched per-test.
     """
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    dr.async_get(hass).async_get_or_create(
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+    )
+    device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         config_subentry_id=receiver_id(entry),
         identifiers={(DOMAIN, receiver_scope(entry))},
