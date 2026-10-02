@@ -256,6 +256,10 @@ escalate_paths = [
 "tests/test_binary_sensor_motion.py" = ["binary_sensor.py", "event.py"]
 "tests/test_event_trace.py" = ["event.py"]
 "tests/test_diagnostics_repairs.py" = ["diagnostics.py", "repairs.py"]
+# The re-key helper owns two paths: the battery-swap ``device_key`` swap and the
+# location consolidation, and the latter raises the "duplicate history dropped"
+# notice that lives in ``repairs.py``.
+"tests/test_device_replace.py" = ["device_replace.py", "repairs.py"]
 "tests/test_sdr_controls.py" = [
     "number.py",
     "select.py",
