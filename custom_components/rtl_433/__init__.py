@@ -41,7 +41,9 @@ the device registry. A single nested device can be removed from its device page
 via :func:`async_remove_config_entry_device`, which returns it to the pending
 list; deleting the location entry removes all nested devices and entities
 automatically, and deleting a receiver subentry removes that receiver's own
-device.
+device (and, via :func:`_async_purge_removed_receiver_entities`, its
+per-receiver signal entities on the merged devices) while every merged device
+and its history survive.
 
 Setting up the first location also registers the discovery WebSocket commands
 (:mod:`.websocket_api`), which back the approval panel and are equally usable
@@ -559,6 +561,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
         # A receiver was added or removed, or a reconfigure / re-advertised
         # discovery / rebind re-pointed one at a new server (or a new stable
         # radio id). Either way the running set no longer matches the stored one.
+        _async_purge_removed_receiver_entities(hass, entry, set(coordinators) - stored)
         await hass.config_entries.async_reload(entry.entry_id)
         return
 
@@ -596,6 +599,46 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
         timeout,
         len(coordinators),
     )
+
+
+@callback
+def _async_purge_removed_receiver_entities(
+    hass: HomeAssistant, entry: ConfigEntry, removed: set[str]
+) -> None:
+    """Remove a deleted receiver's per-receiver signal entities.
+
+    Deleting a receiver subentry is mostly Home Assistant's job: it clears the
+    subentry off the registries, which takes the **receiver** device with
+    everything on it — the radio controls, the noise sensors, the connectivity
+    sensor — because all of those are owned by that subentry.
+
+    It cannot take the one set of entities that describes the receiver but does
+    **not** live on its device: the per-receiver ``rssi`` / ``snr`` / ``last_seen``
+    entities on every merged device. Those are added with no
+    ``config_subentry_id`` on purpose (a merged device fed by two receivers may
+    not hold entities from two subentries), so the subentry sweep does not see
+    them and they would survive as permanently-unavailable orphans of a server
+    that is gone. They are found here by their identity instead: the four-segment
+    ``{location_entry_id}:{device_key}:{receiver_subentry_id}:{object_suffix}``,
+    matched on the removed receiver's id in the third segment.
+
+    What deliberately does **not** happen: the merged devices themselves and
+    their unioned entities are left completely alone, history included. A sensor
+    only the removed receiver ever heard keeps its device and its recorded
+    history and simply goes unavailable once no remaining receiver vouches for it
+    — deleting it stays an explicit user action, the same as any other RF device.
+
+    Runs before the reload so the rebuild does not re-add an entity for a
+    receiver that no longer exists; a no-op when nothing was removed (the same
+    branch also fires for a receiver *added* or re-pointed).
+    """
+    if not removed:
+        return
+    entity_registry = er.async_get(hass)
+    for ent in list(er.async_entries_for_config_entry(entity_registry, entry.entry_id)):
+        parts = ent.unique_id.split(":")
+        if len(parts) == 4 and parts[0] == entry.entry_id and parts[2] in removed:
+            entity_registry.async_remove(ent.entity_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

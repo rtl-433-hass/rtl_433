@@ -230,6 +230,20 @@ def receiver_scope(entry: MockConfigEntry, index: int = 0) -> str:
     return receiver_identity(entry.entry_id, receiver_id(entry, index))
 
 
+def link_unique_id(
+    entry: MockConfigEntry, device_key: str, object_suffix: str, index: int = 0
+) -> str:
+    """Return a per-receiver link entity's four-segment ``unique_id``.
+
+    ``rssi`` / ``snr`` / ``last_seen`` are excluded from the union -- they measure
+    one receiver's link to the sensor, not the sensor -- so each yields one entity
+    per (device x receiver) on the merged device, discriminated by the receiver's
+    subentry id: ``{entry_id}:{device_key}:{receiver_id}:{object_suffix}``. A
+    unioned field keeps the receiver-agnostic three-segment id.
+    """
+    return f"{entry.entry_id}:{device_key}:{receiver_id(entry, index)}:{object_suffix}"
+
+
 def build_coordinator(hass, entry: MockConfigEntry, **kwargs: Any) -> Rtl433Coordinator:
     """Build a coordinator for a location entry's first receiver."""
     kwargs.setdefault("host", "rtl433.local")
