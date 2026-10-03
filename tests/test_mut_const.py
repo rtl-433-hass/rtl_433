@@ -14,8 +14,10 @@ from custom_components.rtl_433.const import (
     SIGNAL_HUB_UPDATE,
     SIGNAL_NEW_DEVICE,
     signal_device_update,
+    signal_hub_noise,
     signal_hub_update,
     signal_new_device,
+    signal_pending_update,
 )
 
 
@@ -56,3 +58,15 @@ def test_signal_new_device_embeds_hub_id_exactly():
 def test_signal_new_device_distinct_per_hub():
     assert signal_new_device("h1") != signal_new_device("h2")
     assert "h1" in signal_new_device("h1")
+
+
+def test_signal_hub_noise_embeds_hub_id_exactly():
+    assert signal_hub_noise("hubA") == "rtl_433_hub_noise_hubA"
+    assert signal_hub_noise("h1") != signal_hub_noise("h2")
+    # Its own signal: the hub-wide update must not wake the noise sensors' feed.
+    assert signal_hub_noise("hubA") != signal_hub_update("hubA")
+
+
+def test_signal_pending_update_embeds_hub_id_exactly():
+    assert signal_pending_update("hubA") == "rtl_433_pending_update_hubA"
+    assert signal_pending_update("h1") != signal_pending_update("h2")
