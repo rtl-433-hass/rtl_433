@@ -10,6 +10,16 @@ make it eligible for Home Assistant's Energy dashboard, calibrate the device.
 
 ## Calibrating a Meter
 
+When you add a meter under **Add discovered devices**, the integration offers
+the calibration right away: for each added device whose signal names a
+commodity (`MeterType` or `ert_type`), a **Calibrate** step asks what it
+measures, pre-filled from the signal, and then the base unit and scale. Pick
+**None** to skip a meter; nothing is lost, it can be calibrated later exactly as
+below. (Devices added from the discovery panel are not prompted; use Device
+settings for those.)
+
+To calibrate a meter you added earlier, or to change a calibration:
+
 Open **Settings → Devices & Services → rtl_433 → Configure (the gear icon) →
 Device settings** and pick the meter.
 
