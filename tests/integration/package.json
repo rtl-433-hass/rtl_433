@@ -11,6 +11,6 @@
   "license": "MIT",
   "devDependencies": {
     "playwright": "1.63.0",
-    "ws": "8.21.3"
+    "ws": "8.22.0"
   }
 }
