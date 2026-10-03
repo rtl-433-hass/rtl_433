@@ -219,6 +219,7 @@ export const STRINGS = {
   "settings.data.unit": "Base unit",
   "settings.data.scale": "Scale",
   "settings.data.mappings": "Overrides",
+  "settings.data.auto_replace": "Follow ID changes automatically",
   "settings.data_description.availability_mode":
     "How long a device may go unheard before it is marked unavailable. The defaults never expire doorbells, motion and contacts.",
   "settings.data_description.availability_timeout":
@@ -234,6 +235,8 @@ export const STRINGS = {
   "settings.data_description.unit": "One unit of what the counter counts.",
   "settings.data_description.scale":
     "Multiplier on the raw counter, to reach one base unit.",
+  "settings.data_description.auto_replace":
+    "Switch this device to its new ID after a battery change without asking, when exactly one match appears within an hour. Otherwise you are asked in Repairs.",
 };
 
 /**
@@ -3060,6 +3063,10 @@ class Rtl433Panel extends HTMLElement {
     if (device.motion) {
       schema.push(this._secondsField("motion_clear_delay", 1));
     }
+    // Many sensors take a new ID when their batteries are changed. On, the
+    // backend moves the device onto its successor by itself; off, it asks in
+    // Repairs. Either way the matching rules are the backend's (`id_change`).
+    schema.push({ name: "auto_replace", selector: { boolean: {} } });
     schema.push({
       name: "commodity",
       selector: {
@@ -3157,6 +3164,7 @@ class Rtl433Panel extends HTMLElement {
       device_key: deviceKey,
       timeout_override: device.timeout_override,
       motion_clear_delay: device.motion_clear_delay,
+      auto_replace: Boolean(device.auto_replace),
       commodity,
       unit: calibration && calibration.commodity === commodity
         ? calibration.unit
@@ -3435,6 +3443,7 @@ class Rtl433Panel extends HTMLElement {
         device_key: data.device_key,
         timeout_override: number("timeout_override"),
         motion_clear_delay: number("motion_clear_delay"),
+        auto_replace: Boolean(data.auto_replace),
         commodity: data.commodity,
         unit: calibrated ? data.unit : null,
         scale: calibrated ? number("scale") : null,

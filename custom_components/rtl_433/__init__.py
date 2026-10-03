@@ -51,7 +51,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from . import repairs
+from . import id_change, repairs
 from .const import (
     CONF_DEVICES,
     CONF_HOST,
@@ -373,6 +373,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(
         repairs.async_track_event_time_precision(hass, entry, coordinator)
     )
+    # Offer (or, for opted-in devices, perform) a replace when an added device
+    # comes back under a new transmitter id after a battery swap.
+    entry.async_on_unload(id_change.async_track_id_changes(hass, entry, coordinator))
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 

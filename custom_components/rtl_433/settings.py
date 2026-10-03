@@ -46,6 +46,7 @@ from .const import (
     CONF_MODEL,
     CONF_USER_MAPPINGS,
     DATA_ENTRY_LIBRARY,
+    DEVICE_AUTO_REPLACE,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
     DEVICE_MOTION_CLEAR_DELAY,
@@ -225,6 +226,7 @@ def device_defaults(
         DEVICE_MOTION_CLEAR_DELAY: device_clear_delay(entry, device_key),
         "motion": is_motion_bearing(hass, entry, device_key),
         "calibration": existing,
+        DEVICE_AUTO_REPLACE: bool(record.get(DEVICE_AUTO_REPLACE)),
         "commodity": (
             existing[CALIBRATION_COMMODITY]
             if existing is not None
@@ -239,8 +241,15 @@ def build_device_data(
     *,
     override: int | None,
     calibration: dict[str, Any] | None,
+    auto_replace: bool | None = None,
 ) -> dict[str, Any]:
     """Return ``entry.data`` with this device's override + calibration applied.
+
+    ``auto_replace`` is the opt-in for following a transmitter-id change without
+    asking (see :mod:`.id_change`). ``None`` leaves it as stored, so a caller that
+    does not offer the switch cannot clear it by omission; ``False`` drops it
+    rather than storing a ``False``, keeping records of devices that never opted
+    in unchanged.
 
     ``None`` clears rather than stores in both cases: a blank timeout falls back
     to the hub default, and a cleared calibration falls back to the library
@@ -271,6 +280,11 @@ def build_device_data(
         record.pop(DEVICE_CALIBRATION, None)
     else:
         record[DEVICE_CALIBRATION] = calibration
+    if auto_replace is not None:
+        if auto_replace:
+            record[DEVICE_AUTO_REPLACE] = True
+        else:
+            record.pop(DEVICE_AUTO_REPLACE, None)
     record.pop(DEVICE_MOTION_CLEAR_DELAY, None)
     devices[device_key] = record
     data[CONF_DEVICES] = devices

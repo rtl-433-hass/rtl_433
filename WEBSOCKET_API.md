@@ -564,7 +564,8 @@ alternative is three round trips to fill controls the user may never open.
   "devices": [
     {"device_key": "SCM-12345", "label": "SCM (SCM-12345) — gas detected",
      "model": "SCM", "timeout_override": null, "motion_clear_delay": null,
-     "motion": false, "commodity": "gas", "calibration": null}
+     "motion": false, "commodity": "gas", "calibration": null,
+     "auto_replace": false}
   ],
   "commodities": ["none", "energy", "gas", "water"],
   "commodity_units": {"gas": ["m³", "ft³", "L", "CCF"], "...": []},
@@ -621,6 +622,11 @@ store *no* calibration at all.
 `motion_clear_delay` only does anything on a device with a field that auto-clears
 (`motion` is `true` in the payload for those); elsewhere it is a control with
 nothing behind it.
+
+`auto_replace` is a plain boolean rather than a nullable override: `true` lets the
+integration follow the device onto a new transmitter id without asking (see
+[Managing devices that change IDs](docs/changing-device-ids.md)), `false` goes back
+to raising a repair instead, and leaving it out keeps what is stored.
 
 ### `rtl_433/settings/mappings`
 
