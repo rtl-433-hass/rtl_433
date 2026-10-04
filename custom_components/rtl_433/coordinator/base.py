@@ -61,6 +61,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 import dataclasses
 from datetime import datetime
+import time
 from typing import Any
 
 from pyrtl_433 import CannotConnect as CannotConnect, Rtl433Client, TimePrecision
@@ -78,9 +79,11 @@ from ..const import (
     DEFAULT_PATH,
     DEFAULT_PORT,
     LOGGER,
+    NOISE_PUBLISH_INTERVAL,
     SDR_STORE_VERSION,
     sdr_store_key,
     signal_device_update,
+    signal_hub_noise,
     signal_hub_update,
     signal_pending_update,
 )
@@ -91,6 +94,51 @@ from ._watchdog import _WATCHDOG_INTERVAL, _AvailabilityMixin
 # ``CannotConnect`` is the library's error, re-exported here (and via
 # ``coordinator/__init__.py``) so existing import sites — ``config_flow.py``,
 # ``repairs.py`` — keep importing it from the coordinator package unchanged.
+
+
+class _TimeWeightedMean:
+    """The mean of a stepwise reading, each value counting for as long as it held.
+
+    rtl_433's noise readings are steps: a value is in effect until the next line
+    replaces it. Counting lines instead of time would weight a value by how often
+    it is re-reported or by how fast its neighbours jitter -- the client drops
+    repeats of an unchanged value, and a ``-M noise`` line re-states the previous
+    threshold -- so each value is weighted by the seconds it held instead.
+    """
+
+    def __init__(self) -> None:
+        """Start with nothing in effect."""
+        self.value: float | None = None
+        # When the current value (or the interval) started. Only read once a value
+        # is in effect, and every set() and take() stamps it first.
+        self._since: float
+        self._weighted_sum = 0.0
+        self._seconds = 0.0
+
+    def set(self, value: float, now: float) -> None:
+        """``value`` takes effect at ``now``, closing the one it replaces."""
+        self._close(now)
+        self.value = value
+
+    def take(self, now: float) -> float | None:
+        """The mean (0.1 dB) since the last take, then start the next interval.
+
+        ``None`` when nothing has been in effect yet. A value set at the very
+        moment of the take (no time elapsed) is returned as is.
+        """
+        self._close(now)
+        mean = self._weighted_sum / self._seconds if self._seconds > 0 else self.value
+        self._weighted_sum = 0.0
+        self._seconds = 0.0
+        return None if mean is None else round(mean, 1)
+
+    def _close(self, now: float) -> None:
+        """Credit the current value with the time since it (or the interval) began."""
+        if self.value is not None:
+            held = now - self._since
+            self._weighted_sum += self.value * held
+            self._seconds += held
+        self._since = now
 
 
 class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityMixin):
@@ -380,9 +428,25 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             event_tz=dt_util.get_default_time_zone(),
         )
 
+        # --- Receiver noise (see :meth:`_note_noise_reading`) -----------------
+        # The client's latest raw pair, as last seen by :meth:`_emit_hub_update`;
+        # a callback whose pair differs from it was fired by a noise log line.
+        self._noise_raw: tuple[float | None, float | None] = (None, None)
+        # Both are published as the time-weighted mean of the interval: a
+        # snapshot of a value that moves every tenth of a second would graph as
+        # noise. ``_noise_clock`` is monotonic seconds; tests replace it.
+        self._noise_mean = _TimeWeightedMean()
+        self._min_level_mean = _TimeWeightedMean()
+        self._noise_clock: Callable[[], float] = time.monotonic
+        # What the noise sensors show: updated at most once per
+        # ``NOISE_PUBLISH_INTERVAL`` (the first reading at once).
+        self._noise_published: float | None = None
+        self._min_level_published: float | None = None
+
         # --- Internal lifecycle handles --------------------------------------
         self._started = False
         self._watchdog_unsub: Callable[[], None] | None = None
+        self._noise_unsub: Callable[[], None] | None = None
 
     # ------------------------------------------------------------------ #
     # Client-backed read-only state                                      #
@@ -440,14 +504,16 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
     @property
     def noise_level(self) -> float | None:
-        """Estimated receiver noise level in dB (client-parsed "Auto Level" logs).
+        """Estimated receiver noise level in dB, as published to the sensor.
 
         Socket-sourced: rtl_433 surfaces its noise floor only as "Auto Level"
-        log frames (requires ``-Y autolevel`` and/or ``-M noise`` server-side);
-        the client parses them into this snapshot. ``None`` until the first
-        such frame arrives.
+        log frames (requires ``-Y autolevel`` and/or ``-M noise`` server-side),
+        which the client parses. A busy receiver sends several a second, so this
+        is the time-weighted mean of the estimate over the last
+        ``NOISE_PUBLISH_INTERVAL`` (the first one is published at once), rounded
+        to 0.1 dB. ``None`` until the first such frame arrives.
         """
-        return self._client.noise_level
+        return self._noise_published
 
     @property
     def min_level(self) -> float | None:
@@ -456,9 +522,10 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         Carried only by the ``-Y autolevel`` *adjustment* log line, never by the
         ``-M noise`` periodic report, so this trails :attr:`noise_level`: it
         stays ``None`` until the server actually re-adjusts the threshold, which
-        a receiver whose noise floor has settled may never do.
+        a receiver whose noise floor has settled may never do. Published on the
+        same schedule as :attr:`noise_level`, as the interval's time-weighted mean.
         """
-        return self._client.min_level
+        return self._min_level_published
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                          #
@@ -483,6 +550,12 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             self._async_watchdog,
             _WATCHDOG_INTERVAL,
             name=f"rtl_433 watchdog {self.entry.entry_id}",
+        )
+        self._noise_unsub = async_track_time_interval(
+            self.hass,
+            self._async_publish_noise,
+            NOISE_PUBLISH_INTERVAL,
+            name=f"rtl_433 noise {self.entry.entry_id}",
         )
         LOGGER.debug("rtl_433 coordinator started for %s", self.ws_url)
 
@@ -585,6 +658,9 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         if self._watchdog_unsub is not None:
             self._watchdog_unsub()
             self._watchdog_unsub = None
+        if self._noise_unsub is not None:
+            self._noise_unsub()
+            self._noise_unsub = None
 
         # The client closes its own socket and cancels its loops; it never closes
         # the injected HA shared session.
@@ -616,6 +692,20 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         to the hub entities over the dispatcher — exactly as before.
         """
         connected = self._client.connected
+        raw = (self._client.noise_level, self._client.min_level)
+        noise_changed = raw != self._noise_raw
+        self._noise_raw = raw
+        if raw == (None, None):
+            # The client clears the noise floor on every drop.
+            self._reset_noise()
+        elif noise_changed:
+            self._note_noise_reading(*raw)
+        if noise_changed and connected and self._was_connected:
+            # Fired by a noise log line: the client invokes this callback right
+            # after storing a changed reading, so nothing else is new. Keep it
+            # off the hub-wide fan-out, which would re-write every hub entity
+            # several times a second.
+            return
         if connected and not self._was_connected:
             # (Re)connect edge: anchor the HA-side backlog gate, reopen the
             # hub-offline gate (repainting the devices the outage had taken
@@ -643,6 +733,55 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
         self._maybe_refresh_hub_identity()
         async_dispatcher_send(self.hass, signal_hub_update(self.entry.entry_id))
+
+    # ------------------------------------------------------------------ #
+    # Receiver noise: collected per log line, published on a schedule    #
+    # ------------------------------------------------------------------ #
+    def _note_noise_reading(
+        self, noise_level: float | None, min_level: float | None
+    ) -> None:
+        """Collect one parsed "Auto Level" reading for the next publish.
+
+        The very first reading is published straight away, so the sensors do
+        not sit at ``unknown`` for a minute after every (re)connect.
+        """
+        now = self._noise_clock()
+        if noise_level is not None:
+            self._noise_mean.set(noise_level, now)
+        if min_level is not None:
+            # Re-setting an unchanged threshold (a noise-only ``-M noise`` line
+            # leaves it as it was) just continues its segment.
+            self._min_level_mean.set(min_level, now)
+        if self._noise_published is None and self._min_level_published is None:
+            self._publish_noise()
+
+    @callback
+    def _async_publish_noise(self, _now: datetime | None = None) -> None:
+        """Interval callback: publish what arrived since the last publish."""
+        self._publish_noise()
+
+    def _publish_noise(self) -> None:
+        """Publish each reading's time-weighted mean since the last publish.
+
+        A reading that held one value all interval publishes that value again,
+        which writes nothing; one never reported stays ``None``.
+        """
+        now = self._noise_clock()
+        published = (
+            self._noise_mean.take(now),
+            self._min_level_mean.take(now),
+        )
+        if published == (self._noise_published, self._min_level_published):
+            return
+        self._noise_published, self._min_level_published = published
+        async_dispatcher_send(self.hass, signal_hub_noise(self.entry.entry_id))
+
+    def _reset_noise(self) -> None:
+        """Forget every noise reading: the next connection starts afresh."""
+        self._noise_mean = _TimeWeightedMean()
+        self._min_level_mean = _TimeWeightedMean()
+        self._noise_published = None
+        self._min_level_published = None
 
     async def _on_connect(self) -> None:
         """Adopt + enforce the managed SDR settings on a (re)connect.

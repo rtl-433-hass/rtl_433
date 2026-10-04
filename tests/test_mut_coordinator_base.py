@@ -46,7 +46,7 @@ from __future__ import annotations
 from collections import OrderedDict
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, call, patch
 
 from pyrtl_433 import Rtl433Client
 from pyrtl_433.normalizer import DEFAULT_SKIP_KEYS, NormalizedEvent
@@ -56,6 +56,7 @@ from custom_components.rtl_433.const import (
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_PATH,
     DEFAULT_PORT,
+    NOISE_PUBLISH_INTERVAL,
     SDR_STORE_VERSION,
     sdr_store_key,
     signal_device_update,
@@ -64,6 +65,7 @@ from custom_components.rtl_433.const import (
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator._events import PendingDevice
 from custom_components.rtl_433.coordinator._watchdog import _WATCHDOG_INTERVAL
+from custom_components.rtl_433.coordinator.base import _TimeWeightedMean
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
@@ -396,6 +398,9 @@ async def test_a_fresh_coordinator_is_disconnected_and_unstarted(
     assert coordinator._seen_dev_query is None
     assert coordinator._started is False
     assert coordinator._watchdog_unsub is None
+    assert coordinator._noise_unsub is None
+    assert coordinator.noise_level is None
+    assert coordinator.min_level is None
 
 
 async def test_a_fresh_coordinator_manages_no_sdr_settings(hass, make_coordinator):
@@ -428,13 +433,24 @@ async def test_async_start_arms_the_watchdog_for_this_hub(hass, make_coordinator
     with patch(TRACK_INTERVAL) as track:
         await coordinator.async_start()
 
-    track.assert_called_once_with(
-        hass,
-        coordinator._async_watchdog,
-        _WATCHDOG_INTERVAL,
-        name=f"rtl_433 watchdog {coordinator.entry.entry_id}",
-    )
+    # The noise publish is armed alongside it: without it the noise sensors
+    # would show their first reading forever.
+    assert track.call_args_list == [
+        call(
+            hass,
+            coordinator._async_watchdog,
+            _WATCHDOG_INTERVAL,
+            name=f"rtl_433 watchdog {coordinator.entry.entry_id}",
+        ),
+        call(
+            hass,
+            coordinator._async_publish_noise,
+            NOISE_PUBLISH_INTERVAL,
+            name=f"rtl_433 noise {coordinator.entry.entry_id}",
+        ),
+    ]
     assert coordinator._watchdog_unsub is track.return_value
+    assert coordinator._noise_unsub is track.return_value
     assert coordinator._started is True
 
 
@@ -470,7 +486,7 @@ async def test_async_start_is_ignored_once_already_started(
         await coordinator.async_start()
         await coordinator.async_start()
 
-    assert track.call_count == 1
+    assert track.call_count == 2  # the watchdog and the noise publish, once each
     assert client_transport.start.await_count == 1
 
 
@@ -504,13 +520,17 @@ async def test_async_stop_disarms_the_watchdog_and_stops_the_client(
     """
     coordinator = make_coordinator()
     unsub = Mock()
+    noise_unsub = Mock()
     coordinator._watchdog_unsub = unsub
+    coordinator._noise_unsub = noise_unsub
     coordinator._started = True
 
     await coordinator.async_stop()
 
     unsub.assert_called_once_with()
+    noise_unsub.assert_called_once_with()
     assert coordinator._watchdog_unsub is None
+    assert coordinator._noise_unsub is None
     assert coordinator._started is False
     client_transport.stop.assert_awaited_once_with()
 
@@ -1105,3 +1125,60 @@ async def test_forgetting_a_device_also_withdraws_it_as_a_candidate(
         coordinator.forget_device(_KEY)
 
     assert coordinator.pending == {}
+
+
+def test_time_weighted_mean_weights_each_value_by_how_long_it_held():
+    """-21 for 50 s then -27 for 10 s is -22, not the -24 a per-line mean gives."""
+    m = _TimeWeightedMean()
+    m.set(-21.0, 0.0)
+    m.set(-27.0, 50.0)
+    assert m.take(60.0) == -22.0
+
+
+def test_time_weighted_mean_restarts_each_interval_from_the_held_value():
+    """The next interval starts at the take, carrying the value still in effect."""
+    m = _TimeWeightedMean()
+    m.set(-20.0, 0.0)
+    assert m.take(60.0) == -20.0
+    m.set(-26.0, 90.0)  # -20 for 30 s of this interval, then -26 for 30 s
+    assert m.take(120.0) == -23.0
+
+
+def test_time_weighted_mean_re_setting_the_same_value_changes_nothing():
+    """Re-stating an unchanged value (a noise-only line's threshold) adds no weight."""
+    m = _TimeWeightedMean()
+    m.set(-18.0, 0.0)
+    for t in range(5, 10):
+        m.set(-18.0, float(t))
+    m.set(-24.0, 10.0)
+    assert m.take(60.0) == -23.0  # (-18 x 10 s + -24 x 50 s) / 60 s
+
+
+def test_time_weighted_mean_of_a_value_set_at_the_take_is_that_value():
+    """No time has passed (the first reading, published at once): the value itself."""
+    m = _TimeWeightedMean()
+    m.set(-18.44, 5.0)
+    assert m.take(5.0) == -18.4
+
+
+def test_time_weighted_mean_is_none_until_something_is_set():
+    m = _TimeWeightedMean()
+    assert m.take(10.0) is None
+    assert m.value is None
+
+
+def test_time_weighted_mean_ignores_time_before_the_first_value():
+    """Seconds with nothing in effect neither count nor dilute the mean."""
+    m = _TimeWeightedMean()
+    m.take(0.0)
+    m.set(-30.0, 40.0)
+    m.set(-20.0, 50.0)
+    assert m.take(60.0) == -25.0
+
+
+def test_time_weighted_mean_handles_intervals_under_a_second():
+    """A sub-second interval is still a weighted mean, not just the latest value."""
+    m = _TimeWeightedMean()
+    m.set(-20.0, 0.0)
+    m.set(-30.0, 0.4)
+    assert m.take(0.8) == -25.0
