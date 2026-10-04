@@ -256,6 +256,97 @@ async def test_options_menu_leads_with_the_two_approval_steps(
     ]
 
 
+METER_PENDING = "SCMplus-102845955"
+METER_FRAME = {
+    "model": "SCMplus",
+    "id": 102845955,
+    "MeterType": "Gas",
+    "consumption_data": 401358,
+    "ert_type": 12,
+    "snr": 22.0,
+}
+
+
+async def _hub_hearing_a_meter_and_a_door(hass, hub_entry_builder):
+    """A hub with two pending devices: a gas meter (commodity hint) and a door."""
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = _coordinator(hass, entry)
+    _hear(coordinator, METER_FRAME)
+    _hear(coordinator, PENDING_MID_FRAME)
+    await hass.async_block_till_done()
+    return entry
+
+
+async def test_add_devices_offers_calibration_for_an_adopted_meter(
+    hass, hub_entry_builder, no_socket
+):
+    """Adding a utility meter asks for its calibration before the dialog closes.
+
+    The gas meter's decoded ``MeterType`` names a commodity, so the add-devices
+    submit does not finish: it shows an adopt_calibration step for that meter
+    (and only that meter -- the door sensor is added without a question), with
+    the commodity pre-filled from the signal. Choosing the commodity leads into
+    the shared calibration step, and the ``{commodity, unit, scale}`` triple lands
+    in the meter's record while the door's record stays uncalibrated.
+    """
+    entry = await _hub_hearing_a_meter_and_a_door(hass, hub_entry_builder)
+
+    result = await _open_add_devices(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"add": [METER_PENDING, PENDING_MID], "ignore": []}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "adopt_calibration"
+    assert result["description_placeholders"]["position"] == "1"
+    assert result["description_placeholders"]["total"] == "1"
+    assert "gas detected" in result["description_placeholders"]["device"]
+    # Both devices are already adopted at this point; only the meter is asked about.
+    assert METER_PENDING in entry.data[CONF_DEVICES]
+    assert PENDING_MID in entry.data[CONF_DEVICES]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "calibration"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CALIBRATION_UNIT: UnitOfVolume.CENTUM_CUBIC_FEET, CALIBRATION_SCALE: 0.01},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    assert entry.data[CONF_DEVICES][METER_PENDING][DEVICE_CALIBRATION] == {
+        CALIBRATION_COMMODITY: COMMODITY_GAS,
+        CALIBRATION_UNIT: UnitOfVolume.CENTUM_CUBIC_FEET,
+        CALIBRATION_SCALE: 0.01,
+    }
+    assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][PENDING_MID]
+
+
+async def test_add_devices_calibration_can_be_skipped(
+    hass, hub_entry_builder, no_socket
+):
+    """Answering ``none`` on the adopt-time step adds the meter uncalibrated."""
+    entry = await _hub_hearing_a_meter_and_a_door(hass, hub_entry_builder)
+
+    result = await _open_add_devices(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"add": [METER_PENDING], "ignore": []}
+    )
+    assert result["step_id"] == "adopt_calibration"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_NONE}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert METER_PENDING in entry.data[CONF_DEVICES]
+    assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][METER_PENDING]
+
+
 async def test_add_devices_adds_ignores_and_leaves_the_rest_pending(
     hass, hub_entry_builder, no_socket
 ):
