@@ -16,6 +16,7 @@
     "custom_components/rtl_433/entity.py": 5523.875,
     "custom_components/rtl_433/event.py": 137.161,
     "custom_components/rtl_433/hub_settings.py": 239.58599999999998,
+    "custom_components/rtl_433/id_change.py": 240.0,
     "custom_components/rtl_433/library.py": 32.044000000000004,
     "custom_components/rtl_433/migration.py": 4524.053,
     "custom_components/rtl_433/number.py": 102.40100000000001,

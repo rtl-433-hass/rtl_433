@@ -60,6 +60,7 @@ from .const import (
     signal_hub_update,
 )
 from .coordinator import CannotConnect, Rtl433Coordinator
+from .id_change import ISSUE_ID_CHANGED, DeviceIdChangedRepairFlow
 from .sdr_settings import KEY_SAMPLE_RATE
 
 # How often reachability is evaluated. Aligned to be responsive without being
@@ -590,11 +591,21 @@ async def async_create_fix_flow(
     *applies* the recommended 1.024 MS/s rate or *keeps* the current rate and
     durably silences the advisory for the hub. ``event_time_unusable`` gets a
     single confirm step, because its remedy is server-side and only the
-    acknowledgement is ours to record. Every other issue is
+    acknowledgement is ours to record. ``device_id_changed`` (raised by
+    :mod:`.id_change`) confirms and runs the replace for the pair it names. Every
+    other issue is
     informational/dismissible, so a simple confirm-and-dismiss flow is the right
     surface; those issues also self-clear, so the confirm dialog mainly lets a
     user dismiss a stale card.
     """
+    if issue_id.startswith(f"{ISSUE_ID_CHANGED}_") and data:
+        # The pair is carried in ``data`` rather than parsed back out of the id:
+        # a device key contains the same separators the id is built with.
+        entry = hass.config_entries.async_get_entry(str(data.get("entry_id")))
+        if entry is not None:
+            return DeviceIdChangedRepairFlow(
+                entry, str(data.get("old_key")), str(data.get("new_key"))
+            )
     for prefix, flow in (
         (ISSUE_UNREACHABLE, HubRadioReplaceRepairFlow),
         (ISSUE_SAMPLE_RATE_LOW, SampleRateRepairFlow),

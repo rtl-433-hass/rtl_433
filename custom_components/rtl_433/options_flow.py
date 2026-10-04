@@ -78,6 +78,7 @@ from .const import (
     CONF_USER_MAPPINGS,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MOTION_CLEAR_DELAY,
+    DEVICE_AUTO_REPLACE,
     DEVICE_CALIBRATION,
     DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
@@ -176,6 +177,8 @@ class Rtl433OptionsFlow(OptionsFlow):
     # through the (optional) calibration step into the finish path. ``None`` means
     # "no value submitted" -> clear any prior override.
     _motion_clear_delay: int | None = None
+    # The follow-id-changes switch from the settings step, carried the same way.
+    _auto_replace: bool = False
     # The device to keep, chosen on the replace step and carried into
     # replace_target (whose candidate list and ordering are both derived from it).
     _replace_old_key: str = ""
@@ -472,6 +475,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         override: int | None,
         calibration: dict[str, Any] | None,
         motion_clear_delay: int | None,
+        auto_replace: bool = False,
     ) -> ConfigFlowResult:
         """Persist a device's timeout override + calibration; finish the flow.
 
@@ -500,6 +504,7 @@ class Rtl433OptionsFlow(OptionsFlow):
                 device_key,
                 override=override,
                 calibration=calibration,
+                auto_replace=auto_replace,
             ),
         )
         # ``async_create_entry`` *is* the options write for a flow, so the
@@ -587,6 +592,7 @@ class Rtl433OptionsFlow(OptionsFlow):
             commodity = user_input.get(CALIBRATION_COMMODITY, COMMODITY_NONE)
             # Optional + no key in the schema for non-motion devices -> ``None``.
             clear_delay = user_input.get(DEVICE_MOTION_CLEAR_DELAY)
+            auto_replace = bool(user_input.get(DEVICE_AUTO_REPLACE, False))
 
             if commodity == COMMODITY_NONE:
                 return self._write_device_record(
@@ -594,12 +600,14 @@ class Rtl433OptionsFlow(OptionsFlow):
                     override=override,
                     calibration=None,
                     motion_clear_delay=clear_delay,
+                    auto_replace=auto_replace,
                 )
 
             # Carry the timeout + commodity into the calibration step.
             self._calibration_override = override
             self._calibration_commodity = commodity
             self._motion_clear_delay = clear_delay
+            self._auto_replace = auto_replace
             return await self.async_step_calibration()
 
         commodity_options = [
@@ -643,6 +651,10 @@ class Rtl433OptionsFlow(OptionsFlow):
                     ),
                 )
             ] = vol.All(int, vol.Range(min=1))
+        # Follow a battery-swap id change without asking (see ``id_change``).
+        schema_dict[
+            vol.Optional(DEVICE_AUTO_REPLACE, default=defaults[DEVICE_AUTO_REPLACE])
+        ] = bool
         return self.async_show_form(
             step_id="device_settings",
             data_schema=vol.Schema(schema_dict),
@@ -677,6 +689,7 @@ class Rtl433OptionsFlow(OptionsFlow):
                 override=self._calibration_override,
                 calibration=calibration,
                 motion_clear_delay=self._motion_clear_delay,
+                auto_replace=self._auto_replace,
             )
 
         # Pre-fill from an existing calibration when re-editing the same device.
