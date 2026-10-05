@@ -110,10 +110,47 @@ models:
       object_suffix: T
 ```
 
+### Choosing the right scope
+
 Mapping overrides are **global or model-scoped only** — they apply to every device
-of a model, not a single physical unit. To change settings for one specific unit
-(its availability timeout, meter calibration, or motion clear delay), use the
-*Device settings* page instead.
+of a model, not a single physical unit. `model` is the most specific scope the
+library has, and for some decoders it is coarser than the hardware it covers:
+every Honeywell 5800 door sensor, window sensor, PIR and tilt sensor reports
+`model: "Honeywell-Security"`.
+
+| What is wrong | Where to fix it |
+| --- | --- |
+| A field is mapped wrongly for every device that emits it | *Device mappings*, as a top-level entry |
+| A field is mapped wrongly for one model | *Device mappings*, inside a [`models:` block](#model-scoped-mappings-models) |
+| One unit needs a different availability timeout, meter calibration or motion clear delay | *Device settings* |
+| One unit's entity is correct but shown as the wrong kind of thing | Home Assistant's entity settings — see below |
+
+#### Retyping a single entity
+
+Home Assistant can change a binary sensor's **device class** per entity, which is
+finer than any mapping override can be. Open the entity, then its settings (the
+gear icon) → **Shown as**, and pick a different class. The choice lives in Home
+Assistant's entity registry, so it survives restarts and hub reloads, and the
+value the integration shipped is retained separately as the entity's original
+class — a later library update will not overwrite your choice.
+
+This is how you tell one Honeywell 5800 sensor from another. They all share a
+model string, so a `models:` entry cannot separate them, and which loop bit a
+given sensor reports on is chosen by whoever installed it:
+
+- A door or window sensor reports on `contact_open` or `reed_open`. Both ship as
+  **Opening**; retype to **Door** or **Window** for the matching icon and wording.
+- A PIR reports on the same fields, so retype it to **Motion** or **Occupancy**.
+- The loop your sensor does *not* use still produces an entity, which simply never
+  changes state. Hide it from the same entity settings page.
+
+!!! note "Entity category is not adjustable from the UI"
+
+    Home Assistant has no per-entity control for **entity category**, so a field
+    the library marks `diagnostic` cannot be promoted out of a device's
+    Diagnostic section from Home Assistant. That one has to be right in the
+    library — if a field is categorized wrongly for your hardware, please
+    [open an issue](https://github.com/rtl-433-hass/rtl_433/issues).
 
 ## Mapping entry schema (summary)
 
