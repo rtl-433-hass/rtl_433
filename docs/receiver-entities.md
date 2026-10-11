@@ -13,7 +13,7 @@ that merge — see [Availability](availability.md#receivers-in-one-location).
 
 The per-device **RSSI**, **SNR** and **Last seen** entities are also per
 receiver, but they live on the *merged* device rather than here, because they
-describe how well one receiver hears one sensor. See
+describe how well one receiver receives one sensor. See
 [Per-Receiver Signal Detail](availability.md#per-receiver-signal-detail).
 
 ## Connectivity

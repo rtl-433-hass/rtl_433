@@ -521,7 +521,7 @@ async def test_receiver_diagnostic_sensors_unmanaged(hass, receiver_entry_builde
 # Dynamic add of a brand-new device, gated by explicit adoption.               #
 # --------------------------------------------------------------------------- #
 async def test_new_device_added_when_adopted(hass, receiver_entry_builder, events):
-    """An unseen device is only heard; adopting it creates the nested device."""
+    """An unseen device is only received; adopting it creates the nested device."""
     power_event = _live(events("power_sensor.json")[0])
     device_key = "EnergyMeter-2000-1234"
 
@@ -535,7 +535,7 @@ async def test_new_device_added_when_adopted(hass, receiver_entry_builder, event
     dev_reg = dr.async_get(hass)
     prefix = f"{receiver.entry_id}:{device_key}"
 
-    # Heard, but nothing exists in Home Assistant until the user asks for it.
+    # Received, but nothing exists in Home Assistant until the user asks for it.
     assert device_key in coordinator.pending
     assert ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:watts") is None
     assert (
@@ -1041,7 +1041,7 @@ async def test_last_seen_created_for_every_device(hass, receiver_entry_builder):
 
     The Last-seen sensor ships disabled-by-default, so each registry entry is
     created ``disabled_by`` the integration. Covers both the seeded-map setup
-    path (including a device with no mapped fields) and the heard-then-adopted
+    path (including a device with no mapped fields) and the received-then-adopted
     path.
     """
     mapped_key = "EnergyMeter-2000-1234"
@@ -1083,7 +1083,7 @@ async def test_last_seen_created_for_every_device(hass, receiver_entry_builder):
     await _enable_entity(hass, receiver, mapped_eid)
     assert hass.states.get(mapped_eid).attributes["device_class"] == "timestamp"
 
-    # A brand-new device heard live and then adopted also gets exactly one
+    # A brand-new device received live and then adopted also gets exactly one
     # Last-seen sensor.
     new_key = "Acurite-606TX-42"
     coordinator = _coordinator(hass, receiver)
@@ -1896,7 +1896,7 @@ async def test_calibrated_consumption_sensor_is_energy_eligible(
 # --------------------------------------------------------------------------- #
 # No persistent notification: a device exists only because the user added it.  #
 # --------------------------------------------------------------------------- #
-# The integration used to raise one persistent notification per newly heard
+# The integration used to raise one persistent notification per newly received
 # device, which in a noisy location meant dozens of un-actionable alerts a day
 # (issue #128). Adoption replaced it: a device now reaches Home Assistant only
 # because the user asked for it, so there is nothing left to alert them to.
@@ -1908,7 +1908,7 @@ _NOTIFY_TARGET = "homeassistant.components.persistent_notification.async_create"
 async def test_newly_heard_device_raises_no_notification(
     hass, receiver_entry_builder, events
 ):
-    """A device heard for the first time raises no notification at all.
+    """A device received for the first time raises no notification at all.
 
     Neither the first sighting nor the adoption that follows may notify: the
     pending list is the only surface a new device appears on, and the user is
@@ -2118,7 +2118,7 @@ async def test_adopted_device_matches_a_seeded_device(
     missing field, no ``via_device`` link, a different model string — and for
     nobody to notice until a user's automations broke after upgrading.
 
-    Two receivers are set up in the same Home Assistant: one hears the device and has
+    Two receivers are set up in the same Home Assistant: one receives the device and has
     it adopted, the other is pre-seeded with it in ``entry.data[CONF_DEVICES]``
     (the restart path, which is behaviourally what auto-add used to leave
     behind). The device-registry entries and the entity sets they produce must
@@ -2129,7 +2129,7 @@ async def test_adopted_device_matches_a_seeded_device(
     device_key = "EnergyMeter-2000-1234"
     fields = ["power_W", "energy_kWh", "voltage_V", "current_A"]
 
-    # Receiver 1: heard, then explicitly adopted.
+    # Receiver 1: received, then explicitly adopted.
     adopted_receiver = await _setup_receiver(hass, receiver_entry_builder)
     coordinator = _coordinator(hass, adopted_receiver)
     _feed(coordinator, power_event)
@@ -2219,11 +2219,11 @@ async def test_pending_list_is_empty_after_a_reload(
     """Reloading the receiver clears every unapproved candidate.
 
     Pending state is deliberately held only in coordinator memory: a device the
-    user never approved must not outlive the session that heard it, which is what
+    user never approved must not outlive the session that received it, which is what
     keeps the list free of yesterday's bad decodes without any eviction policy or
     TTL. This test is the guard against someone later "improving" that by
     persisting it — the list is rebuilt from live traffic, and nothing that was
-    merely heard is carried across.
+    merely received is carried across.
     """
     receiver = await _setup_receiver(hass, receiver_entry_builder)
     coordinator = _coordinator(hass, receiver)

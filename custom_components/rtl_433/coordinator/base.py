@@ -135,7 +135,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         ``ignored``: ``set[str]`` device keys the user never wants to see.
             Seeded from the location's ``entry.data[CONF_IGNORED_DEVICES]``.
         ``pending``: ``dict[str, PendingDevice]`` devices *this receiver* has
-            heard this session that are neither adopted nor ignored. In-memory
+            received this session that are neither adopted nor ignored. In-memory
             only, so it is empty again after a restart or reload. The location's
             candidate list is the merge of every receiver's map
             (``aggregator.merged_candidates``).
@@ -292,9 +292,9 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # by :mod:`~custom_components.rtl_433.adoption`, which is what makes one
         # click apply to all of them.
         #
-        # ``pending`` is everything else this receiver has heard since it
+        # ``pending`` is everything else this receiver has received since it
         # started — deliberately *not* persisted, so an unwanted device never
-        # outlives the session that heard it. It stays per receiver because it
+        # outlives the session that received it. It stays per receiver because it
         # is an ingestion buffer, not a decision: the replay / backlog gate that
         # fills it is a statement about *this* receiver's connection. The list
         # the user is actually offered is the merge of every receiver's map
@@ -302,7 +302,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # enforced.
         self.adopted: set[str] = set(adopted_keys or ())
         self.ignored: set[str] = set(ignored_keys or ())
-        # Least-recently-heard first, so the cap in ``_events`` can drop from
+        # Least-recently-received first, so the cap in ``_events`` can drop from
         # the cold end. An ``OrderedDict`` is a ``dict``, so readers are
         # unaffected.
         self.pending: OrderedDict[str, PendingDevice] = OrderedDict()
@@ -533,7 +533,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         LOGGER.debug("rtl_433 coordinator started for %s", self.ws_url)
 
     def forget_device(self, device_key: str) -> None:
-        """Un-adopt a device, dropping it back to "heard but not approved".
+        """Un-adopt a device, dropping it back to "received but not approved".
 
         Called when a device is removed from its device page
         (``async_remove_config_entry_device``).
@@ -591,7 +591,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         self.devices[device_key] = event
         self.last_seen[device_key] = record.last_seen
         self.available[device_key] = True
-        # Every field seen since this candidate was first heard, not just the
+        # Every field seen since this candidate was first received, not just the
         # ones in the last frame. A weather station splits its readings across
         # frames -- wind in one, rain in the next -- so seeding from the last
         # frame alone built half the device's entities and left the rest missing
@@ -607,7 +607,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
     @callback
     def mark_adopted(self, device_key: str) -> None:
-        """Adopt a key this receiver has never heard, because the location has.
+        """Adopt a key this receiver has never received, because the location has.
 
         Adoption is a decision about a *sensor*, so it applies to every receiver
         in the location -- including the ones out of range of it, which have no
@@ -616,7 +616,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         sighting and re-queue the device the user has already added.
 
         Deliberately seeds **no** runtime state and fires no registration: this
-        receiver genuinely has not heard the device, and writing another
+        receiver genuinely has not received the device, and writing another
         receiver's ``last_seen`` here would let it vouch for a sensor it cannot
         hear (see :func:`~custom_components.rtl_433.aggregator.receiver_vouches`).
         It fills its own maps on its first real frame, exactly as it does for a
@@ -769,7 +769,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         in this integration that knows the signal's name -- so the discovery
         panel's WebSocket subscription has exactly one thing to listen to. Public
         because the callers are not all in this class: the coordinator announces
-        the changes it *originates* (a candidate first heard in
+        the changes it *originates* (a candidate first received in
         ``_record_pending``, a device un-adopted from its device page via
         :meth:`forget_device`), while a batch the user submits is announced once,
         by :mod:`~custom_components.rtl_433.adoption`, after both the runtime sets
@@ -789,7 +789,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         counts in the websocket layer (a slow, change-detecting re-send) leaves
         this class a pure state holder that never learns a UI exists.
 
-        The signal is **location-scoped**: a sensor both receivers hear is one
+        The signal is **location-scoped**: a sensor both receivers receive is one
         candidate row, so there is one list to announce however many receivers
         decoded the transmission. ``pending_listeners`` run first, because the
         location's merged-cap enforcement is registered there and the announced
@@ -801,7 +801,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
 
     # Rendering the candidate list and clearing it are **location** verbs, and
     # live in ``aggregator.py`` (``merged_candidates`` / ``clear_pending``): a
-    # sensor several receivers hear is one row to offer and one row to clear, so
+    # sensor several receivers receive is one row to offer and one row to clear, so
     # answering from a single receiver's map would show the same device twice
     # and clear only half of it. This class keeps only the state and the
     # per-receiver writes.

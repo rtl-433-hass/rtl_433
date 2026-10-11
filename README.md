@@ -18,7 +18,7 @@ them, with no cloud dependency and no polling.
 ## Receivers, Radios, and Locations
 
 **A receiver is a computer running rtl_433; it contains a radio.** The radio is
-the SDR dongle that hears the airwaves; the receiver is the machine — a Raspberry
+the SDR dongle that receives the airwaves; the receiver is the machine — a Raspberry
 Pi, a NAS, your Home Assistant box — running the `rtl_433` process that decodes
 what the radio picks up and serves it over a WebSocket.
 
@@ -28,9 +28,9 @@ can plausibly hear the same sensors — a house, a barn and its yard, one
 apartment. Set-up creates the location and its first receiver together, and
 **Add a receiver** on the integration page adds the rest.
 
-Receivers in one location are **unioned**. A sensor two of them hear is a single
+Receivers in one location are **unioned**. A sensor two of them receive is a single
 Home Assistant device with a single set of entities, updating whenever *any*
-receiver hears it — so a weather station at the edge of the garden stops dropping
+receiver receives it — so a weather station at the edge of the garden stops dropping
 out just because one server missed a transmission, and you never end up with two
 copies of the same thermometer.
 
@@ -43,19 +43,19 @@ two identical sensors at two sites from being mistaken for one.
 
 - One location holds every rtl_433 server that can hear the same sensors;
   decoded RF devices appear as nested Home Assistant devices under it.
-- **Union across receivers**: one physical sensor heard by several receivers is
-  one device and one entity per mapped field, fed by whichever receiver hears it.
+- **Union across receivers**: one physical sensor received by several receivers is
+  one device and one entity per mapped field, fed by whichever receiver receives it.
 - **Per-receiver signal detail is kept**, because "how well does *this* receiver
   hear that sensor" is a different measurement per receiver: **RSSI**, **SNR**
   and **Last seen** stay one entity per sensor and receiver ("RSSI Attic"), and
   the panel's **Signal coverage** page shows the comparison with no entity
   enabled at all.
 - A device stays available while **at least one** receiver is connected *and*
-  has heard it inside its availability timeout.
+  has received it inside its availability timeout.
 - Device support is data-driven through a YAML
   [device library](docs/device-library.md) shipped by the `pyrtl_433` dependency,
   with per-location user overrides available from the Home Assistant UI.
-- Every device your receivers hear is listed on **one** union add-device page for
+- Every device your receivers receive is listed on **one** union add-device page for
   you to add or ignore; approving once covers the whole location, and nothing is
   added to Home Assistant on its own.
 - Supports class-aware availability, Last seen timestamps, momentary event
@@ -97,9 +97,9 @@ Its radio settings are its own; everything else — which devices are added, whi
 are ignored, the availability timeout, the mapping overrides — is the location's
 and already applies to it.
 
-From then on, every sensor both receivers hear is one device. The **Add or
+From then on, every sensor both receivers receive is one device. The **Add or
 replace device** page shows one card per sensor rather than one per receiver,
-listing which receivers heard it and the readings from whichever heard it last,
+listing which receivers received it and the readings from whichever received it last,
 and adding it once covers the location.
 
 Removing a receiver drops that receiver's own entities — its radio controls,
