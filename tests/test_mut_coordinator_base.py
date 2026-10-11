@@ -18,10 +18,10 @@ them:
   so the arguments the watchdog is armed with — and the flags the stop clears —
   were never observed.
 * **The client callbacks.** ``_on_connect`` (managed-SDR adopt/enforce) and
-  ``_maybe_refresh_hub_identity`` (the hub device-registry refresh) are handed to
+  ``_maybe_refresh_receiver_identity`` (the hub device-registry refresh) are handed to
   the library client and fire off a real socket. Every test that opens one stubs
   the transport, so neither was ever called. They are called directly here.
-* **The dispatch seams.** ``_emit_hub_update`` (the connect/disconnect edge) and
+* **The dispatch seams.** ``_emit_receiver_update`` (the connect/disconnect edge) and
   ``_dispatch`` (the per-device fan-out) are always observed through the
   entities downstream of them, never through the dispatcher call itself, so the
   signal each one addresses -- and the replay/repaint flags ``_dispatch``
@@ -80,7 +80,7 @@ _KEY = "Acurite-606TX-42"
 # The lifecycle tests drive ``async_start`` / ``async_stop`` themselves and
 # assert on what each edge leaves behind, so they opt out of the conftest fixture
 # that marks every started coordinator connected for them.
-pytestmark = pytest.mark.hub_disconnected
+pytestmark = pytest.mark.receiver_disconnected
 
 
 @pytest.fixture(autouse=True)
@@ -101,7 +101,7 @@ def client_transport():
 
 
 @pytest.fixture
-async def make_coordinator(hass, hub_entry_builder):
+async def make_coordinator(hass, receiver_entry_builder):
     """Build a coordinator against a real hub entry.
 
     Async so construction happens inside the event loop: the coordinator builds
@@ -110,7 +110,7 @@ async def make_coordinator(hass, hub_entry_builder):
     """
 
     def _make(**kwargs):
-        entry = hub_entry_builder(entry_id=kwargs.pop("entry_id", None))
+        entry = receiver_entry_builder(entry_id=kwargs.pop("entry_id", None))
         entry.add_to_hass(hass)
         kwargs.setdefault("host", "rtl433.local")
         return Rtl433Coordinator(hass, entry, **kwargs)
@@ -121,7 +121,9 @@ async def make_coordinator(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 # Construction: the transport client and the desired-state Store.              #
 # --------------------------------------------------------------------------- #
-async def test_the_client_is_pointed_at_the_configured_hub(hass, hub_entry_builder):
+async def test_the_client_is_pointed_at_the_configured_hub(
+    hass, receiver_entry_builder
+):
     """Every connection parameter reaches the library client unchanged.
 
     This is the whole of the user's "where is my receiver?" answer. A port that
@@ -134,7 +136,7 @@ async def test_the_client_is_pointed_at_the_configured_hub(hass, hub_entry_build
     session's lifecycle, and a client given its own session would leak one per
     reload and never be closed.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     with patch(CLIENT) as client_cls:
@@ -156,13 +158,15 @@ async def test_the_client_is_pointed_at_the_configured_hub(hass, hub_entry_build
         session=async_get_clientsession(hass),
         skip_keys=coordinator.skip_keys,
         on_event=coordinator._on_client_event,
-        on_hub_update=coordinator._emit_hub_update,
+        on_hub_update=coordinator._emit_receiver_update,
         event_tz=dt_util.get_default_time_zone(),
     )
     assert coordinator._client is client_cls.return_value
 
 
-async def test_the_desired_state_store_is_scoped_to_this_hub(hass, hub_entry_builder):
+async def test_the_desired_state_store_is_scoped_to_this_hub(
+    hass, receiver_entry_builder
+):
     """The managed-SDR Store is keyed per config entry, at the current version.
 
     Two hubs on one Home Assistant share nothing: a Store key that did not carry
@@ -171,7 +175,7 @@ async def test_the_desired_state_store_is_scoped_to_this_hub(hass, hub_entry_bui
     drives the Hz->MHz centre-frequency migration, so a wrong one leaves an
     existing managed hub tuned three orders of magnitude off.
     """
-    entry = hub_entry_builder(entry_id="hub-attic")
+    entry = receiver_entry_builder(entry_id="hub-attic")
     entry.add_to_hass(hass)
 
     with patch(STORE) as store_cls:
@@ -215,7 +219,9 @@ async def test_the_hub_configuration_is_readable_back(hass, make_coordinator):
     assert coordinator.initial_center_frequency == 868.3
 
 
-async def test_the_entry_is_kept_for_the_signals_keyed_on_it(hass, hub_entry_builder):
+async def test_the_entry_is_kept_for_the_signals_keyed_on_it(
+    hass, receiver_entry_builder
+):
     """Every dispatcher signal this coordinator sends is keyed on its entry.
 
     Held separately from the configuration above because losing it is not a
@@ -223,7 +229,7 @@ async def test_the_entry_is_kept_for_the_signals_keyed_on_it(hass, hub_entry_bui
     same signal name and each other's entities would repaint from the wrong
     radio.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
     coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
@@ -365,7 +371,7 @@ async def test_the_injectable_hooks_start_unwired(hass, make_coordinator):
     assert coordinator.new_device_callback is None
     assert coordinator.effective_timeout_resolver is None
     assert coordinator.effective_clear_delay_resolver is None
-    assert coordinator.hub_info_callback is None
+    assert coordinator.receiver_info_callback is None
     assert coordinator.known_field_keys == frozenset()
     assert coordinator.calibration_snapshot == {}
     assert coordinator.user_mappings_snapshot == {}
@@ -378,7 +384,7 @@ async def test_a_fresh_coordinator_is_disconnected_and_unstarted(
 ):
     """Nothing is connected until ``async_start`` says so.
 
-    The connect-edge detection in ``_emit_hub_update`` is a comparison against
+    The connect-edge detection in ``_emit_receiver_update`` is a comparison against
     ``_was_connected``, and the outage reporting is a comparison against
     ``_ever_connected``. Starting either at ``True`` means the very first
     connection is not seen as an edge at all: the backlog anchor is never set, so
@@ -688,17 +694,17 @@ async def test_the_hub_identity_refresh_fires_once_per_change(hass, make_coordin
     """
     coordinator = make_coordinator()
     calls = []
-    coordinator.hub_info_callback = lambda: calls.append(1)
+    coordinator.receiver_info_callback = lambda: calls.append(1)
     coordinator._client.dev_info = {"vendor": "Realtek", "serial": "00000001"}
     coordinator._client.dev_query = "0"
 
-    coordinator._maybe_refresh_hub_identity()
+    coordinator._maybe_refresh_receiver_identity()
 
     assert len(calls) == 1
     assert coordinator._seen_dev_info == {"vendor": "Realtek", "serial": "00000001"}
     assert coordinator._seen_dev_query == "0"
 
-    coordinator._maybe_refresh_hub_identity()
+    coordinator._maybe_refresh_receiver_identity()
 
     assert len(calls) == 1
 
@@ -715,13 +721,13 @@ async def test_the_hub_identity_refresh_fires_when_only_the_usb_label_changes(
     """
     coordinator = make_coordinator()
     calls = []
-    coordinator.hub_info_callback = lambda: calls.append(1)
+    coordinator.receiver_info_callback = lambda: calls.append(1)
     coordinator._client.dev_info = {"vendor": "Realtek"}
     coordinator._client.dev_query = "0"
-    coordinator._maybe_refresh_hub_identity()
+    coordinator._maybe_refresh_receiver_identity()
 
     coordinator._client.dev_info = {"vendor": "Nooelec"}
-    coordinator._maybe_refresh_hub_identity()
+    coordinator._maybe_refresh_receiver_identity()
 
     assert len(calls) == 2
     assert coordinator._seen_dev_info == {"vendor": "Nooelec"}
@@ -738,13 +744,13 @@ async def test_the_hub_identity_refresh_fires_when_only_the_selector_changes(
     """
     coordinator = make_coordinator()
     calls = []
-    coordinator.hub_info_callback = lambda: calls.append(1)
+    coordinator.receiver_info_callback = lambda: calls.append(1)
     coordinator._client.dev_info = {"vendor": "Realtek"}
     coordinator._client.dev_query = "0"
-    coordinator._maybe_refresh_hub_identity()
+    coordinator._maybe_refresh_receiver_identity()
 
     coordinator._client.dev_query = "1"
-    coordinator._maybe_refresh_hub_identity()
+    coordinator._maybe_refresh_receiver_identity()
 
     assert len(calls) == 2
     assert coordinator._seen_dev_query == "1"
@@ -763,7 +769,7 @@ async def test_the_hub_identity_is_recorded_even_with_no_callback_wired(
     coordinator._client.dev_info = {"vendor": "Realtek"}
     coordinator._client.dev_query = "0"
 
-    coordinator._maybe_refresh_hub_identity()
+    coordinator._maybe_refresh_receiver_identity()
 
     assert coordinator._seen_dev_query == "0"
 
@@ -785,14 +791,16 @@ async def test_a_failing_hub_identity_callback_is_reported_and_swallowed(
     def _boom() -> None:
         raise RuntimeError("registry unavailable")
 
-    coordinator.hub_info_callback = _boom
+    coordinator.receiver_info_callback = _boom
     coordinator._client.dev_info = {"vendor": "Realtek"}
     coordinator._client.dev_query = "0"
 
     with caplog.at_level(logging.DEBUG, logger=LOG):
-        coordinator._maybe_refresh_hub_identity()
+        coordinator._maybe_refresh_receiver_identity()
 
-    assert "rtl_433 hub_info_callback failed: registry unavailable" in caplog.messages
+    assert (
+        "rtl_433 receiver_info_callback failed: registry unavailable" in caplog.messages
+    )
     assert coordinator._seen_dev_info == {"vendor": "Realtek"}
 
 
@@ -876,7 +884,7 @@ async def test_the_connect_edge_anchors_the_backlog_gate_and_adopts(
         patch.object(type(coordinator.entry), "async_create_background_task") as task,
         patch(DISPATCH),
     ):
-        coordinator._emit_hub_update()
+        coordinator._emit_receiver_update()
 
     assert coordinator._was_connected is True
     assert coordinator._connection_time is not None
@@ -902,9 +910,9 @@ async def test_the_disconnect_edge_drops_the_backlog_anchor(hass, make_coordinat
     coordinator._client.connected = True
 
     with patch(DISPATCH):
-        coordinator._emit_hub_update()
+        coordinator._emit_receiver_update()
         coordinator._client.connected = False
-        coordinator._emit_hub_update()
+        coordinator._emit_receiver_update()
 
     assert coordinator._was_connected is False
     assert coordinator._connection_time is None
@@ -922,7 +930,7 @@ async def test_every_hub_update_repaints_this_hubs_own_entities(hass, make_coord
     coordinator._client.connected = False
 
     with patch(DISPATCH) as dispatch:
-        coordinator._emit_hub_update()
+        coordinator._emit_receiver_update()
 
     dispatch.assert_any_call(hass, signal_receiver_update(coordinator.entry.entry_id))
 

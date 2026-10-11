@@ -34,15 +34,15 @@ _FIELD_KEY = "secret_knock"
 
 
 @pytest.fixture
-async def event_entity(hass, hub_entry_builder) -> Rtl433Event:
+async def event_entity(hass, receiver_entry_builder) -> Rtl433Event:
     """A doorbell ``secret_knock`` event entity wired to a bare coordinator.
 
-    ``__init__`` reads ``coordinator.entry.data``, the descriptor and the hub
+    ``__init__`` reads ``coordinator.entry.data``, the descriptor and the receiver
     device's registry id (for ``via_device_id``), so a plain coordinator plus the
-    hub device ``async_setup_entry`` always registers first is enough; the
+    receiver device ``async_setup_entry`` always registers first is enough; the
     dispatch hooks are patched per-test.
     """
-    entry = hub_entry_builder()
+    entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id, identifiers={(DOMAIN, entry.entry_id)}

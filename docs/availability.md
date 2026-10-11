@@ -19,27 +19,27 @@ How long a device can reasonably stay silent depends on the device type.
 Periodic devices use finite timeouts. Event-driven devices default to never
 expiring because a long silence is normal and does not imply failure.
 
-## Hub Connection
+## Receiver Connection
 
 Silence only means something while the integration is listening. If the
 connection to the rtl_433 server drops, no events can arrive for any device, so a
 device's last reading says nothing about whether the device is still there.
 
-When the connection to the rtl_433 server drops, every device behind that hub is
+When the connection to the rtl_433 server drops, every device behind that receiver is
 marked `unavailable` straight away, regardless of its own timeout — including
 event-driven devices that never expire on silence, and their **Last seen**
 sensors. There is no grace period: while the socket is down the integration
 cannot hear the radio at all, so continuing to show the last reading would
 present stale data as current. This is the same behavior an MQTT device gets from
 an availability topic and a last-will message, and what Home Assistant
-integrations do generally when a connection to a hub is lost.
+integrations do generally when a connection to a receiver is lost.
 
 The devices come back as soon as the connection is re-established; their values
 are the last ones received, and the usual silence timeouts resume from there. A
 brief drop therefore shows up as a brief `unavailable` — an honest one, because
 during it the integration genuinely was not listening.
 
-If you want an automation to tolerate short blips, condition it on the hub's
+If you want an automation to tolerate short blips, condition it on the receiver's
 **Connectivity** binary sensor with a `for:` delay rather than reacting to each
 device going unavailable.
 
@@ -56,12 +56,12 @@ replays a stale press.
 
 One kind of entity is deliberately exempt:
 
-- **The hub's SDR controls** (**Gain**, **Sample rate**, **Frequency
+- **The receiver's SDR controls** (**Gain**, **Sample rate**, **Frequency
   correction**, **Hop interval**, **Conversion mode**) stay available, because
   they are settings you are writing rather than readings you are trusting. With
   **Manage SDR settings** on — the default — these appear as `number`/`select`
   entities. Turning it off replaces them with read-only diagnostic sensors, and
-  those *are* gated on the connection along with the hub's other diagnostic
+  those *are* gated on the connection along with the receiver's other diagnostic
   sensors (center frequency, frame counters, enabled decoders), whose values are
   fetched over HTTP and would otherwise freeze at whatever was last read.
 
@@ -79,7 +79,7 @@ INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
 The effective availability timeout is resolved in this order:
 
 1. Per-device override from **Device settings**.
-2. Hub default from **Receiver settings**, if set.
+2. Receiver default from **Receiver settings**, if set.
 3. Device-class default.
 4. 600 second fallback.
 
@@ -89,7 +89,7 @@ default for event-driven devices.
 **Receiver settings** asks which of the three you want outright — *Per-device-type
 defaults*, *Never expire*, or *a fixed timeout* — so leaving the receiver on the
 class defaults is a choice you make rather than a number you have to leave alone.
-A fixed timeout of 600 seconds is a hub default like any other, and stops at step
+A fixed timeout of 600 seconds is a receiver default like any other, and stops at step
 2; it is not the same as the step-4 fallback, which only applies to devices no
 earlier step has claimed.
 
@@ -111,5 +111,5 @@ periodic devices, whose availability already conveys freshness.
 
 Unlike measurement sensors, Last seen stays available after the device falls
 silent, so it can drive staleness automations. It does go unavailable while the
-hub connection is down, because the timestamp then only records when the
+receiver connection is down, because the timestamp then only records when the
 integration stopped listening.
