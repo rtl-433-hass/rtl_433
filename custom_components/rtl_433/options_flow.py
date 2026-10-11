@@ -84,7 +84,7 @@ from .const import (
     DOMAIN,
 )
 from .device_replace import DeviceReplaceError, async_replace_device
-from .hub_settings import _hub_ignored_devices
+from .receiver_settings import _hub_ignored_devices
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,

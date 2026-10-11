@@ -32,7 +32,7 @@ from a script, and the **discovery panel** itself — the shipped
 guarded to happen once rather than once per hub.
 
 The library loading lives in :mod:`.library`, the hub-setting resolvers in
-:mod:`.hub_settings`, the shared adopt / ignore / un-ignore service in
+:mod:`.receiver_settings`, the shared adopt / ignore / un-ignore service in
 :mod:`.adoption`, and the config-entry migration / one-time legacy cleanups in
 :mod:`.migration`; this module keeps only the steady-state lifecycle.
 """
@@ -69,7 +69,13 @@ from .const import (
     signal_new_device,
 )
 from .coordinator import Rtl433Coordinator
-from .hub_settings import (
+from .library import _async_load_library, _merge_entry_library
+from .migration import (
+    _cleanup_phantom_unknown_device,
+    _migrate_motion_event_to_binary_sensor,
+    async_migrate_entry,
+)
+from .receiver_settings import (
     _calibration_map,
     _explicit_hub_timeout,
     _hub_availability_timeout,
@@ -77,12 +83,6 @@ from .hub_settings import (
     _hub_ignored_devices,
     _hub_manage_settings,
     _hub_secure,
-)
-from .library import _async_load_library, _merge_entry_library
-from .migration import (
-    _cleanup_phantom_unknown_device,
-    _migrate_motion_event_to_binary_sensor,
-    async_migrate_entry,
 )
 from .settings import device_clear_delay
 from .websocket_api import async_preload_entity_metadata, async_register_commands

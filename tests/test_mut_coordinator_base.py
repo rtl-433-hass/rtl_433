@@ -59,7 +59,7 @@ from custom_components.rtl_433.const import (
     SDR_STORE_VERSION,
     sdr_store_key,
     signal_device_update,
-    signal_hub_update,
+    signal_receiver_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator._events import PendingDevice
@@ -924,7 +924,7 @@ async def test_every_hub_update_repaints_this_hubs_own_entities(hass, make_coord
     with patch(DISPATCH) as dispatch:
         coordinator._emit_hub_update()
 
-    dispatch.assert_any_call(hass, signal_hub_update(coordinator.entry.entry_id))
+    dispatch.assert_any_call(hass, signal_receiver_update(coordinator.entry.entry_id))
 
 
 # --------------------------------------------------------------------------- #
