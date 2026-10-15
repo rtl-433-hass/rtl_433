@@ -34,6 +34,7 @@ from custom_components.rtl_433.const import (
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     DATA_ENTRY_LIBRARY,
+    DEVICE_AUTO_REPLACE,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
     DEVICE_MOTION_CLEAR_DELAY,
@@ -77,6 +78,7 @@ DEVICE_DEFAULT_KEYS = {
     "motion",
     "calibration",
     "commodity",
+    DEVICE_AUTO_REPLACE,
 }
 
 

@@ -120,6 +120,10 @@ DEVICE_EVENT_TYPES: Final = "event_types"
 # base unit + ``total_increasing`` + a value scale). Absent (or commodity =
 # ``none``) means the consumption field keeps its library/global descriptor.
 DEVICE_CALIBRATION: Final = "calibration"
+# Per-device opt-in (bool, absent = off) to follow a transmitter-id change without
+# asking: when :mod:`.id_change` finds exactly one plausible successor for this
+# device, it re-keys the device onto it instead of raising a repair.
+DEVICE_AUTO_REPLACE: Final = "auto_replace"
 # Per-hub user mapping overrides. Holds the normalized override object (the same
 # shape ``merge_overrides`` consumes: flat field entries, an optional ``models``
 # block, and an optional ``skip_keys`` list) edited via the options flow and
