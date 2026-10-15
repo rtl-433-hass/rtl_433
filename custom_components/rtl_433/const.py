@@ -7,6 +7,7 @@ modules import from here, so names are intended to be stable.
 
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 from typing import Any, Final
 
@@ -306,6 +307,27 @@ SIGNAL_HUB_UPDATE: Final = "rtl_433_hub_update_{hub_entry_id}"
 def signal_hub_update(hub_entry_id: str) -> str:
     """Return the hub-level update dispatcher signal for one hub."""
     return SIGNAL_HUB_UPDATE.format(hub_entry_id=hub_entry_id)
+
+
+# Hub-level "the published noise readings changed" signal. The receiver's noise
+# estimate arrives as rtl_433 "Auto Level" log lines, which a busy receiver emits
+# several times a second as the estimate jitters by a dB or so. Relaying each one
+# on :data:`SIGNAL_HUB_UPDATE` would re-write every hub entity and fill the
+# recorder, so the coordinator publishes their time-weighted means at most once
+# per :data:`NOISE_PUBLISH_INTERVAL` on this separate signal, which
+# only the two noise sensors subscribe to.
+SIGNAL_HUB_NOISE: Final = "rtl_433_hub_noise_{hub_entry_id}"
+
+
+def signal_hub_noise(hub_entry_id: str) -> str:
+    """Return the hub-level noise-reading dispatcher signal for one hub."""
+    return SIGNAL_HUB_NOISE.format(hub_entry_id=hub_entry_id)
+
+
+# How often the noise sensors are updated at most. A minute keeps the recorder
+# to about 1,400 rows a day per sensor while still showing a noise floor that is
+# creeping up well before it costs any decodes.
+NOISE_PUBLISH_INTERVAL: Final = timedelta(seconds=60)
 
 
 # Hub-level "the connection-backed availability gate flipped" signal. The

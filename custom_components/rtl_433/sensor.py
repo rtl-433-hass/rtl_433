@@ -36,13 +36,14 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
 from homeassistant.util.enum import try_parse_enum
 
-from .const import DOMAIN
+from .const import DOMAIN, signal_hub_noise
 from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
 
 if TYPE_CHECKING:
@@ -431,6 +432,9 @@ class HubSensorDesc:
     intentionally NOT folded
     (its actual can diverge from the desired value under hopping), and the
     server-stats sensors are never folded.
+
+    ``noise`` marks a sensor fed by the coordinator's scheduled noise publish
+    (``signal_hub_noise``) rather than by every hub update.
     """
 
     suffix: str
@@ -441,6 +445,7 @@ class HubSensorDesc:
     state_class: SensorStateClass | None = None
     attrs: Callable[[Rtl433Coordinator], dict[str, Any] | None] | None = None
     folded_when_managing: bool = False
+    noise: bool = False
 
 
 HUB_SENSORS: tuple[HubSensorDesc, ...] = (
@@ -526,7 +531,10 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
     # upstream emits just while the estimate sits >3 dB below the configured
     # ``minlevel`` and the new threshold moves by >1 dB. A settled receiver
     # emits none, so ``min_level`` can stay ``unknown`` indefinitely even with
-    # ``autolevel`` on (see ``docs/hub-entities.md``).
+    # ``autolevel`` on (see ``docs/hub-entities.md``). A busy receiver sends
+    # these lines several times a second, so both sensors show what the
+    # coordinator publishes at most once a minute (``NOISE_PUBLISH_INTERVAL``):
+    # the time-weighted mean of each over that minute.
     HubSensorDesc(
         suffix="noise_level",
         name="Noise level",
@@ -536,6 +544,7 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
         # A live gauge of the receiver's noise floor -> MEASUREMENT, so HA
         # records long-term statistics ("is my noise creeping up?").
         state_class=SensorStateClass.MEASUREMENT,
+        noise=True,
     ),
     HubSensorDesc(
         suffix="min_level",
@@ -544,6 +553,7 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         native_unit=SIGNAL_STRENGTH_DECIBELS,
         state_class=SensorStateClass.MEASUREMENT,
+        noise=True,
     ),
 )
 
@@ -584,6 +594,18 @@ class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
         self._attr_device_class = desc.device_class
         self._attr_native_unit_of_measurement = desc.native_unit
         self._attr_state_class = desc.state_class
+
+    async def async_added_to_hass(self) -> None:
+        """Also follow the scheduled noise publish when this is a noise sensor."""
+        await super().async_added_to_hass()
+        if self._desc.noise:
+            self.async_on_remove(
+                async_dispatcher_connect(
+                    self.hass,
+                    signal_hub_noise(self._hub_entry_id),
+                    self._handle_hub_update,
+                )
+            )
 
     @property
     def available(self) -> bool:

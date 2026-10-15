@@ -66,6 +66,7 @@ from custom_components.rtl_433.const import (
     ENTRY_TYPE_DEVICE,
     ENTRY_TYPE_HUB,
     LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
+    NOISE_PUBLISH_INTERVAL,
     signal_hub_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
@@ -73,7 +74,10 @@ from custom_components.rtl_433.coordinator.base import Rtl433Client
 from homeassistant.const import ATTR_UNIT_OF_MEASUREMENT, MATCH_ALL
 from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.dispatcher import (
+    async_dispatcher_connect,
+    async_dispatcher_send,
+)
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
@@ -395,6 +399,34 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
     assert cf_entry.entity_category == "diagnostic"
 
 
+class _NoiseClock:
+    """Stands in for the coordinator's monotonic noise clock, in seconds."""
+
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def _noise_clock(coordinator) -> _NoiseClock:
+    clock = _NoiseClock()
+    coordinator._noise_clock = clock
+    return clock
+
+
+async def _publish_at(
+    hass, clock: _NoiseClock, seconds: float, interval: int = 1
+) -> None:
+    """Run the scheduled noise publish with the noise clock at ``seconds``.
+
+    ``interval`` picks which scheduled run fires (1 = the first after setup).
+    """
+    clock.t = 1000.0 + seconds
+    async_fire_time_changed(hass, dt_util.utcnow() + NOISE_PUBLISH_INTERVAL * interval)
+    await hass.async_block_till_done()
+
+
 async def test_hub_noise_sensors_track_autolevel_log_frames(hass, hub_entry_builder):
     """The noise sensors update from real "Auto Level" log frames on the socket.
 
@@ -404,6 +436,7 @@ async def test_hub_noise_sensors_track_autolevel_log_frames(hass, hub_entry_buil
     """
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
+    clock = _noise_clock(coordinator)
 
     ent_reg = er.async_get(hass)
 
@@ -433,14 +466,21 @@ async def test_hub_noise_sensors_track_autolevel_log_frames(hass, hub_entry_buil
     assert min_state.state == "-35.4"
     assert min_state.attributes["state_class"] == "measurement"
 
-    # A periodic -M noise report moves the estimate; min level is untouched.
+    # A periodic -M noise report 20 s later moves the estimate; min level is
+    # untouched. Only the first reading is shown at once; later ones wait for the
+    # scheduled publish, which shows the time-weighted mean of the minute.
+    clock.t = 1020.0
     coordinator._client._handle_text_frame(
         '{"time": "2026-05-26 10:00:30", "src": "Auto Level", "lvl": 4, '
         '"msg": "Current noise level -37.9 dB, estimated noise -39.1 dB"}'
     )
     await hass.async_block_till_done()
+    assert hass.states.get(sensor_id("noise_level")).state == "-38.4"
 
-    assert hass.states.get(sensor_id("noise_level")).state == "-39.1"
+    await _publish_at(hass, clock, 60)
+
+    # -38.4 for 20 s, -39.1 for 40 s
+    assert hass.states.get(sensor_id("noise_level")).state == "-38.9"
     assert hass.states.get(sensor_id("min_level")).state == "-35.4"
 
     # The log frame never became a phantom device: only the hub device exists.
@@ -451,6 +491,220 @@ async def test_hub_noise_sensors_track_autolevel_log_frames(hass, hub_entry_buil
     noise_entry = ent_reg.async_get(sensor_id("noise_level"))
     assert noise_entry.device_id == hub_device.id
     assert noise_entry.entity_category == "diagnostic"
+
+
+def _auto_level_frame(noise: float) -> str:
+    """A ``-Y autolevel`` adjustment line for ``noise`` dB, as rtl_433 sends it."""
+    return (
+        '{"time": "2026-09-29 06:00:00", "src": "Auto Level", "lvl": 4, '
+        f'"msg": "Estimated noise level is {noise:.1f} dB, '
+        f'adjusting minimum detection level to {noise + 3:.1f} dB"}}'
+    )
+
+
+async def test_a_burst_of_noise_lines_writes_once_per_interval(hass, hub_entry_builder):
+    """Noise lines several times a second become one write a minute: the mean.
+
+    Neither the hub-wide update (every other hub entity, the repair checks) nor
+    the recorder sees the burst; the two noise sensors change once, each to the
+    time-weighted mean of the minute.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+    clock = _noise_clock(coordinator)
+    ent_reg = er.async_get(hass)
+    noise_id = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:hub:noise_level"
+    )
+    min_id = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, f"{hub.entry_id}:hub:min_level"
+    )
+    changes: list[str] = []
+    async_track_state_change_event(
+        hass, [noise_id, min_id], lambda event: changes.append(event.data["entity_id"])
+    )
+    hub_updates: list[None] = []
+    async_dispatcher_connect(
+        hass, signal_hub_update(hub.entry_id), lambda: hub_updates.append(None)
+    )
+
+    coordinator._client._handle_text_frame(_auto_level_frame(-21.0))
+    await hass.async_block_till_done()
+    # The first reading is published at once, so the sensors are not unknown.
+    assert hass.states.get(noise_id).state == "-21.0"
+    assert sorted(changes) == sorted([noise_id, min_id])
+    changes.clear()
+
+    for seconds, noise in ((10, -20.0), (20, -22.0), (30, -24.0), (40, -26.0)):
+        clock.t = 1000.0 + seconds
+        coordinator._client._handle_text_frame(_auto_level_frame(noise))
+    await hass.async_block_till_done()
+    assert changes == []
+    assert hub_updates == []
+
+    await _publish_at(hass, clock, 60)
+
+    # -21, -20, -22 and -24 for 10 s each, then -26 for the last 20 s
+    assert hass.states.get(noise_id).state == "-23.2"
+    # The threshold is averaged too: a snapshot of it jitters like the estimate.
+    assert hass.states.get(min_id).state == "-20.2"
+    assert sorted(changes) == sorted([noise_id, min_id])
+    assert hub_updates == []
+
+    # The next minute held -26 throughout, so it reads -26; a minute after that
+    # with still nothing new writes nothing at all.
+    changes.clear()
+    await _publish_at(hass, clock, 120, interval=2)
+    assert hass.states.get(noise_id).state == "-26.0"
+    changes.clear()
+    await _publish_at(hass, clock, 180, interval=3)
+    assert changes == []
+
+
+async def test_a_value_held_counts_for_as_long_as_it_held(hass, hub_entry_builder):
+    """Repeated identical lines add nothing; the time a value held is its weight.
+
+    The client drops repeats of an unchanged reading, so a floor that sits at
+    -21 dB for 50 s arrives as one line. Weighted per line it would count the
+    same as the -27 dB that lasted 10 s (-24); weighted by time it is -22.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+    clock = _noise_clock(coordinator)
+    client = coordinator._client
+
+    client._handle_text_frame(_auto_level_frame(-21.0))
+    for seconds in range(5, 15):  # ten identical lines
+        clock.t = 1000.0 + seconds
+        client._handle_text_frame(_auto_level_frame(-21.0))
+    clock.t = 1050.0
+    client._handle_text_frame(_auto_level_frame(-27.0))
+    await _publish_at(hass, clock, 60)
+
+    assert coordinator.noise_level == -22.0
+    assert coordinator.min_level == -19.0
+
+
+async def test_noise_only_reports_do_not_re_weight_the_threshold(
+    hass, hub_entry_builder
+):
+    """A ``-M noise`` line leaves the threshold as it was; it must not count again.
+
+    With ``-Y autolevel`` and ``-M noise`` both on, the threshold is -18 for 10 s
+    (re-stated by four noise reports in that time) and -24 for 50 s: -23, where
+    counting it once per line would give about -19.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+    clock = _noise_clock(coordinator)
+    client = coordinator._client
+
+    client._handle_text_frame(_auto_level_frame(-21.0))
+    for seconds, noise in ((2, -22.0), (4, -23.0), (6, -22.0), (8, -23.0)):
+        clock.t = 1000.0 + seconds
+        client._handle_text_frame(_noise_report_frame(noise))
+    clock.t = 1010.0
+    client._handle_text_frame(_auto_level_frame(-27.0))
+    await _publish_at(hass, clock, 60)
+
+    assert coordinator.min_level == -23.0
+    # Noise: -21, -22, -23, -22, -23 for 2 s each, then -27 for 50 s
+    assert coordinator.noise_level == -26.2
+
+
+def _noise_report_frame(noise: float) -> str:
+    """A periodic ``-M noise`` report: a noise estimate and no threshold."""
+    return (
+        '{"time": "2026-09-29 06:00:00", "src": "Auto Level", "lvl": 4, '
+        f'"msg": "Current noise level {noise - 1:.1f} dB, '
+        f'estimated noise {noise:.1f} dB"}}'
+    )
+
+
+async def test_a_noise_report_alone_leaves_the_threshold_unknown(
+    hass, hub_entry_builder
+):
+    """``-M noise`` without autolevel carries no threshold; it is not invented.
+
+    The first report is shown at once, but a threshold that has never been
+    reported keeps later reports waiting for the scheduled publish too: only the
+    very first reading of a connection skips the wait.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+    clock = _noise_clock(coordinator)
+    client = coordinator._client
+
+    client._handle_text_frame(_noise_report_frame(-21.0))
+    await hass.async_block_till_done()
+    assert coordinator.noise_level == -21.0
+    assert coordinator.min_level is None
+
+    clock.t = 1030.0
+    client._handle_text_frame(_noise_report_frame(-25.0))
+    await hass.async_block_till_done()
+    assert coordinator.noise_level == -21.0  # waits for the publish
+
+    await _publish_at(hass, clock, 60)
+    assert coordinator.noise_level == -23.0  # -21 and -25 for 30 s each
+    assert coordinator.min_level is None
+
+
+async def test_a_hub_refresh_after_a_noise_line_still_reaches_every_hub_entity(
+    hass, hub_entry_builder
+):
+    """Only the noise line itself skips the hub-wide update, nothing after it.
+
+    The client fires the same callback for a meta/stats refresh; one that lands
+    after a noise line (with the noise reading unchanged) is a real hub change
+    and must repaint the hub entities as before.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+    hub_updates: list[None] = []
+    async_dispatcher_connect(
+        hass, signal_hub_update(hub.entry_id), lambda: hub_updates.append(None)
+    )
+
+    coordinator._client._handle_text_frame(_auto_level_frame(-21.0))
+    await hass.async_block_till_done()
+    assert hub_updates == []
+
+    coordinator._emit_hub_update()  # what a meta/stats refresh does
+    await hass.async_block_till_done()
+    assert hub_updates == [None]
+    assert coordinator.noise_level == -21.0
+
+
+async def test_noise_readings_start_afresh_after_a_drop(hass, hub_entry_builder):
+    """A drop clears the readings; the next connection shows its first at once."""
+    hub = await _setup_hub(hass, hub_entry_builder)
+    coordinator = _coordinator(hass, hub)
+    client = coordinator._client
+
+    client._handle_text_frame(_auto_level_frame(-21.0))
+    client._handle_text_frame(_auto_level_frame(-25.0))  # waiting for the publish
+    await hass.async_block_till_done()
+    assert coordinator.noise_level == -21.0
+
+    # What the client does when the socket drops.
+    client.connected = False
+    client.noise_level = None
+    client.min_level = None
+    coordinator._emit_hub_update()
+    assert coordinator.noise_level is None
+    assert coordinator.min_level is None
+
+    # Back up (the connect edge itself is not what is under test here). The
+    # server now sends only periodic reports, so there is no threshold.
+    client.connected = True
+    coordinator._was_connected = True
+    client._handle_text_frame(_noise_report_frame(-30.0))
+    await hass.async_block_till_done()
+
+    # The readings held over from before the drop are gone, not carried over.
+    assert coordinator.noise_level == -30.0
+    assert coordinator.min_level is None
 
 
 async def test_hub_diagnostic_sensors_unmanaged(hass, hub_entry_builder):
