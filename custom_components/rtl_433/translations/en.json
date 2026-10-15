@@ -105,6 +105,16 @@
           "ignore": "The devices to hide. They stay hidden until you un-ignore them."
         }
       },
+      "adopt_calibration": {
+        "title": "Calibrate {device}",
+        "description": "You just added a utility meter ({position} of {total}). Choose what it measures to calibrate its consumption sensor for the Energy dashboard now, or None to leave it unitless; you can calibrate it any time later under Device settings.",
+        "data": {
+          "commodity": "Meter commodity"
+        },
+        "data_description": {
+          "commodity": "What this meter measures. Pick Energy, Gas, or Water to calibrate the consumption sensor (next step) so it works in the Energy dashboard. Pick None to leave it unitless (and clear any existing calibration)."
+        }
+      },
       "ignored_devices": {
         "title": "Ignored devices",
         "description": "These devices are hidden from the discovered-devices list. Select any you want offered again. A device reappears the next time it transmits, which for a door or motion sensor means the next time it is triggered.",

@@ -7,7 +7,10 @@ step, a *device* step, a *mappings* step, and a *replace* step:
   device heard since the last restart that the user has neither added nor
   ignored -- and on submit adopts the selected keys and ignores the ones the user
   never wants offered again. It leads the menu because it is the route by which
-  an RF device reaches the Home Assistant device registry.
+  an RF device reaches the Home Assistant device registry. A utility meter it
+  adopts (a device whose decoded ``MeterType`` / ``ert_type`` names a commodity)
+  is offered its calibration right away: one **adopt_calibration** step per
+  meter, feeding the shared *calibration* step, before the dialog closes.
 - **ignored_devices** un-ignores keys from ``entry.data["ignored_devices"]`` so
   the devices are offered again on their next transmission.
 
@@ -45,6 +48,7 @@ flow); ``Rtl433ConfigFlow.async_get_options_flow`` returns this class.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from pyrtl_433.library import validate_user_mappings
@@ -91,6 +95,7 @@ from .settings import (
     build_device_options,
     build_hub_options,
     build_mappings_data,
+    commodity_hint,
     device_defaults,
     device_label,
     hub_defaults,
@@ -176,6 +181,12 @@ class Rtl433OptionsFlow(OptionsFlow):
     # through the (optional) calibration step into the finish path. ``None`` means
     # "no value submitted" -> clear any prior override.
     _motion_clear_delay: int | None = None
+    # Utility meters adopted on the add-devices step that still need a calibration
+    # answer, in adoption order, plus the answers given so far (written in one
+    # entry update at the end of the chain so the hub reloads once, not per meter).
+    _adopt_queue: list[str] | None = None
+    _adopt_total: int = 0
+    _adopt_calibrations: dict[str, dict[str, Any]] | None = None
     # The device to keep, chosen on the replace step and carried into
     # replace_target (whose candidate list and ordering are both derived from it).
     _replace_old_key: str = ""
@@ -300,9 +311,103 @@ class Rtl433OptionsFlow(OptionsFlow):
         """
         entry = self.config_entry
 
-        await async_adopt_devices(self.hass, entry, coordinator, add)
+        adopted = await async_adopt_devices(self.hass, entry, coordinator, add)
         await async_ignore_devices(self.hass, entry, coordinator, ignore)
 
+        # A utility meter is only useful to the Energy dashboard once it has a
+        # calibration, and the moment it is added is when the user is looking at
+        # it: offer the calibration now, for each adopted device whose decoded
+        # ``MeterType`` / ``ert_type`` names a commodity, rather than leaving it
+        # to be found later under "Device settings".
+        meters = [
+            key
+            for key in adopted.applied
+            if commodity_hint(self.hass, entry, key) != COMMODITY_NONE
+        ]
+        if meters:
+            self._adopt_queue = meters
+            self._adopt_total = len(meters)
+            self._adopt_calibrations = {}
+            return await self.async_step_adopt_calibration()
+
+        return self.async_create_entry(title="", data=dict(entry.options))
+
+    async def async_step_adopt_calibration(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Offer a calibration for each utility meter just adopted, one at a time.
+
+        Reached only from :meth:`_apply_add_and_ignore`, with the meters queued in
+        adoption order. Each asks the same commodity question as the device
+        settings step, pre-filled from the decoded hint; a real commodity advances
+        to :meth:`async_step_calibration` for the base unit and scale, and ``none``
+        skips that meter (it can be calibrated later under "Device settings").
+        When the queue is empty every answer is written in one entry update -- so
+        adding three meters reloads the hub once -- and the flow finishes.
+        """
+        entry = self.config_entry
+        queue = self._adopt_queue or []
+        if not queue:
+            return self._finish_adopt_calibrations()
+        device_key = queue[0]
+
+        if user_input is not None:
+            commodity = user_input.get(CALIBRATION_COMMODITY, COMMODITY_NONE)
+            if commodity == COMMODITY_NONE:
+                queue.pop(0)
+                return await self.async_step_adopt_calibration()
+            self._device_key = device_key
+            self._calibration_commodity = commodity
+            self._calibration_override = None
+            self._motion_clear_delay = None
+            return await self.async_step_calibration()
+
+        defaults = device_defaults(self.hass, entry, device_key)
+        commodity_options = [
+            SelectOptionDict(value=value, label=value)
+            for value in CALIBRATION_COMMODITIES
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CALIBRATION_COMMODITY, default=defaults[CALIBRATION_COMMODITY]
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=commodity_options,
+                        mode=SelectSelectorMode.DROPDOWN,
+                        translation_key="commodity",
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(
+            step_id="adopt_calibration",
+            data_schema=schema,
+            description_placeholders={
+                "device": defaults["label"],
+                "position": str(self._adopt_total - len(queue) + 1),
+                "total": str(self._adopt_total),
+            },
+        )
+
+    def _finish_adopt_calibrations(self) -> ConfigFlowResult:
+        """Write every adopt-time calibration in one update and close the dialog."""
+        entry = self.config_entry
+        calibrations = self._adopt_calibrations or {}
+        if calibrations:
+            # build_device_data() copies entry.data each call; feed each result
+            # back through a stand-in entry so the writes accumulate into one map.
+            data = dict(entry.data)
+            for device_key, calibration in calibrations.items():
+                data = build_device_data(
+                    SimpleNamespace(data=data),
+                    device_key,
+                    override=None,
+                    calibration=calibration,
+                )
+            self.hass.config_entries.async_update_entry(entry, data=data)
+        self._adopt_queue = None
+        self._adopt_calibrations = None
         return self.async_create_entry(title="", data=dict(entry.options))
 
     async def async_step_ignored_devices(
@@ -672,6 +777,14 @@ class Rtl433OptionsFlow(OptionsFlow):
                     CALIBRATION_SCALE: user_input[CALIBRATION_SCALE],
                 }
             )
+            queue = self._adopt_queue
+            if queue and queue[0] == device_key:
+                # Adopt-time chain: bank this meter's answer and move to the next
+                # one; the writes happen together when the chain ends.
+                if calibration is not None and self._adopt_calibrations is not None:
+                    self._adopt_calibrations[device_key] = calibration
+                queue.pop(0)
+                return await self.async_step_adopt_calibration()
             return self._write_device_record(
                 device_key,
                 override=self._calibration_override,
