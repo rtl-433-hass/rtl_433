@@ -6,13 +6,13 @@ its availability timeout, its entities become `unavailable`.
 
 ![Device entities showing the unavailable state after the availability timeout](images/04-unavailable-state.png)
 
-## Transmit Cadences
+## Transmission Patterns
 
 How long a device can reasonably stay silent depends on the device type.
 
 | Device type | Typical behavior |
 | --- | --- |
-| Periodic weather, temperature, soil, and air-quality sensors | Transmit on a regular cadence. |
+| Periodic weather, temperature, soil, and air-quality sensors | Transmit at regular intervals. |
 | Door/window contacts, motion/PIR, buttons, doorbells, and security sensors | Transmit on events, sometimes with an occasional heartbeat. |
 | Generic EV1527 door/PIR devices and parked TPMS sensors | May have no heartbeat and stay silent for days. |
 
@@ -21,49 +21,31 @@ expiring because a long silence is normal and does not imply failure.
 
 ## Hub Connection
 
-Silence only means something while the integration is listening. If the
-connection to the rtl_433 server drops, no events can arrive for any device, so a
-device's last reading says nothing about whether the device is still there.
+When the connection to the rtl_433 server drops, every device on that hub
+immediately becomes `unavailable`. This includes event-driven devices and
+**Last seen** sensors, regardless of their timeout settings. While disconnected,
+the integration cannot tell whether a device is still transmitting.
 
-When the connection to the rtl_433 server drops, every device behind that hub is
-marked `unavailable` straight away, regardless of its own timeout — including
-event-driven devices that never expire on silence, and their **Last seen**
-sensors. There is no grace period: while the socket is down the integration
-cannot hear the radio at all, so continuing to show the last reading would
-present stale data as current. This is the same behavior an MQTT device gets from
-an availability topic and a last-will message, and what Home Assistant
-integrations do generally when a connection to a hub is lost.
-
-The devices come back as soon as the connection is re-established; their values
-are the last ones received, and the usual silence timeouts resume from there. A
-brief drop therefore shows up as a brief `unavailable` — an honest one, because
-during it the integration genuinely was not listening.
+When the connection returns, devices show their last received values and the
+usual silence timeouts resume.
 
 If you want an automation to tolerate short blips, condition it on the hub's
 **Connectivity** binary sensor with a `for:` delay rather than reacting to each
 device going unavailable.
 
-The separate **rtl_433 server unreachable** repair issue is debounced: it waits
-90 seconds before raising, so a routine server restart does not produce a
-notification even though the entities reported the outage immediately.
+The **rtl_433 server unreachable** repair notification waits 90 seconds, so a
+routine server restart does not produce a notification.
 
-`event` entities (buttons, doorbells, remotes) go unavailable with everything
-else. This matches Zigbee2MQTT, whose event entities carry the bridge-state
-availability topic alongside the per-device one, and Home Assistant's own Shelly
-and ESPHome integrations. Use the `event.received` trigger rather than a plain
-state trigger: it ignores transitions out of `unavailable`, so a reconnect never
-replays a stale press.
+For `event` entities (buttons, doorbells, remotes), use the `event.received`
+trigger. It ignores transitions out of `unavailable`, so reconnecting does not
+trigger an automation for an old press.
 
-One kind of entity is deliberately exempt:
-
-- **The hub's SDR controls** (**Gain**, **Sample rate**, **Frequency
-  correction**, **Hop interval**, **Conversion mode**) stay available, because
-  they are settings you are writing rather than readings you are trusting. With
-  **Manage SDR settings** on — the default — these appear as `number`/`select`
-  entities. Turning it off replaces them with read-only diagnostic sensors, and
-  those *are* gated on the connection along with the hub's other diagnostic
-  sensors (center frequency, frame counters, enabled decoders), whose values are
-  fetched over HTTP and would otherwise freeze at whatever was last read.
+The hub's SDR controls (**Gain**, **Sample rate**, **Frequency correction**,
+**Hop interval**, **Conversion mode**) stay available so you can change settings
+while disconnected. With **Manage SDR settings** on, these appear as
+`number`/`select` entities. Turning it off replaces them with read-only diagnostic
+sensors, which become unavailable on disconnect along with the hub's other
+diagnostic sensors.
 
 The **Connectivity** binary sensor is the entity that reports the outage: it
 reads the socket state directly and stays available throughout. The Home
@@ -86,18 +68,16 @@ The effective availability timeout is resolved in this order:
 Set a timeout to `0` to make a device never expire. This is already the automatic
 default for event-driven devices.
 
-**Receiver settings** asks which of the three you want outright — *Per-device-type
-defaults*, *Never expire*, or *a fixed timeout* — so leaving the receiver on the
-class defaults is a choice you make rather than a number you have to leave alone.
-A fixed timeout of 600 seconds is a hub default like any other, and stops at step
-2; it is not the same as the step-4 fallback, which only applies to devices no
-earlier step has claimed.
+**Receiver settings** offers *Per-device-type defaults*, *Never expire*, or
+*a fixed timeout*. Choosing a fixed timeout of 600 seconds applies that hub
+default at step 2, including to event-driven devices. The 600-second fallback at
+step 4 applies only when no earlier rule supplies a timeout.
 
 ## Restart Behavior
 
 On Home Assistant restart, the last known states are restored first. The timeout
-then runs from the restart time, and entities flip to unavailable only after the
-restored silence window elapses without a fresh event.
+then runs from the restart time, and entities become unavailable if no
+new event arrives within the timeout.
 
 ## Last Seen Sensor
 
