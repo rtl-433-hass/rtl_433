@@ -846,24 +846,21 @@ report_meta noise:30
 </code></pre></div>
 <p>With the Home Assistant add-on, put those two lines in the radio's optional
 per-radio override file in the add-on config directory (see the add-on
-documentation). Without them the sensors stay <code>unknown</code>. Note that <code>autolevel</code>
-changes reception behavior by design: it continuously adapts the pulse
-detector's minimum level to the measured noise floor.</p>
-<p>The two sensors update on different schedules, and <strong>Minimum detection level</strong>
-is the fussier of the pair. <code>-M noise:30</code> emits a report every 30 seconds, but
-that report carries only the noise estimate, so <strong>Noise level</strong> refreshes
-steadily while <strong>Minimum detection level</strong> updates <em>only</em> at the moment
-<code>autolevel</code> actually re-adjusts the threshold. rtl_433 re-adjusts only when the
+documentation). Without them the sensors stay <code>unknown</code>. <code>autolevel</code> continuously
+adjusts the pulse detector's minimum level to the measured noise floor, which
+changes reception behavior.</p>
+<p>The two sensors update on different schedules. <code>-M noise:30</code> updates <strong>Noise
+level</strong> every 30 seconds. <strong>Minimum detection level</strong> updates only when
+<code>autolevel</code> adjusts the threshold. This happens when the
 estimated noise sits more than 3 dB below the configured <code>minlevel</code> (default
 -12.1 dB, so roughly below -15 dB) <em>and</em> the new threshold differs from the
-current one by more than 1 dB. Two consequences are worth knowing before you go
-debugging:</p>
+current one by more than 1 dB. As a result:</p>
 <ul>
 <li>On a receiver whose noise floor is above about -15 dB, <code>autolevel</code> never
   engages and <strong>Minimum detection level</strong> stays <code>unknown</code> however long you wait.
   Check <strong>Noise level</strong> first: it decides whether the threshold can move at all.</li>
-<li>rtl_433 fires a burst of adjustments while it converges at startup, then goes
-  quiet. The event stream carries no backlog, so a server that settled before
+<li>rtl_433 adjusts the threshold several times at startup, then stops once it
+  stabilizes. The event stream carries no backlog, so a server that settled before
   Home Assistant connected leaves the sensor <code>unknown</code> until the noise floor
   drifts by more than 1 dB. To force an update, nudge the hub's <strong>Gain</strong> number
   entity far enough to move the floor, then set it back.</li>
@@ -879,17 +876,15 @@ read <code>unknown</code>.</p>
 <p>Server statistics include cumulative decoded events, OOK frames, FSK frames, and
 enabled decoders. Per-protocol <code>stats[]</code> and the <code>since</code> timestamp appear as
 attributes on the decoded-events sensor.</p>
-<p>Hub observability data is fetched over HTTP from the rtl_433 server's <code>/cmd</code>
-endpoint at the server root, <code>http(s)://host:port/cmd</code>, independent of the
+<p>Hub configuration and statistics are fetched over HTTP from the rtl_433
+server's <code>/cmd</code> endpoint at the server root, <code>http(s)://host:port/cmd</code>, independent of the
 configured WebSocket path. If a reverse proxy exposes only the WebSocket path and
-not <code>/cmd</code>, these sensors degrade to <code>unknown</code> while the event stream and
+not <code>/cmd</code>, these sensors read <code>unknown</code> while the event stream and
 connectivity sensor keep working.</p>
-<p>Because those values come from the server, the diagnostic and statistics sensors
-go <code>unavailable</code> as soon as the hub connection drops — the same gate that applies
-to the devices, see <a href="../availability/#hub-connection">Availability</a>. Otherwise they
-would keep showing a frozen reading. The Connectivity sensor stays available
-throughout, and so do the SDR controls below: those are settings you write, not
-readings you trust.</p>
+<p>The diagnostic and statistics sensors become <code>unavailable</code> when the hub
+connection drops. See <a href="../availability/#hub-connection">Availability</a>. The
+Connectivity sensor stays available to report the connection state, and the SDR
+controls below stay available so you can change settings while disconnected.</p>
 <h2 id="managing-sdr-settings-from-home-assistant">Managing SDR Settings from Home Assistant<a class="headerlink" href="#managing-sdr-settings-from-home-assistant" title="Permanent link">&para;</a></h2>
 <p>By default a new hub adopts and manages the receiver's SDR settings. With
 <strong>Manage rtl_433 settings from Home Assistant</strong> enabled, the hub exposes controls

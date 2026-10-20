@@ -457,10 +457,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#transmit-cadences" class="md-nav__link">
+  <a href="#transmission-patterns" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Transmit Cadences
+        Transmission Patterns
       
     </span>
   </a>
@@ -681,10 +681,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#transmit-cadences" class="md-nav__link">
+  <a href="#transmission-patterns" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Transmit Cadences
+        Transmission Patterns
       
     </span>
   </a>
@@ -760,7 +760,7 @@
 uses a silence-based availability model. If no event for a device arrives within
 its availability timeout, its entities become <code>unavailable</code>.</p>
 <p><img alt="Device entities showing the unavailable state after the availability timeout" src="../images/04-unavailable-state.png" /></p>
-<h2 id="transmit-cadences">Transmit Cadences<a class="headerlink" href="#transmit-cadences" title="Permanent link">&para;</a></h2>
+<h2 id="transmission-patterns">Transmission Patterns<a class="headerlink" href="#transmission-patterns" title="Permanent link">&para;</a></h2>
 <p>How long a device can reasonably stay silent depends on the device type.</p>
 <table>
 <thead>
@@ -772,7 +772,7 @@ its availability timeout, its entities become <code>unavailable</code>.</p>
 <tbody>
 <tr>
 <td>Periodic weather, temperature, soil, and air-quality sensors</td>
-<td>Transmit on a regular cadence.</td>
+<td>Transmit at regular intervals.</td>
 </tr>
 <tr>
 <td>Door/window contacts, motion/PIR, buttons, doorbells, and security sensors</td>
@@ -787,44 +787,26 @@ its availability timeout, its entities become <code>unavailable</code>.</p>
 <p>Periodic devices use finite timeouts. Event-driven devices default to never
 expiring because a long silence is normal and does not imply failure.</p>
 <h2 id="hub-connection">Hub Connection<a class="headerlink" href="#hub-connection" title="Permanent link">&para;</a></h2>
-<p>Silence only means something while the integration is listening. If the
-connection to the rtl_433 server drops, no events can arrive for any device, so a
-device's last reading says nothing about whether the device is still there.</p>
-<p>When the connection to the rtl_433 server drops, every device behind that hub is
-marked <code>unavailable</code> straight away, regardless of its own timeout — including
-event-driven devices that never expire on silence, and their <strong>Last seen</strong>
-sensors. There is no grace period: while the socket is down the integration
-cannot hear the radio at all, so continuing to show the last reading would
-present stale data as current. This is the same behavior an MQTT device gets from
-an availability topic and a last-will message, and what Home Assistant
-integrations do generally when a connection to a hub is lost.</p>
-<p>The devices come back as soon as the connection is re-established; their values
-are the last ones received, and the usual silence timeouts resume from there. A
-brief drop therefore shows up as a brief <code>unavailable</code> — an honest one, because
-during it the integration genuinely was not listening.</p>
+<p>When the connection to the rtl_433 server drops, every device on that hub
+immediately becomes <code>unavailable</code>. This includes event-driven devices and
+<strong>Last seen</strong> sensors, regardless of their timeout settings. While disconnected,
+the integration cannot tell whether a device is still transmitting.</p>
+<p>When the connection returns, devices show their last received values and the
+usual silence timeouts resume.</p>
 <p>If you want an automation to tolerate short blips, condition it on the hub's
 <strong>Connectivity</strong> binary sensor with a <code>for:</code> delay rather than reacting to each
 device going unavailable.</p>
-<p>The separate <strong>rtl_433 server unreachable</strong> repair issue is debounced: it waits
-90 seconds before raising, so a routine server restart does not produce a
-notification even though the entities reported the outage immediately.</p>
-<p><code>event</code> entities (buttons, doorbells, remotes) go unavailable with everything
-else. This matches Zigbee2MQTT, whose event entities carry the bridge-state
-availability topic alongside the per-device one, and Home Assistant's own Shelly
-and ESPHome integrations. Use the <code>event.received</code> trigger rather than a plain
-state trigger: it ignores transitions out of <code>unavailable</code>, so a reconnect never
-replays a stale press.</p>
-<p>One kind of entity is deliberately exempt:</p>
-<ul>
-<li><strong>The hub's SDR controls</strong> (<strong>Gain</strong>, <strong>Sample rate</strong>, <strong>Frequency
-  correction</strong>, <strong>Hop interval</strong>, <strong>Conversion mode</strong>) stay available, because
-  they are settings you are writing rather than readings you are trusting. With
-  <strong>Manage SDR settings</strong> on — the default — these appear as <code>number</code>/<code>select</code>
-  entities. Turning it off replaces them with read-only diagnostic sensors, and
-  those <em>are</em> gated on the connection along with the hub's other diagnostic
-  sensors (center frequency, frame counters, enabled decoders), whose values are
-  fetched over HTTP and would otherwise freeze at whatever was last read.</li>
-</ul>
+<p>The <strong>rtl_433 server unreachable</strong> repair notification waits 90 seconds, so a
+routine server restart does not produce a notification.</p>
+<p>For <code>event</code> entities (buttons, doorbells, remotes), use the <code>event.received</code>
+trigger. It ignores transitions out of <code>unavailable</code>, so reconnecting does not
+trigger an automation for an old press.</p>
+<p>The hub's SDR controls (<strong>Gain</strong>, <strong>Sample rate</strong>, <strong>Frequency correction</strong>,
+<strong>Hop interval</strong>, <strong>Conversion mode</strong>) stay available so you can change settings
+while disconnected. With <strong>Manage SDR settings</strong> on, these appear as
+<code>number</code>/<code>select</code> entities. Turning it off replaces them with read-only diagnostic
+sensors, which become unavailable on disconnect along with the hub's other
+diagnostic sensors.</p>
 <p>The <strong>Connectivity</strong> binary sensor is the entity that reports the outage: it
 reads the socket state directly and stays available throughout. The Home
 Assistant log records the drop and the reconnect:</p>
@@ -841,16 +823,14 @@ INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
 </ol>
 <p>Set a timeout to <code>0</code> to make a device never expire. This is already the automatic
 default for event-driven devices.</p>
-<p><strong>Receiver settings</strong> asks which of the three you want outright — <em>Per-device-type
-defaults</em>, <em>Never expire</em>, or <em>a fixed timeout</em> — so leaving the receiver on the
-class defaults is a choice you make rather than a number you have to leave alone.
-A fixed timeout of 600 seconds is a hub default like any other, and stops at step
-2; it is not the same as the step-4 fallback, which only applies to devices no
-earlier step has claimed.</p>
+<p><strong>Receiver settings</strong> offers <em>Per-device-type defaults</em>, <em>Never expire</em>, or
+<em>a fixed timeout</em>. Choosing a fixed timeout of 600 seconds applies that hub
+default at step 2, including to event-driven devices. The 600-second fallback at
+step 4 applies only when no earlier rule supplies a timeout.</p>
 <h2 id="restart-behavior">Restart Behavior<a class="headerlink" href="#restart-behavior" title="Permanent link">&para;</a></h2>
 <p>On Home Assistant restart, the last known states are restored first. The timeout
-then runs from the restart time, and entities flip to unavailable only after the
-restored silence window elapses without a fresh event.</p>
+then runs from the restart time, and entities become unavailable if no
+new event arrives within the timeout.</p>
 <h2 id="last-seen-sensor">Last Seen Sensor<a class="headerlink" href="#last-seen-sensor" title="Permanent link">&para;</a></h2>
 <p>Every device gets a diagnostic timestamp sensor named <strong>Last seen</strong>. It reports
 when the device was last heard from and restores its previous value across

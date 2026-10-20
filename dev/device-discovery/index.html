@@ -799,9 +799,8 @@ those you don't.</p>
 trigger them once to make them show up.</p>
 <h2 id="the-rtl_433-page">The rtl_433 Page<a class="headerlink" href="#the-rtl_433-page" title="Permanent link">&para;</a></h2>
 <p>Open <strong>Settings → Devices &amp; Services → rtl_433 → Configure (the gear icon)</strong>.
-This is the rtl_433 page, and it works like the Zigbee and Z-Wave pages: it
-opens on an overview of the receiver, with everything else one click away. It is
-available to administrators only.</p>
+The rtl_433 page opens with a receiver overview and links to devices and
+settings. Only administrators can access it.</p>
 <p>The overview has three parts:</p>
 <ul>
 <li>a card at the top saying whether the receiver is <strong>Online</strong>, and how many
@@ -811,7 +810,7 @@ available to administrators only.</p>
 <li><strong>Receiver settings</strong>, <strong>Device settings</strong> and <strong>Device mappings</strong>, which each
   open their own page</li>
 </ul>
-<p>and, bottom right, an <strong>Add or replace device</strong> button.</p>
+<p>The <strong>Add or replace device</strong> button is at the bottom right.</p>
 <p><img alt="The rtl_433 page: a status card with a green tick reading Online and 7 devices; a My network card listing Devices, 7 devices and Entities, 33 entities, each with a chevron; then a card of three rows — Receiver settings (availability timeout and whether Home Assistant manages the receiver), Device settings (per-device timeout overrides and utility-meter calibration) and Device mappings (YAML overrides for how fields become entities); and a blue Add or replace device button in the bottom right" src="../images/18-rtl-433-page.png" /></p>
 <p>If you have more than one receiver, the top of the page covers all of them: the
 device count and both <strong>My network</strong> links include every rtl_433 device,
@@ -860,10 +859,9 @@ with a link to the device that was just created.</p>
 <p><img alt="An Acurite-Tower device page showing Temperature 26.7 C, Humidity 74.0%, Battery 100%, and signal diagnostics" src="../images/02-device-page.png" /></p>
 <p>Otherwise, <strong>Ignore</strong> hides the device.</p>
 <h3 id="clearing-the-list">Clearing the List<a class="headerlink" href="#clearing-the-list" title="Permanent link">&para;</a></h3>
-<p>A receiver left running for a few weeks in a built-up area accumulates hundreds
-of devices, and the one you came to add is somewhere among them. <strong>Clear
-discovered devices</strong> will empty the list so you can easily add the ones you
-want.</p>
+<p>In a busy area, the discovered list can fill with devices you do not want.
+<strong>Clear discovered devices</strong> empties it so you can find your devices as they
+transmit again.</p>
 <h2 id="receiver-and-device-settings">Receiver and Device Settings<a class="headerlink" href="#receiver-and-device-settings" title="Permanent link">&para;</a></h2>
 <p><strong>Receiver settings</strong> is the default availability timeout for every device on
 this receiver, and whether Home Assistant manages the server's own SDR settings
@@ -871,12 +869,11 @@ this receiver, and whether Home Assistant manages the server's own SDR settings
 <p><strong>Device settings</strong> targets one device you have already added: its availability
 timeout override, its motion clear delay, and its
 <a href="../calibration/">utility-meter calibration</a>. Pick the device at the top and the
-rest of the form rebuilds from it, showing only the settings that device
-actually has.</p>
+form shows the settings available for that device.</p>
 <p><strong>Device mappings</strong> is this receiver's
 <a href="../device-library/">device-library overrides</a>, as YAML. Clearing the editor
-removes them all. The device mappings are automatically validated (but not
-tested!) when saving.</p>
+removes them all. Saving checks the YAML syntax and mapping schema. It does not
+test the mappings against transmissions from your devices.</p>
 <h2 id="ignoring-devices">Ignoring Devices<a class="headerlink" href="#ignoring-devices" title="Permanent link">&para;</a></h2>
 <p>Sometimes devices are detected that you will never want to add to Home
 Assistant. Click <strong>Ignore</strong> on the card to hide it at the bottom of the list. If
