@@ -74,18 +74,14 @@ description:
 * mark detect_wet as event_driven ([2eddd52](...)) (thanks [dimatx](https://github.com/dimatx)!)
 ```
 
-The credit is a link to the contributor's profile rather than an `@mention` on
-purpose: a mention is what generates a notification, and this workflow is meant
-to be silent. It never comments, and editing a PR body notifies nobody.
-(`--mention` switches to `@login` if a notification is ever wanted.)
+Credits link to contributor profiles without sending notifications. The
+workflow only edits the PR description. Use `--mention` to generate `@login`
+mentions instead.
 
-Only the pull request description is annotated, so `CHANGELOG.md` keeps
-release-please's own wording. The published GitHub Release notes are a different
-matter: release-please builds them from the merged release PR's body, so credits
-sitting on it at merge time do ship with the release — another reason
-`--mention` is not the default. A credit already on a line is replaced rather
-than repeated, so the workflow can re-run freely and you can leave the lines
-alone — hand edits to them are overwritten. To preview or re-run it by hand:
+`CHANGELOG.md` keeps release-please's wording. Published GitHub Release notes
+include credits from the release PR description at merge time. Re-running the
+workflow replaces existing credits without duplicating them and overwrites hand
+edits to credit lines. To preview or re-run it:
 
 ```bash
 # Preview without writing (needs a token with repo read access).
@@ -151,14 +147,14 @@ The containerized end-to-end / screenshot harness is separate and documented in
 ## Mutation testing
 
 Beyond line coverage, the project uses [mutmut](https://github.com/boxed/mutmut)
-to check that tests actually *detect* wrong behaviour. CI fails if a source
+to check that tests detect incorrect behavior. CI fails if a source
 file's mutation score drops below its committed baseline.
 
 The gate around mutmut is
 [`mutmut-ratchet`](https://github.com/rtl-433-hass/mutmut-ratchet), a shared
-package (this repository and `pyrtl_433` both use it): it scopes a PR's mutation
-run to the modules the diff could affect, fans the work across time-balanced
-shards, and fails only on a real per-file regression. Its per-repo settings —
+package (this repository and `pyrtl_433` both use it): it limits a PR's mutation
+run to modules the diff could affect, divides work into parallel jobs by
+estimated run time, and fails on per-file score regressions. Its per-repo settings —
 the package path, the paths that escalate a scoped run to a full one, and the
 test -> source overrides for tests whose name does not map 1:1 to a module —
 live in `[tool.mutmut_ratchet]` in `pyproject.toml`.
