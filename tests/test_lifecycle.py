@@ -3099,9 +3099,7 @@ async def test_each_receiver_device_is_owned_by_its_own_subentry(hass):
         )
         assert device is not None
         assert device.config_entry_id == location.entry_id
-        assert device.config_entries_subentries[location.entry_id] == {
-            receiver_id(location, index)
-        }
+        assert device.config_subentry_id == receiver_id(location, index)
 
 
 async def test_receiver_entities_are_owned_by_their_receiver(hass):
@@ -3168,7 +3166,8 @@ async def test_rf_device_entities_are_owned_by_the_location_not_a_receiver(hass)
             (DOMAIN, f"{receiver_id(location, index)}:{device_key}"), location.entry_id
         )
         assert device is not None
-        assert device.config_entries_subentries[location.entry_id] == {None}
+        assert device.config_entry_id == location.entry_id
+        assert device.config_subentry_id is None
 
 
 async def test_adding_a_receiver_reloads_the_location(hass, receiver_entry_builder):
