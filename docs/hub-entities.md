@@ -43,25 +43,22 @@ report_meta noise:30
 
 With the Home Assistant add-on, put those two lines in the radio's optional
 per-radio override file in the add-on config directory (see the add-on
-documentation). Without them the sensors stay `unknown`. Note that `autolevel`
-changes reception behavior by design: it continuously adapts the pulse
-detector's minimum level to the measured noise floor.
+documentation). Without them the sensors stay `unknown`. `autolevel` continuously
+adjusts the pulse detector's minimum level to the measured noise floor, which
+changes reception behavior.
 
-The two sensors update on different schedules, and **Minimum detection level**
-is the fussier of the pair. `-M noise:30` emits a report every 30 seconds, but
-that report carries only the noise estimate, so **Noise level** refreshes
-steadily while **Minimum detection level** updates *only* at the moment
-`autolevel` actually re-adjusts the threshold. rtl_433 re-adjusts only when the
+The two sensors update on different schedules. `-M noise:30` updates **Noise
+level** every 30 seconds. **Minimum detection level** updates only when
+`autolevel` adjusts the threshold. This happens when the
 estimated noise sits more than 3 dB below the configured `minlevel` (default
 -12.1 dB, so roughly below -15 dB) *and* the new threshold differs from the
-current one by more than 1 dB. Two consequences are worth knowing before you go
-debugging:
+current one by more than 1 dB. As a result:
 
 - On a receiver whose noise floor is above about -15 dB, `autolevel` never
   engages and **Minimum detection level** stays `unknown` however long you wait.
   Check **Noise level** first: it decides whether the threshold can move at all.
-- rtl_433 fires a burst of adjustments while it converges at startup, then goes
-  quiet. The event stream carries no backlog, so a server that settled before
+- rtl_433 adjusts the threshold several times at startup, then stops once it
+  stabilizes. The event stream carries no backlog, so a server that settled before
   Home Assistant connected leaves the sensor `unknown` until the noise floor
   drifts by more than 1 dB. To force an update, nudge the hub's **Gain** number
   entity far enough to move the floor, then set it back.
@@ -82,18 +79,16 @@ Server statistics include cumulative decoded events, OOK frames, FSK frames, and
 enabled decoders. Per-protocol `stats[]` and the `since` timestamp appear as
 attributes on the decoded-events sensor.
 
-Hub observability data is fetched over HTTP from the rtl_433 server's `/cmd`
-endpoint at the server root, `http(s)://host:port/cmd`, independent of the
+Hub configuration and statistics are fetched over HTTP from the rtl_433
+server's `/cmd` endpoint at the server root, `http(s)://host:port/cmd`, independent of the
 configured WebSocket path. If a reverse proxy exposes only the WebSocket path and
-not `/cmd`, these sensors degrade to `unknown` while the event stream and
+not `/cmd`, these sensors read `unknown` while the event stream and
 connectivity sensor keep working.
 
-Because those values come from the server, the diagnostic and statistics sensors
-go `unavailable` as soon as the hub connection drops — the same gate that applies
-to the devices, see [Availability](availability.md#hub-connection). Otherwise they
-would keep showing a frozen reading. The Connectivity sensor stays available
-throughout, and so do the SDR controls below: those are settings you write, not
-readings you trust.
+The diagnostic and statistics sensors become `unavailable` when the hub
+connection drops. See [Availability](availability.md#hub-connection). The
+Connectivity sensor stays available to report the connection state, and the SDR
+controls below stay available so you can change settings while disconnected.
 
 ## Managing SDR Settings from Home Assistant
 
