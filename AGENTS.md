@@ -18,8 +18,8 @@ integration adds to Home Assistant's own WebSocket API see
     [Runtime dependency](#runtime-dependency-pyrtl_433) below). `base.py` owns and
     drives the client; the mixins (`_events.py`, `_sdr.py`, `_watchdog.py`) hold
     the HA-side policy (event fan-out, managed-SDR desired state, the silence
-    watchdog and the hub-connection availability gate) the library deliberately
-    leaves out.
+    watchdog and the hub-connection availability gate) the library
+    leaves to Home Assistant.
   - `frontend/rtl_433-panel.js` — the shipped discovery panel: one hand-written
     vanilla custom element, **no build step** (see
     [Approval surfaces](#approval-surfaces-adoption-service-websocket-api-panel)).
@@ -60,7 +60,7 @@ warning), so the HACS build stays the feature-ahead parallel channel while core
 catches up. The minimal core build lives on the `rtl_433-integration` branch of a
 `home-assistant/core` fork; **do not invent a second domain.**
 
-Because both builds share the domain, three identity surfaces are a **frozen
+Because both builds share the domain, three identity formats are a **frozen
 compatibility contract** — they MUST stay byte-identical across both builds and
 must not change without a coordinated, non-downgrading migration shipped in both:
 
@@ -122,8 +122,8 @@ own copy of any of that; it consumes the library:
   policy. `coordinator/_watchdog.py` supplies the two HA-side inputs (the adopted
   fields on the config entry, the live `NormalizedEvent.fields`) and
   `const.class_default_timeout` maps the boolean onto the integration's own
-  never-expire / periodic timeout constants — the library deliberately owns no
-  timeout policy.
+  never-expire / periodic timeout constants. Timeout policy stays in the
+  integration.
 - **`pyrtl_433.replay`** — `classify_replay` / `ReplayVerdict` / `parse_event_time`
   plus `DISCOVERY_BACKLOG_GRACE` / `REPLAY_STALE_THRESHOLD`. The client applies the
   classification and stamps the verdict on the `NormalizedEvent`;
@@ -144,7 +144,7 @@ own copy of any of that; it consumes the library:
   unchanged. `validate_connection` delegates to `Rtl433Client.validate_connection`.
 - **`/cmd` write path.** pyrtl_433 0.1.0 exposes no public setter; the coordinator's
   `_send_cmd` delegates to the client's underscore-prefixed **`Rtl433Client._send_cmd`**
-  (a known private-API wart to revisit when the library grows a public alias). All
+  (replace this call when the library provides a public setter). All
   `/cmd` issuance is serialized **inside the client** (its own send lock), so a user
   write and a reconnect enforcement replay can never interleave.
 
@@ -174,7 +174,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   Replay and pre-connection **backlog** frames never create a candidate (a
   reconnect must not repopulate the list), which is the post-connection
   registration gate applied to candidacy — see the coordinator's
-  replay/registration notes. The pending map is **memory-only by design**: empty
+  replay/registration notes. The pending map is **kept in memory only**: empty
   after a restart or reload, refilled by live traffic. Do not add persistence or
   a TTL. It *is* capped, at `_events._MAX_PENDING_CANDIDATES` (512), dropping
   the least recently heard candidate first: 433 MHz is a shared band where a bad
@@ -185,9 +185,8 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   reading.
   A device becomes real only through `coordinator.adopt_device` (from the
   options flow, below), which promotes the stored event into runtime state and
-  fires the **same** `new_device_callback` / `SIGNAL_NEW_DEVICE` seam a live
-  sighting used — one registration path, not two. There is **no** persistent
-  notification for a heard device (the per-device notification, and the per-hub
+  uses the existing `new_device_callback` / `SIGNAL_NEW_DEVICE` registration
+  path. There is **no** persistent notification for a heard device (the per-device notification, and the per-hub
   discovery toggle that used to gate auto-add, were both removed); the
   `INFO` log line in `_record_pending` is the only signal.
 - `async_remove_config_entry_device` (`__init__.py`) backs the per-device
@@ -209,7 +208,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   `COMPATIBILITY_CONTRACT.md` identifier/unique_id templates verbatim (only the
   `device_key` value changes), so the contract is unaffected by a replace.
 - `async_migrate_entry` (`migration.py`, config-entry `VERSION` 1 → 2) performs a
-  **seamless in-place upgrade from 0.1.0**: it re-homes the legacy per-device
+  **in-place upgrade from 0.1.0**: it re-homes the legacy per-device
   config entries' registry devices/entities onto the hub entry (preserving
   unique_ids, entity_ids, and history), folds their state into the hub's devices
   map, and removes the obsolete per-device entries. The minor-7 → 8 step
@@ -308,7 +307,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   that matches an existing entry by `host:port` (`_find_entry_by_host_port`)
   **adopts/re-keys** that entry onto the stable radio id (migration; aborts
   `already_configured`), so a manually-added hub and its later discovery never
-  duplicate and the entry's history is preserved. A genuinely new radio
+  duplicate and the entry's history is preserved. A new radio
   (unknown stable id, no `host:port` match) is routed through
   `async_step_hassio_replace` **when at least one hub already exists** — a guided
   step that offers to rebind one of those hubs onto the new radio (the likely
@@ -322,14 +321,14 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   Both add flows persist `manage_settings` and, when it is on and
   a frequency was entered, `initial_frequency` (MHz) into `entry.data`; the latter
   is applied to the managed desired state **exactly once** at first connect —
-  authoritatively overriding the adopted/persisted center frequency (gated on a
+  overriding the adopted/persisted center frequency (gated on a
   persisted `initial_freq_seeded` flag, not on the desired store being empty), and
   never re-applied after the user later changes the frequency via the control.
 
 ## Approval surfaces (adoption service, WebSocket API, panel)
 
 Adopting, ignoring and un-ignoring a discovered device is reachable from
-**three** surfaces backed by **one** implementation. Add a caller, never a
+three interfaces backed by one implementation. Add a caller, never a
 second implementation.
 
 - **`adoption.py` is that implementation.** `async_adopt_devices`,
@@ -357,7 +356,7 @@ second implementation.
   `_async_get_coordinator` answers an unknown `entry_id` with `ERR_NOT_FOUND`
   and one whose entry exists but is not set up with `not_loaded`, so a panel
   left open across a reload reports a condition instead of raising.
-- **The subscription is deliberately two-speed; keep it that way.** A
+- **Push membership changes immediately; batch repeat sightings.** A
   *membership* change (the dispatcher signal) pushes immediately. A *repeat
   sighting*, which only ages a row's count and last-seen, is picked up by the
   `_REFRESH_INTERVAL` (5s) timer, which re-renders and sends **only when the
@@ -371,10 +370,10 @@ second implementation.
   runs. Do not add npm, a bundler, a lockfile, or a second release pipeline, and
   do not import `ha-*` components or any frontend-internal module — those are
   not a public API and a panel that depends on them breaks silently on upgrade.
-  The sanctioned surface is `hass.connection` for messaging plus Home Assistant's
+  Use `hass.connection` for messaging and Home Assistant's
   **CSS custom properties** for colour, which is what makes the panel follow the
   user's theme (dark mode included) without knowing anything about themes. If it
-  ever outgrows one hand-written file, that is a decision to take deliberately.
+  needs more than one file, discuss that change separately.
 - **Panel registration is once per run, from per-entry setup.**
   `_async_register_panel` (`__init__.py`) returns early on
   `async_panel_exists(hass, DOMAIN)`, then registers the static path
@@ -398,17 +397,14 @@ second implementation.
   hub device page offers no route either. (Reconfigure still reaches the hub's
   *connection* settings; that is a config-flow step, not an options one.)
 
-  It is set deliberately, and the panel now renders all six displaced steps: Add
-  and Ignore on the cards, Replace on a card, Ignored devices behind the toggle,
+  The panel renders all six displaced steps: Add and Ignore on the cards, Replace on a card, Ignored devices behind the toggle,
   and Receiver settings / Device settings / Device mappings as subviews, each on
-  its own deep-linkable path. **The
-  invariant to keep is that list, not the flag**: an options step with no panel
-  equivalent is unreachable while still existing and still passing its tests,
-  which is exactly the kind of break no Python test catches. `knx` ships both a
+  its own deep-linkable path. **The panel must keep an equivalent for every options step**. A missing equivalent
+  leaves the step unreachable even if its Python tests pass. `knx` ships both a
   panel and an options flow and omits the argument for that reason; `dynalite`
   and `insteon` pass it and have no options flow to lose. Because the flow's
   steps are now unreachable, they survive only as the shared implementation
-  behind `settings.py`; removing them is a separate, deliberate change.
+  behind `settings.py`; removing them is a separate change.
   `test_the_panel_registers_once_and_serves_its_module` asserts
   `config_panel_domain == DOMAIN` and that no sidebar slot is taken alongside
   it.
@@ -418,7 +414,7 @@ second implementation.
 - **The panel draws its own toolbar.** Home Assistant renders no chrome around a
   non-iframe custom panel, and with no sidebar entry there is otherwise no way
   back out on a phone, where the sidebar is closed. The back button is
-  `history.back()` — the page is always arrived at from somewhere — falling back
+  `history.back()`, falling back
   to `/config/integrations/integration/rtl_433` when opened cold by URL.
 - **A save that reloads the hub must not read as a failure.** Saving a
   calibration, a mapping override or the manage-settings toggle reloads the
@@ -611,7 +607,7 @@ UI-pickable **device triggers**. Contracts that must survive refactors:
     common case, not the rare one.
 
   It also ignores a `new_state` that is `None`/`unavailable`/`unknown` (the
-  unload edge). An `old_state` of `unknown` is deliberately allowed: the very
+  unload edge). An `old_state` of `unknown` is allowed: the very
   first press rises from the never-fired `unknown` state and must fire.
 
 ## WebSocket frames & hub observability
@@ -656,11 +652,11 @@ because these are the contracts the integration relies on:
   before the restart is recent enough to pass the age test, yet it predates the
   reconnect and so must not re-fire. Any of the three outcomes
   **seeds sensor values** but must **NOT** fire `event` entities or refresh
-  `last_seen` / `available`, so a genuinely-offline device is not resurrected by
+  `last_seen` / `available`, so an offline device is not marked available by
   the replay. A suppressed `event` transmission logs at **DEBUG**
   (`Rtl433Event._handle_dispatch`) — it happens on every reconnect, so it is not
-  INFO-worthy. The classification rides on the
-  dispatch carrier: `NormalizedEvent.is_replay` / `event_time` (stamped via
+  logged at INFO. The classification is carried by
+  `NormalizedEvent.is_replay` / `event_time` (stamped via
   `dataclasses.replace` after `normalize`; live is the default), so dispatch
   needs no extra signature. The **watchdog re-dispatch passes `is_replay=False`**
   so its unavailable re-paint of a cached (maybe-replay) event is never
@@ -695,7 +691,7 @@ because these are the contracts the integration relies on:
   meta/stats/gain/ppm sensors read `unknown`). Each getter swallows its own
   errors so it can never raise into the client's connect loop or the HA watchdog.
   The request uses the `cmd` query param; scalar getters are read defensively
-  through a `{"result": ...}` unwrap. The coordinator surfaces the results via
+  through a `{"result": ...}` unwrap. The coordinator exposes the results through
   read-only properties (`meta`, `stats`, `dev_info`, `dev_query`) that delegate to
   the client, and a `_refresh_meta` that delegates to `Rtl433Client.refresh_meta`.
 - **Exact getter set** (client-owned): `get_meta` + `get_gain` + `get_ppm_error` +
@@ -733,7 +729,7 @@ because these are the contracts the integration relies on:
     frames, and `frames.fsk` → FSK frames, all **`TOTAL_INCREASING`** (cumulative
     since-start counters that tolerate the server-restart reset, so HA records
     long-term statistics); `enabled` → enabled decoders is a gauge →
-    **`MEASUREMENT`**; `stats[]` / `since` are surfaced as attributes.
+    **`MEASUREMENT`**; `stats[]` / `since` are exposed as attributes.
   - Noise level / minimum detection level hub sensors → the coordinator's
     `noise_level` / `min_level` properties (delegating to the client's parsed
     "Auto Level" snapshots above) — **socket-sourced**, not `/cmd`-sourced, so
@@ -748,17 +744,16 @@ because these are the contracts the integration relies on:
 
 ## Hub-connection availability gate
 
-Durable contract for the second availability gate (`coordinator/_watchdog.py`,
-`entity.py`, `event.py`, `sensor.py`). The per-device *silence* timeouts answer
-"has this radio transmitted lately?", which only means anything while the
-integration is listening; this gate answers "is the integration listening at
-all?". End-user docs live in
+Requirements for the hub availability check (`coordinator/_watchdog.py`,
+`entity.py`, `event.py`, `sensor.py`). Per-device silence timeouts track how
+recently a device transmitted. The hub availability check also requires a
+working connection to the server. End-user docs live in
 [docs/availability.md](docs/availability.md#hub-connection).
 
 - **`coordinator.hub_available` is exactly `self.connected`.** No grace window,
   no debounce, no timer: the socket drops, every device behind the hub is
   unavailable on the same tick. **Do not add a delay here.** It was tried and
-  removed deliberately — a delay presents readings as current while the
+  removed because a delay presents readings as current while the
   integration knows it cannot hear the radio, which is what the Silver-tier
   `entity-unavailable` rule exists to prevent, and every Home Assistant
   integration gating on a live connection flag (`mqtt`, `zwave_js`, `esphome`,
@@ -768,9 +763,8 @@ all?". End-user docs live in
   tolerating transient API errors — not a transport known to be down.
 - **The debounce lives in `repairs.py`, not here.** `_UNREACHABLE_GRACE` (90 s)
   delays the user-facing "server unreachable" *notification* so a routine server
-  restart does not raise one. Entities tell the truth immediately; the
-  notification waits until the outage looks real. That split is the design — do
-  not collapse it by moving the delay onto the entities.
+  restart does not raise one. Keep this delay on notifications; entities must
+  become unavailable immediately.
 - **`_disconnected_since` is reporting only.** It feeds the reconnect log line's
   outage duration and the diagnostics dump. Nothing about availability reads it.
 - **Every device entity reads it.** `Rtl433Entity.available` short-circuits on it
@@ -808,16 +802,16 @@ all?". End-user docs live in
 - **The clock starts at `async_start`,** not at the first drop, so a Home
   Assistant restart while the server is down expires the restored states at once
   instead of leaving them available forever.
-- **Lazy gate, edge-driven repaint.** Entities evaluate `hub_available` on every
+- **Check availability on state reads; dispatch on connection changes.** Entities evaluate `hub_available` on every
   state read, so it is always correct; the coordinator only *repaints*. The
   disconnect edge and the connect edge each call it, and each watchdog tick
   re-checks as a cheap backstop in case an edge is ever missed. All
   three funnel into `_async_sync_hub_availability`, which dispatches
-  `SIGNAL_HUB_AVAILABILITY` **once per flip** (a hub-wide signal, deliberately
+  `SIGNAL_HUB_AVAILABILITY` **once per flip** (a hub-wide signal,
   separate from `SIGNAL_HUB_UPDATE`, which also fires on every meta/stats refresh
   and would otherwise write state for every device entity on each poll). Both
   `Rtl433Entity` and `Rtl433HubEntity` subscribe: `SIGNAL_HUB_UPDATE` covers the
-  connect/disconnect edges, which is exactly when a gated entity's `available`
+  connect/disconnect edges, when a gated entity's `available`
   changes.
 - **Logging.** The library logs drops at DEBUG under its own logger, which is
   invisible to anyone debugging the integration. The coordinator logs the loss
@@ -881,7 +875,7 @@ keep this contributor-facing.
   - `hop_interval` → number, command `hop_interval`, `val` = seconds; read
     `hop_times[0]`.
   Commands and arg/val kinds follow [WEBSOCKET_API.md](WEBSOCKET_API.md)
-  exactly — **do not invent fields**. Number bounds are deliberately wide
+  exactly — **do not invent fields**. Number bounds are wide
   (`NumberMode.BOX`); the server clamps/rejects, HA is not the authority on
   ranges. Each entry carries a **`capability` gate** (`Callable[[meta], bool]`,
   today always `_always`) so future per-server capability advertisement can
@@ -906,7 +900,7 @@ keep this contributor-facing.
   field on every (re)connect**, so values survive an rtl_433 restart. Both run
   after a `_refresh_meta`, are wrapped so a failure can never kill the connection,
   and every `/cmd` is best-effort.
-  - **Authoritative setup frequency:** a configured `initial_center_frequency` is
+  - **Setup frequency takes priority:** a configured `initial_center_frequency` is
     applied **once** in `_seed_desired_on_first_connect` (gated on the persisted
     `initial_freq_seeded` flag, **independent of whether `_desired` is empty**), so
     the user's explicit setup choice wins over the adopted/persisted center
@@ -926,8 +920,8 @@ keep this contributor-facing.
 - **`Store` persistence (keyed by entry id, NOT `entry.options`).** Desired
   state persists in a `homeassistant.helpers.storage.Store` keyed by
   `sdr_store_key(entry_id)` (`const.py`, `SDR_STORE_VERSION`), as
-  `{"values": {...}, "managed": [...]}`. It is **deliberately not** stored in
-  `entry.options`: an options write churns the config entry (reloads), and a
+  `{"values": {...}, "managed": [...]}`. Do not store it in
+  `entry.options`: an options write updates the config entry and can trigger a reload, and a
   desired-state value change must not. The public entity API is
   `get_desired(field)`, `is_managed(field)`, `set_sdr(field, value)` (persist
   first, then enforce if connected — a failed send **keeps** the desired value),
@@ -947,10 +941,10 @@ keep this contributor-facing.
   timeout and ignore-list changes are applied live with no reload. The same
   listener also owns the reload for a changed connection target / stable radio id
   (see the config-flow section) — no flow reloads a hub itself.
-- **HA is the authority; no re-adopt action — by design.** Once managed, HA
+- **HA re-applies its stored settings.** Once managed, HA
   re-applies its stored values on reconnect and **overrides later direct edits**
-  to the rtl_433 config. There is deliberately **no re-adopt button/service**.
-  The **only** re-sync path is the toggle dance: **off → restart rtl_433 → on**
+  to the rtl_433 config. There is no re-adopt button or service.
+  To re-sync, use **off → restart rtl_433 → on**
   (the now-empty Store re-adopts the live config value on the next connect).
   Document any change to this in the README in lockstep.
 - **Out of scope but anticipated** (the `capability` gate exists for these):
@@ -986,7 +980,7 @@ temperature_C:
 `name` is **optional**: omit it (or set `null`) to let HA derive a translated
 name from `device_class` — the convention for fields whose name would just
 repeat the device class. Set an explicit name only when it adds information the
-device class doesn't (e.g. "Battery mV", "Gust speed"). The two truly required
+device class doesn't (e.g. "Battery mV", "Gust speed"). The two required non-null
 attributes are `platform` and `object_suffix`.
 
 `binary_sensor` entries use `payload: { on: "<raw>", off: "<raw>" }` instead of
@@ -1032,7 +1026,7 @@ User overrides are **per hub**, stored in `entry.data[CONF_USER_MAPPINGS]`
   `CONF_USER_MAPPINGS`. The file is then **ignored and left untouched** on disk
   (never edited or deleted). Hubs added after the upgrade start with empty
   overrides.
-- **Editing surface: `async_step_mappings`** (the options-flow *Device mappings*
+- **Mapping editor: `async_step_mappings`** (the options-flow *Device mappings*
   step, `config_flow.py`). It presents an `ObjectSelector` / `ha-yaml-editor`
   pre-filled with the hub's current `CONF_USER_MAPPINGS`. The editor blocks
   invalid YAML syntax; on submit the integration **validates the mapping schema**
@@ -1096,15 +1090,14 @@ locks and caches.
 This constraint is needed because `requires-python` is `>=3.14` (what the
 *integration* needs, tracked against Home Assistant), but the pinned test stack
 pulls in a `homeassistant` requiring `>=3.14.2`, so an unrestricted resolution is
-unsatisfiable. Constraining the environment keeps the project's declared support
-honest rather than tightening it to satisfy a dev-only dependency.
+unsatisfiable. The environment constraint allows tests to resolve without
+raising the integration's minimum Python version for a development dependency.
 
 > **If you see `Failed to spawn: pytest`**, the `dev` group is missing or
 > resolution failed. Note this failure mode is **silent**: uv creates an empty
 > environment, fails to find pytest, and **still exits 0**, so a green-looking
-> run has actually executed nothing. Always confirm a real pass/fail count before
-> trusting an exit code — this bit a worktree session before the `dev` group
-> existed.
+> run may have executed no tests. Always confirm a pass/fail count before
+> trusting the exit code.
 
 The pins are duplicated in `requirements_test.txt`, which CI and pip users
 install directly (`uv pip install -r requirements_test.txt`); a renovate
@@ -1165,7 +1158,8 @@ naming helpers, and event-driven classifier now live in the `pyrtl_433` library,
 which carries **its own** test + mutation coverage. Those extracted shards are
 therefore **retired from this repo's mutation scope** — the in-scope modules
 (`library.py`'s hass.data cache, `sdr_settings.py`'s HA-metadata adapter, and
-the coordinator's HA-side policy) are the thin seams that remain here. The baseline/timings reflect only what still ships in
+the coordinator's HA-side policy) are the adapters that remain here. The
+baseline/timings reflect only what still ships in
 `custom_components/rtl_433/`.
 
 ```bash
@@ -1187,7 +1181,7 @@ Hard rules:
 
 - **Never** edit `custom_components/` to make a mutant die — this is test-only work.
 - **Never** add `# pragma: no mutate`, disable a mutator, or otherwise suppress a
-  mutant. Genuinely-equivalent survivors are simply recorded in the baseline.
+  mutant. Record equivalent survivors in the baseline.
 - The committed baseline `scripts/mutation_baseline.json` ratchets **upward only**.
 
 The baseline and gate are driven by
@@ -1224,7 +1218,7 @@ other files). A flat percentage would be far too tight on a small file (1 mutant
 floor protects small files while the fraction scales for large ones. A real
 regression kills far more than the band; a sub-band dip on a small file passes the
 PR gate and is re-measured by the nightly full run. The baseline only ratchets
-**upward**: refresh it in the same PR with `--update` when you genuinely improve a
+**upward**: refresh it in the same PR with `--update` when you improve a
 file. New mutation tests live in `tests/test_mut_*.py`.
 
 Because a full run is slow (~50 min), CI splits the work two ways — by **scope**
@@ -1239,9 +1233,8 @@ Because a full run is slow (~50 min), CI splits the work two ways — by **scope
   entry (`pyproject.toml`, `requirements_test.txt`, `tests/conftest.py`, the
   workflow) or a broad/unmappable test escalates the PR to the full package.
   **Pushes to `main` and a nightly schedule** always run the **full** package, so
-  the whole baseline stays honest and the "a test was weakened but its source is
-  unchanged" blind spot is caught within a day. For a scoped run, the touched
-  files are passed to `mutmut-ratchet stats --paths` so unscoped (un-run) mutants
+  every baseline score is checked daily, including when a test changes without
+  a source change. For a scoped run, the touched files are passed to `mutmut-ratchet stats --paths` so unscoped (un-run) mutants
   aren't counted.
 - **Whatever is in scope is split across a 6-way matrix** (one `mutation` job,
   shards 0–5). `mutmut-ratchet shards` does a deterministic LPT partition of
@@ -1252,7 +1245,7 @@ Because a full run is slow (~50 min), CI splits the work two ways — by **scope
   down to roughly the slowest single module (`entity.py`); a scoped PR fans its
   handful of modules out too. Six shards (not more) because only ~5 modules
   dominate the time — extra shards sit near-idle and widen the spread without
-  lowering the pole. The union of the shard checks equals a single whole-scope
+  shortening the run. The union of the shard checks equals a single whole-scope
   check (mutmut copies the whole package into `mutants/` regardless of the filter,
   so imports resolve; the filter only restricts which mutants execute). The job
   runs on every trigger and decides its own scope, so no matrix leg is skipped at
@@ -1273,7 +1266,7 @@ Because a full run is slow (~50 min), CI splits the work two ways — by **scope
 The end-to-end harness drives the integration against **real RF captures** (no
 SDR hardware) and captures the documentation screenshots with Playwright. It is
 fully documented, including prerequisites, the orchestrator steps
-(`./run-harness.sh full`), and an important honest caveat:
+(`./run-harness.sh full`), and these limitations:
 
 - Because `rtl_433 -r <file> -F http` runs in file **test mode** and exits
   before its mongoose HTTP/WebSocket loop starts, the native `-F http` server
@@ -1286,7 +1279,7 @@ fully documented, including prerequisites, the orchestrator steps
   the structured `{"time","src","lvl","msg"}` frame a real `-F http` server
   pushes, which is the only channel carrying the "Auto Level" noise-floor data
   behind the hub's noise sensors. The replay feeds RF silence between capture
-  passes so that noise floor genuinely moves; without it `-Y autolevel` never
+  passes so that noise floor changes; without it `-Y autolevel` never
   logs an adjustment. The bridge serves no `/cmd`, so the `/cmd`-sourced hub
   sensors read `unknown` in the harness — never synthesize them.
 
