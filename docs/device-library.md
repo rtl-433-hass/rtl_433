@@ -130,7 +130,7 @@ Home Assistant can change a binary sensor's **device class** per entity, which i
 finer than any mapping override can be. Open the entity, then its settings (the
 gear icon) → **Show as**, and pick a different class. Every binary sensor class
 is offered, with the ones closest to the current class listed first. The choice
-lives in Home Assistant's entity registry, so it survives restarts and receiver
+lives in Home Assistant's entity registry, so it survives restarts and location
 reloads, and the value the integration shipped is retained separately as the
 entity's original class — a later library update will not overwrite your choice.
 
@@ -254,7 +254,7 @@ timeout. RF devices signal availability only by transmitting, so the timeout is
 resolved per device, in this order:
 
 1. A per-device override.
-2. An explicit receiver default.
+2. An explicit location default.
 3. A **device-class default** derived from the device's known fields.
 
 The known fields are both its adopted (persisted) fields and its latest payload,
@@ -276,7 +276,7 @@ The class default has two outcomes:
 Diagnostic fields such as `battery_ok` do not decide the class on their own. If a
 device also has an event-driven field, the whole device uses the event-driven
 default, so its battery and other entities stay available between events. An
-explicit per-device or receiver timeout always overrides the class default.
+explicit per-device or location timeout always overrides the class default.
 
 Because an event-driven device's availability no longer signals freshness, its
 per-device **Last seen** timestamp sensor is enabled by default, and is disabled
@@ -431,7 +431,7 @@ next pyrtl_433 release and the integration's requirement bump.
 ### Add-a-mapping workflow
 
 1. **Find the field name.** Watch your rtl_433 stream, or download diagnostics
-   for the receiver from **Settings → Devices & Services → the rtl_433 integration →
+   for the location from **Settings → Devices & Services → the rtl_433 integration →
    ⋮ → Download diagnostics**. The export lists unmapped fields your hardware has
    sent in `unmatched_field_keys`. Each key needs either a mapping
    or, for noise and identity data, an entry for `_skip_keys.yaml`.

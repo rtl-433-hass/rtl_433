@@ -24,10 +24,10 @@ receiver per rtl_433 server. Setting the integration up creates a location and
 its first receiver together, and **Add a receiver** adds more servers to the same
 location.
 
-Everything a location's receivers hear is **unioned**. One physical sensor heard
+Everything a location's receivers hear is combined. One physical sensor heard
 by two receivers is one Home Assistant device with one set of entities, updating
-whenever either receiver hears it. Add a second *location* only for a genuinely
-distant site, where its receivers could never hear the same transmitter as the
+whenever either receiver hears it. Add a second *location* only for a separate
+site, where its receivers could never hear the same transmitter as the
 first — devices never merge across locations.
 
 The best way to use this integration is with the
@@ -49,8 +49,8 @@ integration can connect to any rtl_433 server with HTTP output enabled.
   on one page for you to add, so neighbours' sensors and bad decodes stay out of
   Home Assistant. A sensor two receivers hear is one row, approved once for the
   whole location. Unwanted devices can be ignored until you want them back.
-- **Union across receivers**: several rtl_433 servers in one location feed one
-  device per sensor and one entity per mapped field, deduped so two decodes of
+- **Shared devices across receivers**: several rtl_433 servers in one location feed one
+  device per sensor and one entity per mapped field, so two copies of
   the same transmission are not recorded twice.
 - **Configurable availability**: silence-based availability with location
   defaults, device overrides, and event-driven class defaults, merged across the
@@ -58,8 +58,8 @@ integration can connect to any rtl_433 server with HTTP output enabled.
   connected and hearing it.
 - **Per-receiver signal detail**: RSSI, SNR and Last seen stay per receiver, and
   the **Signal coverage** page compares them without enabling an entity.
-- **Receiver observability**: diagnostic entities for connectivity, radio/meta
-  values, and server statistics, per receiver.
+- **Receiver diagnostics**: entities for connectivity, radio settings, and server
+  statistics for each receiver.
 - **Optional managed radio settings**: Home Assistant can adopt and re-apply each
   receiver's rtl_433 radio settings after reconnects.
 - **Debugging and Diagnostics**: downloadable diagnostics show unmapped fields so

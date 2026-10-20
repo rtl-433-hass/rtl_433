@@ -109,23 +109,18 @@ configured WebSocket path. If a reverse proxy exposes only the WebSocket path an
 not `/cmd`, these sensors read `unknown` while the event stream and
 connectivity sensor keep working.
 
-Because those values come from the server, the diagnostic and statistics sensors
-go `unavailable` as soon as **their own** receiver's connection drops — the same
-transport gate that applies to the devices, see
-[Availability](availability.md#receiver-connection). Otherwise they would keep
-showing a frozen reading. Another receiver at the location being up says nothing
-about this one's radio, so these never borrow its answer the way a merged device
-does. The Connectivity sensor stays available throughout, and so do the radio
-controls below: those are settings you write, not readings you trust.
+The diagnostic and statistics sensors become `unavailable` when their receiver
+disconnects, even if another receiver at the location is connected. See
+[Availability](availability.md#receiver-connection). The Connectivity sensor stays
+available to report the connection state, and the radio controls below stay
+available so you can change settings while disconnected.
 
 ## Managing a Receiver's Radio from Home Assistant
 
-By default a new receiver adopts and manages its radio's settings. This is a
-per-receiver choice — **Manage this receiver's radio**, on that receiver's
-**Receiver settings** page — because each receiver has a radio of its own, and
-one of them being Home-Assistant-managed says nothing about the next. With it
-enabled, the receiver exposes controls under its own receiver device in the
-config entity category:
+By default, Home Assistant adopts and manages each receiver's radio settings.
+To change this, open that receiver's **Receiver settings** page and use
+**Manage this receiver's radio**. When enabled, these controls appear on the
+receiver device in the config entity category:
 
 - **Center frequency** number in MHz, available only for single-frequency setups.
 - **Sample rate** number in Hz.
