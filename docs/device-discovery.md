@@ -12,9 +12,8 @@ trigger them once to make them show up.
 ## The rtl_433 Page
 
 Open **Settings → Devices & Services → rtl_433 → Configure (the gear icon)**.
-This is the rtl_433 page, and it works like the Zigbee and Z-Wave pages: it
-opens on an overview of the receiver, with everything else one click away. It is
-available to administrators only.
+The rtl_433 page opens with a receiver overview and links to devices and
+settings. Only administrators can access it.
 
 The overview has three parts:
 
@@ -25,7 +24,7 @@ The overview has three parts:
 - **Receiver settings**, **Device settings** and **Device mappings**, which each
   open their own page
 
-and, bottom right, an **Add or replace device** button.
+The **Add or replace device** button is at the bottom right.
 
 ![The rtl_433 page: a status card with a green tick reading Online and 7 devices; a My network card listing Devices, 7 devices and Entities, 33 entities, each with a chevron; then a card of three rows — Receiver settings (availability timeout and whether Home Assistant manages the receiver), Device settings (per-device timeout overrides and utility-meter calibration) and Device mappings (YAML overrides for how fields become entities); and a blue Add or replace device button in the bottom right](images/18-rtl-433-page.png)
 
@@ -68,10 +67,9 @@ Otherwise, **Ignore** hides the device.
 
 ### Clearing the List
 
-A receiver left running for a few weeks in a built-up area accumulates hundreds
-of devices, and the one you came to add is somewhere among them. **Clear
-discovered devices** will empty the list so you can easily add the ones you
-want.
+In a busy area, the discovered list can fill with devices you do not want.
+**Clear discovered devices** empties it so you can find your devices as they
+transmit again.
 
 ## Receiver and Device Settings
 
@@ -82,13 +80,12 @@ this receiver, and whether Home Assistant manages the server's own SDR settings
 **Device settings** targets one device you have already added: its availability
 timeout override, its motion clear delay, and its
 [utility-meter calibration](calibration.md). Pick the device at the top and the
-rest of the form rebuilds from it, showing only the settings that device
-actually has.
+form shows the settings available for that device.
 
 **Device mappings** is this receiver's
 [device-library overrides](device-library.md), as YAML. Clearing the editor
-removes them all. The device mappings are automatically validated (but not
-tested!) when saving.
+removes them all. Saving checks the YAML syntax and mapping schema. It does not
+test the mappings against transmissions from your devices.
 
 ## Ignoring Devices
 
