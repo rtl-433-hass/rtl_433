@@ -195,7 +195,7 @@ frames:
   (default `WARNING`; raise with `-v`) gates what is generated. Notably the
   pulse detector's noise estimates (`src` `"Auto Level"`, from `-Y autolevel`
   adjustments and `-M noise[:secs]` periodic reports) arrive this way — the
-  only place rtl_433 surfaces its noise floor; there is no structured getter.
+  only place rtl_433 reports its noise floor; there is no structured getter.
 
 On server shutdown each WebSocket receives `{"shutdown":"goodbye"}`.
 
@@ -290,17 +290,12 @@ reverse proxy with TLS and authentication in front if remote access is required.
 
 ## Home Assistant discovery commands
 
-Everything above belongs to the rtl_433 server. This section is a different API:
-the commands this integration registers on **Home Assistant's own** WebSocket API
-at `ws://<home-assistant>:8123/api/websocket`. They back the discovery panel, and
-they are equally usable from a script or from the browser's developer console —
-the panel adds no logic of its own on top of them, so anything it can do, these
-can do.
-
-They are the programmatic form of [Adding Devices to Home
-Assistant](docs/device-discovery.md): see what the receiver has heard, then add,
-ignore or un-ignore it — and, since the panel became the integration's
-configuration page, read and write the hub's settings too.
+The integration registers the following commands on **Home Assistant's WebSocket
+API** at `ws://<home-assistant>:8123/api/websocket`. The discovery panel uses
+these commands to list, add, ignore, and un-ignore devices and to read and write
+hub settings. You can also call them from a script or the browser's developer
+console. See [Adding Devices to Home Assistant](docs/device-discovery.md) for
+the panel workflow.
 
 ### Authentication
 
@@ -338,21 +333,19 @@ Errors are the usual `{"success": false, "error": {...}}` result:
 | `error.code` | Meaning |
 | --- | --- |
 | `unauthorized` | The connection's user is not an administrator. |
-| `not_found` | No rtl_433 hub has that `entry_id`. An entry belonging to another integration reads the same way — these commands never reach into one. |
-| `not_loaded` | The hub exists but is not set up — reloading, or its server is unreachable. The discovered list lives in memory, so there is nothing to answer with until it loads. |
+| `not_found` | No rtl_433 hub has that `entry_id`, or the entry belongs to another integration. |
+| `not_loaded` | The hub exists but is not loaded, for example during a reload or while its server is unreachable. The discovered list is available only after setup. |
 | `replace_failed` | The replacement cannot be made: an unknown survivor, or the same key on both sides. Distinct from `not_loaded` so a script can tell "retry in a moment" from "this request cannot work". |
 | `invalid_mappings` | The submitted device-mapping document is not YAML, is not a mapping, or breaks the override schema. `error.message` carries every problem found. Nothing is stored. |
 
 ### `rtl_433/hubs`
 
-Lists the hubs, so a caller can pick one. Hubs that failed to load are listed
-too, flagged rather than hidden.
+Lists all configured hubs, including those that failed to load.
 
-`loaded` is whether the config entry is set up. `connected` is whether that
-hub's WebSocket to its rtl_433 server is open right now — the same fact
-`rtl_433/devices/subscribe` reports, but for every hub at once, since a
-subscription only covers the hub it is opened against. A hub that is not loaded
-has no socket to report and so is never `connected`.
+`loaded` reports whether the config entry is set up. `connected` reports whether
+the hub's WebSocket connection is open. An unloaded hub always has
+`connected: false`. The subscription command reports connectivity for one hub;
+this command reports it for all hubs.
 
 ```json
 {"id": 1, "type": "rtl_433/hubs"}
@@ -453,20 +446,17 @@ Each reading describes the entity that field would become:
 | `entity_category` | `"diagnostic"` for the fields Home Assistant files under Diagnostic, else `null`. |
 | `icon` | The icon Home Assistant will show, from core's own `icons.json` for the device class, or `null` when it describes none. |
 
-`display` is worth using in preference to re-formatting `value`. It is built
-from the same descriptor, unit and translated vocabulary the entity itself
-uses, so it says `"Wet"` where a `moisture` sensor says Wet and `"Open"` where
-an `opening` sensor says Open — not `true`/`false`, and not On/Off.
+Use `display` to show readings with the entity's units and translated state
+names, such as `"Wet"` for moisture or `"Open"` for opening sensors.
 
 One known gap: Home Assistant converts a few device classes to the configured
 unit system (for this library, wind speed, rainfall and pressure). `display`
 does not, so on a US-customary installation those three read in metric here and
 in imperial on the device page.
 
-Two kinds of field are deliberately absent, because neither produces an entity
-the user would see: one the device library does not map at all, and one it maps
-with `enabled_by_default: false` (the `time`, `freq`, `rssi`, `snr` and `noise`
-diagnostics). Read the raw frame from the device's own entities after adoption,
+The response omits unmapped fields and fields with `enabled_by_default: false`
+(such as the `time`, `freq`, `rssi`, `snr` and `noise` diagnostics). Read the raw
+frame from the device's own entities after adoption,
 or from `rtl_433/events` above, if you need it verbatim.
 
 `ignored` carries one `{"key", "model"}` per ignored device. The model is an
@@ -475,9 +465,8 @@ usual case — nothing is stored about a device that was never added.
 
 ### `rtl_433/devices/add`, `.../ignore`, `.../unignore`
 
-The three actions. All take the same parameters and return the same shape, and
-all do exactly what the equivalent options-flow step does — there is one
-implementation behind both.
+These commands take the same parameters and return the same response format.
+They share their implementation with the equivalent options-flow steps.
 
 ```json
 {"id": 3, "type": "rtl_433/devices/add",
@@ -489,8 +478,7 @@ implementation behind both.
 {"applied": ["Acurite-Tower-12053-chC"], "skipped": ["LeakDetector-9-21"]}
 ```
 
-`skipped` is not an error. It means the key was not in a state the action
-applies to, and each command means something slightly different by that:
+`skipped` lists keys the action could not apply to, without returning an error:
 
 | Command | `applied` | `skipped` |
 | --- | --- | --- |
@@ -543,14 +531,12 @@ Unsubscribe the standard way, naming the subscription's id:
 
 ## Home Assistant settings commands
 
-The same three forms the panel's settings pages render. They are ordinary
-commands, so anything those pages do is scriptable — including the parts that
-are awkward by hand, like setting the same calibration on a dozen meters.
+These commands read and write the settings shown in the panel's three settings
+pages. Scripts can use them to configure several devices at once.
 
 ### `rtl_433/settings/get`
 
-Everything the three forms need, in one call — they are one screenful, and the
-alternative is three round trips to fill controls the user may never open.
+Returns the data for all three settings forms in one call.
 
 ```json
 {"id": 10, "type": "rtl_433/settings/get",
@@ -573,11 +559,9 @@ alternative is three round trips to fill controls the user may never open.
 }}
 ```
 
-`commodity_units` travels in the payload rather than being a constant a client
-carries, because which units Home Assistant will convert for a given commodity is
-a fact about the integration's calibration table. A client with its own copy will
-eventually offer a unit the entity build refuses, and nothing fails visibly — the
-sensor just stops being eligible for the Energy dashboard.
+Use `commodity_units` to populate unit choices from the integration's calibration
+table. A separate list maintained by the client could offer unsupported units
+that make the sensor ineligible for the Energy dashboard.
 
 `commodity` is a *suggestion*, not a stored value: it is the device's existing
 calibration when it has one, and otherwise a guess from the `MeterType` /
@@ -618,14 +602,12 @@ sent: `{commodity, unit, scale}` is normalized on the way in, and a commodity of
 `none`, an unknown one, or a unit that is not convertible for the commodity all
 store *no* calibration at all.
 
-`motion_clear_delay` only does anything on a device with a field that auto-clears
-(`motion` is `true` in the payload for those); elsewhere it is a control with
-nothing behind it.
+`motion_clear_delay` applies only to devices with a field that auto-clears,
+identified by `motion: true` in the settings payload.
 
 ### `rtl_433/settings/mappings`
 
-The hub's [device-library overrides](docs/device-library.md), as the YAML text the
-documentation writes them in.
+Saves the hub's [device-library overrides](docs/device-library.md) from YAML text.
 
 ```json
 {"id": 13, "type": "rtl_433/settings/mappings",
@@ -633,7 +615,6 @@ documentation writes them in.
  "yaml": "temperature_C:\n  platform: sensor\n  unit_of_measurement: K\n"}
 ```
 
-An empty or whitespace-only document removes every override — clearing the editor
-is how they are all removed. A document that will not store comes back as
-`invalid_mappings` with every problem found joined into `error.message`, and the
-overrides already stored are left exactly as they were.
+An empty or whitespace-only document removes all overrides. Invalid documents
+return `invalid_mappings`, with all validation errors in `error.message`. The
+stored overrides are preserved.
