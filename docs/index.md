@@ -2,7 +2,7 @@
 
 The rtl_433 integration connects Home Assistant to
 [rtl_433](https://github.com/merbanan/rtl_433) so you can see weather stations,
-security sensors, and more, all as native Home Assistant devices and entities.
+security sensors, and other RF devices as Home Assistant devices and entities.
 
 ![A single rtl_433 hub in Home Assistant with its nested devices: a weather sensor, energy meter, door sensor, doorbell, leak detector, and utility meter](images/09-home-hero.png)
 
@@ -35,7 +35,7 @@ integration can connect to any rtl_433 server with HTTP output enabled.
   device overrides, and event-driven class defaults.
 - **Multiple servers**: add one hub per rtl_433 server; device identities are
   scoped per hub.
-- **Hub observability**: diagnostic entities for connectivity, SDR/meta values,
+- **Hub diagnostics**: entities for connectivity, receiver settings,
   and server statistics.
 - **Optional managed SDR settings**: Home Assistant can adopt and re-apply rtl_433
   SDR settings after reconnects.
