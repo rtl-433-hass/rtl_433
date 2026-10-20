@@ -24,8 +24,8 @@ them, with no cloud dependency and no polling.
   with per-hub user overrides available from the Home Assistant UI.
 - Every device the receiver hears is listed for you to add or ignore; nothing is
   added to Home Assistant on its own.
-- Supports class-aware availability, Last seen timestamps, momentary event
-  entities, synthesized-off motion sensors, and utility-meter calibration.
+- Sets availability timeouts by device type, records Last seen timestamps,
+  handles button presses and motion, and supports utility-meter calibration.
 - Optional Home Assistant-managed SDR controls can adopt and re-apply receiver
   settings such as frequency, sample rate, gain, ppm, conversion mode, and hop
   interval.
