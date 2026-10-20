@@ -1,8 +1,8 @@
 # Device Mapping Library
 
 The rtl_433 integration turns the JSON fields emitted by rtl_433 into Home
-Assistant entities using a **data-driven device library**: a set of YAML
-files that map each rtl_433 field name to a Home Assistant entity descriptor.
+Assistant entities using YAML files that map rtl_433 field names to Home
+Assistant entity descriptions.
 
 Use device mappings to add support for fields your rtl_433 hardware already
 reports, without editing the integration code or waiting for a new release. You
@@ -11,8 +11,7 @@ pyrtl_433.
 
 > The YAML files and their loader are part of
 > [`pyrtl_433`](https://github.com/rtl-433-hass/pyrtl_433), the integration's
-> runtime dependency — not this repository. The authoritative YAML schema
-> reference is
+> runtime dependency. For the YAML schema, see
 > [the pyrtl_433 device-library reference](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/).
 
 ## Adding device mappings
@@ -41,20 +40,19 @@ independent set. The editor:
 To find fields your device reports that do not yet have entities, download
 diagnostics for the hub from **Settings → Devices & Services → the rtl_433
 integration → ⋮ → Download diagnostics** and inspect `unmatched_field_keys`. Each
-key is either a candidate for a mapping or, if it is genuinely noise/identity
-data, an entry for `skip_keys:`.
+key may need a mapping or, for noise and identity data, an entry in `skip_keys:`.
 
 > **Comments and formatting are not preserved.** The editor returns parsed YAML,
 > so any comments or hand-formatting in what you paste are dropped once the
-> mappings are stored. The mapping *content* is preserved exactly.
+> mappings are stored. The mapping values are preserved.
 
-Mappings you add in the UI layer **on top of** pyrtl_433:
+Mappings you add in the UI override or extend pyrtl_433:
 
 - A field present in both the UI mapping and pyrtl_433: the **UI mapping
   wins** (full entry replacement, not a deep merge), so you can correct a
   unit, device class, or transform.
 - A field present only in the UI mapping: it is **added** as a new mapping.
-- `skip_keys` entries in the UI mapping are **unioned** with the upstream skip
+- `skip_keys` entries in the UI mapping are **combined** with the upstream skip
   list.
 - A `models:` block in the UI mapping is **merged per `(model, field_key)`**: a
   UI model-scoped entry replaces the upstream one for the same model and field,
@@ -88,10 +86,9 @@ battery_ok:
   object_suffix: B
 ```
 
-`skip_keys:` entries work in the editor exactly as in pyrtl_433, and so do
-model-scoped mappings — the way to correct a mapping for **one specific device
-model** rather than every device that emits the field. Nest the per-model
-descriptors under a [`models:` block](#model-scoped-mappings-models) keyed by the
+The editor also accepts `skip_keys:` entries and model-scoped mappings. Use a
+model-scoped mapping to change how a field is handled for one device model.
+Nest the per-model descriptors under a [`models:` block](#model-scoped-mappings-models) keyed by the
 exact rtl_433 `model` string; a model-scoped entry beats any global one for that
 model (see [precedence](#precedence-specificity-first)). For example, to rename
 one model's temperature sensor and round it more finely than the global default,
@@ -161,7 +158,7 @@ Top-level keys are rtl_433 field names **exactly** as they appear in the JSON
 event (`temperature_C`, `wind_avg_km_h`, `battery_ok`). Names are matched
 **case-sensitively**, and not every decoder uses `snake_case` — SCMplus emits
 `Consumption`, ERT-SCM emits `consumption_data`. A key that differs only in case
-silently never matches and will not show up in Home Assistant.
+will not match, so no entity appears in Home Assistant.
 
 ```yaml
 temperature_C:
@@ -174,9 +171,9 @@ temperature_C:
   object_suffix: T            # short, STABLE unique-id token
 ```
 
-`platform` and `object_suffix` are the only truly required attributes;
-`device_class`, `unit_of_measurement` and `state_class` are required but may be
-`null`. The rest are optional: `value_transform` (`float` / `int` / `scale` /
+`platform` and `object_suffix` require values. `device_class`,
+`unit_of_measurement` and `state_class` must be present but may be `null`.
+The rest are optional: `value_transform` (`float` / `int` / `scale` /
 `offset` / `round`, applied in that order) for sensors, `payload:
 { on: <raw>, off: <raw> }` for binary sensors, `event_map` for event entities,
 plus `clear_delay`, `event_driven`, `force_update`, `entity_category`,
@@ -188,17 +185,16 @@ list with a top-level `skip_keys:` sequence.
 `object_suffix` is part of every entity's unique ID, so **changing it orphans
 existing entities**.
 
-Two attributes change how an entity *behaves* in Home Assistant rather than just
-how it looks: `clear_delay` ([Motion / occupancy](#motion-occupancy)) and
+Two attributes control timing and availability: `clear_delay`
+([Motion / occupancy](#motion-occupancy)) and
 `event_driven` ([Availability classification](#availability-classification)).
 
 ### Motion / occupancy
 
-PIR / occupancy decoders (Interlogix, Risco Agility, Kerui, …) emit `motion`
-**only on detection** (raw value `1`) and **never send an off** — the hardware is
-detect-only. So `motion` is a `binary_sensor` (device class `occupancy`) whose
-`payload` declares only an `on` token; the off state is **synthesized** by a
-timer rather than received:
+PIR / occupancy decoders (Interlogix, Risco Agility, Kerui, …) emit `motion: 1`
+on detection and send no off message. Their `motion` mapping uses a
+`binary_sensor` with device class `occupancy` and only an `on` token. A timer
+turns the sensor off:
 
 ```yaml
 motion:
@@ -210,10 +206,8 @@ motion:
   object_suffix: motion
 ```
 
-The `clear_delay` attribute (seconds) drives the synthesized off: the sensor
-turns `on` on each detection and is auto-cleared to off after the delay elapses
-with no re-detection. Every fresh detection **reschedules** the timer, so the
-off window restarts on each retrigger. The upstream default is **90 seconds**.
+`clear_delay` sets how many seconds the sensor stays on after a detection. Each
+new detection restarts the timer. The default is **90 seconds**.
 
 When Home Assistant restarts, a motion sensor comes back off rather than on,
 since no timer would be left to clear a restored on. A device that has never
@@ -236,20 +230,19 @@ resolved per device, in this order:
 
 The known fields are both its adopted (persisted) fields and its latest payload,
 so an event-driven device that has been silent since a restart is still
-classified correctly before it next transmits (rather than briefly expiring its
-battery at the periodic default).
+classified correctly before it next transmits.
 
 The class default has two outcomes:
 
 - **Event-driven** → never-expire (the device, and all its entities including
   battery, stay available once seen). These devices transmit *only on a state
-  change* — a door opening, motion, a button press — so any finite silence
-  timeout would eventually misfire and wrongly hide a healthy device. A field is
+  change* — a door opening, motion, a button press — so a finite timeout
+  could mark a healthy device unavailable. A field is
   event-driven when it uses `platform: event` **or** sets `event_driven: true`
   (e.g. `motion`, `contact_open`, `reed_open`, `closed`, `alarm`). The set is
   derived from the active library (upstream descriptors plus user mappings).
 - **Periodic** → a finite default (10 min). Everything else — temperature,
-  humidity, power, etc. — which reports on a regular cadence.
+  humidity, power, etc. — which reports at regular intervals.
 
 Diagnostic fields such as `battery_ok` do not decide the class on their own. If a
 device also has an event-driven field, the whole device uses the event-driven
@@ -263,11 +256,10 @@ minutes" automations keep working.
 
 ### Event entities
 
-`platform: event` is for **momentary, fire-and-forget** RF fields — a remote
-button, a doorbell press — that have no steady "on" / "off"
-state to track. Each genuine transmission fires **one** Home Assistant
-[event](https://www.home-assistant.io/integrations/event/), and the entity
-stays available between presses (no faked "off"). Event entries live in their
+`platform: event` is for momentary actions such as remote buttons and doorbell
+presses, which have no lasting on/off state. Each live transmission fires one
+Home Assistant [event](https://www.home-assistant.io/integrations/event/), and the entity
+stays available between presses. Event entries live in their
 own library file, `events.yaml`:
 
 ```yaml
@@ -387,27 +379,21 @@ single field on a single device is, **highest to lowest**:
 The rule is **specificity-first**: a model-scoped entry always beats a global one
 *regardless of source*. In particular an **upstream** `models:` entry outranks a
 **UI global** entry for a matching model. Within each tier the UI mapping beats
-pyrtl_433. (This falls out naturally from the merge: the UI mapping replaces
-the upstream entry *within* a tier, and the lookup checks the model tier before
-the global tier.)
+pyrtl_433.
 
-> **No speculative real-meter mappings ship.** Because a meter's consumption
-> unit/scale is not knowable from the signal, pyrtl_433 does **not** carry a
-> guessed `models:` consumption mapping for any real model — a wrong scale
-> would silently corrupt real Energy data. The example below is purely
-> illustrative; for a real meter use the per-device calibration step in the
-> *Device settings* page (see [Utility-meter calibration](calibration.md)) until a model's unit/scale is authoritatively
-> known.
+> pyrtl_433 does not include guessed consumption mappings for real meters. A
+> wrong scale would produce incorrect Energy data. For a real meter, use
+> [per-device calibration](calibration.md) until its model's unit and scale are
+> confirmed. The mapping example above shows the syntax only.
 
 ## Contributing device mappings
 
-The easiest way to add support for your own installation is
-[Adding device mappings](#adding-device-mappings) — no code, no release wait.
+To add support for your own installation, use
+[the mapping editor](#adding-device-mappings).
 
-If you want the mapping to ship for **everyone**, contribute it to
-**[pyrtl_433](https://github.com/rtl-433-hass/pyrtl_433)**, not to this
-repository: the YAML library moved there in pyrtl_433 0.3.0 so every rtl_433
-consumer shares one curated set of mappings. The files live under
+To include a mapping in future releases, contribute it to
+[pyrtl_433](https://github.com/rtl-433-hass/pyrtl_433). The YAML library has lived
+there since version 0.3.0 and is shared by its consumers. The files live under
 `pyrtl_433/library/data/`, one themed file per domain (`temperature.yaml`,
 `humidity_moisture.yaml`, `power_electrical.yaml`, `events.yaml`, `misc.yaml`, …,
 plus `_skip_keys.yaml`). A merged mapping reaches Home Assistant users on the
@@ -418,8 +404,8 @@ next pyrtl_433 release and the integration's requirement bump.
 1. **Find the field name.** Watch your rtl_433 stream, or download diagnostics
    for the hub from **Settings → Devices & Services → the rtl_433 integration →
    ⋮ → Download diagnostics**. The export lists unmapped fields your hardware has
-   sent in `unmatched_field_keys`. Each key is either a candidate for a mapping
-   or, if it is genuinely noise/identity data, an entry for `_skip_keys.yaml`.
+   sent in `unmatched_field_keys`. Each key needs either a mapping
+   or, for noise and identity data, an entry for `_skip_keys.yaml`.
    rtl_433 field names are case-sensitive and unit-suffixed (`temperature_C`, not
    `temperature`).
 2. **Add the entry in pyrtl_433.** Pick the themed file that matches the field's
@@ -432,13 +418,13 @@ next pyrtl_433 release and the integration's requirement bump.
    fixture under `tests/fixtures/` in *this* repository with a real event from
    your device. `tests/test_fixture_coverage.py` sweeps every fixture against the
    **installed** library and fails if any field in it has no descriptor and no
-   skip-key entry — that sweep is what proves the mapping actually matches the
-   devices this integration builds entities for.
+   skip-key entry. This checks that mappings match the events used by this
+   integration.
 
 !!! warning "Field names are matched exactly, and a mismatch is silent"
 
-    A key that differs from the wire name by so much as its case produces no
-    entity, no warning, and no error — the sensor simply never appears. SCMplus
+    A key that differs from the decoded field name, even only in case, creates
+    no entity and produces no warning or error. SCMplus
     emits `Consumption` (CamelCase) while ERT-SCM emits `consumption_data`
     (snake_case); both decoders are in the same protocol family. Copy the name
     from the decoder's `data_make()` call, or better, from a real event.
@@ -461,4 +447,4 @@ The upstream `mappings` table includes two `device_automation` entries —
 - `button` is modelled as an [event entity](#event-entities) instead of an MQTT
   device trigger — see the library's `events.yaml`.
 
-Everything else from the upstream table is ported faithfully.
+All other entries from the upstream table are included.
