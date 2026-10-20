@@ -4,7 +4,7 @@
 between the full HACS build (`custom_components/rtl_433/`) and the future minimal
 Home Assistant Core build. Both builds ship under the **same domain** (`rtl_433`,
 `const.py:16`) and therefore read and write the **same** config entries, entity
-registry, and device registry. The three identity surfaces below MUST be produced
+registry, and device registry. The three identity formats below MUST be produced
 **byte-identical** by both builds. Changing any of them is a breaking change that
 requires a coordinated migration shipped in **both** builds simultaneously.
 
@@ -12,9 +12,8 @@ The minimal Core `rtl_433` integration MUST:
 - construct every `unique_id` and device `identifiers` tuple using the **exact**
   templates in §2 and §3;
 - carry the same config-entry `VERSION` / `MINOR_VERSION` (§1) and a migration
-  path that is a **superset-tolerant, non-downgrading subset** of §1 — i.e. it
-  MUST tolerate options / `minor_version` values written by the full build, and
-  MUST NOT downgrade an entry;
+  path that tolerates options and `minor_version` values written by the full
+  build and MUST NOT downgrade an entry (§1);
 - never mutate these formats without a coordinated migration in both builds.
 
 All facts below were transcribed from the current source; line citations are to
@@ -81,8 +80,8 @@ hub model.
   disabled at minor 3, not ones the user disabled. Sets `minor_version=6`.
 - **→ minor 7** (`migration.py:528-552`): repeat the minor-4 cleanup — strip a hub
   `CONF_AVAILABILITY_TIMEOUT` still equal to the legacy default (600) that the
-  options flow used to re-persist on save. The options flow no longer writes the
-  sentinel, so this heal is final. Sets `minor_version=7`.
+  options flow used to re-persist on save. The options flow no longer writes this
+  sentinel value, so the cleanup does not need to repeat. Sets `minor_version=7`.
 - **`migration.py:554`** — `return True`.
 
 > Note: the ladder is written to be idempotent and order-tolerant — a legacy device
@@ -144,7 +143,7 @@ phantom device.
 
 ---
 
-## 4. Critical invariant: `hub_entry_id == entry.entry_id`
+## 4. Required identity: `hub_entry_id == entry.entry_id`
 
 Both spellings appear in the code and refer to the **same string**:
 - `entity.py:556` and `entity.py:570` pass `entry.entry_id` as the `hub_entry_id`
@@ -170,4 +169,4 @@ Any change to a `version`/`minor_version` value or migration step (§1), a
 2. the identical change and migration shipped in **both** the HACS build and the
    minimal Core build at the same time.
 
-Until then, these three surfaces are **FROZEN**.
+Until then, these three formats are **FROZEN**.
