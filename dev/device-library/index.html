@@ -573,6 +573,40 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Adding device mappings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#choosing-the-right-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing the right scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Choosing the right scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#retyping-a-single-entity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retyping a single entity
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -789,6 +823,40 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Adding device mappings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#choosing-the-right-scope" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing the right scope
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Choosing the right scope">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#retyping-a-single-entity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Retyping a single entity
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1058,10 +1126,63 @@ leaving every other model untouched:</p>
 <span class="w">      </span><span class="nt">value_transform</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> round</span><span class="p">:</span><span class="w"> </span><span class="nv">2</span><span class="w"> </span><span class="p p-Indicator">}</span>
 <span class="w">      </span><span class="nt">object_suffix</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">T</span>
 </code></pre></div>
+<h3 id="choosing-the-right-scope">Choosing the right scope<a class="headerlink" href="#choosing-the-right-scope" title="Permanent link">&para;</a></h3>
 <p>Mapping overrides are <strong>global or model-scoped only</strong> — they apply to every device
-of a model, not a single physical unit. To change settings for one specific unit
-(its availability timeout, meter calibration, or motion clear delay), use the
-<em>Device settings</em> page instead.</p>
+of a model, not a single physical unit. <code>model</code> is the most specific scope the
+library has, and for some decoders it is coarser than the hardware it covers:
+every Honeywell 5800 door sensor, window sensor, PIR and tilt sensor reports
+<code>model: "Honeywell-Security"</code>.</p>
+<table>
+<thead>
+<tr>
+<th>What is wrong</th>
+<th>Where to fix it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A field is mapped wrongly for every device that emits it</td>
+<td><em>Device mappings</em>, as a top-level entry</td>
+</tr>
+<tr>
+<td>A field is mapped wrongly for one model</td>
+<td><em>Device mappings</em>, inside a <a href="#model-scoped-mappings-models"><code>models:</code> block</a></td>
+</tr>
+<tr>
+<td>One unit needs a different availability timeout, meter calibration or motion clear delay</td>
+<td><em>Device settings</em></td>
+</tr>
+<tr>
+<td>One unit's entity is correct but shown as the wrong kind of thing</td>
+<td>Home Assistant's entity settings — see below</td>
+</tr>
+</tbody>
+</table>
+<h4 id="retyping-a-single-entity">Retyping a single entity<a class="headerlink" href="#retyping-a-single-entity" title="Permanent link">&para;</a></h4>
+<p>Home Assistant can change a binary sensor's <strong>device class</strong> per entity, which is
+finer than any mapping override can be. Open the entity, then its settings (the
+gear icon) → <strong>Shown as</strong>, and pick a different class. The choice lives in Home
+Assistant's entity registry, so it survives restarts and hub reloads, and the
+value the integration shipped is retained separately as the entity's original
+class — a later library update will not overwrite your choice.</p>
+<p>This is how you tell one Honeywell 5800 sensor from another. They all share a
+model string, so a <code>models:</code> entry cannot separate them, and which loop bit a
+given sensor reports on is chosen by whoever installed it:</p>
+<ul>
+<li>A door or window sensor reports on <code>contact_open</code> or <code>reed_open</code>. Both ship as
+  <strong>Opening</strong>; retype to <strong>Door</strong> or <strong>Window</strong> for the matching icon and wording.</li>
+<li>A PIR reports on the same fields, so retype it to <strong>Motion</strong> or <strong>Occupancy</strong>.</li>
+<li>The loop your sensor does <em>not</em> use still produces an entity, which simply never
+  changes state. Hide it from the same entity settings page.</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Entity category is not adjustable from the UI</p>
+<p>Home Assistant has no per-entity control for <strong>entity category</strong>, so a field
+the library marks <code>diagnostic</code> cannot be promoted out of a device's
+Diagnostic section from Home Assistant. That one has to be right in the
+library — if a field is categorized wrongly for your hardware, please
+<a href="https://github.com/rtl-433-hass/rtl_433/issues">open an issue</a>.</p>
+</div>
 <h2 id="mapping-entry-schema-summary">Mapping entry schema (summary)<a class="headerlink" href="#mapping-entry-schema-summary" title="Permanent link">&para;</a></h2>
 <p>The full schema is documented in the
 <a href="https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/">pyrtl_433 device-library reference</a>.</p>
