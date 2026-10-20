@@ -1,7 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
-  "internalChecksFilter": "strict",
+  "extends": ["github>rtl-433-hass/renovate-config:python"],
   "description": [
     "ignorePaths: config:recommended pulls in :ignoreModulesAndTests, whose ignorePaths cover **/test/** and **/tests/** -- which silently put the whole tests/ tree out of Renovate's reach. The screenshot harness lives there and carries two real manifests, tests/integration/docker-compose.yml and tests/integration/package.json, so both went unmanaged: the Home Assistant image sat on 2026.5.4 until it fell below the 2026.9.0 floor hacs.json declares and the harness stopped working, and playwright sat on 1.49.1",
     "This is the upstream list with the two test globs dropped and everything else kept. Nothing else under tests/ is a manifest Renovate reads -- the Python tests carry no pins and the rtl_433_tests gitlink is handled by the git-submodules manager, which is disabled by default"
@@ -13,7 +12,6 @@
     "**/examples/**",
     "**/__fixtures__/**"
   ],
-  "minimumReleaseAgeBehaviour": "timestamp-required",
   "customManagers": [
     {
       "customType": "regex",
@@ -35,12 +33,6 @@
       "datasourceTemplate": "python-version"
     }
   ],
-  "automerge": true,
-  "minimumReleaseAge": "3 days",
-  "pre-commit": {
-    "enabled": true,
-    "description": "Renovate's pre-commit manager is disabled by default, so .pre-commit-config.yaml revs were never updated and drifted behind the equivalent pins in requirements_dev.txt"
-  },
   "packageRules": [
     {
       "matchDepNames": [
@@ -89,28 +81,6 @@
       "matchManagers": ["pre-commit"],
       "groupName": "dev dependencies",
       "description": "Hook revs are developer tooling. Sharing the group above keeps the ruff== pin in requirements_dev.txt and the ruff-pre-commit rev in one PR, so the two cannot drift apart"
-    },
-    {
-      "description": "Tagged action releases: cooldown, then automerge",
-      "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "minimumReleaseAge": "3 days",
-      "automerge": true,
-      "automergeType": "pr"
-    },
-    {
-      "description": "Major action bumps: cooldown, then automerge",
-      "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["major"],
-      "minimumReleaseAge": "3 days",
-      "automerge": true
-    },
-    {
-      "description": "Pure digest moves: no timestamp available, always review",
-      "matchManagers": ["github-actions"],
-      "matchUpdateTypes": ["digest", "pinDigest", "pin"],
-      "automerge": false,
-      "dependencyDashboardApproval": true
     },
     {
       "description": [
