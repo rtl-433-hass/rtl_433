@@ -76,18 +76,16 @@ string in every mode, and these formats are understood:
 | `time:unix` | `1779703200` | Epoch seconds, always UTC. |
 | `time:off` | *(no field)* | **Timestamps off — see below.** |
 
-Adding `usec` to any of them (`time:iso:usec`) adds a fractional part, and `tz`
-(or `utc`) makes the zone explicit. Be explicit if you can: a bare local stamp is
-read in Home Assistant's own time zone, so a server in a different zone puts
-every event hours away from where it belongs. When that lands in the past, each
-frame looks like an event from an old disconnection: values still seed, but
-devices stop refreshing their last-seen and go unavailable, and event entities
-and device triggers stop firing.
+Adding `usec` (`time:iso:usec`) includes fractional seconds; `tz` or `utc`
+specifies the time zone. Include a time zone when possible. Otherwise, Home
+Assistant interprets timestamps in its own zone. If the server uses a different
+zone, live events can appear old: sensor values still update, but Last seen
+stops updating, devices go unavailable, and events and device triggers do not
+fire.
 
 With **no readable timestamp** the integration cannot distinguish a replay from
-a live transmission, so it treats every frame as live — the safe direction for a
-real event, but it means the re-broadcast backlog is ingested afresh on each
-reconnect.
+a live transmission. It treats every frame as live, including replayed events
+on each reconnect.
 
 The recommended setting is the most precise one:
 
@@ -105,7 +103,7 @@ host, port, path, or secure mode. Devices and their history are preserved.
 
 Use **Configure** to open the rtl_433 page. It is where devices are added and
 ignored — see [Adding Devices to Home Assistant](device-discovery.md) — and it
-carries three settings pages:
+includes three settings pages:
 
 - **Receiver settings**: default availability timeout and the managed-settings
   toggle.
@@ -115,7 +113,7 @@ carries three settings pages:
 
 **Receiver settings** configures the default availability timeout for every
 device on the hub, and whether Home Assistant manages the server's SDR settings.
-The timeout is one of three choices rather than a bare number:
+Choose one of three timeout modes:
 
 - **Per-device-type defaults** — the default, and what keeps event-driven
   devices (doorbells, motion, contacts) from going unavailable on silence.
