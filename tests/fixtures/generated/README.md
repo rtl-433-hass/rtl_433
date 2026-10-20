@@ -21,7 +21,7 @@ error — just a meter that appeared to have no reading.
 `tests/test_fixture_coverage.py` sweeps every fixture in `tests/fixtures/` and
 asserts each field resolves to a library descriptor. For the hand-authored
 fixtures that check is only as good as the hand-authoring; against these, it
-checks the device library against what rtl_433 actually puts on the wire.
+checks the device library against rtl_433's decoded output.
 
 `.github/workflows/captures.yml` re-decodes and diffs, so an upstream field
 rename or a bump of the pinned image lands as a red build.
@@ -40,7 +40,7 @@ assert against them.** `tests/scmplus/01/g002_912.6M_2359.3k.json` still records
 *and* `id`. That staleness is the whole reason these fixtures are decoded fresh
 rather than copied.
 
-**Timestamps are relative (`"@0.045207s"`), and that is deliberate.** Replaying a
+**Timestamps are relative (`"@0.045207s"`).** Replaying a
 file leaves rtl_433's default relative offsets, which are a pure function of the
 capture, so regeneration is byte-stable. Passing `-M time:iso` would stamp
 wall-clock time and make every single run a diff.
