@@ -64,3 +64,21 @@ guides for the full setup flow.
 - [Device-library guide](docs/device-library.md) (schema reference:
   [pyrtl_433](https://rtl-433-hass.github.io/pyrtl_433/latest/device-library/))
 - [Issue tracker](https://github.com/rtl-433-hass/rtl_433/issues)
+
+## Pull request documentation previews
+
+Netlify builds the documentation using `netlify.toml` and publishes `site/`.
+The build uses Python 3.14 and `docs/requirements.txt`, then runs
+`mkdocs build --strict` from the repository root. The preview opens the branch's
+current documentation directly, without the published version directories.
+
+To enable previews, create a Netlify project by importing this GitHub repository,
+select `main` as the production branch, and keep Deploy Previews enabled for pull
+requests. Netlify reads the build settings from `netlify.toml` once it is merged.
+Each PR gets a URL such as `https://deploy-preview-123--your-project.netlify.app`.
+No additional GitHub Actions workflow or Netlify API token is required.
+The existing GitHub Pages workflow continues to publish the versioned docs;
+Netlify also publishes `main` at its own `netlify.app` URL.
+
+See Netlify's [repository setup guide](https://docs.netlify.com/start/quickstarts/deploy-from-repository/)
+and [Deploy Preview documentation](https://docs.netlify.com/deploy/deploy-types/deploy-previews/).
