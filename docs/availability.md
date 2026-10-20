@@ -21,26 +21,14 @@ expiring because a long silence is normal and does not imply failure.
 
 ## Receiver Connection
 
-When the connection to the rtl_433 server drops, every device on that hub
-immediately becomes `unavailable`. This includes event-driven devices and
-**Last seen** sensors, regardless of their timeout settings. While disconnected,
-the integration cannot tell whether a device is still transmitting.
-
-When the connection to the rtl_433 server drops, every device that receiver was
-the only one hearing is marked `unavailable` straight away, regardless of its own
-timeout — including event-driven devices that never expire on silence, and their
-**Last seen** sensors. There is no grace period: while the socket is down the
-integration cannot hear the radio at all, so continuing to show the last reading
-would present stale data as current. This is the same behavior an MQTT device
-gets from an availability topic and a last-will message, and what Home Assistant
-integrations do generally when a connection to a receiver is lost. With a second
-receiver at the location still hearing the device, it stays available — see
+When a receiver disconnects, devices that depend on it become `unavailable`
+immediately. This includes event-driven devices and that receiver's **Last seen**
+sensors. A device stays available if another connected receiver at the location
+has received it within its timeout. See
 [Receivers in One Location](#receivers-in-one-location).
 
-The devices come back as soon as the connection is re-established; their values
-are the last ones received, and the usual silence timeouts resume from there. A
-brief drop therefore shows up as a brief `unavailable` — an honest one, because
-during it the integration genuinely was not listening.
+When the connection returns, devices show their last received values and the
+usual silence timeouts resume.
 
 If you want an automation to tolerate short blips, condition it on the receiver's
 **Connectivity** binary sensor with a `for:` delay rather than reacting to each
@@ -53,17 +41,11 @@ For `event` entities (buttons, doorbells, remotes), use the `event.received`
 trigger. It ignores transitions out of `unavailable`, so reconnecting does not
 trigger an automation for an old press.
 
-One kind of entity is deliberately exempt:
-
-- **A receiver's radio controls** (**Gain**, **Sample rate**, **Frequency
-  correction**, **Hop interval**, **Conversion mode**) stay available, because
-  they are settings you are writing rather than readings you are trusting. With
-  **Manage this receiver's radio** on — the default — these appear as
-  `number`/`select` entities. Turning it off replaces them with read-only
-  diagnostic sensors, and those *are* gated on the connection along with that
-  receiver's other diagnostic sensors (center frequency, frame counters, enabled
-  decoders), whose values are fetched over HTTP and would otherwise freeze at
-  whatever was last read.
+A receiver's radio controls (**Gain**, **Sample rate**, **Frequency correction**,
+**Hop interval**, **Conversion mode**) stay available so you can change settings
+while disconnected. With **Manage this receiver's radio** on, these appear as
+`number`/`select` entities. Turning it off replaces them with read-only diagnostic
+sensors, which become unavailable when that receiver disconnects.
 
 The **Connectivity** binary sensor is the entity that reports the outage: it
 reads the socket state directly and stays available throughout. The Home
@@ -76,61 +58,41 @@ INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
 
 ## Receivers in One Location
 
-A location can hold several receivers, and one sensor they all hear is one Home
-Assistant device. So "is this device available?" has to be answered over the
-whole location rather than over one server.
+A location can hold several receivers. A sensor received by more than one of
+them appears as one Home Assistant device.
 
-A receiver **vouches** for a device when *both* of these are true **of that same
-receiver**:
+A receiver can keep a device available when both of these are true:
 
-1. it is **connected** — its WebSocket to its rtl_433 server is up; and
-2. it **heard the device** within the device's effective timeout.
+1. Its WebSocket connection to rtl_433 is open.
+2. It has received the device within its effective timeout, or the device is set
+   to never expire.
 
-**The device is available while at least one receiver vouches for it.** So a
-sensor at the edge of the garden that the garage receiver keeps missing stays
-available as long as the attic receiver hears it, and it goes `unavailable` only
-when every receiver has either dropped its connection or stopped hearing the
-device.
+The device stays available while at least one receiver meets both conditions.
+A connected receiver that has never received the device cannot keep it available.
+Neither can a disconnected receiver, even if it received a recent transmission.
 
-The two halves are deliberately checked together, per receiver, rather than
-separately. "Some receiver is connected" and "some receiver heard it recently"
-can both be true while nothing can actually hear the device — a connected garage
-receiver that is deaf to the sensor, plus an offline attic receiver holding a
-minute-old timestamp. Neither of those receivers can vouch, so the device
-correctly goes unavailable.
-
-Each receiver keeps its own timeout clock, its own connection, and its own
-**Connectivity** sensor; the merge only unions what they each conclude. The
-timeout itself is the location's (or the device's override) — see
+Each receiver tracks when it last received the device. All use the same timeout,
+set for the location or overridden for the device. See
 [Timeout Sources](#timeout-sources).
 
-The per-receiver **RSSI**, **SNR** and **Last seen** entities are the exception
-to the union: each reads its own receiver alone. "How well does *this* receiver
-hear that sensor" is meaningless while *this* receiver is deaf, so `RSSI Attic`
-goes unavailable when the attic receiver does, even while the merged device is
-fine on the garage receiver. That is the point of keeping them separate — see
+**RSSI**, **SNR** and **Last seen** are tracked separately for each receiver.
+For example, **RSSI Attic** becomes unavailable when the attic receiver disconnects,
+even if the garage receiver keeps the device available. See
 [Per-Receiver Signal Detail](#per-receiver-signal-detail).
 
 ## Per-Receiver Signal Detail
 
-Signal readings do not merge. Every added device carries one **RSSI**, one
-**SNR** and one **Last seen** entity *per receiver*, named with the receiver
-they belong to — `RSSI Attic`, `RSSI Garage` — all on the one merged device. A
-single merged value would report whichever receiver's frame happened to arrive
-first, which is meaningless as a signal measurement and hides the very thing a
-second receiver was added to fix.
+Each added device has separate **RSSI**, **SNR** and **Last seen** entities for
+each receiver. Their names include the receiver, for example **RSSI Attic** and
+**RSSI Garage**. This lets you compare reception from different places.
 
-The name after the field is the receiver's own name, which starts out as
-`rtl_433 (host)`. Rename the receiver to something short and the entities on
-every device follow.
+A receiver starts with the name `rtl_433 (host)`. Renaming it also updates these
+entity names.
 
-**RSSI** and **SNR** are disabled by default, as they have always been, so a
-location does not grow two extra entities per sensor per receiver for a number
-most people only glance at. To read the comparison without enabling anything,
-use the panel's **Signal coverage** page, which reports the same levels and ages
-straight from the receivers — see
-[Device Discovery](device-discovery.md#signal-coverage). Enable the entities when
-you want history, graphs, or automations on signal strength.
+**RSSI** and **SNR** are disabled by default. Use the panel's **Signal coverage**
+page to compare levels and ages without enabling entities. Enable the entities
+when you want history, graphs, or automations on signal strength. See
+[Device Discovery](device-discovery.md#signal-coverage).
 
 ## Timeout Sources
 
@@ -144,16 +106,12 @@ The effective availability timeout is resolved in this order:
 Set a timeout to `0` to make a device never expire. This is already the automatic
 default for event-driven devices.
 
-The same resolved timeout is what every receiver in the location measures its own
-silence against, so a device does not have a different deadline depending on
-which server heard it.
+Every receiver uses the same resolved timeout for the device.
 
-**Location settings** asks which of the three you want outright — *Per-device-type
-defaults*, *Never expire*, or *a fixed timeout* — so leaving the location on the
-class defaults is a choice you make rather than a number you have to leave alone.
-A fixed timeout of 600 seconds is a location default like any other, and stops at
-step 2; it is not the same as the step-4 fallback, which only applies to devices
-no earlier step has claimed.
+**Location settings** offers *Per-device-type defaults*, *Never expire*, or
+*a fixed timeout*. Choosing a fixed timeout of 600 seconds applies that location
+default at step 2, including to event-driven devices. The 600-second fallback at
+step 4 applies only when no earlier rule supplies a timeout.
 
 ## Restart Behavior
 

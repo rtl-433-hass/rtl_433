@@ -60,12 +60,10 @@ as the first, not in a second integration entry. On **Settings → Devices &
 Services → rtl_433**, use the location's **Add a receiver** control and fill in
 the same connection fields as above.
 
-Do that and the two servers stop being two copies of your house. Every sensor
-both of them hear becomes **one** Home Assistant device with **one** set of
-entities, fed by whichever receiver hears each transmission — see
-[Availability](availability.md#receivers-in-one-location) for what that does to
-availability, and [Device Discovery](device-discovery.md) for the single
-add-device page it produces.
+Sensors received by both servers appear as one Home Assistant device with one
+set of entities. Either receiver can update the device. See
+[Availability](availability.md#receivers-in-one-location) and
+[Device Discovery](device-discovery.md).
 
 What is shared, and what is not:
 
@@ -78,9 +76,8 @@ What is shared, and what is not:
 | Connection target (host, port, path, secure) | The receiver |
 | **Manage this receiver's radio**, and every radio control | The receiver |
 
-Use a **second location** only for a genuinely distant site — somewhere its
-receivers could never hear the same transmitter as the first. Devices never merge
-across locations, so two identical sensors at two sites keep two identities.
+Use a **second location** for a separate site whose receivers cannot receive the
+same transmitters. Devices never merge across locations.
 
 ### Removing a Receiver
 
@@ -185,8 +182,7 @@ belongs to the location, and a setting about *one radio* belongs to its receiver
 - **Device mappings**: the location's mapping overrides.
 
 **Location settings** configures the default availability timeout for every
-device at the location. The timeout is one of three choices rather than a bare
-number:
+device at the location. Choose one of three timeout modes:
 
 - **Per-device-type defaults** — the default, and what keeps event-driven
   devices (doorbells, motion, contacts) from going unavailable on silence.
@@ -210,9 +206,8 @@ delay, or utility-meter calibration.
 
 ![The Device settings page with the device picker, availability timeout override, and meter commodity selector](images/08-device-settings.png)
 
-**Signal coverage** is not a settings page: it reports how well each receiver
-hears each added device, so a second receiver's worth can be read off before any
-diagnostic entity is enabled. See
+**Signal coverage** shows each receiver's signal level and last-received time
+for each added device. No diagnostic entity needs to be enabled. See
 [Device Discovery](device-discovery.md#signal-coverage).
 
 Changing timeout options applies live. Changing a receiver's manage-radio toggle

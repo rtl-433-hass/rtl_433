@@ -13,8 +13,7 @@ on the RF device:
 
 **RSSI** and **SNR** measure the link between one receiver and the sensor, so a
 location with two receivers gives the device two of each, named `RSSI Attic` and
-`RSSI Garage`. **Frequency** and **Noise** are unioned like any other field, and
-stay one entity. To compare receivers without enabling anything, use the panel's
+`RSSI Garage`. **Frequency** and **Noise** each have one shared entity per device. To compare receivers without enabling anything, use the panel's
 **Signal coverage** page — see
 [Per-Receiver Signal Detail](availability.md#per-receiver-signal-detail).
 

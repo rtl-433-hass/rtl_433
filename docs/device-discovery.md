@@ -1,28 +1,20 @@
 # Adding Devices to Home Assistant
 
-Nothing is added to Home Assistant on its own. Every device your rtl_433 servers
-decode is heard and held on a list of discovered devices, and you decide which
-ones become real devices.
+The integration lists devices decoded by your rtl_433 servers. You choose which
+ones to add to Home Assistant; nothing is added automatically.
 
-That list is where neighbours' sensors, weak signals, and bad decodes end up. In
-a busy area a receiver hears far more than you want to keep, which is why the
-integration waits for you to choose.
-
-The list belongs to the **location**, not to one receiver. However many receivers
-a location holds, a sensor is **one** row — showing the readings from whichever
-receiver heard it last, and naming the receivers that heard it — and adding or
-ignoring it once applies to the whole location. That is the point: you are
-approving a *sensor*, not a sighting.
+The discovered list belongs to the **location**. A sensor received by several
+receivers appears once, with its latest readings and the receivers that received
+it. Adding or ignoring it applies to the whole location.
 
 Doorbells, remotes, and motion sensors only transmit when something happens, so
 trigger them once to make them show up.
 
 ## The rtl_433 Page
 
-Open **Settings → Devices & Services → rtl_433 → Configure (the gear icon)**. This is the
-rtl_433 page, and it works like the Zigbee and Z-Wave pages: it opens on an
-overview of the location, with everything else one click away. It is available
-to administrators only.
+Open **Settings → Devices & Services → rtl_433 → Configure (the gear icon)**.
+The rtl_433 page opens with a location overview and links to devices and
+settings. Only administrators can access it.
 
 The overview has four parts:
 
@@ -102,34 +94,26 @@ Otherwise, **Ignore** hides the device.
 
 ### Clearing the List
 
-A location left running for a few weeks in a built-up area accumulates hundreds
-of candidates, and the one you came to add is somewhere among them. **Clear
-discovered devices** empties the list — on every receiver — so it refills from
-live traffic: trigger the doorbell, and it is the only thing on the screen.
+In a busy area, the discovered list can fill with devices you do not want.
+**Clear discovered devices** empties it on every receiver at the location, so you
+can find your devices as they transmit again.
 
-Nothing is lost. The list has always been held in memory only, so every device
-cleared comes back on its next transmission. Devices you have ignored stay
-ignored — that is a decision, and this is not the control for undoing it.
+Clearing does not remove added devices or change the ignore list. Cleared
+candidates return on their next transmission.
 
 ## Signal Coverage
 
-**Signal coverage** answers the question a second receiver is added to answer:
-which receivers hear each device, and how well.
+**Signal coverage** shows which receivers receive each added device and how well.
 
-![The Signal coverage page: one card per added device, one row per receiver, each giving that receiver's signal level and how long ago it last heard the device](images/18-coverage.png)
+![The Signal coverage page: one card per added device with each receiver's signal level and last-received time](images/18-coverage.png)
 
-One card per device you have added, one row per receiver in the location. Each
-row gives that receiver's last signal level for the device and how long ago it
-last heard it, so `-62 dB, 30s ago` next to `-89 dB, 4m ago` tells you which
-receiver is carrying that sensor. A receiver that has never heard the device says
-so, and one whose connection is down says that instead — a distinction that
-matters, because "offline" and "online but deaf to this sensor" are different
-problems.
+Each device has a card with one row per receiver. A row shows the last signal
+level and how long ago that receiver received the device. For example,
+`-62 dB, 30s ago` beside `-89 dB, 4m ago` lets you compare reception. The page also
+shows when a receiver is disconnected or has never received the device.
 
-The page reads this straight from the receivers. **No diagnostic entity has to be
-enabled**, which is the point: `RSSI` and `SNR` are disabled by default, and with
-several receivers per sensor there would otherwise be a lot of them to turn on
-just to look once. Enable them when you want the history — see
+No diagnostic entity needs to be enabled. Enable **RSSI** or **SNR** entities
+when you want history, graphs, or automations. See
 [Per-Receiver Signal Detail](availability.md#per-receiver-signal-detail).
 
 ## Location, Receiver, and Device Settings

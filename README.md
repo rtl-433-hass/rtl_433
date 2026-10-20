@@ -28,13 +28,13 @@ can plausibly hear the same sensors — a house, a barn and its yard, one
 apartment. Set-up creates the location and its first receiver together, and
 **Add a receiver** on the integration page adds the rest.
 
-Receivers in one location are **unioned**. A sensor two of them hear is a single
+Receivers in one location are combined. A sensor two of them hear is a single
 Home Assistant device with a single set of entities, updating whenever *any*
 receiver hears it — so a weather station at the edge of the garden stops dropping
 out just because one server missed a transmission, and you never end up with two
 copies of the same thermometer.
 
-Add a **second location** only for a genuinely distant site — a cottage, a
+Add a **second location** only for a separate site — a cottage, a
 detached workshop across town — where the receivers could never hear the same
 transmitter. Devices never merge across locations, which is exactly what keeps
 two identical sensors at two sites from being mistaken for one.
@@ -58,8 +58,8 @@ two identical sensors at two sites from being mistaken for one.
 - Every device your receivers hear is listed on **one** union add-device page for
   you to add or ignore; approving once covers the whole location, and nothing is
   added to Home Assistant on its own.
-- Supports class-aware availability, Last seen timestamps, momentary event
-  entities, synthesized-off motion sensors, and utility-meter calibration.
+- Sets availability timeouts by device type, records Last seen timestamps,
+  handles button presses and motion, and supports utility-meter calibration.
 - Optional Home Assistant-managed radio controls can adopt and re-apply each
   receiver's settings such as frequency, sample rate, gain, ppm, conversion mode,
   and hop interval.
