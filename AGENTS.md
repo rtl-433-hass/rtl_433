@@ -875,7 +875,7 @@ keep this contributor-facing.
     `gain_command_arg()` (empty ⇒ auto, else `f"{db:g}"`) and **emits `gain`
     exactly once** per write/replay.
   - `conversion_mode` → select (`native`/`si`/`customary`), command `convert`,
-    `val` = int. The option **index is the `val`** — tuple order is load-bearing
+    `val` = int. The option **index is the `val`**, so preserve tuple order
     (`native`→0, `si`→1, `customary`→2; `conversion_label_to_val` /
     `conversion_val_to_label`).
   - `hop_interval` → number, command `hop_interval`, `val` = seconds; read
@@ -1093,7 +1093,7 @@ and is **not** committed — it stays in `.gitignore` with the other dependency
 locks and caches.
 
 `[tool.uv] environments` pins the resolution to `python_full_version >= 3.14.2`.
-That is deliberate and load-bearing: `requires-python` is `>=3.14` (what the
+This constraint is needed because `requires-python` is `>=3.14` (what the
 *integration* needs, tracked against Home Assistant), but the pinned test stack
 pulls in a `homeassistant` requiring `>=3.14.2`, so an unrestricted resolution is
 unsatisfiable. Constraining the environment keeps the project's declared support
