@@ -159,7 +159,7 @@ writer-second is the working pattern.
 ## Receiver noise ("Auto Level") data
 
 The hub's **Noise level** and **Minimum detection level** sensors have no getter
-in rtl_433's API: the receiver's noise floor surfaces only as pulse-detector log
+in rtl_433's API: the receiver's noise floor is reported only in pulse-detector log
 messages (log source `Auto Level`), which a real `-F http` server forwards to
 every WebSocket client as `{"time","src","lvl","msg"}` frames. The harness
 reproduces that end to end, with no synthesized values:
@@ -175,29 +175,26 @@ reproduces that end to end, with no synthesized values:
   passes keep the receiver permanently "loud": the noise estimate creeps up to
   the replayed burst level and settles, so `-Y autolevel` never sees a shift over
   1 dB and never logs an adjustment — leaving **Minimum detection level**
-  `unknown`. The silence gap makes the noise floor genuinely move, so both
+  `unknown`. The silence gap makes the noise floor change, so both
   message forms are emitted from real measurements.
 
 The other hub sensors (center frequency, sample rate, decoded events, …) are
 fetched over HTTP `/cmd`, which the bridge does not serve, so they read
 `unknown` in `14-hub-noise.png`. That is the documented WebSocket-only-proxy
-behaviour rather than a defect; populating them would mean inventing server
-state, so the harness leaves them alone.
+behavior. The harness does not supply values for endpoints the bridge does not
+serve.
 
 ## Why every stage drives the panel
 
 The panel is registered with `config_panel_domain`, so Home Assistant turns the
 hub's Configure control into a link to it and **nothing opens the options flow**.
-That is deliberate now, but it was first discovered by accident: for one commit
-it was set while the settings still lived only in the flow, and every one of
-those steps lost its only entry point for real users while passing every Python
-test. This harness is what caught it — the options shots simply stopped being
-capturable.
+A previous change enabled this setting before the panel included all settings
+forms. Users lost access to those forms even though the Python tests passed;
+the screenshot harness caught the missing entry points.
 
-So the stages here reach for controls inside the panel's shadow root
-(`inPanel` / `openPanelSettings` in `screenshot.mjs`), and each one warns loudly
-when the control it wants is not there. That warning is the signal that a
-settings form has lost its entry point again, not that a click was mistimed. See
+Each stage now locates controls inside the panel's shadow root using `inPanel`
+and `openPanelSettings` in `screenshot.mjs`. A missing-control warning indicates
+that a settings form may be unreachable. See
 AGENTS.md, "Approval surfaces".
 
 ## Known limitation — why the `ws-bridge` exists
