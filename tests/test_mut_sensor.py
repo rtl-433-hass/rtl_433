@@ -2244,3 +2244,11 @@ def test_sensor_force_update_comes_from_the_descriptor():
     coordinator.last_seen = {}
     sensor = Rtl433Sensor(coordinator, "hub", "dev", "Acurite-899", descriptor)
     assert sensor.force_update is True
+
+
+@pytest.mark.parametrize("value", ["reading", 42, 1.25, True, False])
+def test_restorable_value_preserves_json_scalar_types(value):
+    """Restore data keeps numbers and booleans native rather than stringifying."""
+    restored = _restorable_value(value)
+    assert restored == value
+    assert type(restored) is type(value)

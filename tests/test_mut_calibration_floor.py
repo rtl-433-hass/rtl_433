@@ -46,6 +46,7 @@ from custom_components.rtl_433.calibration import (
     COMMODITY_DEVICE_CLASS,
     COMMODITY_UNITS,
     commodity_from_fields,
+    default_unit,
     normalize_calibration,
 )
 from custom_components.rtl_433.const import (
@@ -737,3 +738,9 @@ class TestNormCalibrationComplete:
             result = normalize_calibration(raw)
             assert result is not None
             assert result[CALIBRATION_COMMODITY] == commodity
+
+
+@pytest.mark.parametrize("commodity", [COMMODITY_NONE, "unknown"])
+def test_default_unit_for_unsupported_commodity(commodity):
+    """An unsupported commodity has no default unit and must not be indexed."""
+    assert default_unit(commodity) is None

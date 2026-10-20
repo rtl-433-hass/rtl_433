@@ -44,6 +44,7 @@ from typing import Any
 from unittest.mock import patch
 
 from freezegun import freeze_time
+from pyrtl_433.library import FieldDescriptor
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -72,6 +73,7 @@ from custom_components.rtl_433.const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
+from custom_components.rtl_433.websocket_api import _EntityMeta, _reading_state
 from homeassistant.components.frontend import DATA_PANELS
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.data_entry_flow import FlowResultType
@@ -1742,3 +1744,19 @@ async def test_mappings_that_will_not_store_are_refused_and_change_nothing(
     assert reply["success"] is False, why
     assert reply["error"]["code"] == "invalid_mappings", why
     assert dict(settings_hub.data) == before, why
+
+
+@pytest.mark.parametrize(("value", "display"), [(True, "On"), (False, "Off")])
+def test_binary_reading_falls_back_when_core_has_no_state_translation(value, display):
+    """An untranslated binary device class still previews the correct state."""
+    descriptor = FieldDescriptor(
+        field_key="contact",
+        name=None,
+        platform="binary_sensor",
+        object_suffix="contact",
+        device_class="door",
+    )
+    assert _reading_state(descriptor, value, _EntityMeta(icons={}, strings={})) == (
+        value,
+        display,
+    )

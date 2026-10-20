@@ -85,12 +85,12 @@ def _at_repo_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     mutmut caches its parsed configuration in a process-global, so drop it
     afterwards rather than leaving a cwd-dependent singleton behind.
     """
-    from mutmut.configuration import Config as MutmutConfig
+    from mutmut.configuration import reset_config
 
     monkeypatch.chdir(_REPO_ROOT)
-    MutmutConfig.reset()
+    reset_config()
     yield
-    MutmutConfig.reset()
+    reset_config()
 
 
 @pytest.fixture

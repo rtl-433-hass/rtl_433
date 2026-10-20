@@ -254,10 +254,10 @@
         "total": 40
       },
       "custom_components.rtl_433.calibration.x_default_unit": {
-        "killed": 3,
+        "killed": 5,
         "score": 1.0,
         "survived": 0,
-        "total": 3
+        "total": 5
       },
       "custom_components.rtl_433.calibration.x_normalize_calibration": {
         "killed": 22,
@@ -1146,10 +1146,10 @@
         "total": 1
       },
       "custom_components.rtl_433.sensor.x__restorable_value": {
-        "killed": 1,
+        "killed": 3,
         "score": 1.0,
         "survived": 0,
-        "total": 1
+        "total": 3
       },
       "custom_components.rtl_433.sensor.x_async_setup_entry": {
         "killed": 23,
@@ -1326,10 +1326,10 @@
         "total": 20
       },
       "custom_components.rtl_433.websocket_api.x__reading_state": {
-        "killed": 38,
-        "score": 0.863636,
-        "survived": 6,
-        "total": 44
+        "killed": 50,
+        "score": 1.0,
+        "survived": 0,
+        "total": 50
       },
       "custom_components.rtl_433.websocket_api.x__with_sorted_ranges": {
         "killed": 12,
