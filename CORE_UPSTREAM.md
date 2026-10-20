@@ -6,23 +6,22 @@ upstream PR lands or its status changes.
 ## Strategy: single shared domain
 
 The integration upstreams into Home Assistant Core under a **single shared `rtl_433`
-domain**. Rather than shipping a monolithic PR, we land one Bronze-tier vertical slice
-first (a single `sensor` platform plus the config flow, coordinator, and manifest), then
-add the remaining platforms and support modules as a sequence of follow-up PRs. Every PR
-targets the *same* domain and config-entry shape, so the HACS custom component and the
-core integration stay behaviorally aligned throughout the (months-long) review.
+domain**. The first PR includes a single `sensor` platform, config flow, coordinator,
+and manifest to meet the Bronze tier. Follow-up PRs add the remaining platforms and
+support modules. Every PR targets the *same* domain and config-entry shape, so the HACS custom component and the
+core integration stay behaviorally aligned throughout review.
 
 Modules that have not yet landed upstream remain **HACS-only**: they ship in this repo's
-`custom_components/rtl_433/` but are not yet part of the core integration. This ledger
-tracks the delta so the long-lived core branch does not silently drift from HACS.
+`custom_components/rtl_433/` but are not yet part of the core integration. This file
+tracks the differences between the core and HACS builds.
 
 Status values:
 - **in-PR** — included in an open or scoped upstream PR (see the PR tag).
 - **upstreamed** — merged into Home Assistant Core (record the landing PR/commit).
 - **HACS-only** — ships in this repo only; not yet scoped for upstream.
 - **in `pyrtl_433`** — no longer a module of this integration at all: it lives in
-  the `pyrtl_433` PyPI requirement, so core gets it for free the moment the
-  requirement lands. Nothing to upstream.
+  the `pyrtl_433` dependency and is available to core once that dependency is
+  added. No separate PR is needed.
 
 ## Per-module status
 
@@ -73,43 +72,42 @@ Notes:
 
 ## Ordered follow-up PR sequence
 
-Ordered by quality-scale tier dependencies (what each PR *unlocks*), not by feature
-preference. Each PR builds on the domain/coordinator established by PR1.
+Ordered by quality-scale requirements and module dependencies. Each PR builds on
+the domain/coordinator established by PR1.
 
-1. **`binary_sensor`** — Bronze. Second platform on the existing coordinator; lowest risk,
-   reinforces the multi-platform entity pattern before anything harder.
-2. **`diagnostics`** — Silver. Cheap, expected early; `diagnostics` is a Silver-tier
+1. **`binary_sensor`** — Bronze. Adds a second platform to the existing coordinator.
+2. **`diagnostics`** — Silver. Add early; `diagnostics` is a Silver-tier
    requirement and has no platform dependencies, so it should land as soon as there are
    entities to redact.
 3. **`event`** — Bronze/Silver platform. Adds the event platform central to rtl_433's
    push model; must exist before anything that consumes device events.
 4. **`device_trigger`** — Silver. Depends on `event`; exposes automation triggers derived
    from the event platform, so it cannot precede it.
-5. **`number`** — Silver/Gold. First SDR control surface; introduces the write path and
-   the shared `sdr_settings` plumbing that `select`/`switch` reuse.
+5. **`number`** — Silver/Gold. Introduces SDR controls, the write path, and
+   the shared `sdr_settings` code that `select`/`switch` reuse.
 6. **`select`** — Silver/Gold. Grouped with `number`; shares the `hub_settings`/
    `sdr_settings` dependency and the control-write pattern.
-7. **`switch`** — Silver/Gold. Completes the SDR control trio on the same shared settings
-   plumbing; kept after `number`/`select` to land the group cohesively.
-8. **`repairs`** — Silver/Gold. Issue-registry surface; needs real platforms and control
-   paths in place to have actionable issues to raise.
-9. **`calibration`** — Gold. Per-device calibration UX; a refinement layer over the sensor
-   platforms, so it follows the platforms it adjusts.
+7. **`switch`** — Silver/Gold. Adds the third SDR control platform using the
+   shared settings code from `number`/`select`.
+8. **`repairs`** — Silver/Gold. Uses the issue registry; depends on platforms and
+   controls that can report problems requiring user action.
+9. **`calibration`** — Gold. Adds per-device calibration after the sensor
+   platforms it configures.
 10. **`library.py`** — Gold. The Home Assistant load/merge wrapper that turns the
     `pyrtl_433` device library into the per-entry merged registry the platforms look
     descriptors up in; expands the entity descriptions once the platforms consuming them
     are upstream. The library data and loader themselves arrive with the `pyrtl_433`
-    requirement, so this PR is only the `hass.data` caching seam.
-11. **user mapping overrides** — Gold. The user-facing field-mapping/override surface
+    requirement, so this PR is only the `hass.data` cache.
+11. **user mapping overrides** — Gold. The field-mapping editor
     (`CONF_USER_MAPPINGS`, the options-flow editor step, `merge_overrides`); depends on
     (10) landing first. Validation/normalization is `pyrtl_433.library`'s, so this is the
     storage + UI half only.
-12. **`options_flow`** — Gold. Configuration UX that tunes behavior across the platforms;
-    lands once the platforms and settings surfaces it configures all exist.
+12. **`options_flow`** — Gold. Configures platform behavior; follows the platforms
+    and settings it configures.
 13. **`hub_settings`** — Gold. Shared hub-level settings model; formalized alongside/after
     the control platforms (`number`/`select`/`switch`) that consume it.
-14. **`sdr_settings`** — Gold/Platinum. SDR-device settings model; the deepest control
-    surface, landed last so the full control stack above it is already upstream.
+14. **`sdr_settings`** — Gold/Platinum. Shared SDR settings model; tracked last, with its
+    supporting code included in the earlier control-platform PRs.
 
 > Ordering guidance: `diagnostics` (Silver) is intentionally pulled forward; the remaining
 > Silver items (`event`, `device_trigger`, `repairs`) precede the Gold refinement layer
