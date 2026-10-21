@@ -321,3 +321,26 @@ async def test_persisted_types_for_another_device_are_not_borrowed(build_event):
     )
 
     assert entity.event_types == ["secret_knock"]
+
+
+async def test_event_repaints_on_its_receiver_connection_change(hass, build_event):
+    """An event built before aggregation still follows its receiver's connection."""
+    from unittest.mock import patch
+
+    from custom_components.rtl_433.const import signal_receiver_availability
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    entity = build_event(_descriptor(event_map={}))
+    entity.hass = hass
+    entity.entity_id = "event.test_receiver_connection"
+    await entity.async_added_to_hass()
+    try:
+        with patch.object(entity, "async_write_ha_state") as write_state:
+            async_dispatcher_send(
+                hass,
+                signal_receiver_availability(receiver_id(entity._coordinator.entry)),
+            )
+            await hass.async_block_till_done()
+        write_state.assert_called_once_with()
+    finally:
+        await entity.async_will_remove_from_hass()
