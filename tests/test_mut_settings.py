@@ -17,6 +17,7 @@ lets each one state the exact hub state it is describing.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from pyrtl_433.library import FieldDescriptor, Registry
@@ -41,6 +42,7 @@ from custom_components.rtl_433.const import (
     DOMAIN,
 )
 from custom_components.rtl_433.settings import (
+    build_calibrations_data,
     build_device_data,
     build_device_options,
     build_hub_options,
@@ -52,6 +54,40 @@ from homeassistant.const import CONF_HOST, UnitOfVolume
 DEVICE = "acme-pir-7"
 OTHER_DEVICE = "acme-therm-3"
 MODEL = "Acme-PIR"
+
+
+def test_calibration_batch_preserves_other_settings_and_skips_removed_devices():
+    """Calibration-only writes neither clear other overrides nor revive a device."""
+    calibration = {
+        CALIBRATION_COMMODITY: COMMODITY_GAS,
+        CALIBRATION_UNIT: UnitOfVolume.CUBIC_METERS,
+        CALIBRATION_SCALE: 0.01,
+    }
+    data = {
+        CONF_HOST: "receiver.local",
+        CONF_DEVICES: {
+            DEVICE: {
+                CONF_MODEL: MODEL,
+                DEVICE_TIMEOUT_OVERRIDE: 90,
+                DEVICE_MOTION_CLEAR_DELAY: 15,
+            },
+            OTHER_DEVICE: {CONF_MODEL: "Other"},
+        },
+    }
+    before = deepcopy(data)
+    result = build_calibrations_data(
+        data, {DEVICE: calibration, "removed-device": calibration}
+    )
+    assert result == {
+        **before,
+        CONF_DEVICES: {
+            DEVICE: {**before[CONF_DEVICES][DEVICE], DEVICE_CALIBRATION: calibration},
+            OTHER_DEVICE: before[CONF_DEVICES][OTHER_DEVICE],
+        },
+    }
+    result[CONF_DEVICES][DEVICE][DEVICE_TIMEOUT_OVERRIDE] = 30
+    assert data == before
+
 
 # A calibration the user has already saved, and the normalized form the form is
 # handed back.
