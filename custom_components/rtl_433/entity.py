@@ -20,7 +20,7 @@ four concerns the platforms would otherwise duplicate:
   :class:`~pyrtl_433.normalizer.NormalizedEvent` and both unsubscribe in
   ``async_will_remove_from_hass``.
 * **Availability** — merged across the location's receivers. A receiver
-  *vouches* for a device when it is connected **and** heard the device within the
+  *vouches* for a device when it is connected **and** received the device within the
   effective per-device timeout; a unioned field is available when at least one
   receiver vouches, and a link field asks only its own receiver. The two gates
   are evaluated per receiver and only the result is OR-ed, because unioning them
@@ -330,7 +330,7 @@ class Rtl433Entity(RestoreEntity):
         (``aggregator.receiver_vouches``): its WebSocket is up — ``False`` the
         moment it drops, no grace window, and it overrides even a never-expire
         device, whose exemption is from *silence*, not from the transport being
-        gone — **and** it heard this device within the device's effective
+        gone — **and** it received this device within the device's effective
         timeout, resolved by the coordinator's own ``_effective_timeout`` so the
         device-class ladder and never-expire semantics are the watchdog's, not a
         second copy.
@@ -339,7 +339,7 @@ class Rtl433Entity(RestoreEntity):
         receivers vouches. The pair is evaluated per receiver and only the result
         is OR-ed, because the two gates cannot be unioned independently: a
         connected receiver that is deaf to the sensor plus an offline one that
-        heard it a minute ago satisfies "some receiver connected" and "some
+        received it a minute ago satisfies "some receiver connected" and "some
         last_seen fresh" while no receiver can actually hear the device, and the
         answer has to be unavailable. The union is asked of the location
         aggregator, which is the thing that knows every receiver; with none

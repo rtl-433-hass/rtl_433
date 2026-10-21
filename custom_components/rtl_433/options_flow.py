@@ -4,7 +4,7 @@ A small menu offering an *add devices* step, an *ignored devices* step, a *recei
 step, a *device* step, a *mappings* step, and a *replace* step:
 
 - **add_devices** renders the location's merged pending list -- every device any
-  of its receivers has heard since the last restart that the user has neither
+  of its receivers has received since the last restart that the user has neither
   added nor ignored, one row per sensor rather than one per receiver -- and on
   submit adopts the selected keys and ignores the ones the user never wants
   offered again, for the whole location. It leads the menu because it is the
@@ -137,8 +137,8 @@ def _pending_label(record: PendingDevice, now: datetime) -> str:
     A neighbour's sensor, a one-off bad decode and the device the user is
     actually waiting for are indistinguishable by name, so the label leads with
     the model and device key and then carries the three signals that do
-    discriminate: how often the device has been heard (a bad decode is typically
-    heard once, a real sensor keeps checking in), how strong its most recent
+    discriminate: how often the device has been received (a bad decode is typically
+    received once, a real sensor keeps checking in), how strong its most recent
     frame was, and how long ago that was. The signal reading comes from
     :attr:`~.coordinator.PendingDevice.signal` — the same property the WebSocket
     payload reports, so the form and the discovery panel cannot disagree about a
@@ -163,7 +163,7 @@ def _pending_label(record: PendingDevice, now: datetime) -> str:
 class Rtl433OptionsFlow(OptionsFlow):
     """Receiver options: the approval steps, a receiver-settings step and a device pair.
 
-    The add-devices step is where a heard device becomes a Home Assistant device
+    The add-devices step is where a received device becomes a Home Assistant device
     (or is ignored for good), and the ignored-devices step reverses the latter.
     The receiver step persists the default availability timeout and the
     manage-settings toggle to ``entry.options``. The device picker chooses one device and the
@@ -190,7 +190,7 @@ class Rtl433OptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Show the options menu.
 
-        The two approval steps lead, as a pair: adding a heard device is the only
+        The two approval steps lead, as a pair: adding a received device is the only
         way one reaches Home Assistant at all, and "ignored devices" is where a
         user goes looking for a device that has stopped being offered. The
         settings steps follow in their established order, with *replace* still
@@ -225,10 +225,10 @@ class Rtl433OptionsFlow(OptionsFlow):
     async def async_step_add_devices(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """List the devices heard but not added, and add or ignore them.
+        """List the devices received but not added, and add or ignore them.
 
         This is the only route by which an RF device reaches the Home Assistant
-        device registry: each receiver records everything it hears into an
+        device registry: each receiver records everything it receives into an
         in-memory pending list, and nothing leaves the merge of those lists
         without an explicit choice here. The list is rebuilt from live traffic
         after every restart, so an empty one shortly after a reload is normal --
@@ -237,13 +237,13 @@ class Rtl433OptionsFlow(OptionsFlow):
         choose from.
 
         A sensor several of the location's receivers can hear appears **once**,
-        showing whichever of them heard it last: the user is approving the
+        showing whichever of them received it last: the user is approving the
         sensor, not one server's view of it, and the submit applies to every
         receiver in the location.
 
         The two multi-selects are deliberately independent so one submit can add
         some devices and ignore others: that is how a long list is actually worked
-        through (the reporter in issue #128 heard 77 devices in a day). Selecting
+        through (the reporter in issue #128 received 77 devices in a day). Selecting
         the same device in both is a contradiction the flow refuses to resolve on
         the user's behalf -- it re-shows the form with an error and writes
         nothing, rather than silently picking one of the two meanings.
@@ -776,22 +776,22 @@ class Rtl433OptionsFlow(OptionsFlow):
         )
 
     def _replacement_model(
-        self, device_key: str, devices: dict[str, Any], heard: dict[str, Any]
+        self, device_key: str, devices: dict[str, Any], received: dict[str, Any]
     ) -> str:
-        """Model for a replacement candidate: stored record, else what was heard.
+        """Model for a replacement candidate: stored record, else what was received.
 
         A candidate can legitimately have no record in ``entry.data["devices"]``:
         a *pending* device has none by definition (nothing is stored until the
         user adds it), and a device adopted this session is in the coordinator's
         runtime state before its devices-map upsert lands. Both are exactly the
-        devices a replace has to offer, so the model falls back to ``heard`` --
+        devices a replace has to offer, so the model falls back to ``received`` --
         the coordinator's adopted events merged with its pending records, whose
         entries both expose ``.model`` -- and then to ``""``. Never raises: a
         missing record, a missing entry and a blank model all degrade to the bare
         key in the picker.
         """
         record: dict[str, Any] = devices.get(device_key, {})
-        return record.get(CONF_MODEL) or getattr(heard.get(device_key), "model", "")
+        return record.get(CONF_MODEL) or getattr(received.get(device_key), "model", "")
 
     def _replacement_label(
         self,
@@ -827,7 +827,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         Candidates are the **union** of the stored devices map, every receiver's
         adopted runtime keys, and the location's merged **pending** keys. Pending
         is the important one: a sensor that drew a new transmitter id when its
-        batteries were changed is heard under that new id and nothing more -- it
+        batteries were changed is received under that new id and nothing more -- it
         is never added automatically -- so without pending candidates this step
         could not offer the one device it exists to adopt. The adopted runtime
         keys stay in the union because they can still lead the devices map by a
@@ -877,22 +877,22 @@ class Rtl433OptionsFlow(OptionsFlow):
         }
         # One mapping for model resolution: a coordinator ``NormalizedEvent`` and
         # a ``PendingDevice`` both carry ``.model``, so the adopted and pending
-        # halves of "what the location has heard" resolve through the same
+        # halves of "what the location has received" resolve through the same
         # lookup. Both are empty for a receiver that is not loaded, which leaves
         # the render working off the stored devices map alone.
-        heard: dict[str, Any] = {}
+        received: dict[str, Any] = {}
         for coordinator in receiver_coordinators(self.hass, self.config_entry).values():
-            heard.update(coordinator.devices)
-        heard.update(pending)
+            received.update(coordinator.devices)
+        received.update(pending)
 
-        old_model = self._replacement_model(old_key, devices, heard)
+        old_model = self._replacement_model(old_key, devices, received)
         # Resolve each candidate's model once. The sort comparator would
         # otherwise re-derive it on every comparison and the label pass once
         # more, which is the same lookup done O(n log n) times for a value that
         # cannot change during the render.
         models = {
-            key: self._replacement_model(key, devices, heard)
-            for key in (set(devices) | set(heard)) - {old_key}
+            key: self._replacement_model(key, devices, received)
+            for key in (set(devices) | set(received)) - {old_key}
         }
         candidates = sorted(
             models,

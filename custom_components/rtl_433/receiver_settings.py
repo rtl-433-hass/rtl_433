@@ -190,7 +190,7 @@ def _receiver_ignored_devices(entry: ConfigEntry) -> list[str]:
     the entry's stored list in place.
 
     It lives on the location, not on a receiver: "I do not want my neighbour's
-    sensor" is a statement about a sensor, and a second receiver that also hears
+    sensor" is a statement about a sensor, and a second receiver that also receives
     it must not re-offer it.
     """
     return list(entry.data.get(CONF_IGNORED_DEVICES, []))

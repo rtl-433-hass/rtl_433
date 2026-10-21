@@ -474,7 +474,7 @@ def _minor_7_entry(hass, *, devices, with_toggle: bool) -> MockConfigEntry:
 async def test_minor_7_upgrade_strips_the_toggle_and_preserves_every_device(hass):
     """The toggle goes from ``data`` and ``options``; nothing else moves.
 
-    Discovery stopped being a toggle — every heard device now waits for an
+    Discovery stopped being a toggle — every received device now waits for an
     explicit add — so a value left behind would show up in diagnostics and
     config-entry exports as though it still meant something. The removal has to
     be exactly that narrow, though: the devices map is every current user's
