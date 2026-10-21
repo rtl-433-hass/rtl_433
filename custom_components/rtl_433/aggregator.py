@@ -62,6 +62,19 @@ recorded per ``(device_key, receiver)`` (:class:`ReceiverCoverage`), which is
 what lets the panel render "heard by Attic (-62 dB) / Garage (-89 dB)" without
 anyone enabling the disabled-by-default ``rssi`` / ``snr`` entities.
 
+**Candidates are merged too, by a deliberately simpler rule.** A device the
+user has not adopted never reaches the union above -- it is recorded as a
+*candidate* in the receiver's own pending map instead (``coordinator/_events.py``),
+behind that receiver's replay / backlog gate. :func:`merged_candidates` folds
+every receiver's map into one location-wide list keyed by ``device_key``, so a
+sensor two receivers hear is **one** row the user approves once, showing
+**last-received-wins** data (the most recently arrived frame from any receiver,
+with no debounce: a discovery preview only needs the freshest sample, where a
+recorded entity value needs the anti-regression guard above) and naming the
+receivers that have heard it. The candidate cap is applied to that **merged**
+list (:func:`enforce_pending_cap`), so a location cannot hold N times as many
+candidates by having N receivers.
+
 The policy lives here rather than in ``pyrtl_433`` deliberately: it is a
 Home-Assistant-side merge over *several* clients, not a property of any single
 client's stream, and the library has no idea the other receiver exists.
@@ -87,10 +100,13 @@ from .const import (
     CONF_DEVICES,
     DATA_AGGREGATOR,
     DOMAIN,
+    LOGGER,
     signal_device_update,
     signal_location_device_update,
     signal_new_device,
+    signal_pending_update,
 )
+from .coordinator import MAX_PENDING_CANDIDATES, PendingDevice
 from .receiver_settings import receiver_coordinators
 
 if TYPE_CHECKING:
@@ -227,6 +243,258 @@ class ReceiverCoverage:
     snr: Any = None
 
 
+@dataclasses.dataclass(slots=True, frozen=True)
+class MergedCandidate:
+    """One row of the location's add-device page: a sensor, not a sighting.
+
+    ``record`` is the merged :class:`~.coordinator.PendingDevice` every surface
+    renders -- the **last-received-wins** view of the candidate, built from the
+    most recently *arrived* frame from any receiver (see :func:`_merge_records`
+    for why that rule is deliberately simpler than the union's dedup) -- and
+    ``coverage`` names the receivers that have heard it, in receiver order, so
+    the page can show "heard by Attic and Garage" before the user commits to
+    adding anything.
+
+    ``coverage`` reuses :class:`ReceiverCoverage` rather than inventing a second
+    shape for the same answer, but it is built from the candidate's own records:
+    the aggregator's coverage map is fed by the per-device dispatch, and a
+    *pending* device dispatches nothing at all, so there is nothing in it to
+    read. Only receivers that have actually heard the candidate appear (unlike
+    :meth:`Rtl433LocationAggregator.coverage`, which lists every receiver
+    including the deaf ones): before adoption, "has heard it" is the whole
+    question. ``vouches`` is always ``False`` -- vouching is about an adopted
+    device's availability, and a candidate has none.
+    """
+
+    record: PendingDevice
+    coverage: tuple[ReceiverCoverage, ...]
+
+    @property
+    def key(self) -> str:
+        """The candidate's ``device_key`` -- the identity the merge is keyed by."""
+        return self.record.key
+
+    @property
+    def receivers(self) -> tuple[str, ...]:
+        """The ids of the receivers that have heard this candidate."""
+        return tuple(entry.receiver_id for entry in self.coverage)
+
+
+def _merge_records(sightings: list[tuple[str, PendingDevice]]) -> PendingDevice:
+    """Fold one device key's per-receiver candidate records into one row.
+
+    **Last-received-wins, with no debounce.** The records are ordered by when
+    Home Assistant *recorded* them (``last_seen``, this process's own clock --
+    not the frame's ``event_time``, which is the decoding host's and so carries
+    that host's clock skew), and the newest supplies the row's event, its model
+    and its ``last_seen``. That is intentionally a simpler rule than the union's
+    skew-tolerant dedup (:meth:`Rtl433LocationAggregator._accept`): an adopted
+    device's value is *recorded*, so a stale frame regressing it is data loss
+    worth guarding against, whereas a candidate row is a preview that is
+    re-rendered seconds later and only ever needs to show the freshest sample.
+
+    The rest of the row is the *location's* answer rather than one receiver's:
+    ``count`` sums the sightings (the location heard it that many times, which
+    is the number that separates a real sensor from a one-off bad decode),
+    ``first_seen`` is the earliest (when the location first heard it, and what
+    the candidate order is built on), and ``fields`` accumulates oldest to
+    newest so a weather station that splits its readings across transmissions --
+    and across receivers -- shows the whole device, with the newest value
+    winning any field two receivers both reported.
+    """
+    ordered = sorted(sightings, key=lambda sighting: sighting[1].last_seen)
+    newest = ordered[-1][1]
+    fields: dict[str, Any] = {}
+    for _receiver_id, record in ordered:
+        fields.update(record.fields)
+    return PendingDevice(
+        key=newest.key,
+        # A frame can decode with an empty model; fall back to the newest
+        # sighting that named one rather than rendering an unnamed row when
+        # another receiver knows what it is.
+        model=newest.model
+        or next(
+            (record.model for _id, record in reversed(ordered) if record.model), ""
+        ),
+        event=newest.event,
+        count=sum(record.count for _id, record in ordered),
+        first_seen=min(record.first_seen for _id, record in ordered),
+        last_seen=newest.last_seen,
+        fields=fields,
+    )
+
+
+def _candidate_coverage(
+    coordinators: dict[str, Rtl433Coordinator],
+    sightings: list[tuple[str, PendingDevice]],
+) -> tuple[ReceiverCoverage, ...]:
+    """Build one candidate's per-receiver coverage, in receiver order."""
+    return tuple(
+        ReceiverCoverage(
+            receiver_id=receiver_id,
+            connected=coordinators[receiver_id].receiver_available,
+            last_seen=record.last_seen,
+            rssi=record.fields.get("rssi"),
+            snr=record.fields.get("snr"),
+        )
+        for receiver_id, record in sightings
+    )
+
+
+def _pending_sightings(
+    coordinators: dict[str, Rtl433Coordinator],
+) -> dict[str, list[tuple[str, PendingDevice]]]:
+    """Group every receiver's candidates by ``device_key``, in receiver order."""
+    sightings: dict[str, list[tuple[str, PendingDevice]]] = {}
+    for receiver_id, coordinator in coordinators.items():
+        for device_key, record in coordinator.pending.items():
+            sightings.setdefault(device_key, []).append((receiver_id, record))
+    return sightings
+
+
+def merged_candidates(hass: HomeAssistant, entry: ConfigEntry) -> list[MergedCandidate]:
+    """Return the location's candidate list: one row per sensor, not per receiver.
+
+    The union add-device page. Two receivers in range of the same sensor each
+    decode it and each record a candidate; merging them here is what lets the
+    user approve a *sensor* once instead of once per server, and what keeps the
+    page from offering the same device twice.
+
+    Ordered exactly as one receiver's list was -- most recently *discovered*
+    first, ties broken by key -- so a long list is worked from the top in the
+    same order on the options form and in the panel, and a card does not move
+    under the cursor every time the device transmits.
+
+    Derived on demand from the receivers' pending maps rather than maintained as
+    a fourth copy of the same state: those maps are the ingestion buffers the
+    replay / backlog gate writes into (per receiver, because that gate is a
+    statement about one receiver's connection), and a cached merge would be one
+    more thing to invalidate on every frame.
+    """
+    coordinators = receiver_coordinators(hass, entry)
+    merged = [
+        MergedCandidate(
+            record=_merge_records(sightings),
+            coverage=_candidate_coverage(coordinators, sightings),
+        )
+        for sightings in _pending_sightings(coordinators).values()
+    ]
+    merged.sort(
+        key=lambda candidate: (candidate.record.first_seen, candidate.key), reverse=True
+    )
+    return merged
+
+
+def merged_candidate(
+    hass: HomeAssistant, entry: ConfigEntry, device_key: str
+) -> MergedCandidate | None:
+    """Return one location-wide candidate, or ``None`` if nothing is offering it.
+
+    The single-key form :mod:`~custom_components.rtl_433.adoption` adopts from,
+    so the device is built from the same merged record the user was looking at
+    when they clicked -- including the fields only the *other* receiver heard.
+    """
+    coordinators = receiver_coordinators(hass, entry)
+    sightings = _pending_sightings(coordinators).get(device_key)
+    if not sightings:
+        return None
+    return MergedCandidate(
+        record=_merge_records(sightings),
+        coverage=_candidate_coverage(coordinators, sightings),
+    )
+
+
+def location_adopted(hass: HomeAssistant, entry: ConfigEntry) -> set[str]:
+    """Return every device key the location has adopted.
+
+    The stored devices map is the restart-safe record and each running
+    coordinator's mirror is the live one; a key adopted moments ago is in the
+    mirrors before the entry write lands, and a key adopted in an earlier
+    session is in the map before any receiver has heard it this process. The
+    union is the only answer that is true in both windows.
+    """
+    adopted = set(entry.data.get(CONF_DEVICES, {}))
+    for coordinator in receiver_coordinators(hass, entry).values():
+        adopted |= coordinator.adopted
+    return adopted
+
+
+def enforce_pending_cap(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Drop the coldest candidates until the **merged** list is back under the cap.
+
+    The cap has to be applied to the merged list, not per receiver: a location
+    with three receivers would otherwise hold three times the candidates of one
+    with a single receiver, and every one of them is rendered into the payload
+    pushed to every open panel. So the bound is on what the user is actually
+    offered -- and a dropped key is dropped from *every* receiver's map, since
+    leaving it in one of them would put the row straight back on the next merge.
+
+    "Coldest" is the merged row's ``last_seen``: the most recent moment *any*
+    receiver heard the device, so a sensor a second receiver still hears is not
+    evicted because the first one lost it. Ordering by that, with the key
+    breaking ties, is what makes the eviction deterministic rather than
+    dict-order dependent.
+
+    The sum of the per-receiver sizes is an upper bound on the size of their
+    union, so a cheap sum rules the whole merge out in the overwhelmingly common
+    case of a list nowhere near the cap.
+    """
+    coordinators = receiver_coordinators(hass, entry)
+    if (
+        sum(len(coordinator.pending) for coordinator in coordinators.values())
+        <= MAX_PENDING_CANDIDATES
+    ):
+        return
+
+    merged = {
+        device_key: _merge_records(sightings)
+        for device_key, sightings in _pending_sightings(coordinators).items()
+    }
+    over = len(merged) - MAX_PENDING_CANDIDATES
+    if over <= 0:
+        return
+    coldest = sorted(merged, key=lambda key: (merged[key].last_seen, key))
+    for device_key in coldest[:over]:
+        for coordinator in coordinators.values():
+            coordinator.pending.pop(device_key, None)
+        LOGGER.debug(
+            "rtl_433 dropping the coldest candidate %s (over the %d key cap)",
+            device_key,
+            MAX_PENDING_CANDIDATES,
+        )
+
+
+def clear_pending(hass: HomeAssistant, entry: ConfigEntry) -> int:
+    """Forget every candidate on every receiver, and return how many rows went.
+
+    Counted in merged rows rather than per-receiver records, because that is
+    what the user was looking at: clearing a list of forty candidates that two
+    receivers both hear cleared forty, not eighty.
+    """
+    coordinators = receiver_coordinators(hass, entry)
+    cleared = len(
+        {key for coordinator in coordinators.values() for key in coordinator.pending}
+    )
+    for coordinator in coordinators.values():
+        coordinator.pending.clear()
+    async_emit_pending_update(hass, entry)
+    return cleared
+
+
+@callback
+def async_emit_pending_update(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Announce that the location's merged candidate list changed membership.
+
+    The location-level twin of
+    :meth:`~.coordinator.Rtl433Coordinator.emit_pending_update`, for the callers
+    that act on the location rather than through one receiver: the adoption
+    verbs, which have just written a batch across every receiver and announce it
+    once. Both send the same location-scoped signal, so a subscriber has exactly
+    one thing to listen to however the change was made.
+    """
+    async_dispatcher_send(hass, signal_pending_update(entry.entry_id))
+
+
 @dataclasses.dataclass(slots=True)
 class _AppliedFrame:
     """The last frame whose value was actually applied for one device field.
@@ -301,6 +569,7 @@ class Rtl433LocationAggregator:
                 )
             )
             coordinator.device_removers.append(self.forget_device)
+            coordinator.pending_listeners.append(self._enforce_pending_cap)
             self._hooked.append(coordinator)
             for device_key in self._known_device_keys(coordinator):
                 self._subscribe(receiver_id, device_key)
@@ -322,7 +591,22 @@ class Rtl433LocationAggregator:
         for coordinator in self._hooked:
             if self.forget_device in coordinator.device_removers:
                 coordinator.device_removers.remove(self.forget_device)
+            if self._enforce_pending_cap in coordinator.pending_listeners:
+                coordinator.pending_listeners.remove(self._enforce_pending_cap)
         self._hooked.clear()
+
+    @callback
+    def _enforce_pending_cap(self) -> None:
+        """Hold the location's merged candidate list under the cap.
+
+        Registered on every receiver's ``pending_listeners``, so it runs on the
+        one thing that can grow the list -- a receiver recording a candidate it
+        has not heard before -- and before that receiver announces the change.
+        The work itself is :func:`enforce_pending_cap`, which is a function over
+        the location rather than a method here because nothing about it needs the
+        aggregator's own state; this is only the wiring that gives it a trigger.
+        """
+        enforce_pending_cap(self.hass, self.entry)
 
     @callback
     def forget_device(self, device_key: str) -> None:
