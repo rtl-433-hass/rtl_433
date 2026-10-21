@@ -80,6 +80,11 @@
       "score": 0.94,
       "total": 50
     },
+    "custom_components/rtl_433/id_change.py": {
+      "killed": 275,
+      "score": 0.759669,
+      "total": 362
+    },
     "custom_components/rtl_433/library.py": {
       "killed": 37,
       "score": 1.0,
@@ -798,6 +803,80 @@
         "score": 0.75,
         "survived": 2,
         "total": 8
+      }
+    },
+    "custom_components/rtl_433/id_change.py": {
+      "custom_components.rtl_433.id_change.x__device_name": {
+        "killed": 9,
+        "score": 1.0,
+        "survived": 0,
+        "total": 9
+      },
+      "custom_components.rtl_433.id_change.x__duration": {
+        "killed": 18,
+        "score": 0.72,
+        "survived": 7,
+        "total": 25
+      },
+      "custom_components.rtl_433.id_change.x__humidity": {
+        "killed": 6,
+        "score": 1.0,
+        "survived": 0,
+        "total": 6
+      },
+      "custom_components.rtl_433.id_change.x__kind": {
+        "killed": 15,
+        "score": 0.681818,
+        "survived": 7,
+        "total": 22
+      },
+      "custom_components.rtl_433.id_change.x__number": {
+        "killed": 6,
+        "score": 1.0,
+        "survived": 0,
+        "total": 6
+      },
+      "custom_components.rtl_433.id_change.x__placeholders": {
+        "killed": 10,
+        "score": 0.30303,
+        "survived": 23,
+        "total": 33
+      },
+      "custom_components.rtl_433.id_change.x__readings_agree": {
+        "killed": 11,
+        "score": 0.916667,
+        "survived": 1,
+        "total": 12
+      },
+      "custom_components.rtl_433.id_change.x__temperature": {
+        "killed": 13,
+        "score": 0.5,
+        "survived": 13,
+        "total": 26
+      },
+      "custom_components.rtl_433.id_change.x_async_follow_id_change": {
+        "killed": 46,
+        "score": 0.901961,
+        "survived": 5,
+        "total": 51
+      },
+      "custom_components.rtl_433.id_change.x_find_id_changes": {
+        "killed": 101,
+        "score": 0.893805,
+        "survived": 12,
+        "total": 113
+      },
+      "custom_components.rtl_433.id_change.x\u01c1DeviceIdChangedRepairFlow\u01c1__init__": {
+        "killed": 3,
+        "score": 1.0,
+        "survived": 0,
+        "total": 3
+      },
+      "custom_components.rtl_433.id_change.x\u01c1DeviceIdChangedRepairFlow\u01c1async_step_confirm": {
+        "killed": 37,
+        "score": 0.660714,
+        "survived": 19,
+        "total": 56
       }
     },
     "custom_components/rtl_433/library.py": {
