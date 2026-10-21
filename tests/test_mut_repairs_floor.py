@@ -2123,3 +2123,28 @@ class TestEventTimeFixFlow:
             )
             is None
         )
+
+
+async def test_fix_flow_preserves_the_receiver_part_of_an_issue_id(
+    hass, receiver_entry_builder
+):
+    """The location delimiter must not consume part of an opaque receiver id."""
+    from types import SimpleNamespace
+
+    entry = receiver_entry_builder()
+    subentry = receiver_subentry(entry)
+    receiver_token = f"{subentry.subentry_id}:suffix"
+    location = SimpleNamespace(
+        entry_id=entry.entry_id, subentries={receiver_token: subentry}
+    )
+    with patch.object(
+        hass.config_entries,
+        "async_get_entry",
+        side_effect=lambda key: location if key == location.entry_id else None,
+    ):
+        flow = await repairs.async_create_fix_flow(
+            hass, repairs._unreachable_issue_id(location, receiver_token), None
+        )
+    assert isinstance(flow, repairs.ReceiverRadioReplaceRepairFlow)
+    assert flow._entry is location
+    assert flow._subentry is subentry
