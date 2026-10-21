@@ -68,6 +68,7 @@ from custom_components.rtl_433.coordinator._watchdog import _WATCHDOG_INTERVAL
 from custom_components.rtl_433.coordinator.base import _TimeWeightedMean
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_subentry
 
 CLIENT = "custom_components.rtl_433.coordinator.base.Rtl433Client"
 CLIENT_VALIDATE = (
@@ -115,7 +116,7 @@ async def make_coordinator(hass, receiver_entry_builder):
         entry = receiver_entry_builder(entry_id=kwargs.pop("entry_id", None))
         entry.add_to_hass(hass)
         kwargs.setdefault("host", "rtl433.local")
-        return Rtl433Coordinator(hass, entry, **kwargs)
+        return Rtl433Coordinator(hass, entry, receiver_subentry(entry), **kwargs)
 
     return _make
 
@@ -145,6 +146,7 @@ async def test_the_client_is_pointed_at_the_configured_hub(
         coordinator = Rtl433Coordinator(
             hass,
             entry,
+            receiver_subentry(entry),
             host="attic.local",
             port=9999,
             path="/stream",
@@ -181,10 +183,12 @@ async def test_the_desired_state_store_is_scoped_to_this_hub(
     entry.add_to_hass(hass)
 
     with patch(STORE) as store_cls:
-        coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+        coordinator = Rtl433Coordinator(
+            hass, entry, receiver_subentry(entry), host="rtl433.local"
+        )
 
     store_cls.assert_called_once_with(
-        hass, SDR_STORE_VERSION, sdr_store_key("hub-attic")
+        hass, SDR_STORE_VERSION, sdr_store_key(coordinator.receiver_id)
     )
     assert coordinator._store is store_cls.return_value
 
@@ -234,7 +238,9 @@ async def test_the_entry_is_kept_for_the_signals_keyed_on_it(
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
 
     assert coordinator.entry is entry
 
@@ -446,13 +452,13 @@ async def test_async_start_arms_the_watchdog_for_this_hub(hass, make_coordinator
             hass,
             coordinator._async_watchdog,
             _WATCHDOG_INTERVAL,
-            name=f"rtl_433 watchdog {coordinator.entry.entry_id}",
+            name=f"rtl_433 watchdog {coordinator.receiver_id}",
         ),
         call(
             hass,
             coordinator._async_publish_noise,
             NOISE_PUBLISH_INTERVAL,
-            name=f"rtl_433 noise {coordinator.entry.entry_id}",
+            name=f"rtl_433 noise {coordinator.receiver_id}",
         ),
     ]
     assert coordinator._watchdog_unsub is track.return_value
@@ -911,7 +917,7 @@ async def test_the_connect_edge_anchors_the_backlog_gate_and_adopts(
     task.assert_called_once()
     assert task.call_args.args[0] is hass
     assert task.call_args.kwargs == {
-        "name": f"rtl_433 sdr adopt {coordinator.entry.entry_id}"
+        "name": f"rtl_433 sdr adopt {coordinator.receiver_id}"
     }
     # The coroutine was handed to a mock that never awaits it.
     task.call_args.args[1].close()
@@ -952,7 +958,7 @@ async def test_every_hub_update_repaints_this_hubs_own_entities(hass, make_coord
     with patch(DISPATCH) as dispatch:
         coordinator._emit_receiver_update()
 
-    dispatch.assert_any_call(hass, signal_receiver_update(coordinator.entry.entry_id))
+    dispatch.assert_any_call(hass, signal_receiver_update(coordinator.receiver_id))
 
 
 # --------------------------------------------------------------------------- #
@@ -975,7 +981,7 @@ async def test_a_device_update_is_addressed_to_that_device_on_this_hub(
         coordinator._dispatch(_KEY, event)
 
     dispatch.assert_called_once_with(
-        hass, signal_device_update(coordinator.entry.entry_id, _KEY), event
+        hass, signal_device_update(coordinator.receiver_id, _KEY), event
     )
 
 

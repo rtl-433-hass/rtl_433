@@ -31,6 +31,7 @@ import pytest
 
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_subentry
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
 LOG = "custom_components.rtl_433"
@@ -50,6 +51,7 @@ def make_coordinator(hass, receiver_entry_builder):
         coordinator = Rtl433Coordinator(
             hass,
             entry,
+            receiver_subentry(entry),
             host="rtl433.local",
             availability_timeout=600,
             skip_keys={"model", "id", "channel", "subtype", "time", "mic"},
