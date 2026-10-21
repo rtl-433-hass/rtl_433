@@ -1,7 +1,20 @@
 # Receiver Entities
 
-Each receiver exposes diagnostic entities on the receiver device so you can observe the
-rtl_433 server itself.
+A **receiver** is a computer running rtl_433; it contains a **radio**, the SDR
+dongle. Each receiver in a location gets its own device in Home Assistant,
+hanging off the location, and exposes diagnostic entities there so you can
+observe that rtl_433 server itself.
+
+These entities are the one part of the integration that does **not** merge across
+a location's receivers: every receiver has its own connectivity, its own radio,
+its own noise floor and its own statistics. Add a second receiver and you get a
+second set, on a second receiver device. The decoded RF devices are the things
+that merge — see [Availability](availability.md#receivers-in-one-location).
+
+The per-device **RSSI**, **SNR** and **Last seen** entities are also per
+receiver, but they live on the *merged* device rather than here, because they
+describe how well one receiver hears one sensor. See
+[Per-Receiver Signal Detail](availability.md#per-receiver-signal-detail).
 
 ## Connectivity
 
@@ -9,9 +22,10 @@ The **Connectivity** binary sensor is on while the receiver's WebSocket connecti
 open and off otherwise. It flips off immediately when the server announces a
 shutdown instead of waiting for a silence timeout.
 
-## SDR and Meta Diagnostics
+## Radio and Meta Diagnostics
 
-Read-only diagnostic sensors report the radio's current configuration:
+Read-only diagnostic sensors report this receiver's radio's current
+configuration:
 
 - Center frequency.
 - Sample rate.
@@ -60,8 +74,8 @@ current one by more than 1 dB. As a result:
 - rtl_433 adjusts the threshold several times at startup, then stops once it
   stabilizes. The event stream carries no backlog, so a server that settled before
   Home Assistant connected leaves the sensor `unknown` until the noise floor
-  drifts by more than 1 dB. To force an update, nudge the receiver's **Gain** number
-  entity far enough to move the floor, then set it back.
+  drifts by more than 1 dB. To force an update, nudge that receiver's **Gain**
+  number entity far enough to move the floor, then set it back.
 
 rtl_433 can send these readings several times a second: the estimate jitters
 by a dB or so, and every move of more than 1 dB produces a new line. Writing
@@ -77,7 +91,7 @@ Unlike the sensors below, this data arrives over the event stream itself
 (rtl_433 ≥ 23.11), so it works even when `/cmd` is proxied away behind a
 WebSocket-only proxy.
 
-![The receiver device's Diagnostic card: Noise level -36.4 dB and Minimum detection level -33.4 dB alongside Connectivity Connected, with the sensors fetched over /cmd reading Unknown](images/14-receiver-noise.png)
+![One receiver device's Diagnostic card: Noise level -36.4 dB and Minimum detection level -33.4 dB alongside Connectivity Connected, with the sensors fetched over /cmd reading Unknown](images/14-receiver-noise.png)
 
 That capture is from a server reachable only over its WebSocket stream, which is
 why the two noise sensors report while the `/cmd`-sourced sensors described below
@@ -95,16 +109,18 @@ configured WebSocket path. If a reverse proxy exposes only the WebSocket path an
 not `/cmd`, these sensors read `unknown` while the event stream and
 connectivity sensor keep working.
 
-The diagnostic and statistics sensors become `unavailable` when the receiver
-connection drops. See [Availability](availability.md#receiver-connection). The
-Connectivity sensor stays available to report the connection state, and the SDR
-controls below stay available so you can change settings while disconnected.
+The diagnostic and statistics sensors become `unavailable` when their receiver
+disconnects, even if another receiver at the location is connected. See
+[Availability](availability.md#receiver-connection). The Connectivity sensor stays
+available to report the connection state, and the radio controls below stay
+available so you can change settings while disconnected.
 
-## Managing SDR Settings from Home Assistant
+## Managing a Receiver's Radio from Home Assistant
 
-By default a new receiver adopts and manages the radio's SDR settings. With
-**Manage rtl_433 settings from Home Assistant** enabled, the receiver exposes controls
-under the receiver device in the config entity category:
+By default, Home Assistant adopts and manages each receiver's radio settings.
+To change this, open that receiver's **Receiver settings** page and use
+**Manage this receiver's radio**. When enabled, these controls appear on the
+receiver device in the config entity category:
 
 - **Center frequency** number in MHz, available only for single-frequency setups.
 - **Sample rate** number in Hz.
@@ -118,10 +134,15 @@ Frequency hopping must be configured in rtl_433. Home Assistant can adjust the
 hop interval after rtl_433 is already running with multiple frequencies, but it
 does not provide an entity for editing the frequency list.
 
-On first connect, Home Assistant adopts the server's current settings into its
+On first connect, Home Assistant adopts that server's current settings into its
 desired state. It then re-applies managed settings on every reconnect so values
-survive rtl_433 restarts. If an initial frequency was configured during setup,
-that value is applied once and takes priority over the adopted frequency.
+survive rtl_433 restarts. If an initial frequency was configured when the
+receiver was added, that value is applied once and takes priority over the
+adopted frequency.
+
+Each receiver keeps its own desired state, so two receivers in a location can sit
+on different frequencies or gains — which is a reasonable thing to want, since
+they are hearing different parts of the same place.
 
 Once managed, change these settings in Home Assistant rather than editing the
 rtl_433 config directly. Home Assistant is the authority and will re-apply its
@@ -129,12 +150,12 @@ stored values on the next reconnect.
 
 ### Re-Syncing from rtl_433 Config
 
-To pick up direct rtl_433 config edits:
+To pick up direct rtl_433 config edits on one receiver:
 
-1. Turn **Manage rtl_433 settings from Home Assistant** off. This clears Home
-   Assistant's stored desired state.
+1. Turn **Manage this receiver's radio** off on that receiver's **Receiver
+   settings** page. This clears Home Assistant's stored desired state for it.
 2. Restart rtl_433 so it loads its config.
-3. Turn the toggle back on. On the next connect, Home Assistant re-adopts the
+3. Turn the toggle back on. On the next connect, Home Assistant re-adopts that
    server's current settings.
 
 ### Requirements and Caveats
@@ -147,6 +168,6 @@ To pick up direct rtl_433 config edits:
 - Retuning does not widen the sample rate automatically; high-frequency bands may
   require manually increasing sample rate.
 
-Turning management off removes the controls, stops Home Assistant from sending
-commands, and clears its stored desired state. The radio's settings are left
-untouched.
+Turning management off removes that receiver's controls, stops Home Assistant
+from sending it commands, and clears its stored desired state. The radio's own
+settings are left untouched, as are every other receiver's.
