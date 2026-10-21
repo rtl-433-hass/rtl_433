@@ -1,7 +1,7 @@
 """Event platform for the rtl_433 hub config entry.
 
 ``async_setup_entry`` runs once for the hub config entry and delegates to the
-shared :func:`~custom_components.rtl_433.entity.async_setup_hub_platform`
+shared :func:`~custom_components.rtl_433.entity.async_setup_receiver_platform`
 helper, which resolves the hub coordinator, builds a :class:`Rtl433Event` for
 every device's observed mapped fields whose descriptor ``platform == "event"``,
 adds new devices/fields at runtime, and keeps the hub's devices map current.
@@ -46,7 +46,7 @@ from homeassistant.util import dt as dt_util
 from .const import CONF_DEVICES, DEVICE_EVENT_TYPES, LOGGER
 from .entity import (
     Rtl433Entity,
-    async_setup_hub_platform,
+    async_setup_receiver_platform,
     async_upsert_event_types,
     resolve_event_type,
 )
@@ -79,13 +79,13 @@ class Rtl433Event(Rtl433Entity, EventEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         device_key: str,
         model: str,
         descriptor: FieldDescriptor,
     ) -> None:
         """Initialize event-specific description fields from persisted state."""
-        super().__init__(coordinator, hub_entry_id, device_key, model, descriptor)
+        super().__init__(coordinator, receiver_entry_id, device_key, model, descriptor)
         # ``EventEntity.device_class`` accepts the plain string from the
         # descriptor (an ``EventDeviceClass`` member value or ``None``).
         self._attr_device_class = descriptor.device_class
@@ -243,6 +243,6 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up rtl_433 event entities for every device under the hub entry."""
-    await async_setup_hub_platform(
+    await async_setup_receiver_platform(
         hass, entry, async_add_entities, PLATFORM, Rtl433Event
     )

@@ -53,21 +53,21 @@ from custom_components.rtl_433.const import (
     CONF_DEVICES,
     CONF_ENTRY_TYPE,
     CONF_HOST,
-    CONF_HUB_ENTRY_ID,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    CONF_RECEIVER_ENTRY_ID,
     DEVICE_CALIBRATION,
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
-    ENTRY_TYPE_HUB,
+    ENTRY_TYPE_RECEIVER,
     LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
     NOISE_PUBLISH_INTERVAL,
-    signal_hub_update,
+    signal_receiver_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
@@ -281,7 +281,7 @@ async def test_hub_connectivity_sensor(hass, hub_entry_builder):
 
     # Mark connected and notify -> state on.
     coordinator._client.connected = True
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == "on"
 
@@ -341,7 +341,7 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
         "frames": {"count": 12, "fsk": 3, "events": 40},
         "stats": [{"name": "Acurite", "events": 40}],
     }
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -525,7 +525,7 @@ async def test_a_burst_of_noise_lines_writes_once_per_interval(hass, hub_entry_b
     )
     hub_updates: list[None] = []
     async_dispatcher_connect(
-        hass, signal_hub_update(hub.entry_id), lambda: hub_updates.append(None)
+        hass, signal_receiver_update(hub.entry_id), lambda: hub_updates.append(None)
     )
 
     coordinator._client._handle_text_frame(_auto_level_frame(-21.0))
@@ -663,7 +663,7 @@ async def test_a_hub_refresh_after_a_noise_line_still_reaches_every_hub_entity(
     coordinator = _coordinator(hass, hub)
     hub_updates: list[None] = []
     async_dispatcher_connect(
-        hass, signal_hub_update(hub.entry_id), lambda: hub_updates.append(None)
+        hass, signal_receiver_update(hub.entry_id), lambda: hub_updates.append(None)
     )
 
     coordinator._client._handle_text_frame(_auto_level_frame(-21.0))
@@ -724,7 +724,7 @@ async def test_hub_diagnostic_sensors_unmanaged(hass, hub_entry_builder):
         "gain": "",  # empty string -> rendered as "auto"
         "ppm_error": 0,
     }
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1126,7 +1126,7 @@ async def test_phantom_unknown_device_cleaned_up(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 async def test_migration_folds_legacy_device_entries_into_hub(hass):
     """A v1 hub + two v1 device entries migrate to one hub with devices map."""
-    hub_entry_id = "huboldid01"
+    receiver_entry_id = "huboldid01"
     key_a = "Acurite-606TX-42"
     key_b = "EnergyMeter-2000-1234"
 
@@ -1136,9 +1136,9 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
         title="rtl_433 (rtl433.local)",
         version=1,
         unique_id="hub:rtl433.local:8433",
-        entry_id=hub_entry_id,
+        entry_id=receiver_entry_id,
         data={
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             CONF_HOST: "rtl433.local",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
@@ -1149,10 +1149,10 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
         domain=DOMAIN,
         title="Acurite-606TX",
         version=1,
-        unique_id=f"{hub_entry_id}:{key_a}",
+        unique_id=f"{receiver_entry_id}:{key_a}",
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_entry_id,
+            CONF_RECEIVER_ENTRY_ID: receiver_entry_id,
             CONF_DEVICE_KEY: key_a,
             CONF_MODEL: "Acurite-606TX",
         },
@@ -1162,10 +1162,10 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
         domain=DOMAIN,
         title="EnergyMeter-2000",
         version=1,
-        unique_id=f"{hub_entry_id}:{key_b}",
+        unique_id=f"{receiver_entry_id}:{key_b}",
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_entry_id,
+            CONF_RECEIVER_ENTRY_ID: receiver_entry_id,
             CONF_DEVICE_KEY: key_b,
             CONF_MODEL: "EnergyMeter-2000",
         },
@@ -1185,30 +1185,30 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
     # couple of entities each — keyed exactly as 0.1.0 created them.
     device_a_dev = dev_reg.async_get_or_create(
         config_entry_id=device_a.entry_id,
-        identifiers={(DOMAIN, f"{hub_entry_id}:{key_a}")},
+        identifiers={(DOMAIN, f"{receiver_entry_id}:{key_a}")},
     )
     device_b_dev = dev_reg.async_get_or_create(
         config_entry_id=device_b.entry_id,
-        identifiers={(DOMAIN, f"{hub_entry_id}:{key_b}")},
+        identifiers={(DOMAIN, f"{receiver_entry_id}:{key_b}")},
     )
     temp_entry = ent_reg.async_get_or_create(
         "sensor",
         DOMAIN,
-        f"{hub_entry_id}:{key_a}:T",
+        f"{receiver_entry_id}:{key_a}:T",
         config_entry=device_a,
         device_id=device_a_dev.id,
     )
     hum_entry = ent_reg.async_get_or_create(
         "sensor",
         DOMAIN,
-        f"{hub_entry_id}:{key_a}:H",
+        f"{receiver_entry_id}:{key_a}:H",
         config_entry=device_a,
         device_id=device_a_dev.id,
     )
     watts_entry = ent_reg.async_get_or_create(
         "sensor",
         DOMAIN,
-        f"{hub_entry_id}:{key_b}:watts",
+        f"{receiver_entry_id}:{key_b}:watts",
         config_entry=device_b,
         device_id=device_b_dev.id,
     )
@@ -1227,7 +1227,7 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
     # Both devices are now associated with the hub config entry.
     for key in (key_a, key_b):
         device = dev_reg.async_get_device_by_identifier(
-            (DOMAIN, f"{hub_entry_id}:{key}"), hub_entry_id
+            (DOMAIN, f"{receiver_entry_id}:{key}"), receiver_entry_id
         )
         assert device is not None
         # One owner per device, so this also says neither legacy entry owns it.
@@ -2744,7 +2744,7 @@ def _timeout_hub(options, *, minor_version=3):
         minor_version=minor_version,
         unique_id="hub:rtl433.local:8433",
         data={
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             CONF_HOST: "rtl433.local",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
@@ -2990,7 +2990,7 @@ async def test_setup_wires_the_event_time_advisory(hass, hub_entry_builder):
 
     # The first event frame tells the client the server stamps nothing readable.
     _coordinator(hass, hub)._client.time_precision = TimePrecision.UNUSABLE
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
