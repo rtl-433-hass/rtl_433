@@ -607,7 +607,7 @@ class Rtl433ReceiverSensor(Rtl433ReceiverEntity, SensorEntity):
                 async_dispatcher_connect(
                     self.hass,
                     signal_receiver_noise(self._receiver_entry_id),
-                    self._handle_hub_update,
+                    self._handle_receiver_update,
                 )
             )
 
