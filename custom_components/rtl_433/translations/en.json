@@ -276,15 +276,14 @@
         "step": {
           "confirm": {
             "title": "Replace the ID for {device}?",
-            "description": "{device} ({old_key}) has stopped reporting, and a new device of the same model and channel has appeared: {new_key}. This can happen after a battery change, but it could also be a different sensor.\n\nConfirm only if you have checked that this is the same physical device. Submitting moves {device} onto {new_key}, preserving its entities, history, name and settings. Otherwise, close this dialog. You can ignore an unrelated candidate from the rtl_433 page."
+            "description": "{device} ({old_key}) has stopped reporting, and a new device of the same model and channel has appeared: {new_key}. The reception timing and any comparable temperature or humidity readings suggest an ID change, but cannot confirm that this is the same physical device.\n\nConfirm only if you have checked that this is the same physical device. Submitting moves {device} onto {new_key}, preserving its entities, history, name and settings. Otherwise, close this dialog. You can ignore an unrelated candidate from the rtl_433 page."
           }
         },
         "abort": {
           "device_id_change_stale": "This suggested replacement is no longer valid. Check the rtl_433 page for current devices.",
           "device_id_change_failed": "The device could not be switched to its new ID. Try Replace from the rtl_433 page."
         }
-      },
-      "description": "{device} ({old_key}) has gone quiet. {new_key} may be the same sensor under a new ID: same model and channel, last temperature {old_temperature}, new temperature {new_temperature}, signal {signal}. It first appeared {gap} after {device} went quiet. These clues cannot confirm that it is the same physical device. Open this card to review the suggested replacement."
+      }
     }
   },
   "config_panel": {
