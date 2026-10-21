@@ -546,6 +546,18 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     can never fall through to one of them, and a change that does reload simply
     re-seeds the set from ``entry.data`` at setup.
     """
+    # A location whose last receiver has just been deleted can never be set up
+    # again -- ``async_setup_entry`` refuses a receiver-less entry -- so it goes
+    # with the receiver rather than lingering as an unloadable shell. Home
+    # Assistant offers no hook to *refuse* a subentry removal
+    # (``async_remove_subentry`` is a plain callback with no veto), so the
+    # nearest thing to blocking it is to let the location follow. Scheduled
+    # rather than awaited: this listener runs inside the config-entry update it
+    # is reacting to, and removing the entry re-enters that machinery.
+    if not receiver_subentries(entry):
+        hass.async_create_task(hass.config_entries.async_remove(entry.entry_id))
+        return
+
     coordinators = running_coordinators(hass, entry)
     if not coordinators:
         return
