@@ -2980,3 +2980,17 @@ async def test_hassio_confirm_can_attach_to_an_existing_location(hass):
     ]
     assert [r.unique_id for r in receivers] == ["radio-old", "radio-new"]
     assert receivers[1].data[CONF_HOST] == "new.local"
+
+
+async def test_hassio_confirm_omits_location_picker_without_rtl433_locations(hass):
+    """Other integrations do not make first-time setup offer a location picker."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    MockConfigEntry(domain="hue", title="Hue Bridge").add_to_hass(hass)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_HASSIO},
+        data=_disc(host="new.local", port=9000, uid="radio-new"),
+    )
+    assert result["step_id"] == "hassio_confirm"
+    assert "location" not in {key.schema for key in result["data_schema"].schema}
