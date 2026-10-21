@@ -2088,3 +2088,23 @@ async def test_update_listener_logs_what_it_applied(
     assert (
         f"rtl_433 location {receiver.title} options updated (timeout=600s, receivers=1)"
     ) in messages
+
+
+async def test_setup_entry_registers_location_device(hass, receiver_entry_builder):
+    """The location root has its own identity and metadata above the receivers."""
+    location = receiver_entry_builder(availability_timeout=600)
+    location.add_to_hass(hass)
+    hass.config_entries.async_update_entry(location, title="Home")
+    assert await hass.config_entries.async_setup(location.entry_id)
+    await hass.async_block_till_done()
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, location.entry_id), location.entry_id
+    )
+    assert device is not None
+    assert device.config_entry_id == location.entry_id
+    assert device.config_subentry_id is None
+    assert device.manufacturer == "rtl_433"
+    assert device.name == location.title
+    assert device.model == "rtl_433 location"
+    assert device.entry_type is dr.DeviceEntryType.SERVICE
+    assert device.via_device_id is None

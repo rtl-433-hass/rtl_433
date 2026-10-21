@@ -1147,3 +1147,30 @@ async def test_effective_clear_delay_override_wins_over_descriptor(
     await _advance_to(hass, start, override + 2)
     assert hass.states.get(eid).state == "off"
     assert override + 2 < DEFAULT_MOTION_CLEAR_DELAY
+
+
+async def test_binary_sensor_can_force_repeated_state_updates(
+    hass, receiver_entry_builder
+):
+    """Mappings can request a state event even when a boolean value repeats."""
+    from pyrtl_433.library import FieldDescriptor
+
+    from custom_components.rtl_433.binary_sensor import Rtl433BinarySensor
+
+    location = await _setup_receiver(hass, receiver_entry_builder)
+    descriptor = FieldDescriptor(
+        field_key="closed",
+        platform="binary_sensor",
+        name="Contact",
+        object_suffix="contact",
+        device_class="opening",
+        force_update=True,
+    )
+    sensor = Rtl433BinarySensor(
+        _coordinator(hass, location),
+        receiver_id(location),
+        _DOOR_KEY,
+        _DOOR_MODEL,
+        descriptor,
+    )
+    assert sensor.force_update is True
