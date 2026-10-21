@@ -136,18 +136,23 @@ test("every headline it can return is a string the panel has", () => {
 
 // -- Where the rows link ------------------------------------------------------
 
-test("the registry links are filtered to the integration, not to one hub", () => {
-  // The bug, stated as the URL it produces: `config_entry=` here is what made
-  // the count and the page it opens disagree on an instance with two receivers.
+test("the registry links are filtered to the location, not to one receiver", () => {
+  // The bug, stated as the URL it produces: a link scoped to anything but the
+  // location entry made the count and the page it opens disagree. A receiver is
+  // a subentry of the location, so the location's entry covers every radio in
+  // it -- which is exactly the set the count beside the link is taken from.
   for (const which of ["devices", "entities"]) {
-    const path = configPagePath(which);
-    assert.equal(path, `/config/${which}/dashboard?historyBack=1&domain=rtl_433`);
-    assert.ok(!path.includes("config_entry"), path);
+    const path = configPagePath(which, "01LOCATION");
+    assert.equal(
+      path,
+      `/config/${which}/dashboard?historyBack=1&config_entry=01LOCATION`,
+    );
+    assert.ok(!path.includes("domain="), path);
   }
 });
 
 test("the links come back to this panel rather than to their own tab", () => {
   // `historyBack=1` is what Home Assistant's registry pages read to put the
   // caller behind their back arrow.
-  assert.ok(configPagePath("devices").includes("historyBack=1"));
+  assert.ok(configPagePath("devices", "01LOCATION").includes("historyBack=1"));
 });
