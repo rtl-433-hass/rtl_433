@@ -26,9 +26,9 @@ is currently tracking — the old ID before a replace, the new one after.
 ## Suggested replacements in Repairs
 
 When an added device goes quiet and a new candidate looks like its successor,
-the integration raises a notice in **Settings → System → Repairs**. It shows the
-old and new IDs, the temperature readings when available, the signal level, and
-the time between the old device's last report and the new candidate's first.
+the integration raises a notice in **Settings → System → Repairs**. Open it to
+review the old and new IDs and confirm whether they belong to the same physical
+device.
 
 The suggestion requires the same model, channel and subtype, at least ten
 minutes of silence from the old device, and at least two sightings of the
