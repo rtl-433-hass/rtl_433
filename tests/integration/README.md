@@ -32,6 +32,7 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | `06-config-user.png` | The config-flow connection form (host / port / path / toggles / initial frequency) |
 | `07-hub-settings.png` | The **Receiver settings** page (the availability-timeout choice, managed settings) |
 | `08-device-settings.png` | The **Device settings** page for the SCMplus meter: the picker, the timeout override, the commodity pre-filled to `gas`, and the base unit + scale it reveals |
+| `19-calibrate-on-add.png` | The calibration prompt opened by **Add** on the SCMplus meter, with its detected gas type and **Skip for now** control |
 | `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
 | `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
@@ -52,8 +53,9 @@ device visible.
 Nothing is added to Home Assistant automatically, so the `shots` stage works the
 approval flow for real: it captures the page with every heard device still
 pending, ignores the leak detector and captures the ignored section, then
-un-ignores it and adds every device — which is why the later shots have a full
-hub to work with.
+un-ignores it and adds every device. Adding the SCMplus meter must open its
+calibration prompt; the harness captures it and chooses **Skip for now**, which
+keeps the meter added for the later shots.
 
 **Order matters for the panel shot.** It is captured *before* the approval runs,
 because that adds all six replayed devices and would leave the page with no cards

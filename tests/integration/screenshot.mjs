@@ -606,6 +606,24 @@ async function approveDevices(page) {
       `screenshot: add ${key} -> ` + (await clickCardButton(page, key, "add")),
     );
     await page.waitForTimeout(2500);
+    const calibration = await inPanel(
+      page,
+      `(panel) => panel._calibrationAfterAdd`,
+    );
+    if (calibration) {
+      // Reach this form through Add itself, so the capture also checks that
+      // the prompt is available from the normal discovery UI.
+      const form = page.locator("rtl-433-panel .view-settings");
+      await form.waitFor({ state: "visible" });
+      if (key === "SCMplus") {
+        await form.screenshot({ path: resolve(SHOTS, "19-calibrate-on-add.png") });
+        console.log("screenshot: captured 19-calibrate-on-add.png after Add");
+      }
+      await page.locator("rtl-433-panel .settings-skip").click();
+      await page.locator("rtl-433-panel .view-discovered").waitFor({ state: "visible" });
+    } else if (key === "SCMplus") {
+      throw new Error("Adding the SCMplus meter did not offer calibration");
+    }
   }
   await page.waitForTimeout(4000);
 }
