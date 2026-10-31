@@ -1,59 +1,64 @@
 # Utility-Meter Calibration
 
-Utility meters decoded by SCM, ERT, and SCMplus protocols report a raw
-consumption counter, but the RF signal does not carry the counter's unit or
-scale. Meters use different counter scales, so the integration needs calibration
-before their readings can be used in the Energy dashboard.
+Some electricity, gas, and water meters send a running total without saying
+which unit it uses. Calibration tells the integration how to convert that
+number into a reading Home Assistant's Energy dashboard can use.
 
-Out of the box, consumption is a plain unitless `total_increasing` counter. To
-make it eligible for Home Assistant's Energy dashboard, calibrate the device.
+Until you calibrate one of these meters, its consumption sensor shows a counter
+without a unit. This applies to meters using the SCM, ERT, and SCMplus protocols.
 
 ## Calibrating a Meter
 
-Open **Settings → Devices & Services → rtl_433 → Configure (the gear icon) →
-Device settings** and pick the meter.
+After you click **Add** on a recognized meter in **Discovered devices**, its
+**Device settings** page opens. Check whether it measures electricity, gas, or
+water, then choose the unit and conversion factor described below. Click
+**Save** to apply them, or **Skip for now** to leave the meter added without
+calibration.
 
-The device picker labels meters with their detected commodity (energy, gas, or
-water). When the meter reports a `MeterType` or `ert_type` hint,
-the commodity is pre-filled from it. You can override it, and re-editing an
-already-calibrated device shows its stored commodity, unit and scale.
+![Device settings opened immediately after adding an SCMplus gas meter, with its detected gas type and calibration controls](images/19-calibrate-on-add.png)
+
+Closing the page without saving also keeps the meter added. You can calibrate
+it later.
+
+To calibrate a meter you added earlier, or to change a calibration, open
+**Settings → Devices & Services → rtl_433 → Configure → Device settings** and
+pick the meter.
+
+The integration fills in the meter type when it can detect it. You can change
+this choice. Opening a calibrated meter shows its saved settings.
 
 | Field | Meaning |
 | --- | --- |
-| **Commodity** | `none`, `energy`, `gas`, or `water`. This sets the sensor's device class. Choosing `none` clears the calibration and leaves the counter unitless. |
-| **Base unit** | The unit the calibrated counter is expressed in, constrained to the Home Assistant units that are convertible for that commodity. |
-| **Scale** | Multiplier applied to the raw counter so the stored value is in the chosen base unit. |
+| **Utility meter commodity** | What the meter measures: `energy` (electricity), `gas`, or `water`. Saving `none` removes any calibration. |
+| **Base unit** | The unit you want the reading expressed in, such as kWh or m³. The choices depend on what the meter measures. |
+| **Scale** | The number to multiply the meter's counter by to get a reading in your chosen unit. For example, if 100 counts mean 1 m³, enter `0.01`. Check your meter's documentation or compare its counter with the physical meter before choosing a scale. |
 
-The base unit and scale only appear once you have chosen a real commodity, and
-available units depend on the commodity and are compatible with the Energy
-dashboard.
+The base unit and scale appear after you choose electricity, gas, or water.
 
-![The Device settings page for the SCMplus gas meter, with the commodity pre-filled to gas and the base-unit and scale controls it reveals](images/08-device-settings.png)
+![The Device settings page for an existing SCMplus gas meter](images/08-device-settings.png)
 
-Once calibrated, the consumption sensor gets a device class, native unit,
-and `state_class: total_increasing`. You do not need to pick the display unit in
-the calibration flow: Home Assistant can convert convertible units in the entity
-settings.
+Once calibrated, the consumption sensor has the type and unit the Energy
+dashboard needs. You can choose a different display unit later in the entity's
+Home Assistant settings.
 
 The counter field itself needs no configuration: SCM and ERT meters report
 `consumption_data` and SCMplus meters report `Consumption`, and both ship in the
 device library. Neither requires a YAML override.
 
-## Statistics Caveat
+## Changing a Calibration
 
-Changing commodity, base unit, or scale changes the sensor's native unit or
-device class. Home Assistant treats that as a non-convertible change for long
-term statistics.
+Choose the unit and scale carefully before calibrating. Changing them later can
+interrupt the meter's long-term statistics in Home Assistant. The entity keeps
+its ID, but earlier statistics may no longer be linked to the new readings.
 
-The entity keeps its ID, but previous long-term statistics are orphaned. Choose
-the unit and scale carefully before calibrating. Saving a calibration reloads
-the hub so the sensor is rebuilt with the new unit and class.
+Saving a calibration briefly reloads the receiver so the sensor can use the
+new settings.
 
 ## Model-Scoped Mappings
 
-For models whose unit and scale are confirmed, a contributor can ship
-a model-scoped mapping in the [device library](device-library.md#model-scoped-mappings-models)
+For models whose unit and scale are confirmed, a contributor can add
+a model-scoped mapping to the [device library](device-library.md#model-scoped-mappings-models)
 so those meters work without per-device calibration.
 
-pyrtl_433 does not include speculative real-meter consumption mappings. A
-wrong scale would silently corrupt Energy data.
+The device library does not guess meter scales: a wrong scale would produce
+incorrect Energy dashboard readings.
