@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.1](https://github.com/rtl-433-hass/rtl_433/compare/v0.21.0...v0.21.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* **entity:** build entities in a deterministic field order ([#287](https://github.com/rtl-433-hass/rtl_433/issues/287)) ([38661c7](https://github.com/rtl-433-hass/rtl_433/commit/38661c7a7360308d86a0a895eec90b9e35e787d3))
+* publish the hub noise sensors at most once a minute ([#302](https://github.com/rtl-433-hass/rtl_433/issues/302)) ([7c02e9b](https://github.com/rtl-433-hass/rtl_433/commit/7c02e9b6db2ac9d844c340779690a603d25494f6))
+
+
+### Documentation
+
+* **device-library:** document the per-entity device-class override ([#290](https://github.com/rtl-433-hass/rtl_433/issues/290)) ([6a4a129](https://github.com/rtl-433-hass/rtl_433/commit/6a4a129c5f52b49de3f045ba2581d5f0d8c4f416))
+* use plain language ([#317](https://github.com/rtl-433-hass/rtl_433/issues/317)) ([a0aa038](https://github.com/rtl-433-hass/rtl_433/commit/a0aa038e13f505de5bfa798348ff6dd84085735a))
+
 ## [0.21.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.20.1...v0.21.0) (2026-09-14)
 
 
