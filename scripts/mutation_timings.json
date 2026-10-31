@@ -15,11 +15,11 @@
     "custom_components/rtl_433/diagnostics.py": 76.403,
     "custom_components/rtl_433/entity.py": 5523.875,
     "custom_components/rtl_433/event.py": 137.161,
-    "custom_components/rtl_433/hub_settings.py": 239.58599999999998,
     "custom_components/rtl_433/library.py": 32.044000000000004,
     "custom_components/rtl_433/migration.py": 4524.053,
     "custom_components/rtl_433/number.py": 102.40100000000001,
     "custom_components/rtl_433/options_flow.py": 653.378,
+    "custom_components/rtl_433/receiver_settings.py": 239.58599999999998,
     "custom_components/rtl_433/repairs.py": 122.17399999999999,
     "custom_components/rtl_433/sdr_settings.py": 3.67,
     "custom_components/rtl_433/select.py": 536.391,
@@ -156,15 +156,6 @@
       "custom_components.rtl_433.event.x\u01c1Rtl433Event\u01c1__init__": 25.898,
       "custom_components.rtl_433.event.x\u01c1Rtl433Event\u01c1async_added_to_hass": 59.517
     },
-    "custom_components/rtl_433/hub_settings.py": {
-      "custom_components.rtl_433.hub_settings.x__calibration_map": 87.647,
-      "custom_components.rtl_433.hub_settings.x__explicit_hub_timeout": 3.233,
-      "custom_components.rtl_433.hub_settings.x__hub_availability_timeout": 2.195,
-      "custom_components.rtl_433.hub_settings.x__hub_connection": 3.065,
-      "custom_components.rtl_433.hub_settings.x__hub_ignored_devices": 4.59,
-      "custom_components.rtl_433.hub_settings.x__hub_manage_settings": 7.525,
-      "custom_components.rtl_433.hub_settings.x__hub_secure": 131.331
-    },
     "custom_components/rtl_433/library.py": {
       "custom_components.rtl_433.library.x__async_load_library": 8.351,
       "custom_components.rtl_433.library.x__merge_entry_library": 23.693
@@ -203,6 +194,15 @@
       "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_mappings": 34.582,
       "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_replace": 22.678,
       "custom_components.rtl_433.options_flow.x\u01c1Rtl433OptionsFlow\u01c1async_step_replace_target": 84.913
+    },
+    "custom_components/rtl_433/receiver_settings.py": {
+      "custom_components.rtl_433.receiver_settings.x__calibration_map": 87.647,
+      "custom_components.rtl_433.receiver_settings.x__explicit_hub_timeout": 3.233,
+      "custom_components.rtl_433.receiver_settings.x__hub_availability_timeout": 2.195,
+      "custom_components.rtl_433.receiver_settings.x__hub_connection": 3.065,
+      "custom_components.rtl_433.receiver_settings.x__hub_ignored_devices": 4.59,
+      "custom_components.rtl_433.receiver_settings.x__hub_manage_settings": 7.525,
+      "custom_components.rtl_433.receiver_settings.x__hub_secure": 131.331
     },
     "custom_components/rtl_433/repairs.py": {
       "custom_components.rtl_433.repairs.x__advisory_dismissed": 1.686,
