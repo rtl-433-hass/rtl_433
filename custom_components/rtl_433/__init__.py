@@ -36,7 +36,7 @@ entry** (rfxtrx-style), not as their own config entries. They are recreated on
 startup from ``entry.data[CONF_DEVICES]`` — the restart-safe record of the
 devices the user has adopted — and added at runtime via the new-device
 dispatcher signal when the user approves one from a coordinator's pending
-list. A device the user has not adopted is only ever *heard*; it never reaches
+list. A device the user has not adopted is only ever *received*; it never reaches
 the device registry. A single nested device can be removed from its device page
 via :func:`async_remove_config_entry_device`, which returns it to the pending
 list; deleting the location entry removes all nested devices and entities
@@ -295,7 +295,7 @@ async def _async_setup_receiver(
         event_driven_keys=entry_event_driven_keys,
         # The location's persisted devices map is the restart-safe record of
         # what the user has approved, so it is what tells the coordinator which
-        # frames may reach Home Assistant; everything else is heard into the
+        # frames may reach Home Assistant; everything else is received into the
         # pending list. Both sets are the *location's*, so every receiver under
         # it starts from the same approvals -- and a key on both lists resolves
         # to ignored (see :func:`_location_adopted_devices`).
@@ -645,7 +645,7 @@ def _async_purge_removed_receiver_entities(
 
     What deliberately does **not** happen: the merged devices themselves and
     their unioned entities are left completely alone, history included. A sensor
-    only the removed receiver ever heard keeps its device and its recorded
+    only the removed receiver ever received keeps its device and its recorded
     history and simply goes unavailable once no remaining receiver vouches for it
     — deleting it stays an explicit user action, the same as any other RF device.
 

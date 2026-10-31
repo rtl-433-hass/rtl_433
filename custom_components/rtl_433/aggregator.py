@@ -30,7 +30,7 @@ aggregator keeps the last-applied ``(event_time, applied_at)`` per
 ``(device_key, field)`` and applies a debounce window:
 
 * within :data:`_MERGE_DEBOUNCE` of the last applied frame -> the **same
-  transmission**, heard twice; the value is ignored (first applied wins);
+  transmission**, received twice; the value is ignored (first applied wins);
 * clearly **older** -> a stale frame or a reconnect-backlog replay; rejected, so
   a replay can never regress a live reading;
 * clearly **newer** -> a genuine new transmission; applied.
@@ -50,7 +50,7 @@ receiver connected" AND "the newest last_seen is fresh" -- is a correctness bug:
 a connected receiver that is deaf to the sensor would keep it alive on an
 *offline* receiver's minute-old timestamp. So the pair is evaluated per receiver
 and only the *result* is OR-ed: a receiver **vouches** for a device when it is
-connected AND heard it inside the timeout (:func:`receiver_vouches`), and the
+connected AND received it inside the timeout (:func:`receiver_vouches`), and the
 merged device is available when at least one receiver vouches
 (:meth:`Rtl433LocationAggregator.device_available`). The per-receiver watchdogs
 keep running unchanged; this only unions what they conclude, and the
@@ -59,7 +59,7 @@ coordinator's own, reused verbatim.
 
 **Per-receiver coverage is kept.** The link half of each partitioned frame is
 recorded per ``(device_key, receiver)`` (:class:`ReceiverCoverage`), which is
-what lets the panel render "heard by Attic (-62 dB) / Garage (-89 dB)" without
+what lets the panel render "received by Attic (-62 dB) / Garage (-89 dB)" without
 anyone enabling the disabled-by-default ``rssi`` / ``snr`` entities.
 
 **Candidates are merged too, by a deliberately simpler rule.** A device the
@@ -67,11 +67,11 @@ user has not adopted never reaches the union above -- it is recorded as a
 *candidate* in the receiver's own pending map instead (``coordinator/_events.py``),
 behind that receiver's replay / backlog gate. :func:`merged_candidates` folds
 every receiver's map into one location-wide list keyed by ``device_key``, so a
-sensor two receivers hear is **one** row the user approves once, showing
+sensor two receivers receive is **one** row the user approves once, showing
 **last-received-wins** data (the most recently arrived frame from any receiver,
 with no debounce: a discovery preview only needs the freshest sample, where a
 recorded entity value needs the anti-regression guard above) and naming the
-receivers that have heard it. The candidate cap is applied to that **merged**
+receivers that have received it. The candidate cap is applied to that **merged**
 list (:func:`enforce_pending_cap`), so a location cannot hold N times as many
 candidates by having N receivers.
 
@@ -115,7 +115,7 @@ if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
 
 # How far apart two frames for the same ``(device_key, field)`` have to be before
-# they count as two transmissions rather than one heard twice.
+# they count as two transmissions rather than one received twice.
 #
 # Sized against what it has to absorb, from below and above. From below: a 433 MHz
 # sensor repeats each message several times within a second or so, and two
@@ -174,10 +174,10 @@ def receiver_vouches(coordinator: Rtl433Coordinator, device_key: str) -> bool:
 
     * **transport** -- ``receiver_available`` is the socket state, ``False`` the
       instant the WebSocket drops with no grace window. A receiver that is not
-      listening has nothing to vouch with, whatever it heard before; and
-    * **silence** -- it heard this device within the device's effective timeout.
+      listening has nothing to vouch with, whatever it received before; and
+    * **silence** -- it received this device within the device's effective timeout.
       A timeout of :data:`~.const.AVAILABILITY_TIMEOUT_NEVER` is the never-expire
-      exemption: once heard, always fresh (but never heard is still not heard).
+      exemption: once received, always fresh (but never received is still not received).
 
     The timeout comes from the coordinator's own ``_effective_timeout``, so the
     device-class-aware resolution ladder (per-device override -> location default
@@ -217,15 +217,15 @@ def location_aggregator(
 
 @dataclasses.dataclass(slots=True, frozen=True)
 class ReceiverCoverage:
-    """One receiver's view of one device: how well, and how recently, it hears it.
+    """One receiver's view of one device: how well, and how recently, it receives it.
 
     The union deliberately throws this detail away for the *sensor's* values, so
     it is kept here instead. ``rssi`` / ``snr`` are the last values that receiver
     reported for the device (``None`` until it reports one -- not every decoder
-    emits them) and ``last_seen`` is when that receiver last heard a real frame,
+    emits them) and ``last_seen`` is when that receiver last received a real frame,
     which is not the same as the coordinator's ``last_seen``: that one also
     carries the entity's startup baseline, and a coverage display must not report
-    a device as "heard just now" because Home Assistant restarted.
+    a device as "received just now" because Home Assistant restarted.
 
     ``connected`` and ``vouches`` are **not** recorded: :meth:`coverage` fills
     them in from the receiver's live transport gate and from
@@ -251,17 +251,17 @@ class MergedCandidate:
     renders -- the **last-received-wins** view of the candidate, built from the
     most recently *arrived* frame from any receiver (see :func:`_merge_records`
     for why that rule is deliberately simpler than the union's dedup) -- and
-    ``coverage`` names the receivers that have heard it, in receiver order, so
-    the page can show "heard by Attic and Garage" before the user commits to
+    ``coverage`` names the receivers that have received it, in receiver order, so
+    the page can show "received by Attic and Garage" before the user commits to
     adding anything.
 
     ``coverage`` reuses :class:`ReceiverCoverage` rather than inventing a second
     shape for the same answer, but it is built from the candidate's own records:
     the aggregator's coverage map is fed by the per-device dispatch, and a
     *pending* device dispatches nothing at all, so there is nothing in it to
-    read. Only receivers that have actually heard the candidate appear (unlike
+    read. Only receivers that have actually received the candidate appear (unlike
     :meth:`Rtl433LocationAggregator.coverage`, which lists every receiver
-    including the deaf ones): before adoption, "has heard it" is the whole
+    including the deaf ones): before adoption, "has received it" is the whole
     question. ``vouches`` is always ``False`` -- vouching is about an adopted
     device's availability, and a candidate has none.
     """
@@ -276,7 +276,7 @@ class MergedCandidate:
 
     @property
     def receivers(self) -> tuple[str, ...]:
-        """The ids of the receivers that have heard this candidate."""
+        """The ids of the receivers that have received this candidate."""
         return tuple(entry.receiver_id for entry in self.coverage)
 
 
@@ -294,9 +294,9 @@ def _merge_records(sightings: list[tuple[str, PendingDevice]]) -> PendingDevice:
     re-rendered seconds later and only ever needs to show the freshest sample.
 
     The rest of the row is the *location's* answer rather than one receiver's:
-    ``count`` sums the sightings (the location heard it that many times, which
+    ``count`` sums the sightings (the location received it that many times, which
     is the number that separates a real sensor from a one-off bad decode),
-    ``first_seen`` is the earliest (when the location first heard it, and what
+    ``first_seen`` is the earliest (when the location first received it, and what
     the candidate order is built on), and ``fields`` accumulates oldest to
     newest so a weather station that splits its readings across transmissions --
     and across receivers -- shows the whole device, with the newest value
@@ -392,7 +392,7 @@ def merged_candidate(
 
     The single-key form :mod:`~custom_components.rtl_433.adoption` adopts from,
     so the device is built from the same merged record the user was looking at
-    when they clicked -- including the fields only the *other* receiver heard.
+    when they clicked -- including the fields only the *other* receiver received.
     """
     coordinators = receiver_coordinators(hass, entry)
     sightings = _pending_sightings(coordinators).get(device_key)
@@ -410,7 +410,7 @@ def location_adopted(hass: HomeAssistant, entry: ConfigEntry) -> set[str]:
     The stored devices map is the restart-safe record and each running
     coordinator's mirror is the live one; a key adopted moments ago is in the
     mirrors before the entry write lands, and a key adopted in an earlier
-    session is in the map before any receiver has heard it this process. The
+    session is in the map before any receiver has received it this process. The
     union is the only answer that is true in both windows.
     """
     adopted = set(entry.data.get(CONF_DEVICES, {}))
@@ -430,7 +430,7 @@ def enforce_pending_cap(hass: HomeAssistant, entry: ConfigEntry) -> None:
     leaving it in one of them would put the row straight back on the next merge.
 
     "Coldest" is the merged row's ``last_seen``: the most recent moment *any*
-    receiver heard the device, so a sensor a second receiver still hears is not
+    receiver received the device, so a sensor a second receiver still receives is not
     evicted because the first one lost it. Ordering by that, with the key
     breaking ties, is what makes the eviction deterministic rather than
     dict-order dependent.
@@ -601,7 +601,7 @@ class Rtl433LocationAggregator:
 
         Registered on every receiver's ``pending_listeners``, so it runs on the
         one thing that can grow the list -- a receiver recording a candidate it
-        has not heard before -- and before that receiver announces the change.
+        has not received before -- and before that receiver announces the change.
         The work itself is :func:`enforce_pending_cap`, which is a function over
         the location rather than a method here because nothing about it needs the
         aggregator's own state; this is only the wiring that gives it a trigger.
@@ -662,7 +662,7 @@ class Rtl433LocationAggregator:
 
         The receiver is bound in as well as the device because the location
         signal is receiver-agnostic by design: once the frame is re-emitted there
-        is nothing left on it to say who heard it, and the coverage map needs
+        is nothing left on it to say who received it, and the coverage map needs
         exactly that.
         """
 
@@ -681,7 +681,7 @@ class Rtl433LocationAggregator:
         The merged gate. Each receiver's transport and silence gates are
         evaluated together (:func:`receiver_vouches`) and only the results are
         OR-ed, which is what keeps a device from reading available on an offline
-        receiver's stale timestamp while the connected one hears nothing.
+        receiver's stale timestamp while the connected one receives nothing.
 
         ``False`` for a location with no running coordinator (mid-setup or
         mid-teardown): nothing is listening, so nothing can vouch.
@@ -695,12 +695,12 @@ class Rtl433LocationAggregator:
         """Return one device's per-receiver coverage, in receiver order.
 
         The A-vs-B comparison the union hides, served straight from aggregator
-        state so the panel can render "heard by Attic (-62 dB) / Garage (-89 dB)"
+        state so the panel can render "received by Attic (-62 dB) / Garage (-89 dB)"
         with **no** entity enabled -- ``rssi`` / ``snr`` ship
         disabled-by-default and a location would otherwise pay
         *sensors x receivers x 2* entities for a detail most users only glance at.
 
-        Every running receiver appears, including one that has never heard this
+        Every running receiver appears, including one that has never received this
         device at all (``last_seen``/``rssi``/``snr`` all ``None``): "Garage does
         not hear it" is exactly as much a coverage answer as a weak signal is.
         """
@@ -730,7 +730,7 @@ class Rtl433LocationAggregator:
 
         A re-paint carries the device's *cached* frame rather than a new
         transmission, so it must not move ``last_seen`` forward -- doing so would
-        make a silent sensor look freshly heard every watchdog tick, which is the
+        make a silent sensor look freshly received every watchdog tick, which is the
         opposite of what a coverage display is for. Its link values are equally
         stale, so the whole record is left alone.
 
@@ -760,7 +760,7 @@ class Rtl433LocationAggregator:
 
         The link half is recorded against this receiver on the way past (see
         :meth:`coverage`) rather than dropped: it is the only record of which
-        receiver hears the sensor how well, and the union is about to make the
+        receiver receives the sensor how well, and the union is about to make the
         frame receiver-agnostic.
 
         The event is re-emitted **unconditionally**, even when every field was
@@ -827,7 +827,7 @@ class Rtl433LocationAggregator:
 
         delta = event_time - previous.event_time
         if abs(delta) <= _MERGE_DEBOUNCE:
-            # The same transmission, heard twice. First applied wins.
+            # The same transmission, received twice. First applied wins.
             return False
         if delta < timedelta(0):
             # Clearly older: a stale frame or a reconnect backlog replay.
