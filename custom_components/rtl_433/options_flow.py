@@ -3,11 +3,12 @@
 A small menu offering an *add devices* step, an *ignored devices* step, a *receiver*
 step, a *device* step, a *mappings* step, and a *replace* step:
 
-- **add_devices** renders the coordinator's in-memory pending list -- every
-  device heard since the last restart that the user has neither added nor
-  ignored -- and on submit adopts the selected keys and ignores the ones the user
-  never wants offered again. It leads the menu because it is the route by which
-  an RF device reaches the Home Assistant device registry.
+- **add_devices** renders the location's merged pending list -- every device any
+  of its receivers has heard since the last restart that the user has neither
+  added nor ignored, one row per sensor rather than one per receiver -- and on
+  submit adopts the selected keys and ignores the ones the user never wants
+  offered again, for the whole location. It leads the menu because it is the
+  route by which an RF device reaches the Home Assistant device registry.
 - **ignored_devices** un-ignores keys from ``entry.data["ignored_devices"]`` so
   the devices are offered again on their next transmission.
 
@@ -64,6 +65,7 @@ from homeassistant.helpers.selector import (
 from homeassistant.util import dt as dt_util
 
 from .adoption import async_adopt_devices, async_ignore_devices, async_unignore_devices
+from .aggregator import merged_candidates
 from .calibration import COMMODITY_UNITS, default_unit, normalize_calibration
 from .const import (
     CALIBRATION_COMMODITIES,
@@ -83,7 +85,11 @@ from .const import (
     DEVICE_TIMEOUT_OVERRIDE,
 )
 from .device_replace import DeviceReplaceError, async_replace_device
-from .receiver_settings import _receiver_ignored_devices, receiver_coordinator
+from .receiver_settings import (
+    _receiver_ignored_devices,
+    receiver_coordinator,
+    receiver_coordinators,
+)
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,
@@ -222,12 +228,18 @@ class Rtl433OptionsFlow(OptionsFlow):
         """List the devices heard but not added, and add or ignore them.
 
         This is the only route by which an RF device reaches the Home Assistant
-        device registry: the coordinator records everything it hears into an
-        in-memory pending list, and nothing leaves that list without an explicit
-        choice here. The list is rebuilt from live traffic after every restart, so
-        an empty one shortly after a reload is normal -- it means nothing has
-        transmitted yet, not that anything is broken -- and the step aborts saying
-        so rather than rendering a form with nothing to choose from.
+        device registry: each receiver records everything it hears into an
+        in-memory pending list, and nothing leaves the merge of those lists
+        without an explicit choice here. The list is rebuilt from live traffic
+        after every restart, so an empty one shortly after a reload is normal --
+        it means nothing has transmitted yet, not that anything is broken -- and
+        the step aborts saying so rather than rendering a form with nothing to
+        choose from.
+
+        A sensor several of the location's receivers can hear appears **once**,
+        showing whichever of them heard it last: the user is approving the
+        sensor, not one server's view of it, and the submit applies to every
+        receiver in the location.
 
         The two multi-selects are deliberately independent so one submit can add
         some devices and ignore others: that is how a long list is actually worked
@@ -236,10 +248,10 @@ class Rtl433OptionsFlow(OptionsFlow):
         the user's behalf -- it re-shows the form with an error and writes
         nothing, rather than silently picking one of the two meanings.
         """
-        coordinator = self._coordinator()
-        if coordinator is None:
+        if self._coordinator() is None:
             return self.async_abort(reason="receiver_not_loaded")
-        if not coordinator.pending:
+        candidates = merged_candidates(self.hass, self.config_entry)
+        if not candidates:
             return self.async_abort(reason="no_pending_devices")
 
         errors: dict[str, str] = {}
@@ -249,15 +261,17 @@ class Rtl433OptionsFlow(OptionsFlow):
             if set(add) & set(ignore):
                 errors["base"] = "add_and_ignore_conflict"
             else:
-                return await self._apply_add_and_ignore(coordinator, add, ignore)
+                return await self._apply_add_and_ignore(add, ignore)
 
         now = dt_util.utcnow()
-        # Ordered by the coordinator, which is also what the discovery panel
+        # Ordered by the aggregator, which is also what the discovery panel
         # renders, so a long list is worked from the top in the same order on
         # both surfaces.
         options = [
-            SelectOptionDict(value=record.key, label=_pending_label(record, now))
-            for record in coordinator.pending_candidates()
+            SelectOptionDict(
+                value=candidate.key, label=_pending_label(candidate.record, now)
+            )
+            for candidate in candidates
         ]
         # One selector serves both fields: same candidates, same rendering; only
         # the meaning of the selection differs.
@@ -280,7 +294,7 @@ class Rtl433OptionsFlow(OptionsFlow):
         )
 
     async def _apply_add_and_ignore(
-        self, coordinator: Rtl433Coordinator, add: list[str], ignore: list[str]
+        self, add: list[str], ignore: list[str]
     ) -> ConfigFlowResult:
         """Adopt the selected devices, ignore the selected devices, and finish.
 
@@ -303,8 +317,8 @@ class Rtl433OptionsFlow(OptionsFlow):
         """
         entry = self.config_entry
 
-        await async_adopt_devices(self.hass, entry, coordinator, add)
-        await async_ignore_devices(self.hass, entry, coordinator, ignore)
+        await async_adopt_devices(self.hass, entry, add)
+        await async_ignore_devices(self.hass, entry, ignore)
 
         return self.async_create_entry(title="", data=dict(entry.options))
 
@@ -319,13 +333,12 @@ class Rtl433OptionsFlow(OptionsFlow):
         hand the selection to that service.
 
         ``entry.data`` is the source of truth for what is ignored, but the step
-        still requires a running coordinator: discarding the key from the
+        still requires a running receiver: discarding the key from every
         coordinator's mirrored set is what un-ignores the device on its next
         transmission instead of only after a reload, and the service needs the
-        coordinator to do it.
+        coordinators to do it.
         """
-        coordinator = self._coordinator()
-        if coordinator is None:
+        if self._coordinator() is None:
             return self.async_abort(reason="receiver_not_loaded")
 
         entry = self.config_entry
@@ -337,7 +350,6 @@ class Rtl433OptionsFlow(OptionsFlow):
             await async_unignore_devices(
                 self.hass,
                 entry,
-                coordinator,
                 set(user_input.get(CONF_UNIGNORE_DEVICES, [])),
             )
             return self.async_create_entry(title="", data=dict(entry.options))
@@ -812,19 +824,19 @@ class Rtl433OptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Pick the new identity to adopt onto the device kept on the previous step.
 
-        Candidates are the **union** of the stored devices map, the coordinator's
-        adopted runtime keys, and its **pending** keys. Pending is the important
-        one: a sensor that drew a new transmitter id when its batteries were
-        changed is heard under that new id and nothing more -- it is never added
-        automatically -- so without pending candidates this step could not offer
-        the one device it exists to adopt. The adopted runtime keys stay in the
-        union because they can still lead the devices map by a beat (a device
-        adopted this session is in runtime state before its upsert lands), and
-        :func:`async_replace_device` accepts a ``new_key`` with no stored record,
-        which is precisely what a pending key is. The coordinator is reached the
-        way :meth:`_device_commodity_default` reaches it and is guarded the same
-        way -- the options flow can be opened while the entry is not loaded, and
-        then the devices map alone is the candidate set. Same-model candidates
+        Candidates are the **union** of the stored devices map, every receiver's
+        adopted runtime keys, and the location's merged **pending** keys. Pending
+        is the important one: a sensor that drew a new transmitter id when its
+        batteries were changed is heard under that new id and nothing more -- it
+        is never added automatically -- so without pending candidates this step
+        could not offer the one device it exists to adopt. The adopted runtime
+        keys stay in the union because they can still lead the devices map by a
+        beat (a device adopted this session is in runtime state before its upsert
+        lands), and :func:`async_replace_device` accepts a ``new_key`` with no
+        stored record, which is precisely what a pending key is. Both halves read
+        every receiver of the location, and both are empty when the entry is not
+        loaded -- then the devices map alone is the candidate set. Same-model
+        candidates
         sort first across the whole combined set, since a battery swap keeps the
         model, and an empty candidate set (a single-device receiver) aborts rather
         than showing a dead-end dropdown.
@@ -859,17 +871,19 @@ class Rtl433OptionsFlow(OptionsFlow):
                     title="", data=dict(self.config_entry.options)
                 )
 
-        coordinator = self._coordinator()
-        pending: dict[str, Any] = getattr(coordinator, "pending", None) or {}
+        pending: dict[str, Any] = {
+            candidate.key: candidate.record
+            for candidate in merged_candidates(self.hass, self.config_entry)
+        }
         # One mapping for model resolution: a coordinator ``NormalizedEvent`` and
         # a ``PendingDevice`` both carry ``.model``, so the adopted and pending
-        # halves of "what the receiver has heard" resolve through the same lookup.
-        # ``getattr`` with a default keeps a not-yet-loaded receiver (and a stub
-        # coordinator) from breaking the render.
-        heard: dict[str, Any] = {
-            **(getattr(coordinator, "devices", None) or {}),
-            **pending,
-        }
+        # halves of "what the location has heard" resolve through the same
+        # lookup. Both are empty for a receiver that is not loaded, which leaves
+        # the render working off the stored devices map alone.
+        heard: dict[str, Any] = {}
+        for coordinator in receiver_coordinators(self.hass, self.config_entry).values():
+            heard.update(coordinator.devices)
+        heard.update(pending)
 
         old_model = self._replacement_model(old_key, devices, heard)
         # Resolve each candidate's model once. The sort comparator would

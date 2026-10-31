@@ -106,6 +106,7 @@ from .migration import (
 from .receiver_settings import (
     _calibration_map,
     _explicit_receiver_timeout,
+    _location_adopted_devices,
     _receiver_availability_timeout,
     _receiver_connection,
     _receiver_ignored_devices,
@@ -292,10 +293,13 @@ async def _async_setup_receiver(
         initial_center_frequency=subentry.data.get(CONF_INITIAL_FREQUENCY),
         skip_keys=entry_skip_keys,
         event_driven_keys=entry_event_driven_keys,
-        # The persisted devices map is the restart-safe record of what the user
-        # has approved, so it is what tells the coordinator which frames may
-        # reach Home Assistant; everything else is heard into the pending list.
-        adopted_keys=set(entry.data.get(CONF_DEVICES, {})),
+        # The location's persisted devices map is the restart-safe record of
+        # what the user has approved, so it is what tells the coordinator which
+        # frames may reach Home Assistant; everything else is heard into the
+        # pending list. Both sets are the *location's*, so every receiver under
+        # it starts from the same approvals -- and a key on both lists resolves
+        # to ignored (see :func:`_location_adopted_devices`).
+        adopted_keys=_location_adopted_devices(entry),
         ignored_keys=set(_receiver_ignored_devices(entry)),
     )
 
@@ -552,6 +556,11 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     ignored = set(_receiver_ignored_devices(entry))
     for coordinator in coordinators.values():
         coordinator.ignored = set(ignored)
+        # Ignored wins a conflict, live as well as at setup: a key that has
+        # landed on both lists (only a deliberate consolidation can do that --
+        # see ``_location_adopted_devices``) must stop reaching Home Assistant
+        # now, not at the next restart.
+        coordinator.adopted -= ignored
 
     stored = {subentry.subentry_id for subentry in receiver_subentries(entry)}
     if set(coordinators) != stored or any(
