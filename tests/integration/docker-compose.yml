@@ -61,7 +61,7 @@ services:
 
   wsbridge:
     # node:22-alpine (digest resolved 2026-05-25, linux/arm64).
-    image: node:24-alpine@sha256:44fce696f38ba8c987c4db89954051000bbd05ffd8d8659ba15ed4a8602e937f
+    image: node:26-alpine@sha256:c6ad9e9c1d80f6eb607c26b4b0a132ff7a2344fad1c78ea3baa2a7d4c8de6d94
     container_name: wsbridge_harness
     working_dir: /app
     command: ["node", "/app/ws-bridge.mjs"]
