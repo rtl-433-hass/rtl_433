@@ -331,6 +331,10 @@
           }
         }
       }
+    },
+    "history_merged_on_consolidation": {
+      "title": "Duplicate history dropped when merging {dropped}",
+      "description": "You moved **{dropped}** into the same location as **{kept}**, and both had been recording the same {count} entities. Home Assistant allows only one entity per sensor reading, so the merged location keeps the entity belonging to the receiver that was added first ({kept}) and the duplicate copies from {dropped} were removed along with their recorded history.\n\nThe readings themselves are not lost: the surviving entities now record whichever receiver hears the sensor. Only the second, duplicate copy of the history is gone.\n\nRemoved: {entities}"
     }
   },
   "config_panel": {
