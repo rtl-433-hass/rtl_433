@@ -81,10 +81,9 @@ from .const import (
     DEVICE_CALIBRATION,
     DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
-    DOMAIN,
 )
 from .device_replace import DeviceReplaceError, async_replace_device
-from .receiver_settings import _receiver_ignored_devices
+from .receiver_settings import _receiver_ignored_devices, receiver_coordinator
 from .settings import (
     MAPPINGS_DOCS_URL,
     build_device_data,
@@ -204,14 +203,18 @@ class Rtl433OptionsFlow(OptionsFlow):
         )
 
     def _coordinator(self) -> Rtl433Coordinator | None:
-        """Return this receiver's running coordinator, or ``None`` when unloaded.
+        """Return this location's first receiver coordinator, or ``None``.
 
-        The options flow can be opened while the entry is not loaded (a receiver whose
-        server is unreachable, or one the user disabled), and the pending list
-        lives only in the coordinator's memory -- so the steps that need it have
-        to be able to say so rather than raise.
+        The options flow can be opened while the entry is not loaded (a location
+        whose server is unreachable, or one the user disabled), and the pending
+        list lives only in a coordinator's memory -- so the steps that need it
+        have to be able to say so rather than raise.
+
+        A location with several receivers still answers with the first: this flow
+        speaks the one-server model, and the union of every receiver's pending
+        list is the aggregator's job, not a per-step merge here.
         """
-        return self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        return receiver_coordinator(self.hass, self.config_entry)
 
     async def async_step_add_devices(
         self, user_input: dict[str, Any] | None = None

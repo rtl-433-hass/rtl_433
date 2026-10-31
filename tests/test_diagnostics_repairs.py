@@ -12,6 +12,7 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 from pyrtl_433 import TimePrecision
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rtl_433 import repairs
 from custom_components.rtl_433.const import (
@@ -28,6 +29,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
+from tests.conftest import build_receiver_subentry, receiver_id, receiver_subentry
 
 # The coordinator's reachability validator, patched so no socket is opened.
 VALIDATE = "custom_components.rtl_433.coordinator.Rtl433Coordinator.validate_connection"
@@ -73,13 +75,13 @@ async def test_diagnostics_redacts_host_and_reports_unmatched(
     registry, skip_keys = load_library()
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN]["_library"] = (registry, skip_keys)
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    hass.data[DOMAIN][receiver_id(entry)] = coordinator
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
 
     assert diag["coordinator_loaded"] is True
-    # Host is redacted in both the entry data and the connection block.
-    assert diag["entry"]["data"][CONF_HOST] != "rtl433.local"
+    # Host is redacted in the receiver's stored data and in the connection block.
+    assert diag["receivers"][0]["data"][CONF_HOST] != "rtl433.local"
     assert diag["connection"][CONF_HOST] != "secret-host.local"
     assert diag["connection"]["ws_url"] != coordinator.ws_url
     # temperature_C / humidity are mapped; only the made-up field is unmatched.
@@ -113,7 +115,9 @@ async def test_reachability_raises_after_grace_and_clears_on_reconnect(
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
 
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     coordinator._client.connected = False
 
     # Capture the poll callback the tracker schedules.
@@ -129,7 +133,7 @@ async def test_reachability_raises_after_grace_and_clears_on_reconnect(
 
     poll = polls[0]
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._unreachable_issue_id(entry)
+    issue_id = repairs._unreachable_issue_id(entry, receiver_id(entry))
 
     start = dt_util.utcnow()
     # First poll: starts the disconnected streak, no issue yet.
@@ -187,10 +191,12 @@ async def test_sample_rate_advisory_edge_triggered(
 
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
 
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._sample_rate_issue_id(entry)
+    issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry))
 
     # Wire the tracker with meta already in the good (low-band) state.
     coordinator._client.meta = {"center_frequency": 433_920_000, "samp_rate": 250_000}
@@ -199,7 +205,7 @@ async def test_sample_rate_advisory_edge_triggered(
 
     # Retune into the high band at the default rate -> advisory raised.
     coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     issue = issue_reg.async_get_issue(DOMAIN, issue_id)
     assert issue is not None
@@ -207,17 +213,17 @@ async def test_sample_rate_advisory_edge_triggered(
     assert issue.translation_placeholders["frequency"] == "915"
 
     # A user dismissing it while still on a low rate must not re-raise it.
-    repairs.async_clear_sample_rate_low(hass, entry)
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    repairs.async_clear_sample_rate_low(hass, entry, receiver_id(entry))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     # Raising the sample rate, then dropping back, re-triggers the edge.
     coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 1_024_000}
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
@@ -236,10 +242,12 @@ async def test_event_time_advisory_edge_triggered(
 
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
 
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._event_time_issue_id(entry)
+    issue_id = repairs._event_time_issue_id(entry, receiver_id(entry))
 
     # Wire up with whole-second stamps: usable, so nothing is raised. SECOND is
     # the rtl_433 default and pyrtl_433 separates same-second frames by payload,
@@ -250,7 +258,7 @@ async def test_event_time_advisory_edge_triggered(
 
     # The operator turns timestamps off -> replay suppression is dead -> advise.
     coordinator._client.time_precision = TimePrecision.UNUSABLE
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     issue = issue_reg.async_get_issue(DOMAIN, issue_id)
     assert issue is not None
@@ -258,17 +266,17 @@ async def test_event_time_advisory_edge_triggered(
     assert issue.translation_placeholders["title"] == entry.title
 
     # Dismissing the card while still unusable must not immediately re-raise it.
-    repairs.async_clear_event_time_unusable(hass, entry)
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    repairs.async_clear_event_time_unusable(hass, entry, receiver_id(entry))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     # Timestamps come back, then go away again: the edge re-triggers.
     coordinator._client.time_precision = TimePrecision.MICROSECOND
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     coordinator._client.time_precision = TimePrecision.UNUSABLE
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
@@ -287,21 +295,25 @@ async def test_dismissed_event_time_advisory_is_not_re_raised(
 
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(
-        entry, data={**entry.data, CONF_EVENT_TIME_DISMISSED: True}
+    hass.config_entries.async_update_subentry(
+        entry,
+        receiver_subentry(entry),
+        data={**receiver_subentry(entry).data, CONF_EVENT_TIME_DISMISSED: True},
     )
 
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     coordinator._client.time_precision = TimePrecision.UNUSABLE
 
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._event_time_issue_id(entry)
+    issue_id = repairs._event_time_issue_id(entry, receiver_id(entry))
 
     unsub = repairs.async_track_event_time_precision(hass, entry, coordinator)
     # The immediate wire-up evaluation stays silent despite the flagged state.
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
     unsub()
@@ -318,17 +330,17 @@ async def test_create_fix_flow_routes_by_issue_id(
     entry.add_to_hass(hass)
 
     unreachable = await repairs.async_create_fix_flow(
-        hass, repairs._unreachable_issue_id(entry), None
+        hass, repairs._unreachable_issue_id(entry, receiver_id(entry)), None
     )
     assert isinstance(unreachable, repairs.ReceiverRadioReplaceRepairFlow)
 
     sample_rate = await repairs.async_create_fix_flow(
-        hass, repairs._sample_rate_issue_id(entry), None
+        hass, repairs._sample_rate_issue_id(entry, receiver_id(entry)), None
     )
     assert isinstance(sample_rate, repairs.SampleRateRepairFlow)
 
     event_time = await repairs.async_create_fix_flow(
-        hass, repairs._event_time_issue_id(entry), None
+        hass, repairs._event_time_issue_id(entry, receiver_id(entry)), None
     )
     assert isinstance(event_time, repairs.EventTimeRepairFlow)
 
@@ -350,18 +362,23 @@ async def test_sample_rate_fix_flow_applies_rate_and_clears_issue(
 
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     coordinator._client.connected = False
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {})[receiver_id(entry)] = coordinator
 
     repairs.async_raise_sample_rate_low(
-        hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+        hass,
+        entry,
+        receiver_subentry(entry),
+        {"center_frequency": 915_000_000, "samp_rate": 250_000},
     )
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._sample_rate_issue_id(entry)
+    issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry))
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
-    flow = repairs.SampleRateRepairFlow(entry)
+    flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
     flow.hass = hass
 
     init = await flow.async_step_init()
@@ -387,13 +404,16 @@ async def test_sample_rate_fix_flow_apply_dismisses_when_coordinator_absent(
     entry.add_to_hass(hass)
 
     repairs.async_raise_sample_rate_low(
-        hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+        hass,
+        entry,
+        receiver_subentry(entry),
+        {"center_frequency": 915_000_000, "samp_rate": 250_000},
     )
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._sample_rate_issue_id(entry)
+    issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry))
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
-    flow = repairs.SampleRateRepairFlow(entry)
+    flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
     flow.hass = hass
     await flow.async_step_init()
     result = await flow.async_step_apply()
@@ -406,26 +426,32 @@ async def test_sample_rate_fix_flow_ignore_silences_advisory(
 ):
     """Choosing "keep the current rate" persists a flag and clears the card.
 
-    The flag lives in ``entry.data`` so it survives reloads, and it must NOT
-    apply any sample-rate change to the coordinator.
+    The flag lives on the *receiver* subentry so it survives reloads and says
+    nothing about the location's other receivers, and it must NOT apply any
+    sample-rate change to the coordinator.
     """
     from custom_components.rtl_433.const import CONF_SAMPLE_RATE_DISMISSED
     from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
 
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     coordinator._client.connected = False
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    hass.data.setdefault(DOMAIN, {})[receiver_id(entry)] = coordinator
 
     repairs.async_raise_sample_rate_low(
-        hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+        hass,
+        entry,
+        receiver_subentry(entry),
+        {"center_frequency": 915_000_000, "samp_rate": 250_000},
     )
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._sample_rate_issue_id(entry)
+    issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry))
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
-    flow = repairs.SampleRateRepairFlow(entry)
+    flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry))
     flow.hass = hass
     await flow.async_step_init()
     result = await flow.async_step_ignore()
@@ -434,7 +460,7 @@ async def test_sample_rate_fix_flow_ignore_silences_advisory(
     assert result["type"] == FlowResultType.CREATE_ENTRY
     # The card is gone and the durable dismissal flag is set.
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
-    assert entry.data.get(CONF_SAMPLE_RATE_DISMISSED) is True
+    assert receiver_subentry(entry).data.get(CONF_SAMPLE_RATE_DISMISSED) is True
     # "Keep the current rate" must not have touched the desired sample rate.
     assert coordinator.get_desired(KEY_SAMPLE_RATE) is None
 
@@ -451,14 +477,19 @@ async def test_sample_rate_advisory_clears_after_a_reload(
     entry.add_to_hass(hass)
 
     repairs.async_raise_sample_rate_low(
-        hass, entry, {"center_frequency": 915_000_000, "samp_rate": 250_000}
+        hass,
+        entry,
+        receiver_subentry(entry),
+        {"center_frequency": 915_000_000, "samp_rate": 250_000},
     )
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._sample_rate_issue_id(entry)
+    issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry))
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
     # The reload: a fresh coordinator and tracker, receiver now on a wide rate.
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 1_024_000}
     unsub = repairs.async_track_sample_rate(hass, entry, coordinator)
 
@@ -484,22 +515,26 @@ async def test_dismissed_advisory_is_not_re_raised(
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
     # Simulate a prior "keep the current rate" choice persisted on the entry.
-    hass.config_entries.async_update_entry(
-        entry, data={**entry.data, CONF_SAMPLE_RATE_DISMISSED: True}
+    hass.config_entries.async_update_subentry(
+        entry,
+        receiver_subentry(entry),
+        data={**receiver_subentry(entry).data, CONF_SAMPLE_RATE_DISMISSED: True},
     )
 
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     coordinator._client.meta = {"center_frequency": 915_000_000, "samp_rate": 250_000}
 
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._sample_rate_issue_id(entry)
+    issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry))
 
     unsub = repairs.async_track_sample_rate(hass, entry, coordinator)
     # Immediate wire-up evaluation must not raise it despite the flagged meta.
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
 
     # A later meta refresh in the flagged state must also stay silent.
-    async_dispatcher_send(hass, signal_receiver_update(entry.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(receiver_id(entry)))
     await hass.async_block_till_done()
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is None
     unsub()
@@ -517,15 +552,17 @@ async def test_rebind_fix_flow_repoints_receiver_and_clears_issue(
     devices = {"acurite-1": {"model": "Acurite", "fields": {}}}
     entry = receiver_entry_builder(devices=devices)
     entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(entry, unique_id="radio-old")
+    hass.config_entries.async_update_subentry(
+        entry, receiver_subentry(entry), unique_id="radio-old"
+    )
 
     original_entry_id = entry.entry_id
-    repairs.async_raise_receiver_unreachable(hass, entry)
+    repairs.async_raise_receiver_unreachable(hass, entry, receiver_subentry(entry))
     issue_reg = ir.async_get(hass)
-    issue_id = repairs._unreachable_issue_id(entry)
+    issue_id = repairs._unreachable_issue_id(entry, receiver_id(entry))
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None
 
-    flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
+    flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
     flow.hass = hass
 
     # The init step just shows the confirm form.
@@ -554,11 +591,13 @@ async def test_rebind_fix_flow_repoints_receiver_and_clears_issue(
 
     assert result["type"] == FlowResultType.CREATE_ENTRY
 
-    # Same entry, re-pointed at the new radio with its devices intact.
+    # Same location and same receiver subentry, re-pointed at the new radio --
+    # so the location's adopted devices are untouched.
     rebound = hass.config_entries.async_get_entry(original_entry_id)
     assert rebound is not None
-    assert rebound.unique_id == "radio-new"
-    assert rebound.data[CONF_HOST] == "rtl433-new.local"
+    rebound_receiver = receiver_subentry(rebound)
+    assert rebound_receiver.unique_id == "radio-new"
+    assert rebound_receiver.data[CONF_HOST] == "rtl433-new.local"
     assert rebound.data["devices"] == devices
 
     # And the unreachable card is gone.
@@ -571,9 +610,11 @@ async def test_rebind_fix_flow_cannot_connect_reshows_form(
     """A failed connection re-shows the form and leaves the receiver unchanged."""
     entry = receiver_entry_builder()
     entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(entry, unique_id="radio-old")
+    hass.config_entries.async_update_subentry(
+        entry, receiver_subentry(entry), unique_id="radio-old"
+    )
 
-    flow = repairs.ReceiverRadioReplaceRepairFlow(entry)
+    flow = repairs.ReceiverRadioReplaceRepairFlow(entry, receiver_subentry(entry))
     flow.hass = hass
 
     user_input = {
@@ -590,6 +631,84 @@ async def test_rebind_fix_flow_cannot_connect_reshows_form(
     assert result["step_id"] == "confirm"
     assert result["errors"] == {"base": "cannot_connect"}
 
-    # No rebind happened: the entry still points at the old radio/host.
-    assert entry.unique_id == "radio-old"
-    assert entry.data[CONF_HOST] == "rtl433.local"
+    # No rebind happened: the receiver still points at the old radio/host.
+    unchanged = receiver_subentry(entry)
+    assert unchanged.unique_id == "radio-old"
+    assert unchanged.data[CONF_HOST] == "rtl433.local"
+
+
+# ===========================================================================
+# Per-receiver targeting: a location with two receivers
+# ===========================================================================
+
+
+def _two_receiver_location(hass) -> MockConfigEntry:
+    """A location holding two receivers, neither of them set up."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Home",
+        data={},
+        options={},
+        unique_id=None,
+        version=2,
+        subentries_data=[
+            build_receiver_subentry(host="first.local"),
+            build_receiver_subentry(host="second.local"),
+        ],
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_sample_rate_apply_widens_the_receiver_the_card_is_about(
+    hass: HomeAssistant,
+):
+    """Apply retunes the advisory's own receiver, not the location's first.
+
+    Each receiver carries its own radio settings, so an advisory raised for the
+    second one must not quietly widen the first. Looking the coordinator up
+    without the receiver id falls back to "this location's first receiver" --
+    the right default for a surface that speaks the one-server model, and the
+    wrong one here, where the flow knows exactly which receiver it is fixing.
+    """
+    from custom_components.rtl_433.sdr_settings import KEY_SAMPLE_RATE
+
+    entry = _two_receiver_location(hass)
+    coordinators = {}
+    for index in (0, 1):
+        coordinator = Rtl433Coordinator(
+            hass, entry, receiver_subentry(entry, index), host="rtl433.local"
+        )
+        coordinator._client.connected = False
+        hass.data.setdefault(DOMAIN, {})[receiver_id(entry, index)] = coordinator
+        coordinators[index] = coordinator
+
+    flow = repairs.SampleRateRepairFlow(entry, receiver_subentry(entry, 1))
+    flow.hass = hass
+
+    result = await flow.async_step_apply()
+    await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert coordinators[1].get_desired(KEY_SAMPLE_RATE) == 1_024_000
+    assert coordinators[0].get_desired(KEY_SAMPLE_RATE) is None
+
+
+async def test_fix_flow_carries_the_receiver_named_in_the_issue_id(
+    hass: HomeAssistant,
+):
+    """The flow is handed the receiver its issue id names.
+
+    The id encodes location *and* receiver precisely so a second unreachable
+    server cannot overwrite the first one's card, which only pays off if the
+    flow is then built around that receiver: handed the wrong one -- or none at
+    all -- every step afterwards would act on a receiver the user never saw.
+    """
+    entry = _two_receiver_location(hass)
+    issue_id = repairs._sample_rate_issue_id(entry, receiver_id(entry, 1))
+
+    flow = await repairs.async_create_fix_flow(hass, issue_id, None)
+
+    assert isinstance(flow, repairs.SampleRateRepairFlow)
+    assert flow._subentry is not None
+    assert flow._subentry.subentry_id == receiver_id(entry, 1)

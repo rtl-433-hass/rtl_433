@@ -2,7 +2,7 @@
 
 The signal helpers exist so the coordinator and entities format dispatcher
 signal strings identically. A mutation that drops an argument (e.g.
-``receiver_entry_id=None``) produces a signal string that no longer round-trips,
+``receiver_id=None``) produces a signal string that no longer round-trips,
 so we assert the exact formatted output and that distinct inputs produce
 distinct, correctly-embedded strings.
 
@@ -44,9 +44,7 @@ def test_signal_device_update_distinguishes_receiver_and_device():
     c = signal_device_update("receiver1", "dev2")
     assert a != b and a != c and b != c
     assert "receiver1" in a and "dev1" in a
-    assert a == SIGNAL_DEVICE_UPDATE.format(
-        receiver_entry_id="receiver1", device_key="dev1"
-    )
+    assert a == SIGNAL_DEVICE_UPDATE.format(receiver_id="receiver1", device_key="dev1")
 
 
 def test_signal_device_update_device_key_is_used():
@@ -57,7 +55,7 @@ def test_signal_device_update_device_key_is_used():
 def test_signal_receiver_update_embeds_receiver_id_exactly():
     assert signal_receiver_update("receiverA") == "rtl_433_receiver_update_receiverA"
     assert signal_receiver_update("receiverA") == SIGNAL_RECEIVER_UPDATE.format(
-        receiver_entry_id="receiverA"
+        receiver_id="receiverA"
     )
 
 
@@ -69,7 +67,7 @@ def test_signal_receiver_update_distinct_per_receiver():
 def test_signal_new_device_embeds_receiver_id_exactly():
     assert signal_new_device("receiverA") == "rtl_433_new_device_receiverA"
     assert signal_new_device("receiverA") == SIGNAL_NEW_DEVICE.format(
-        receiver_entry_id="receiverA"
+        receiver_id="receiverA"
     )
 
 
