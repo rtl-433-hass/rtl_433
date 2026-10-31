@@ -19,7 +19,7 @@ How long a device can reasonably stay silent depends on the device type.
 Periodic devices use finite timeouts. Event-driven devices default to never
 expiring because a long silence is normal and does not imply failure.
 
-## Hub Connection
+## Receiver Connection
 
 When the connection to the rtl_433 server drops, every device on that hub
 immediately becomes `unavailable`. This includes event-driven devices and
@@ -29,7 +29,7 @@ the integration cannot tell whether a device is still transmitting.
 When the connection returns, devices show their last received values and the
 usual silence timeouts resume.
 
-If you want an automation to tolerate short blips, condition it on the hub's
+If you want an automation to tolerate short blips, condition it on the receiver's
 **Connectivity** binary sensor with a `for:` delay rather than reacting to each
 device going unavailable.
 
@@ -40,11 +40,11 @@ For `event` entities (buttons, doorbells, remotes), use the `event.received`
 trigger. It ignores transitions out of `unavailable`, so reconnecting does not
 trigger an automation for an old press.
 
-The hub's SDR controls (**Gain**, **Sample rate**, **Frequency correction**,
+The receiver's SDR controls (**Gain**, **Sample rate**, **Frequency correction**,
 **Hop interval**, **Conversion mode**) stay available so you can change settings
 while disconnected. With **Manage SDR settings** on, these appear as
 `number`/`select` entities. Turning it off replaces them with read-only diagnostic
-sensors, which become unavailable on disconnect along with the hub's other
+sensors, which become unavailable on disconnect along with the receiver's other
 diagnostic sensors.
 
 The **Connectivity** binary sensor is the entity that reports the outage: it
@@ -61,7 +61,7 @@ INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
 The effective availability timeout is resolved in this order:
 
 1. Per-device override from **Device settings**.
-2. Hub default from **Receiver settings**, if set.
+2. Receiver default from **Receiver settings**, if set.
 3. Device-class default.
 4. 600 second fallback.
 
@@ -69,7 +69,7 @@ Set a timeout to `0` to make a device never expire. This is already the automati
 default for event-driven devices.
 
 **Receiver settings** offers *Per-device-type defaults*, *Never expire*, or
-*a fixed timeout*. Choosing a fixed timeout of 600 seconds applies that hub
+*a fixed timeout*. Choosing a fixed timeout of 600 seconds applies that receiver
 default at step 2, including to event-driven devices. The 600-second fallback at
 step 4 applies only when no earlier rule supplies a timeout.
 
@@ -91,5 +91,5 @@ periodic devices, whose availability already conveys freshness.
 
 Unlike measurement sensors, Last seen stays available after the device falls
 silent, so it can drive staleness automations. It does go unavailable while the
-hub connection is down, because the timestamp then only records when the
+receiver connection is down, because the timestamp then only records when the
 integration stopped listening.

@@ -47,7 +47,7 @@ term statistics.
 
 The entity keeps its ID, but previous long-term statistics are orphaned. Choose
 the unit and scale carefully before calibrating. Saving a calibration reloads
-the hub so the sensor is rebuilt with the new unit and class.
+the receiver so the sensor is rebuilt with the new unit and class.
 
 ## Model-Scoped Mappings
 
