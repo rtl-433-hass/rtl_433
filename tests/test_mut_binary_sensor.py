@@ -108,7 +108,7 @@ def _door_devices():
 def _motion_eid(hass, receiver):
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver_id(receiver)}:{_DEVICE_KEY}:motion"
+        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DEVICE_KEY}:motion"
     )
     assert eid is not None, "Motion entity not found"
     return eid
@@ -117,7 +117,7 @@ def _motion_eid(hass, receiver):
 def _door_eid(hass, receiver):
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "binary_sensor", DOMAIN, f"{receiver_id(receiver)}:{_DOOR_KEY}:opening"
+        "binary_sensor", DOMAIN, f"{receiver.entry_id}:{_DOOR_KEY}:opening"
     )
     assert eid is not None, "Door opening entity not found"
     return eid
@@ -141,7 +141,7 @@ async def test_init_model_passed_to_super(hass, receiver_entry_builder):
         hass, receiver_entry_builder, devices=_door_devices()
     )
     dev_reg = dr.async_get(hass)
-    prefix = f"{receiver_id(receiver)}:{_DOOR_KEY}"
+    prefix = f"{receiver.entry_id}:{_DOOR_KEY}"
     device_entry = dev_reg.async_get_device_by_identifier(
         (DOMAIN, prefix), receiver.entry_id
     )
@@ -1147,3 +1147,30 @@ async def test_effective_clear_delay_override_wins_over_descriptor(
     await _advance_to(hass, start, override + 2)
     assert hass.states.get(eid).state == "off"
     assert override + 2 < DEFAULT_MOTION_CLEAR_DELAY
+
+
+async def test_binary_sensor_can_force_repeated_state_updates(
+    hass, receiver_entry_builder
+):
+    """Mappings can request a state event even when a boolean value repeats."""
+    from pyrtl_433.library import FieldDescriptor
+
+    from custom_components.rtl_433.binary_sensor import Rtl433BinarySensor
+
+    location = await _setup_receiver(hass, receiver_entry_builder)
+    descriptor = FieldDescriptor(
+        field_key="closed",
+        platform="binary_sensor",
+        name="Contact",
+        object_suffix="contact",
+        device_class="opening",
+        force_update=True,
+    )
+    sensor = Rtl433BinarySensor(
+        _coordinator(hass, location),
+        receiver_id(location),
+        _DOOR_KEY,
+        _DOOR_MODEL,
+        descriptor,
+    )
+    assert sensor.force_update is True
