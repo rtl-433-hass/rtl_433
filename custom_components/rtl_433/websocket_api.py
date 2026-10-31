@@ -94,6 +94,7 @@ from .const import (
     DATA_ENTITY_META,
     DEFAULT_AVAILABILITY_TIMEOUT,
     DEFAULT_MOTION_CLEAR_DELAY,
+    DEVICE_AUTO_REPLACE,
     DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
@@ -1048,6 +1049,9 @@ def ws_set_hub_settings(
         ),
         vol.Optional(CALIBRATION_UNIT): vol.Any(None, str),
         vol.Optional(CALIBRATION_SCALE): vol.Any(None, vol.Coerce(float)),
+        # Absent leaves the stored choice alone, so an older panel that does not
+        # know the switch cannot turn it off by omission.
+        vol.Optional(DEVICE_AUTO_REPLACE): bool,
     }
 )
 @websocket_api.require_admin
@@ -1102,6 +1106,7 @@ def ws_set_device_settings(
             device_key,
             override=msg.get(DEVICE_TIMEOUT_OVERRIDE),
             calibration=calibration,
+            auto_replace=msg.get(DEVICE_AUTO_REPLACE),
         ),
         options=build_device_options(
             entry,
