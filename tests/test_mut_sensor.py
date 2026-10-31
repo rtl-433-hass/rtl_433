@@ -84,7 +84,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
-from tests.conftest import receiver_id, receiver_scope
+from tests.conftest import link_unique_id, receiver_id, receiver_scope
 
 # ---------------------------------------------------------------------------
 # Helpers shared with test_lifecycle
@@ -139,7 +139,7 @@ async def _enable_last_seen(hass, receiver, device_key):
 
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+        "sensor", DOMAIN, link_unique_id(receiver, device_key, "last_seen")
     )
     assert eid is not None
     ent_reg.async_update_entity(eid, disabled_by=None)
@@ -1170,7 +1170,7 @@ async def test_last_seen_restores_datetime_when_no_live_value(
 ):
     """Rtl433LastSeenSensor restores a prior ISO timestamp as a tz-aware datetime."""
     device_key = "Acurite-606TX-42"
-    restore_eid = "sensor.acurite_606tx_42_last_seen"
+    restore_eid = "sensor.acurite_606tx_42_last_seen_rtl_433_rtl433_local"
     prior = "2026-05-20T08:30:00+00:00"
     mock_restore_cache(hass, (State(restore_eid, prior),))
 
@@ -1186,7 +1186,7 @@ async def test_last_seen_restores_datetime_when_no_live_value(
     )
     ent_reg = er.async_get(hass)
     eid = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{device_key}:last_seen"
+        "sensor", DOMAIN, link_unique_id(receiver, device_key, "last_seen")
     )
     assert eid is not None
     assert eid == restore_eid
@@ -1215,7 +1215,7 @@ async def test_last_seen_restore_ignores_unknown_state(hass, receiver_entry_buil
     test_last_seen_restores_datetime_when_no_live_value).
     """
     device_key = "Acurite-606TX-42"
-    restore_eid = "sensor.acurite_606tx_42_last_seen"
+    restore_eid = "sensor.acurite_606tx_42_last_seen_rtl_433_rtl433_local"
 
     for bad_state in ("unknown", "unavailable"):
         mock_restore_cache(hass, (State(restore_eid, bad_state),))
@@ -1552,7 +1552,9 @@ async def test_per_device_sensor_and_last_seen_created_on_setup(
     assert watts_eid is not None
 
     # Synthetic Last-seen entity.
-    last_seen_eid = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{prefix}:last_seen")
+    last_seen_eid = ent_reg.async_get_entity_id(
+        "sensor", DOMAIN, link_unique_id(receiver, device_key, "last_seen")
+    )
     assert last_seen_eid is not None
 
 
@@ -1578,10 +1580,10 @@ async def test_last_seen_enabled_by_default_for_event_driven_device(
     ent_reg = er.async_get(hass)
 
     motion_ls = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{motion_key}:last_seen"
+        "sensor", DOMAIN, link_unique_id(receiver, motion_key, "last_seen")
     )
     temp_ls = ent_reg.async_get_entity_id(
-        "sensor", DOMAIN, f"{receiver.entry_id}:{temp_key}:last_seen"
+        "sensor", DOMAIN, link_unique_id(receiver, temp_key, "last_seen")
     )
     assert motion_ls is not None and temp_ls is not None
 
