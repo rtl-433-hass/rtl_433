@@ -25,7 +25,7 @@ requires-python = ">=3.14"
 dev = [
     "pytest-homeassistant-custom-component==0.13.375",
     "pyrtl_433==0.4.1",
-    "home-assistant-frontend==20260930.5",
+    "home-assistant-frontend==20261028.0",
     "mutmut==3.8.1",
     "mutmut-ratchet>=0.4.0",
 ]
