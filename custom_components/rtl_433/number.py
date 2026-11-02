@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .entity import Rtl433ReceiverControl, async_setup_receiver_controls
 
@@ -42,11 +42,10 @@ class Rtl433NumberControl(Rtl433ReceiverControl, NumberEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        receiver_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Initialize number-specific description fields from the setting."""
-        super().__init__(coordinator, receiver_entry_id, setting)
+        super().__init__(coordinator, setting)
         self._attr_native_min_value = setting.native_min
         self._attr_native_max_value = setting.native_max
         self._attr_native_step = setting.native_step
@@ -70,9 +69,9 @@ class Rtl433NumberControl(Rtl433ReceiverControl, NumberEntity):
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Register the receiver's managed Number controls (only when managing)."""
+    """Register every receiver's managed Number controls (only when managing)."""
     await async_setup_receiver_controls(
         hass, entry, async_add_entities, PLATFORM, Rtl433NumberControl
     )
