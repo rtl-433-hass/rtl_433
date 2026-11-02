@@ -232,7 +232,7 @@ escalate_paths = [
 # render, so a mutated abort reason / error key / step id is caught by it as
 # surely as by a flow-driving test.
 "tests/test_translations.py" = ["config_flow.py", "options_flow.py"]
-"tests/test_mut_init.py" = ["__init__.py", "migration.py", "hub_settings.py"]
+"tests/test_mut_init.py" = ["__init__.py", "migration.py", "receiver_settings.py"]
 # ``settings.py`` holds the sentinel rules behind the hub / device / mapping
 # forms, and both the options flow and the panel's WebSocket commands are only
 # presentation over it -- so a change to either flow test has to reach it.

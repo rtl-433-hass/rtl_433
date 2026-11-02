@@ -12,7 +12,7 @@ cover every class and every branch in the module:
 * ``_meta`` helper: missing key -> None, present key -> value.
 * ``_frames`` helper: missing "frames" key -> None, non-dict "frames" -> None,
   valid dict -> correct key.
-* ``HUB_SENSORS`` tuple – exact count, exact name/suffix/device_class/native_unit/
+* ``RECEIVER_SENSORS`` tuple – exact count, exact name/suffix/device_class/native_unit/
   state_class for every descriptor.
 * ``HubSensorDesc.folded_when_managing`` – exact flag per descriptor (both
   folded and not).
@@ -26,7 +26,7 @@ cover every class and every branch in the module:
   non-restorable state ignored, parseable datetime restored); _handle_dispatch
   updates native_value from coordinator.last_seen; available True iff
   native_value is not None.
-* ``Rtl433HubSensor``: always available; native_value reads descriptor.value;
+* ``Rtl433ReceiverSensor``: always available; native_value reads descriptor.value;
   extra_state_attributes: None when no attrs, filtered dict when attrs present,
   None when all attrs are None; unique_id / name / device_class / unit /
   state_class populated from desc; entity_category = DIAGNOSTIC.
@@ -54,7 +54,7 @@ from custom_components.rtl_433.const import (
     CONF_MODEL,
     DEVICE_FIELDS,
     DOMAIN,
-    signal_hub_update,
+    signal_receiver_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
@@ -63,9 +63,9 @@ from custom_components.rtl_433.sensor import (
     _NON_RESTORABLE,
     _SENSOR_PRIVATE_OPTIONS,
     _SUGGESTED_UNIT_OPTION,
-    HUB_SENSORS,
     LAST_SEEN_DESCRIPTOR,
-    Rtl433HubSensor,
+    RECEIVER_SENSORS,
+    Rtl433ReceiverSensor,
     Rtl433Sensor,
     _frames,
     _gain,
@@ -287,7 +287,7 @@ class TestGainHelper:
 
 
 # ---------------------------------------------------------------------------
-# 3. HUB_SENSORS descriptors (exact metadata)
+# 3. RECEIVER_SENSORS descriptors (exact metadata)
 # ---------------------------------------------------------------------------
 
 
@@ -296,13 +296,13 @@ class TestHubSensorsDescriptors:
     device_class/unit/state_class mutants."""
 
     def _by_suffix(self, suffix):
-        for d in HUB_SENSORS:
+        for d in RECEIVER_SENSORS:
             if d.suffix == suffix:
                 return d
         raise KeyError(suffix)
 
     def test_count(self):
-        assert len(HUB_SENSORS) == 12
+        assert len(RECEIVER_SENSORS) == 12
 
     def test_center_frequency(self):
         d = self._by_suffix("center_frequency")
@@ -421,7 +421,7 @@ class TestHubSensorsDescriptors:
 
     def test_hub_sensor_value_lambdas(self):
         """Confirm that each HubSensorDesc.value callable reads the right path."""
-        by_suffix = {d.suffix: d for d in HUB_SENSORS}
+        by_suffix = {d.suffix: d for d in RECEIVER_SENSORS}
 
         c = _FakeCoord(
             meta={
@@ -458,7 +458,7 @@ class TestHubSensorsDescriptors:
 class TestFoldedHubSensorSuffixes:
     @staticmethod
     def _folded():
-        return {d.suffix for d in HUB_SENSORS if d.folded_when_managing}
+        return {d.suffix for d in RECEIVER_SENSORS if d.folded_when_managing}
 
     def test_sample_rate_is_folded(self):
         assert "sample_rate" in self._folded()
@@ -495,19 +495,19 @@ class TestFoldedHubSensorSuffixes:
 
 
 # ---------------------------------------------------------------------------
-# 5. Rtl433HubSensor – unit tests with a mock coordinator
+# 5. Rtl433ReceiverSensor – unit tests with a mock coordinator
 # ---------------------------------------------------------------------------
 
 
 def _make_hub_sensor(desc, meta=None, stats=None, entry_id="test_entry"):
-    """Build a bare Rtl433HubSensor (no HA scaffolding) for property tests."""
+    """Build a bare Rtl433ReceiverSensor (no HA scaffolding) for property tests."""
     coord = MagicMock()
     coord.meta = meta or {}
     coord.stats = stats or {}
     # Hub sensors read the connection gate for ``available``; a MagicMock would
     # otherwise return a truthy mock rather than a bool.
-    coord.hub_available = True
-    sensor = Rtl433HubSensor.__new__(Rtl433HubSensor)
+    coord.receiver_available = True
+    sensor = Rtl433ReceiverSensor.__new__(Rtl433ReceiverSensor)
     sensor._coordinator = coord
     sensor._desc = desc
     sensor._attr_unique_id = f"{entry_id}:hub:{desc.suffix}"
@@ -519,7 +519,7 @@ def _make_hub_sensor(desc, meta=None, stats=None, entry_id="test_entry"):
 
 
 def _desc_by_suffix(suffix):
-    for d in HUB_SENSORS:
+    for d in RECEIVER_SENSORS:
         if d.suffix == suffix:
             return d
     raise KeyError(suffix)
@@ -530,7 +530,7 @@ class TestRtl433HubSensorProperties:
         """Hub values are HTTP-sourced, so an outage freezes them -> unavailable."""
         sensor = _make_hub_sensor(_desc_by_suffix("gain"))
         assert sensor.available is True
-        sensor._coordinator.hub_available = False
+        sensor._coordinator.receiver_available = False
         assert sensor.available is False
 
     def test_entity_category_is_diagnostic(self):
@@ -842,7 +842,7 @@ async def test_sensor_rain_mm_transform(hass, hub_entry_builder):
 
 
 async def test_sensor_unique_id_format(hass, hub_entry_builder):
-    """Rtl433Sensor unique_id follows ``{hub_entry_id}:{device_key}:{object_suffix}``."""
+    """Rtl433Sensor unique_id follows ``{receiver_entry_id}:{device_key}:{object_suffix}``."""
     device_key = "EnergyMeter-2000-1234"
     await _setup_hub(
         hass,
@@ -1382,7 +1382,7 @@ async def test_hub_sensors_unmanaged_mode_all_present(hass, hub_entry_builder):
 
     ent_reg = er.async_get(hass)
 
-    for desc in HUB_SENSORS:
+    for desc in RECEIVER_SENSORS:
         uid = ent_reg.async_get_entity_id(
             "sensor", DOMAIN, f"{hub.entry_id}:hub:{desc.suffix}"
         )
@@ -1390,7 +1390,7 @@ async def test_hub_sensors_unmanaged_mode_all_present(hass, hub_entry_builder):
 
 
 async def test_hub_sensor_unique_id_format(hass, hub_entry_builder):
-    """Hub sensor unique_id is ``{hub_entry_id}:hub:{suffix}``."""
+    """Hub sensor unique_id is ``{receiver_entry_id}:hub:{suffix}``."""
     await _setup_hub(hass, hub_entry_builder, entry_id="hub007")
     ent_reg = er.async_get(hass)
     # center_frequency is present in both modes.
@@ -1407,7 +1407,7 @@ async def test_hub_sensor_entity_category_diagnostic(hass, hub_entry_builder):
         hass, hub_entry_builder, options={CONF_MANAGE_SETTINGS: False}
     )
     ent_reg = er.async_get(hass)
-    for desc in HUB_SENSORS:
+    for desc in RECEIVER_SENSORS:
         uid = f"{hub.entry_id}:hub:{desc.suffix}"
         eid = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
         assert eid is not None, desc.suffix
@@ -1424,7 +1424,7 @@ async def test_hub_sensor_center_frequency_metadata(hass, hub_entry_builder):
         "frequencies": [433920000],
         "hop_times": [600],
     }
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1449,7 +1449,7 @@ async def test_hub_sensor_decoded_events_metadata(hass, hub_entry_builder):
         "frames": {"count": 12, "fsk": 3, "events": 40},
         "stats": [{"name": "Acurite", "events": 40}],
     }
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1468,7 +1468,7 @@ async def test_hub_sensor_ook_fsk_frames(hass, hub_entry_builder):
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     coordinator._client.stats = {"frames": {"count": 8, "fsk": 3, "events": 40}}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1489,7 +1489,7 @@ async def test_hub_sensor_enabled_decoders_measurement(hass, hub_entry_builder):
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     coordinator._client.stats = {"enabled": 7, "frames": {}}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1568,7 +1568,7 @@ async def test_hub_sensor_gain_auto_in_unmanaged_mode(hass, hub_entry_builder):
     )
     coordinator = _coordinator(hass, hub)
     coordinator._client.meta = {"gain": ""}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1584,7 +1584,7 @@ async def test_hub_sensor_gain_numeric_in_unmanaged_mode(hass, hub_entry_builder
     )
     coordinator = _coordinator(hass, hub)
     coordinator._client.meta = {"gain": "40.2"}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1600,7 +1600,7 @@ async def test_hub_sensor_sample_rate_in_unmanaged_mode(hass, hub_entry_builder)
     )
     coordinator = _coordinator(hass, hub)
     coordinator._client.meta = {"samp_rate": 250000}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1620,7 +1620,7 @@ async def test_hub_sensor_hop_interval_in_unmanaged_mode(hass, hub_entry_builder
     )
     coordinator = _coordinator(hass, hub)
     coordinator._client.meta = {"hop_interval": 600}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1640,7 +1640,7 @@ async def test_hub_sensor_ppm_error_in_unmanaged_mode(hass, hub_entry_builder):
     )
     coordinator = _coordinator(hass, hub)
     coordinator._client.meta = {"ppm_error": -3}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1656,7 +1656,7 @@ async def test_hub_sensor_conversion_mode_in_unmanaged_mode(hass, hub_entry_buil
     )
     coordinator = _coordinator(hass, hub)
     coordinator._client.meta = {"conversion_mode": 2}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1668,7 +1668,7 @@ async def test_hub_sensor_conversion_mode_in_unmanaged_mode(hass, hub_entry_buil
 
 
 # ---------------------------------------------------------------------------
-# 9. Rtl433HubSensor.extra_state_attributes – edge cases
+# 9. Rtl433ReceiverSensor.extra_state_attributes – edge cases
 # ---------------------------------------------------------------------------
 
 
@@ -1680,7 +1680,7 @@ async def test_hub_sensor_extra_attrs_none_when_all_values_none(
     coordinator = _coordinator(hass, hub)
     # center_frequency meta: neither frequencies nor hop_times set -> both None.
     coordinator._client.meta = {"center_frequency": 433920000}
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1704,7 +1704,7 @@ async def test_hub_sensor_extra_attrs_present_when_some_values_set(
         "frequencies": [433920000],
         # hop_times absent -> None
     }
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
