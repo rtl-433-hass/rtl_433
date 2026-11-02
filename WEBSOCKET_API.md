@@ -127,7 +127,7 @@ unset when no SDR device is open, such as `-D manual`.
 
 ### Live SDR control (applied immediately)
 
-These call into the SDR driver and take effect on the running receiver. Each
+These call into the SDR driver and take effect on the running radio. Each
 returns `{"result": "Ok"}` on success.
 
 The Home Assistant integration exercises these live SDR controls and the
@@ -293,7 +293,7 @@ reverse proxy with TLS and authentication in front if remote access is required.
 The integration registers the following commands on **Home Assistant's WebSocket
 API** at `ws://<home-assistant>:8123/api/websocket`. The discovery panel uses
 these commands to list, add, ignore, and un-ignore devices and to read and write
-hub settings. You can also call them from a script or the browser's developer
+receiver settings. You can also call them from a script or the browser's developer
 console. See [Adding Devices to Home Assistant](docs/device-discovery.md) for
 the panel workflow.
 
@@ -312,8 +312,8 @@ administrator**, so a token issued for a non-admin user is refused:
 
 | `type` | Parameters | Returns |
 | --- | --- | --- |
-| `rtl_433/hubs` | — | Every configured hub, loaded or not, with its connection. |
-| `rtl_433/devices/pending` | `entry_id` | One hub's discovered devices and its ignore list. |
+| `rtl_433/hubs` | — | Every configured receiver, loaded or not, with its connection. |
+| `rtl_433/devices/pending` | `entry_id` | One receiver's discovered devices and its ignore list. |
 | `rtl_433/devices/add` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
 | `rtl_433/devices/ignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
 | `rtl_433/devices/unignore` | `entry_id`, `device_keys` | `applied` / `skipped` keys. |
@@ -321,11 +321,11 @@ administrator**, so a token issued for a non-admin user is refused:
 | `rtl_433/devices/replace` | `entry_id`, `device_key`, `replaces` | Re-points an existing device onto a candidate. |
 | `rtl_433/devices/clear` | `entry_id` | Forgets every candidate; `cleared` counts them. |
 | `rtl_433/settings/get` | `entry_id` | Everything the three settings forms render. |
-| `rtl_433/settings/hub` | `entry_id`, `availability_timeout`, `manage_settings` | The hub's stored options. |
+| `rtl_433/settings/hub` | `entry_id`, `availability_timeout`, `manage_settings` | The receiver's stored options. |
 | `rtl_433/settings/device` | `entry_id`, `device_key`, + overrides | That device's stored settings. |
 | `rtl_433/settings/mappings` | `entry_id`, `yaml` | The stored override document, re-rendered. |
 
-`entry_id` is a hub's config-entry id, from `rtl_433/hubs`. `device_keys` is a
+`entry_id` is a receiver's config-entry id, from `rtl_433/hubs`. `device_keys` is a
 list, so one message can add or ignore several devices.
 
 Errors are the usual `{"success": false, "error": {...}}` result:
@@ -333,14 +333,14 @@ Errors are the usual `{"success": false, "error": {...}}` result:
 | `error.code` | Meaning |
 | --- | --- |
 | `unauthorized` | The connection's user is not an administrator. |
-| `not_found` | No rtl_433 hub has that `entry_id`, or the entry belongs to another integration. |
-| `not_loaded` | The hub exists but is not loaded, for example during a reload or while its server is unreachable. The discovered list is available only after setup. |
+| `not_found` | No rtl_433 receiver has that `entry_id`, or the entry belongs to another integration. |
+| `not_loaded` | The receiver exists but is not loaded, for example during a reload or while its server is unreachable. The discovered list is available only after setup. |
 | `replace_failed` | The replacement cannot be made: an unknown survivor, or the same key on both sides. Distinct from `not_loaded` so a script can tell "retry in a moment" from "this request cannot work". |
 | `invalid_mappings` | The submitted device-mapping document is not YAML, is not a mapping, or breaks the override schema. `error.message` carries every problem found. Nothing is stored. |
 
 ### `rtl_433/hubs`
 
-Lists all configured hubs, including those that failed to load.
+Lists all configured receivers, including those that failed to load.
 
 `loaded` reports whether the config entry is set up. `connected` reports whether
 the hub's WebSocket connection is open. An unloaded hub always has
@@ -371,7 +371,7 @@ this command reports it for all hubs.
 
 ### `rtl_433/devices/pending`
 
-Returns one hub's discovered devices, most recently heard first, together with
+Returns one receiver's discovered devices, most recently heard first, together with
 the keys it is ignoring.
 
 ```json
@@ -428,7 +428,7 @@ The `result`, with four of its six devices left out:
 | --- | --- |
 | `key` | The device key: the decoded model plus the id, channel and subtype it reported. This is the id every command below takes. |
 | `model` | The model rtl_433 decoded. |
-| `count` | Sightings since Home Assistant started. The list is memory-only, so this counts from the last restart or hub reload. |
+| `count` | Sightings since Home Assistant started. The list is memory-only, so this counts from the last restart or receiver reload. |
 | `signal` | The most recent message's SNR, or its RSSI when no SNR was reported, in dB. `null` when the server reports no levels (it needs `-M level`). |
 | `first_seen`, `last_seen` | ISO 8601 timestamps. |
 | `readings` | The most recent message, resolved through the device library into the entities adoption would create. Ordered as a device page orders them: readings first, then diagnostics, alphabetical within each. |
@@ -491,7 +491,7 @@ discovered list. The device returns there on its next transmission.
 
 ### `rtl_433/devices/subscribe`
 
-Subscribes to one hub's discovered devices. The event payload is exactly what
+Subscribes to one receiver's discovered devices. The event payload is exactly what
 `rtl_433/devices/pending` returns.
 
 ```json
@@ -585,7 +585,7 @@ calibration when it has one, and otherwise a guess from the `MeterType` /
 ### `rtl_433/settings/device`
 
 Every override is optional and nullable, and the two mean the same thing: clear
-it, falling back to the hub default or the library descriptor.
+it, falling back to the receiver default or the library descriptor.
 
 ```json
 {"id": 12, "type": "rtl_433/settings/device",
@@ -607,7 +607,7 @@ identified by `motion: true` in the settings payload.
 
 ### `rtl_433/settings/mappings`
 
-Saves the hub's [device-library overrides](docs/device-library.md) from YAML text.
+Saves the receiver's [device-library overrides](docs/device-library.md) from YAML text.
 
 ```json
 {"id": 13, "type": "rtl_433/settings/mappings",
