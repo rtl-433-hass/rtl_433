@@ -207,6 +207,16 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   or entity `unique_id`s; do not open-code a re-key elsewhere. It re-emits the
   `COMPATIBILITY_CONTRACT.md` identifier/unique_id templates verbatim (only the
   `device_key` value changes), so the contract is unaffected by a replace.
+- `id_change.py` suggests a replacement through a fixable repair when an
+  added device has gone quiet and exactly one same-model/channel/subtype pending
+  candidate fits, with at least two sightings and similar temperature/humidity
+  where both report them. Ambiguity in either direction suppresses the suggestion.
+  This is a heuristic, not proof of physical identity: replacement **always
+  requires user confirmation**, and the flow rechecks the match on submission.
+  Only `async_replace_device` rewrites identity. There is no automatic replacement
+  setting or execution path. Notices are in memory, withdrawn when no longer
+  valid, and rebuilt from live traffic after reload.
+
 - `async_migrate_entry` (`migration.py`, config-entry `VERSION` 1 → 2) performs a
   **in-place upgrade from 0.1.0**: it re-homes the legacy per-device
   config entries' registry devices/entities onto the hub entry (preserving

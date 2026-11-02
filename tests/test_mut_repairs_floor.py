@@ -1037,6 +1037,37 @@ class TestAsyncCreateFixFlow:
         flow = await repairs.async_create_fix_flow(hass, "completely_unknown", None)
         assert isinstance(flow, ConfirmRepairFlow)
 
+    async def test_unrelated_issue_with_data_keeps_its_flow(
+        self, hass: HomeAssistant, hub_entry_builder
+    ):
+        """Entry data alone must not route another issue into ID replacement."""
+        entry = hub_entry_builder()
+        entry.add_to_hass(hass)
+        data = {
+            "entry_id": entry.entry_id,
+            "old_key": "old",
+            "new_key": "new",
+        }
+
+        flow = await repairs.async_create_fix_flow(
+            hass, repairs._unreachable_issue_id(entry), data
+        )
+        assert isinstance(flow, repairs.HubRadioReplaceRepairFlow)
+        assert flow._entry is entry
+
+        unknown = await repairs.async_create_fix_flow(hass, "unrelated_issue", data)
+        assert isinstance(unknown, ConfirmRepairFlow)
+
+    @pytest.mark.parametrize("data", [None, {}])
+    async def test_id_change_without_data_returns_confirm_flow(
+        self, hass: HomeAssistant, data
+    ):
+        """An ID-change prefix alone cannot construct a replacement flow."""
+        flow = await repairs.async_create_fix_flow(
+            hass, f"{repairs.ISSUE_ID_CHANGED}_missing_pair", data
+        )
+        assert isinstance(flow, ConfirmRepairFlow)
+
     async def test_unreachable_prefix_without_valid_entry_returns_confirm_flow(
         self, hass: HomeAssistant
     ):
