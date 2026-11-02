@@ -19,6 +19,10 @@ actionable* problems, not speculative ones). Three receiver-scoped issues live h
   server-side ``report_meta`` setting, so confirming sets a persisted per-receiver flag
   and the card otherwise clears itself once readable stamps arrive.
 
+Plus one location-scoped notice, :func:`async_raise_history_merged`, raised by
+``device_replace.async_consolidate_location`` when merging two locations forced a
+duplicate recorder history to be dropped.
+
 The coordinator owns no repairs policy: it exposes raw receiver state and this module
 decides what is worth a card. :func:`async_track_receiver_reachability` polls the
 coordinator's ``connected`` flag on an interval, and
@@ -92,6 +96,15 @@ ISSUE_SAMPLE_RATE_LOW = "sample_rate_low_for_band"
 # re-broadcast buffer is replayed as fresh traffic -- reviving devices that are
 # actually silent, and re-firing their event entities and device triggers.
 ISSUE_EVENT_TIME_UNUSABLE = "event_time_unusable"
+
+# translation_key / issue_id prefix for the "duplicate history was dropped"
+# notice raised when a user consolidates two locations into one. Home Assistant
+# forbids two registry rows holding one unique_id, so when both locations had
+# been recording the same physical sensor exactly one of the two histories can
+# survive the merge -- the loss is mandated by the registry, not chosen. The
+# notice is what makes it visible, and names the receiver whose copy was dropped
+# so the user knows which recorder history to stop expecting.
+ISSUE_HISTORY_MERGED = "history_merged_on_consolidation"
 
 # Conservative band heuristic for the sample-rate advisory. rtl_433 does not
 # auto-widen the sample rate when retuned via ``/cmd`` (unlike some CLI startup
@@ -224,6 +237,45 @@ def async_raise_motion_moved(hass: HomeAssistant) -> None:
         is_fixable=False,
         severity=ir.IssueSeverity.WARNING,
         translation_key=ISSUE_MOTION_MOVED,
+    )
+
+
+@callback
+def async_raise_history_merged(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    *,
+    kept: str,
+    dropped: str,
+    entity_ids: list[str],
+) -> None:
+    """Raise the "duplicate history dropped" notice for a consolidation.
+
+    ``kept`` and ``dropped`` are receiver titles: the entity of the
+    **earliest-added** receiver survives the merge, so ``dropped`` names the
+    later one, whose duplicate rows were removed. ``entity_ids`` is the removed
+    set, listed in the card so the user can see exactly what stopped recording.
+
+    Scoped to the surviving location's entry id, not to a receiver: the merge is
+    one event about one location, and a second consolidation into the same
+    location should replace the notice rather than stack a second card. It is
+    ``is_persistent`` so it survives a restart -- the user has to see it once,
+    and there is nothing to re-detect afterwards that would raise it again.
+    """
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        f"{ISSUE_HISTORY_MERGED}_{entry.entry_id}",
+        is_fixable=False,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_HISTORY_MERGED,
+        translation_placeholders={
+            "kept": kept,
+            "dropped": dropped,
+            "count": str(len(entity_ids)),
+            "entities": ", ".join(sorted(entity_ids)),
+        },
     )
 
 
