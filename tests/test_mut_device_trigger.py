@@ -46,7 +46,6 @@ from homeassistant.core import HassJob, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.trigger import async_initialize_triggers
 from homeassistant.util import dt as dt_util
-from tests.conftest import receiver_id
 from tests.test_lifecycle import _coordinator, _feed, _setup_receiver
 
 # ---------------------------------------------------------------------------
@@ -274,7 +273,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         assert entity_id is not None
         entry = ent_reg.async_get(entity_id)
@@ -312,7 +311,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         assert entry is not None
@@ -347,7 +346,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         assert entity_id is not None
         entry = ent_reg.async_get(entity_id)
@@ -381,7 +380,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
@@ -410,7 +409,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -446,7 +445,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
@@ -476,7 +475,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
@@ -500,7 +499,7 @@ class TestEventTypesForEntryPersisted:
         er.async_get(hass)
         # No event entities exist since no device is seeded; use a mock entry.
         # Build a fake entry with a valid unique_id for this receiver.
-        fake_uid = f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+        fake_uid = f"{receiver.entry_id}:{DEVICE_KEY}:button"
         mock_entry = MagicMock()
         mock_entry.unique_id = fake_uid
         mock_entry.config_entry_id = receiver.entry_id
@@ -534,7 +533,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
@@ -561,7 +560,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
@@ -588,7 +587,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
@@ -620,7 +619,7 @@ class TestEventTypesForEntryPersisted:
         ent_reg = er.async_get(hass)
         # Check button entity
         button_eid = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         assert button_eid is not None, "button event entity not found"
         button_entry = ent_reg.async_get(button_eid)
@@ -628,7 +627,7 @@ class TestEventTypesForEntryPersisted:
 
         # Check secret_knock entity
         knock_eid = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:secret_knock"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:secret_knock"
         )
         assert knock_eid is not None, "secret_knock event entity not found"
         knock_entry = ent_reg.async_get(knock_eid)
@@ -661,7 +660,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
@@ -719,7 +718,7 @@ class TestEventTypesForEntryFallback:
 
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         assert entity_id is not None
         ent_reg.async_get(entity_id)
@@ -764,7 +763,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -799,7 +798,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -829,7 +828,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -861,7 +860,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -894,7 +893,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -933,7 +932,7 @@ class TestAsyncAttachBaseTrigger:
         coordinator = _coordinator(hass, receiver)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -978,7 +977,7 @@ class TestAsyncAttachBaseTrigger:
         coordinator = _coordinator(hass, receiver)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -1024,7 +1023,7 @@ class TestAsyncAttachBaseTrigger:
         coordinator = _coordinator(hass, receiver)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -1087,7 +1086,7 @@ class TestAsyncAttachSubtypeTrigger:
         receiver = await _setup_button_receiver(hass, receiver_entry_builder)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -1141,7 +1140,7 @@ class TestAsyncAttachSubtypeTrigger:
         receiver = await _setup_button_receiver(hass, receiver_entry_builder)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
