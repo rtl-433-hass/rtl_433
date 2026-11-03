@@ -267,16 +267,24 @@ class Rtl433Entity(RestoreEntity):
     def _handle_dispatch(self, event: NormalizedEvent) -> None:
         """Handle a dispatched event for this device.
 
-        Two cases drive a state write:
-        * the event carries this entity's field -> update the value, and
-        * the event is a watchdog re-dispatch with the field absent -> the value
-          stays put but availability may have flipped.
-        In both cases ``async_write_ha_state`` re-reads ``available``.
+        Three classes of dispatch, in order:
 
-        A replayed / stale frame (``event.is_replay``) still applies its value and
-        writes state here so sensors seed their latest reading from the reconnect
-        replay; only ``Rtl433Event`` honors the flag (to not re-fire automations).
+        * ``is_repaint`` — watchdog availability re-paint of the *cached* last
+          frame (``is_replay`` is forced False on that path). Value must not be
+          re-applied: it is stale, and applying it would also re-arm binary
+          ``clear_delay`` timers. Only re-read ``available``.
+        * ``is_replay`` — reconnect / stale-gap backlog. Historical readings must
+          not become new Home Assistant ``state_changed`` rows (that stamped old
+          temperatures with "now" in the Recorder). Restore and the next live
+          frame own the measurement; empty entities wait for live.
+        * live — the event carries this entity's field -> update the value; a
+          field-absent live dispatch still writes so availability is re-read.
         """
+        if event.is_repaint:
+            self.async_write_ha_state()
+            return
+        if event.is_replay:
+            return
         if self._descriptor.field_key in event.fields:
             self._apply_value(event.fields[self._descriptor.field_key])
         self.async_write_ha_state()

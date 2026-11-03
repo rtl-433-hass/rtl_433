@@ -1934,15 +1934,18 @@ async def test_fresh_event_at_reconnect_still_fires(hass, hub_entry_builder, eve
     assert dt_util.parse_datetime(after.state) > dt_util.parse_datetime(first_fired_at)
 
 
-async def test_sensor_seeds_from_replay_but_event_does_not_fire(
+async def test_sensor_does_not_publish_replay_and_event_does_not_fire(
     hass, hub_entry_builder, caplog
 ):
-    """A reconnect replay seeds a sensor's value while the event stays unfired.
+    """A reconnect replay must not publish a measurement or fire an event.
 
     A device with both a measurement field (temperature) and an event field
-    (button) is fed ONLY a stale replayed frame (no prior live frame). The sensor
-    must seed its value and the device snapshot must record it, but the event
-    entity must stay ``unknown`` (never fired) and ``last_seen`` is NOT stamped.
+    (button) is fed ONLY a stale replayed frame (no prior live frame). The
+    coordinator still records the frame in ``devices`` (for diagnostics /
+    pending), but the sensor must **not** publish it as a new HA state (that
+    would stamp a historical reading with wall-clock "now" in the Recorder).
+    The event entity must stay ``unknown`` (never fired) and ``last_seen`` is
+    NOT stamped. The next *live* frame owns the measurement.
     """
     device_key = "Acurite-606TX-42"
     hub = await _setup_hub(
@@ -1970,12 +1973,15 @@ async def test_sensor_seeds_from_replay_but_event_does_not_fire(
     # value shows until the timeout). A replay must not *advance* it, so capture
     # the baseline and assert the replayed frame leaves it untouched.
     baseline_seen = coordinator.last_seen[device_key]
+    # No restore cache and no prior live reading: temperature stays unknown.
+    assert hass.states.get(temp_eid).state == "unknown"
 
-    # Stale frame (frame time far behind now) -> replay: seeds sensor, no fire.
+    # Stale then live, under a fixed wall clock so classification is deterministic.
     with (
         freeze_time("2026-05-25T10:30:00+00:00"),
         caplog.at_level(logging.DEBUG, logger="custom_components.rtl_433"),
     ):
+        # Frame time far behind now -> replay: no measurement publish, no fire.
         _feed(
             coordinator,
             {
@@ -1988,21 +1994,36 @@ async def test_sensor_seeds_from_replay_but_event_does_not_fire(
         )
         await hass.async_block_till_done()
 
-    # The sensor seeded its value from the replay.
-    assert hass.states.get(temp_eid).state == "21.4"
-    assert coordinator.devices[device_key].fields["temperature_C"] == 21.4
-    # The event entity never fired (still unknown, no event_type).
-    button_state = hass.states.get(button_eid)
-    assert button_state.state == "unknown"
-    assert button_state.attributes["event_type"] is None
-    # Liveness was NOT refreshed by the replay: last_seen unchanged from the
-    # setup baseline (the replay must not stamp it to the frame/now time).
-    assert coordinator.last_seen[device_key] == baseline_seen
-    # The ignored event-field transmission was logged at DEBUG.
-    assert any(
-        "ignored an old/duplicate" in r.message and r.levelno == logging.DEBUG
-        for r in caplog.records
-    )
+        # Coordinator still saw the frame (diagnostics / device map), but HA state
+        # did not adopt the historical reading as a fresh measurement.
+        assert coordinator.devices[device_key].fields["temperature_C"] == 21.4
+        assert hass.states.get(temp_eid).state == "unknown"
+        # The event entity never fired (still unknown, no event_type).
+        button_state = hass.states.get(button_eid)
+        assert button_state.state == "unknown"
+        assert button_state.attributes["event_type"] is None
+        # Liveness was NOT refreshed by the replay: last_seen unchanged from the
+        # setup baseline (the replay must not stamp it to the frame/now time).
+        assert coordinator.last_seen[device_key] == baseline_seen
+        # The ignored event-field transmission was logged at DEBUG.
+        assert any(
+            "ignored an old/duplicate" in r.message and r.levelno == logging.DEBUG
+            for r in caplog.records
+        )
+
+        # A subsequent live frame (time ≈ frozen now) publishes the measurement.
+        _feed(
+            coordinator,
+            {
+                "model": "Acurite-606TX",
+                "id": 42,
+                "temperature_C": 22.0,
+                "button": "A",
+                "time": "2026-05-25T10:30:00Z",
+            },
+        )
+        await hass.async_block_till_done()
+        assert hass.states.get(temp_eid).state == "22.0"
 
 
 # --------------------------------------------------------------------------- #
