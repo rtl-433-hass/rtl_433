@@ -121,10 +121,16 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
         self._attr_native_unit_of_measurement = descriptor.unit_of_measurement
         self._attr_force_update = descriptor.force_update
 
-        # Seed from the coordinator's last event if it already carries the field
-        # (covers a device that transmitted before its entity was added).
+        # Seed from the coordinator's last *live* event if it already carries the
+        # field (covers a device that transmitted before its entity was added).
+        # Skip ``is_replay`` frames: reconnect backlog must not initialize state
+        # as if it were a fresh reading (see ``Rtl433Entity._handle_dispatch``).
         last_event = coordinator.devices.get(device_key)
-        if last_event is not None and descriptor.field_key in last_event.fields:
+        if (
+            last_event is not None
+            and not last_event.is_replay
+            and descriptor.field_key in last_event.fields
+        ):
             self._apply_value(last_event.fields[descriptor.field_key])
 
     async def async_added_to_hass(self) -> None:
@@ -364,7 +370,15 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
         Overrides the base: the synthetic field is never in ``event.fields``, so
         instead of the field-driven path we read coordinator.last_seen, which the
         non-dispatching baseline never reaches.
+
+        Reconnect replay does not advance ``coordinator.last_seen`` and must not
+        rewrite this sensor. Watchdog ``is_repaint`` only re-reads availability.
         """
+        if event.is_replay:
+            return
+        if event.is_repaint:
+            self.async_write_ha_state()
+            return
         self._attr_native_value = self._coordinator.last_seen.get(self._device_key)
         self.async_write_ha_state()
 

@@ -68,11 +68,16 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
         # Pending synthesized-clear timer unsub handle (clear_delay descriptors).
         self._clear_unsub: CALLBACK_TYPE | None = None
 
-        # Seed from the coordinator's last event if it already carries the field.
-        # ``hass`` is not set yet, so any clear timer is (re)started in
-        # ``async_added_to_hass`` from the seeded ``is_on``.
+        # Seed from the coordinator's last *live* event if it already carries the
+        # field. ``hass`` is not set yet, so any clear timer is (re)started in
+        # ``async_added_to_hass`` from the seeded ``is_on``. Skip ``is_replay``:
+        # backlog must not arm occupancy/motion as a fresh detection.
         last_event = coordinator.devices.get(device_key)
-        if last_event is not None and descriptor.field_key in last_event.fields:
+        if (
+            last_event is not None
+            and not last_event.is_replay
+            and descriptor.field_key in last_event.fields
+        ):
             self._apply_value(last_event.fields[descriptor.field_key])
 
     def _apply_value(self, raw_value: Any) -> None:
