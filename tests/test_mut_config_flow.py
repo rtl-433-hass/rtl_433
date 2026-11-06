@@ -76,13 +76,83 @@ from custom_components.rtl_433.const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
-from custom_components.rtl_433.options_flow import CONF_DEVICE
+from custom_components.rtl_433.options_flow import CONF_DEVICE, Rtl433OptionsFlow
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.const import UnitOfEnergy, UnitOfVolume
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 VALIDATE = "custom_components.rtl_433.config_flow.Rtl433Coordinator.validate_connection"
+
+
+@pytest.mark.parametrize("has_answers", [False, True])
+async def test_finish_adoption_preserves_options_and_clears_temporary_state(
+    hass, hub_entry_builder, has_answers
+):
+    """Finishing adoption returns existing options and releases the batch state."""
+    key = "SCMplus-123"
+    calibration = {
+        CALIBRATION_COMMODITY: COMMODITY_GAS,
+        CALIBRATION_UNIT: UnitOfVolume.CUBIC_METERS,
+        CALIBRATION_SCALE: 0.01,
+    }
+    options = {CONF_AVAILABILITY_TIMEOUT: 90, CONF_MANAGE_SETTINGS: True}
+    entry = hub_entry_builder(devices={key: {CONF_MODEL: "SCMplus"}}, options=options)
+    entry.add_to_hass(hass)
+    flow = Rtl433OptionsFlow()
+    flow.hass = hass
+    flow.handler = entry.entry_id
+    flow._adopt_queue = []
+    flow._adopt_calibrations = {key: calibration} if has_answers else {}
+
+    with patch.object(
+        hass.config_entries,
+        "async_update_entry",
+        wraps=hass.config_entries.async_update_entry,
+    ) as update:
+        result = flow._finish_adopt_calibrations()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == ""
+    assert result["data"] == options
+    assert entry.options == options
+    assert flow._adopt_queue is None
+    assert flow._adopt_calibrations is None
+    if has_answers:
+        update.assert_called_once()
+        assert entry.data[CONF_DEVICES][key][DEVICE_CALIBRATION] == calibration
+    else:
+        update.assert_not_called()
+        assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][key]
+
+
+async def test_adoption_does_not_store_an_unusable_calibration(hass, hub_entry_builder):
+    """A calibration the normalizer rejects is skipped without storing None."""
+    key = "SCMplus-123"
+    entry = hub_entry_builder(devices={key: {CONF_MODEL: "SCMplus"}})
+    entry.add_to_hass(hass)
+    flow = Rtl433OptionsFlow()
+    flow.hass = hass
+    flow.handler = entry.entry_id
+    flow._device_key = key
+    flow._calibration_commodity = COMMODITY_GAS
+    flow._adopt_queue = [key]
+    flow._adopt_total = 1
+    flow._adopt_calibrations = {}
+
+    with patch.object(
+        hass.config_entries,
+        "async_update_entry",
+        wraps=hass.config_entries.async_update_entry,
+    ) as update:
+        result = await flow.async_step_calibration(
+            {CALIBRATION_UNIT: UnitOfEnergy.KILO_WATT_HOUR, CALIBRATION_SCALE: 0.01}
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    update.assert_not_called()
+    assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][key]
+
 
 # ---------------------------------------------------------------------------
 # Helpers

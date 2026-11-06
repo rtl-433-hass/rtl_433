@@ -32,6 +32,7 @@ data and options in a single ``async_update_entry``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from pyrtl_433.library import lookup, normalize_overrides
@@ -231,6 +232,26 @@ def device_defaults(
             else commodity_hint(hass, entry, device_key)
         ),
     }
+
+
+def build_calibrations_data(
+    data: Mapping[str, Any], calibrations: Mapping[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Apply calibration answers without changing any other device settings.
+
+    Read the current data at save time and skip devices removed while the form
+    was open. Each changed record is copied so callers can batch one entry write.
+    """
+    updated = dict(data)
+    devices = dict(updated.get(CONF_DEVICES, {}))
+    for device_key, calibration in calibrations.items():
+        if device_key in devices:
+            devices[device_key] = {
+                **devices[device_key],
+                DEVICE_CALIBRATION: calibration,
+            }
+    updated[CONF_DEVICES] = devices
+    return updated
 
 
 def build_device_data(

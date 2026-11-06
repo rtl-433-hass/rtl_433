@@ -199,6 +199,11 @@ export const STRINGS = {
     "Settings for this receiver as a whole. Individual devices can override the timeout.",
   "settings.device_intro":
     "Overrides for one device. Blank means “use the receiver's setting”.",
+  "settings.adopt_intro":
+    "You added {device}. Check what it measures, then set its unit and conversion factor for the Energy dashboard. Skip for now keeps the meter added; you can calibrate it later in Device settings.",
+  "settings.skip_calibration": "Skip for now",
+  "settings.adopt_failed":
+    "The device was added, but calibration could not be opened: {error}. You can calibrate it later in Device settings.",
   "settings.device_empty":
     "No devices have been added yet. Add one from this page first, and its settings will appear here.",
   "settings.mappings_intro":
@@ -810,6 +815,7 @@ class Rtl433Panel extends HTMLElement {
     // because editing several devices in a row is the normal way to use it,
     // and re-picking from a list of thirty each time is not.
     this._settingsDevice = "";
+    this._calibrationAfterAdd = null;
 
     // Device keys with a command in flight, so their buttons can be disabled.
     this._busy = new Set();
@@ -993,6 +999,11 @@ class Rtl433Panel extends HTMLElement {
    * mean the same thing, and all three were pushing.
    */
   _goUp() {
+    if (this._calibrationAfterAdd) {
+      this._calibrationAfterAdd = null;
+      this._navigate("discovered", { replace: true });
+      return;
+    }
     if (this._pushed) {
       this._pushed = false;
       // `popstate` re-reads the URL and renders, so this needs no follow-up.
@@ -1345,6 +1356,7 @@ class Rtl433Panel extends HTMLElement {
     // receiver's devices under this receiver's name.
     this._settings = null;
     this._settingsDevice = "";
+    this._calibrationAfterAdd = null;
     this._status = this._t("common.loading");
     this._render();
     await this._openSubscription();
@@ -1508,7 +1520,7 @@ class Rtl433Panel extends HTMLElement {
       if (result.skipped && result.skipped.length) {
         this._setBanner(skippedMessage, "notice");
       } else if (onApplied) {
-        onApplied();
+        await onApplied();
       }
     } catch (error) {
       this._setBanner(this._describeError(error), "error");
@@ -1520,17 +1532,21 @@ class Rtl433Panel extends HTMLElement {
 
   /** Add one candidate, keeping its card on screen in the adopted state. */
   _addDevice(row) {
+    const entryId = this._entryId;
     // Read the area *before* sending the command. Adding a device makes the
     // backend push an updated pending list, and that push arrives ahead of the
     // command's own reply -- rendering it removes this card and forgets its
     // picker. Reading the area in the reply handler therefore always found
     // nothing, and the area the user chose was silently dropped.
     const areaId = this._areaChoiceFor(row.key);
-    this._act(
+    return this._act(
       "rtl_433/devices/add",
       row.key,
       this._t("action.already_added", { device: row.key }),
-      () => {
+      async () => {
+        if (this._entryId !== entryId || !this.isConnected) {
+          return;
+        }
         // Snapshot the row: it is about to leave the pending list, and this is
         // the only copy of what the card should keep showing.
         this._added.set(row.key, { row, deviceId: null });
@@ -1538,8 +1554,52 @@ class Rtl433Panel extends HTMLElement {
           this._pendingAreas.set(row.key, areaId);
           this._applyPendingAreas();
         }
+        await this._offerCalibration(row.key);
       }
     );
+  }
+
+  /** Reuse Device settings for a newly added meter, with its detected defaults. */
+  async _offerCalibration(deviceKey) {
+    if (this._segment !== "discovered") {
+      return;
+    }
+    const entryId = this._entryId;
+    let settings;
+    try {
+      settings = await this._call({
+        type: "rtl_433/settings/get",
+        entry_id: entryId,
+      });
+    } catch (error) {
+      if (this._entryId === entryId && this._segment === "discovered") {
+        this._setBanner(
+          this._t("settings.adopt_failed", { error: this._describeError(error) }),
+          "notice"
+        );
+      }
+      return;
+    }
+    // An answer arriving after navigation must not take the user back again.
+    if (
+      !this.isConnected ||
+      this._entryId !== entryId ||
+      this._segment !== "discovered"
+    ) {
+      return;
+    }
+    this._settings = settings;
+    this._settingsFor = entryId;
+    const device = settings.devices.find((item) => item.device_key === deviceKey);
+    if (!device || !(settings.commodity_units[device.commodity] || []).length) {
+      return;
+    }
+    this._settingsAttempt = null;
+    this._settingsDevice = deviceKey;
+    this._calibrationAfterAdd = deviceKey;
+    // This is the next part of Add, so replace its discovery entry. Save and
+    // Skip restore that entry without adding a history loop through the form.
+    this._navigate("device-settings", { entry: entryId, replace: true });
   }
 
   /**
@@ -2123,6 +2183,13 @@ class Rtl433Panel extends HTMLElement {
       "filled"
     );
     this._el.settingsActions.append(this._el.settingsSave);
+    this._el.settingsSkip = haButton(
+      this._t("settings.skip_calibration"),
+      "ghost settings-skip"
+    );
+    this._el.settingsSkip.hidden = true;
+    this._el.settingsSkip.addEventListener("click", () => this._goUp());
+    this._el.settingsActions.prepend(this._el.settingsSkip);
 
     // The two list actions are built rather than templated so they can be Home
     // Assistant's buttons. They are appended in the order they read on the page,
@@ -2213,6 +2280,7 @@ class Rtl433Panel extends HTMLElement {
       this._settingsAttempt = null;
       this._settingsForm = null;
       this._settingsData = null;
+      this._calibrationAfterAdd = null;
       // Dropped so the next visit builds a fresh form: the schema it needs
       // depends on the payload, which is re-fetched after every save.
       this._el.settingsFormEl = null;
@@ -3182,6 +3250,7 @@ class Rtl433Panel extends HTMLElement {
     this._el.settingsIntro.textContent = "";
     this._showSettingsSave(true);
     this._settingsForm = kind;
+    this._el.settingsSkip.hidden = kind !== "device" || !this._calibrationAfterAdd;
 
     if (kind === "hub") {
       this._el.settingsIntro.textContent = this._t("settings.hub_intro");
@@ -3192,7 +3261,11 @@ class Rtl433Panel extends HTMLElement {
         this._settingsData = {};
         return;
       }
-      this._el.settingsIntro.textContent = this._t("settings.device_intro");
+      this._el.settingsIntro.textContent = this._calibrationAfterAdd
+        ? this._t("settings.adopt_intro", {
+            device: this._deviceSettings(this._calibrationAfterAdd).label,
+          })
+        : this._t("settings.device_intro");
     } else {
       // The one intro that needs a link, so it is built rather than assigned.
       this._el.settingsIntro.textContent = this._t("settings.mappings_intro");
@@ -3359,6 +3432,10 @@ class Rtl433Panel extends HTMLElement {
       next.device_key !== previous.device_key
     ) {
       this._settingsDevice = next.device_key;
+      // Picking a different device leaves the post-add prompt.
+      this._calibrationAfterAdd = null;
+      this._el.settingsSkip.hidden = true;
+      this._el.settingsIntro.textContent = this._t("settings.device_intro");
       this._settingsData = this._deviceDefaults(next.device_key);
       this._renderSettingsForm();
       return;

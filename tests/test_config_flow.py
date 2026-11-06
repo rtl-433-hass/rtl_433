@@ -25,6 +25,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from freezegun import freeze_time
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.rtl_433 import async_remove_config_entry_device
@@ -50,6 +51,7 @@ from custom_components.rtl_433.const import (
     DEFAULT_MANAGE_SETTINGS,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
+    DEVICE_MOTION_CLEAR_DELAY,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
 )
@@ -254,6 +256,193 @@ async def test_options_menu_leads_with_the_two_approval_steps(
         "mappings",
         "replace",
     ]
+
+
+METER_PENDING = "SCMplus-102845955"
+METER_FRAME = {
+    "model": "SCMplus",
+    "id": 102845955,
+    "MeterType": "Gas",
+    "consumption_data": 401358,
+    "ert_type": 12,
+    "snr": 22.0,
+}
+
+
+async def _hub_hearing_a_meter_and_a_door(hass, hub_entry_builder):
+    """A hub with two pending devices: a gas meter (commodity hint) and a door."""
+    entry = hub_entry_builder()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = _coordinator(hass, entry)
+    _hear(coordinator, METER_FRAME)
+    _hear(coordinator, PENDING_MID_FRAME)
+    await hass.async_block_till_done()
+    return entry
+
+
+async def test_add_devices_offers_calibration_for_an_adopted_meter(
+    hass, hub_entry_builder, no_socket
+):
+    """Adding a utility meter asks for its calibration before the dialog closes.
+
+    The gas meter's decoded ``MeterType`` names a commodity, so the add-devices
+    submit does not finish: it shows an adopt_calibration step for that meter
+    (and only that meter -- the door sensor is added without a question), with
+    the commodity pre-filled from the signal. Choosing the commodity leads into
+    the shared calibration step, and the ``{commodity, unit, scale}`` triple lands
+    in the meter's record while the door's record stays uncalibrated.
+    """
+    entry = await _hub_hearing_a_meter_and_a_door(hass, hub_entry_builder)
+
+    result = await _open_add_devices(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"add": [METER_PENDING, PENDING_MID], "ignore": []}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "adopt_calibration"
+    assert result["description_placeholders"]["position"] == "1"
+    assert result["description_placeholders"]["total"] == "1"
+    assert "gas detected" in result["description_placeholders"]["device"]
+    # Both devices are already adopted at this point; only the meter is asked about.
+    assert METER_PENDING in entry.data[CONF_DEVICES]
+    assert PENDING_MID in entry.data[CONF_DEVICES]
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "calibration"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CALIBRATION_UNIT: UnitOfVolume.CENTUM_CUBIC_FEET, CALIBRATION_SCALE: 0.01},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    assert entry.data[CONF_DEVICES][METER_PENDING][DEVICE_CALIBRATION] == {
+        CALIBRATION_COMMODITY: COMMODITY_GAS,
+        CALIBRATION_UNIT: UnitOfVolume.CENTUM_CUBIC_FEET,
+        CALIBRATION_SCALE: 0.01,
+    }
+    assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][PENDING_MID]
+
+
+async def test_add_devices_calibration_can_be_skipped(
+    hass, hub_entry_builder, no_socket
+):
+    """Answering ``none`` on the adopt-time step adds the meter uncalibrated."""
+    entry = await _hub_hearing_a_meter_and_a_door(hass, hub_entry_builder)
+
+    result = await _open_add_devices(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"add": [METER_PENDING], "ignore": []}
+    )
+    assert result["step_id"] == "adopt_calibration"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_NONE}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert METER_PENDING in entry.data[CONF_DEVICES]
+    assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][METER_PENDING]
+
+
+async def _add_two_meters(hass, hub_entry_builder):
+    entry = await _hub_hearing_a_meter_and_a_door(hass, hub_entry_builder)
+    second_key = "SCMplus-102845956"
+    _hear(
+        _coordinator(hass, entry),
+        {**METER_FRAME, "id": 102845956, "MeterType": "Water", "ert_type": 8},
+    )
+    result = await _open_add_devices(hass, entry)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"add": [METER_PENDING, second_key], "ignore": []}
+    )
+    assert result["description_placeholders"]["total"] == "2"
+    return entry, second_key, result
+
+
+@pytest.mark.parametrize("skip_second", [False, True])
+async def test_add_meters_batches_calibrations_and_reloads_once(
+    hass, hub_entry_builder, no_socket, skip_second
+):
+    """A batch saves once and preserves settings edited while it was open."""
+    entry, second_key, result = await _add_two_meters(hass, hub_entry_builder)
+    # A separate settings edit while the calibration dialog is open must survive.
+    data = deepcopy(dict(entry.data))
+    data[CONF_DEVICES][METER_PENDING][DEVICE_TIMEOUT_OVERRIDE] = 90
+    data[CONF_DEVICES][METER_PENDING][DEVICE_MOTION_CLEAR_DELAY] = 15
+    hass.config_entries.async_update_entry(entry, data=data)
+    await hass.async_block_till_done()
+
+    with patch.object(
+        hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
+    ) as reload_spy:
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
+        )
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CALIBRATION_UNIT: UnitOfVolume.CENTUM_CUBIC_FEET, CALIBRATION_SCALE: 0.01},
+        )
+        assert result["step_id"] == "adopt_calibration"
+        assert result["description_placeholders"]["position"] == "2"
+        assert _schema_default(result, CALIBRATION_COMMODITY) == COMMODITY_WATER
+        assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][METER_PENDING]
+        reload_spy.assert_not_called()
+
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {CALIBRATION_COMMODITY: COMMODITY_NONE if skip_second else COMMODITY_WATER},
+        )
+        if not skip_second:
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"],
+                {CALIBRATION_UNIT: UnitOfVolume.CUBIC_METERS, CALIBRATION_SCALE: 0.1},
+            )
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+        reload_spy.assert_called_once_with(entry.entry_id)
+
+    first = entry.data[CONF_DEVICES][METER_PENDING]
+    assert first[DEVICE_CALIBRATION] == {
+        CALIBRATION_COMMODITY: COMMODITY_GAS,
+        CALIBRATION_UNIT: UnitOfVolume.CENTUM_CUBIC_FEET,
+        CALIBRATION_SCALE: 0.01,
+    }
+    assert first[DEVICE_TIMEOUT_OVERRIDE] == 90
+    assert first[DEVICE_MOTION_CLEAR_DELAY] == 15
+    second = entry.data[CONF_DEVICES][second_key]
+    if skip_second:
+        assert DEVICE_CALIBRATION not in second
+    else:
+        assert second[DEVICE_CALIBRATION] == {
+            CALIBRATION_COMMODITY: COMMODITY_WATER,
+            CALIBRATION_UNIT: UnitOfVolume.CUBIC_METERS,
+            CALIBRATION_SCALE: 0.1,
+        }
+
+
+async def test_closing_adopt_calibration_keeps_devices_without_saving_answers(
+    hass, hub_entry_builder, no_socket
+):
+    """Closing mid-batch keeps adoption, but discards unsaved calibration answers."""
+    entry, second_key, result = await _add_two_meters(hass, hub_entry_builder)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CALIBRATION_COMMODITY: COMMODITY_GAS}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CALIBRATION_UNIT: UnitOfVolume.CENTUM_CUBIC_FEET, CALIBRATION_SCALE: 0.01},
+    )
+    assert result["step_id"] == "adopt_calibration"
+    hass.config_entries.options.async_abort(result["flow_id"])
+    await hass.async_block_till_done()
+    for key in (METER_PENDING, second_key):
+        assert key in _coordinator(hass, entry).adopted
+        assert DEVICE_CALIBRATION not in entry.data[CONF_DEVICES][key]
 
 
 async def test_add_devices_adds_ignores_and_leaves_the_rest_pending(
