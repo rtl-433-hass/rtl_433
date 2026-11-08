@@ -50,7 +50,7 @@ or suppression line.
 | Log pattern | Meaning |
 | --- | --- |
 | `rtl_433 RX <device> ... -> LIVE` | A genuine live transmission. Availability refreshes and event entities fire. |
-| `... -> REPLAY (event_time<=high_water)` | An already-seen frame from reconnect replay. Sensors seed, events do not fire. |
+| `... -> REPLAY (event_time<=high_water)` | An already-seen frame from reconnect replay. Sensors update only if it is newer than what they show; events do not fire. |
 | `... -> STALE-GAP (age>threshold)` | A frame that occurred while Home Assistant was disconnected and is too old to fire. |
 | `... -> BACKLOG (pre-connection)` | A replayed frame timestamped before this connection began. |
 | `rtl_433 fired <type> ...` | An event entity fired for a live transmission. |

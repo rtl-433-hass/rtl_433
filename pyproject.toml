@@ -284,3 +284,12 @@ escalate_paths = [
     "event.py",
     "diagnostics.py",
 ]
+# Reconnect-replay must not publish historical readings as new HA states. The
+# stem does not auto-resolve to a single module; the contract spans entity base
+# dispatch, sensor/binary seed, LastSeen, and event suppression.
+"tests/test_replay_dispatch.py" = [
+    "entity.py",
+    "sensor.py",
+    "binary_sensor.py",
+    "event.py",
+]
