@@ -40,6 +40,7 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
     mock_restore_cache,
+    mock_restore_cache_with_extra_data,
 )
 
 from custom_components.rtl_433.const import (
@@ -1934,18 +1935,18 @@ async def test_fresh_event_at_reconnect_still_fires(hass, hub_entry_builder, eve
     assert dt_util.parse_datetime(after.state) > dt_util.parse_datetime(first_fired_at)
 
 
-async def test_sensor_does_not_publish_replay_and_event_does_not_fire(
+async def test_sensor_seeds_newest_replay_once_and_event_does_not_fire(
     hass, hub_entry_builder, caplog
 ):
-    """A reconnect replay must not publish a measurement or fire an event.
+    """A replay burst seeds an empty sensor once, with its newest value.
 
     A device with both a measurement field (temperature) and an event field
-    (button) is fed ONLY a stale replayed frame (no prior live frame). The
-    coordinator still records the frame in ``devices`` (for diagnostics /
-    pending), but the sensor must **not** publish it as a new HA state (that
-    would stamp a historical reading with wall-clock "now" in the Recorder).
-    The event entity must stay ``unknown`` (never fired) and ``last_seen`` is
-    NOT stamped. The next *live* frame owns the measurement.
+    (button) is fed only stale replayed frames (no prior live frame, nothing
+    restored). The sensor has no value to protect, so the backlog is the best
+    reading there is -- but it is written once, after the burst settles, and
+    only as its newest value: writing each frame would record a run of
+    historical readings all stamped "now". The event entity never fires and
+    ``last_seen`` is not stamped. A later live frame still updates at once.
     """
     device_key = "Acurite-606TX-42"
     hub = await _setup_hub(
@@ -1981,23 +1982,27 @@ async def test_sensor_does_not_publish_replay_and_event_does_not_fire(
         freeze_time("2026-05-25T10:30:00+00:00"),
         caplog.at_level(logging.DEBUG, logger="custom_components.rtl_433"),
     ):
-        # Frame time far behind now -> replay: no measurement publish, no fire.
-        _feed(
-            coordinator,
-            {
-                "model": "Acurite-606TX",
-                "id": 42,
-                "temperature_C": 21.4,
-                "button": "A",
-                "time": "2026-05-25T10:00:00Z",
-            },
-        )
+        # Frame times far behind now -> replays: a burst of three readings.
+        for minute, temp in ((0, 21.0), (1, 21.2), (2, 21.4)):
+            _feed(
+                coordinator,
+                {
+                    "model": "Acurite-606TX",
+                    "id": 42,
+                    "temperature_C": temp,
+                    "button": "A",
+                    "time": f"2026-05-25T10:0{minute}:00Z",
+                },
+            )
         await hass.async_block_till_done()
 
-        # Coordinator still saw the frame (diagnostics / device map), but HA state
-        # did not adopt the historical reading as a fresh measurement.
+        # Nothing is written while the burst may still be arriving ...
         assert coordinator.devices[device_key].fields["temperature_C"] == 21.4
         assert hass.states.get(temp_eid).state == "unknown"
+        # ... then the newest value is written once.
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+        await hass.async_block_till_done()
+        assert hass.states.get(temp_eid).state == "21.4"
         # The event entity never fired (still unknown, no event_type).
         button_state = hass.states.get(button_eid)
         assert button_state.state == "unknown"
@@ -2024,6 +2029,79 @@ async def test_sensor_does_not_publish_replay_and_event_does_not_fire(
         )
         await hass.async_block_till_done()
         assert hass.states.get(temp_eid).state == "22.0"
+
+
+@pytest.mark.parametrize(
+    ("replay_temp", "replay_time", "expected"),
+    [
+        # Older than the restored reading: already-recorded history, ignored.
+        (19.0, "2026-05-25T09:50:00Z", "20.5"),
+        # Newer: sent while Home Assistant was down, so it is the current value.
+        (23.5, "2026-05-25T10:20:00Z", "23.5"),
+    ],
+    ids=["older-replay-ignored", "newer-replay-adopted"],
+)
+async def test_restart_replay_compared_with_restored_value_time(
+    hass, hub_entry_builder, replay_temp, replay_time, expected
+):
+    """After a restart a replay wins only when newer than the restored value.
+
+    The restore data carries the server timestamp of the restored reading, and
+    the backlog arrives before the entity exists (``async_start`` runs before the
+    platforms are set up), so the decision is made from the coordinator's cached
+    frame while the entity is added.
+    """
+    device_key = "Acurite-606TX-42"
+    hub = hub_entry_builder(
+        availability_timeout=600,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
+    )
+    hub.add_to_hass(hass)
+    temp_eid = "sensor.acurite_606tx_42_temperature"
+    er.async_get(hass).async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{hub.entry_id}:{device_key}:T",
+        config_entry=hub,
+        suggested_object_id="acurite_606tx_42_temperature",
+    )
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(temp_eid, "20.5"),
+                {
+                    "native_value": 20.5,
+                    "native_unit_of_measurement": "°C",
+                    "event_time": "2026-05-25T10:00:00+00:00",
+                },
+            )
+        ],
+    )
+
+    replay = {
+        "model": "Acurite-606TX",
+        "id": 42,
+        "temperature_C": replay_temp,
+        "time": replay_time,
+    }
+    with freeze_time("2026-05-25T10:30:00+00:00"):
+        original_start = Rtl433Coordinator.async_start
+
+        async def start_then_replay(self):
+            await original_start(self)
+            self._client._process_event(dict(replay))
+
+        with patch.object(Rtl433Coordinator, "async_start", start_then_replay):
+            assert await hass.config_entries.async_setup(hub.entry_id)
+            await hass.async_block_till_done()
+
+        assert hass.states.get(temp_eid).state == expected
 
 
 # --------------------------------------------------------------------------- #

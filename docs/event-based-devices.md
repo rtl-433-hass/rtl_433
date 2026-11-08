@@ -14,8 +14,9 @@ is the transmitted value. Event entities stay available between presses.
 
 On reconnect or Home Assistant restart, rtl_433 replays recent event history.
 Momentary events that occurred while Home Assistant was disconnected are not
-re-fired, so an old doorbell press cannot trigger automations late. Their latest
-readings still seed ordinary sensors.
+re-fired, so an old doorbell press cannot trigger automations late. Ordinary
+sensors still pick up the newest replayed reading when it is newer than the one
+they show, so a door that opened while Home Assistant was restarting reads open.
 
 ## Motion and Occupancy
 

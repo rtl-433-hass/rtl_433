@@ -660,10 +660,11 @@ because these are the contracts the integration relies on:
   uses). The backlog gate is what closes the **HA-restart re-delivery** case: on
   a fresh process the high-water mark is unset, so a doorbell pressed *seconds*
   before the restart is recent enough to pass the age test, yet it predates the
-  reconnect and so must not re-fire. Any of the three outcomes
-  **seeds sensor values** but must **NOT** fire `event` entities or refresh
-  `last_seen` / `available`, so an offline device is not marked available by
-  the replay. A suppressed `event` transmission logs at **DEBUG**
+  reconnect and so must not re-fire. None of the three outcomes may fire
+  `event` entities or refresh `last_seen` / `available`, so an offline device
+  is not marked available by the replay. A replayed frame **may set a sensor or
+  binary_sensor value, but only when newer than the value the entity holds**
+  (see the next bullet). A suppressed `event` transmission logs at **DEBUG**
   (`Rtl433Event._handle_dispatch`) — it happens on every reconnect, so it is not
   logged at INFO. The classification is carried by
   `NormalizedEvent.is_replay` / `event_time` (stamped via
@@ -676,6 +677,33 @@ because these are the contracts the integration relies on:
   classification does not depend on the host process zone). **Limitation:** with server
   timestamps disabled (`report_meta notime`) there is no usable `time`, so every
   frame is treated as live and **events fire on replay**.
+- **Replayed values on field entities** (`Rtl433Entity._handle_dispatch` /
+  `_replay_is_newer`, `entity.py`). `is_replay` lumps together frames already
+  delivered, frames sent while HA was not listening, and frames from before
+  this connection; only the middle kind is news. Each field entity keeps
+  `_value_time`, the server `event_time` of the frame its value came from, and
+  persists it in its restore data (`event_time`, beside HA's own sensor keys,
+  which HA ignores on read — downgrade-safe). A replayed frame is adopted only
+  when its `event_time >= _value_time` (or `_value_time` is unknown); equal is
+  accepted so a calibration reload re-applies the new transform to the frame
+  behind the restored value. Two rules must survive refactors:
+  - **Never drop every replay.** That loses a door that opened while HA was
+    restarting, and freezes every sensor when the server clock lags HA's
+    (every frame then reads STALE-GAP). The comparison is server time against
+    server time, so clock skew does not matter.
+  - **Never write each replayed frame.** A reconnect backlog arrives within
+    milliseconds; writing each step records minutes of readings all stamped
+    "now". Adopted replays are written once, `REPLAY_WRITE_DELAY` after the
+    first, and not at all when the value did not change (a `force_update`
+    sensor would otherwise record a duplicate per reconnect). A live write
+    cancels the pending one.
+
+  The backlog usually lands before the platforms are set up, so
+  `async_added_to_hass` weighs the coordinator's cached replayed frame against
+  the restored value; `__init__` seeds from a *live* cached frame only.
+  Detect-only `clear_delay` binary sensors, `Rtl433Event` and the Last seen
+  sensor refuse replays outright (`_accepts_replay`). A watchdog `is_repaint`
+  only re-writes availability and never re-applies the cached value.
 - **Post-connection device-registration gate** (HA-side, `_events.py`
   `_on_client_event` / `_maybe_register_device`, `_connection_time`,
   `DISCOVERY_BACKLOG_GRACE`). Distinct from the replay/event

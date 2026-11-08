@@ -33,7 +33,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 import dataclasses
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from pyrtl_433.library import FieldDescriptor, Registry, lookup
@@ -41,11 +41,12 @@ from pyrtl_433.naming import display_name, identity_suffix
 
 from homeassistant.components.sensor import SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo, Entity, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
@@ -76,6 +77,32 @@ if TYPE_CHECKING:
 
     from .coordinator import Rtl433Coordinator
     from .sdr_settings import SdrSetting
+
+
+# How long a replayed value waits before it is written to the state machine.
+# The rtl_433 server re-sends its backlog in one burst on every (re)connect, so
+# a device that transmitted several times while Home Assistant was not listening
+# arrives as several frames within milliseconds. Writing each one would record
+# minutes of readings as a sawtooth stamped with a single instant; holding the
+# write for a moment lets the burst settle so only the newest value is recorded.
+REPLAY_WRITE_DELAY = 1.0
+
+# Key under which a field entity persists the server timestamp of its value in
+# its restore data (see ``Rtl433Entity._value_time``).
+RESTORE_EVENT_TIME = "event_time"
+
+
+def restored_event_time(stored: dict[str, Any]) -> datetime | None:
+    """Return the value timestamp persisted in restore data, or ``None``."""
+    raw = stored.get(RESTORE_EVENT_TIME)
+    if not isinstance(raw, str):
+        return None
+    return dt_util.parse_datetime(raw)
+
+
+def stored_event_time(value_time: datetime | None) -> str | None:
+    """Return ``value_time`` in the form restore data persists it."""
+    return value_time.isoformat() if value_time is not None else None
 
 
 def _resolve_entity_category(value: str | None) -> EntityCategory | None:
@@ -180,8 +207,19 @@ class Rtl433Entity(RestoreEntity):
         self._unsub_dispatcher: Callable[[], None] | None = None
         self._unsub_hub_availability: Callable[[], None] | None = None
 
+        # The rtl_433 server's ``time`` for the frame the current value came
+        # from (``NormalizedEvent.event_time``), persisted in the subclasses'
+        # restore data. It decides whether a replayed frame is newer than what
+        # the entity already shows. Both sides of that comparison are the
+        # *server's* clock, so it holds even when the server and Home Assistant
+        # disagree about the time. ``None`` means unknown: no value yet, a value
+        # restored from data written before this was kept, or a server that
+        # sends no timestamps.
+        self._value_time: datetime | None = None
+        self._unsub_replay_write: CALLBACK_TYPE | None = None
+
     # ------------------------------------------------------------------ #
-    # Availability                                                       #
+    # Availability                                                      #
     # ------------------------------------------------------------------ #
     @property
     def available(self) -> bool:
@@ -236,6 +274,15 @@ class Rtl433Entity(RestoreEntity):
         # Let the subclass re-apply its restored value (if any).
         await self._async_restore_state()
 
+        # The server's reconnect backlog usually arrives before the platforms
+        # are set up, so the coordinator's cached frame for this device may be a
+        # replay that is newer than the value just restored -- a door that
+        # opened while Home Assistant was restarting. Adopt it now; Home
+        # Assistant writes the first state right after this method returns.
+        cached = self._coordinator.devices.get(self._device_key)
+        if cached is not None and cached.is_replay and self._replay_is_newer(cached):
+            self._adopt_frame(cached)
+
         self._unsub_dispatcher = async_dispatcher_connect(
             self.hass,
             signal_device_update(self._hub_entry_id, self._device_key),
@@ -252,7 +299,8 @@ class Rtl433Entity(RestoreEntity):
         )
 
     async def async_will_remove_from_hass(self) -> None:
-        """Tear down the dispatcher subscriptions."""
+        """Tear down the dispatcher subscriptions and any pending replay write."""
+        self._cancel_replay_write()
         if self._unsub_dispatcher is not None:
             self._unsub_dispatcher()
             self._unsub_dispatcher = None
@@ -269,24 +317,106 @@ class Rtl433Entity(RestoreEntity):
 
         Three classes of dispatch, in order:
 
-        * ``is_repaint`` — watchdog availability re-paint of the *cached* last
-          frame (``is_replay`` is forced False on that path). Value must not be
-          re-applied: it is stale, and applying it would also re-arm binary
-          ``clear_delay`` timers. Only re-read ``available``.
-        * ``is_replay`` — reconnect / stale-gap backlog. Historical readings must
-          not become new Home Assistant ``state_changed`` rows (that stamped old
-          temperatures with "now" in the Recorder). Restore and the next live
-          frame own the measurement; empty entities wait for live.
-        * live — the event carries this entity's field -> update the value; a
-          field-absent live dispatch still writes so availability is re-read.
+        * ``is_repaint`` -- the availability watchdog re-sent the device's
+          *cached* last frame only so entities re-read ``available``. Its value
+          is not news: re-applying it could overwrite a newer restored value and
+          would re-arm a binary sensor's ``clear_delay`` timer. Only re-write.
+        * ``is_replay`` -- the server's reconnect backlog: frames already
+          delivered, frames sent while Home Assistant was not listening, and
+          frames from before this connection. Only the middle kind is news, and
+          the timestamp is what tells them apart, so a frame is adopted only
+          when it is at least as new as the value the entity holds (see
+          :meth:`_replay_is_newer`). The write is deferred so a burst of backlog
+          frames is recorded once, as its newest value, rather than as a run of
+          historical readings all stamped "now".
+        * live -- apply the field when the frame carries it, then write (a
+          field-less live frame still writes so ``available`` is re-read).
         """
         if event.is_repaint:
             self.async_write_ha_state()
             return
         if event.is_replay:
+            self._handle_replay(event)
             return
         if self._descriptor.field_key in event.fields:
-            self._apply_value(event.fields[self._descriptor.field_key])
+            self._adopt_frame(event)
+        # A live write supersedes a replayed value still waiting to be written.
+        self._cancel_replay_write()
+        self.async_write_ha_state()
+
+    def _handle_replay(self, event: NormalizedEvent) -> None:
+        """Adopt a replayed frame that is newer than the held value."""
+        if not self._replay_is_newer(event):
+            return
+        before = self._current_value()
+        self._adopt_frame(event)
+        # Re-adopting the value already shown (the already-delivered tail of the
+        # backlog) is not a state change; writing it anyway would add a row on
+        # every reconnect for a ``force_update`` sensor.
+        if self._current_value() != before:
+            self._schedule_replay_write()
+
+    def _replay_is_newer(self, event: NormalizedEvent) -> bool:
+        """Whether a replayed frame should replace the entity's value.
+
+        An *equal* timestamp is accepted: it is the frame the held value came
+        from (or a repeat decode of it), and re-applying it is what lets a
+        reload that changed the field's transform -- a utility-meter calibration
+        -- correct a restored value straight away. A frame with no timestamp
+        cannot be placed and is never adopted; in practice it never arrives as a
+        replay, because the library classifies such a frame as live.
+        """
+        if not self._accepts_replay():
+            return False
+        if self._descriptor.field_key not in event.fields:
+            return False
+        if event.event_time is None:
+            return False
+        return self._value_time is None or event.event_time >= self._value_time
+
+    def _adopt_frame(self, event: NormalizedEvent) -> None:
+        """Apply the frame's value for this field and remember when it was sent."""
+        self._apply_value(event.fields[self._descriptor.field_key])
+        self._value_time = event.event_time
+
+    def _seed_from_coordinator(self) -> None:
+        """Seed the value from the coordinator's cached *live* frame, if any.
+
+        Called at the end of the field subclasses' ``__init__``; it covers a
+        device that transmitted before its entity existed. A replayed cached
+        frame is left to :meth:`async_added_to_hass`, which first restores the
+        previous value so the two can be compared.
+        """
+        cached = self._coordinator.devices.get(self._device_key)
+        if (
+            cached is not None
+            and not cached.is_replay
+            and self._descriptor.field_key in cached.fields
+        ):
+            self._adopt_frame(cached)
+
+    def _schedule_replay_write(self) -> None:
+        """Write state once the backlog burst has settled.
+
+        Not re-armed while pending, so a steady stream of replayed frames (a
+        server whose clock lags far enough that every frame reads as stale) is
+        still written at most :data:`REPLAY_WRITE_DELAY` after the first.
+        """
+        if self._unsub_replay_write is None:
+            self._unsub_replay_write = async_call_later(
+                self.hass, REPLAY_WRITE_DELAY, self._write_replayed_value
+            )
+
+    def _cancel_replay_write(self) -> None:
+        """Drop a pending deferred replay write, if any."""
+        if self._unsub_replay_write is not None:
+            self._unsub_replay_write()
+            self._unsub_replay_write = None
+
+    @callback
+    def _write_replayed_value(self, _now: datetime) -> None:
+        """Write the newest replayed value (deferred; see ``_handle_dispatch``)."""
+        self._unsub_replay_write = None
         self.async_write_ha_state()
 
     @callback
@@ -309,6 +439,19 @@ class Rtl433Entity(RestoreEntity):
     async def _async_restore_state(self) -> None:
         """Re-apply the last known state on startup. Overridden."""
         raise NotImplementedError
+
+    def _current_value(self) -> Any:
+        """Return the current value, to tell whether a replay changed it."""
+        return None
+
+    def _accepts_replay(self) -> bool:
+        """Whether a replayed frame may set this entity's value.
+
+        Entities whose state marks a moment rather than holding a reading -- a
+        fired event, a detect-only sensor that switches itself off -- override
+        this to refuse.
+        """
+        return True
 
 
 class Rtl433HubEntity(Entity):

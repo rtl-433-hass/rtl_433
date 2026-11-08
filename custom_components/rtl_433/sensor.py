@@ -44,7 +44,14 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.enum import try_parse_enum
 
 from .const import DOMAIN, signal_hub_noise
-from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
+from .entity import (
+    RESTORE_EVENT_TIME,
+    Rtl433Entity,
+    Rtl433HubEntity,
+    async_setup_hub_platform,
+    restored_event_time,
+    stored_event_time,
+)
 
 if TYPE_CHECKING:
     from pyrtl_433.normalizer import NormalizedEvent
@@ -66,6 +73,23 @@ _JSON_SCALARS = (str, int, float, bool)
 def _restorable_value(value: Any) -> Any:
     """Return ``value`` in a form the restore store can persist."""
     return value if isinstance(value, _JSON_SCALARS) else str(value)
+
+
+@dataclass
+class Rtl433SensorExtraStoredData(SensorExtraStoredData):
+    """Home Assistant's sensor restore data plus the value's server timestamp.
+
+    ``event_time`` is the rtl_433 server's ``time`` for the frame the value came
+    from (ISO-8601, or ``None`` when unknown); see ``Rtl433Entity._value_time``.
+    ``SensorExtraStoredData.from_dict`` ignores keys it does not know, so data
+    written here still restores on a build that predates the field.
+    """
+
+    event_time: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the sensor data with the value timestamp beside it."""
+        return {**super().as_dict(), RESTORE_EVENT_TIME: self.event_time}
 
 
 # Entity-registry option Home Assistant's sensor base writes to freeze a sensor's
@@ -121,17 +145,7 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
         self._attr_native_unit_of_measurement = descriptor.unit_of_measurement
         self._attr_force_update = descriptor.force_update
 
-        # Seed from the coordinator's last *live* event if it already carries the
-        # field (covers a device that transmitted before its entity was added).
-        # Skip ``is_replay`` frames: reconnect backlog must not initialize state
-        # as if it were a fresh reading (see ``Rtl433Entity._handle_dispatch``).
-        last_event = coordinator.devices.get(device_key)
-        if (
-            last_event is not None
-            and not last_event.is_replay
-            and descriptor.field_key in last_event.fields
-        ):
-            self._apply_value(last_event.fields[descriptor.field_key])
+        self._seed_from_coordinator()
 
     async def async_added_to_hass(self) -> None:
         """Restore state, then drop any stale frozen temperature unit."""
@@ -176,8 +190,12 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
         """Transform and store a raw value as the sensor's native value."""
         self._attr_native_value = apply_transform(self._descriptor, raw_value)
 
+    def _current_value(self) -> Any:
+        """Return the native value."""
+        return self._attr_native_value
+
     @property
-    def extra_restore_state_data(self) -> SensorExtraStoredData:
+    def extra_restore_state_data(self) -> Rtl433SensorExtraStoredData:
         """Persist the native value + native unit, independently of ``available``.
 
         Home Assistant writes ``unavailable`` as the *state* whenever
@@ -192,12 +210,16 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
         restore can tell what the stored number *means*: a device-library update
         that re-maps a field's native unit would otherwise have the old number
         silently reinterpreted in the new unit.
+
+        The server timestamp of the value rides along too, so that after a
+        restart a replayed frame can be compared with the restored value.
         """
-        return SensorExtraStoredData(
+        return Rtl433SensorExtraStoredData(
             _restorable_value(self._attr_native_value)
             if self._attr_native_value is not None
             else None,
             self.native_unit_of_measurement,
+            stored_event_time(self._value_time),
         )
 
     def _to_native_unit(self, value: Any, from_unit: str | None) -> Any:
@@ -261,6 +283,7 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
                 unit = None
             if value is not None:
                 self._attr_native_value = self._to_native_unit(value, unit)
+                self._value_time = restored_event_time(stored)
                 return
         last_state = await self.async_get_last_state()
         if last_state is not None and last_state.state not in _NON_RESTORABLE:
@@ -321,14 +344,20 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
         # disabled-by-default.
         if coordinator.is_event_driven_device(device_key):
             self._attr_entity_registry_enabled_default = True
-        # Seed only when a *real* event has been seen this session; the presence
-        # of a devices-map entry distinguishes a true timestamp from the base's
-        # startup baseline (which never sets coordinator.devices).
-        if coordinator.devices.get(device_key) is not None:
+        # Seed only when a *live* event has been seen this session. A
+        # devices-map entry alone is not enough: the reconnect backlog fills it
+        # too, without advancing ``last_seen``, so the timestamp there may be the
+        # base's startup baseline ("now") rather than a real transmission.
+        cached = coordinator.devices.get(device_key)
+        if cached is not None and not cached.is_replay:
             self._attr_native_value = coordinator.last_seen.get(device_key)
 
     def _apply_value(self, raw_value: Any) -> None:
         """No-op: the sentinel field_key never appears in an event."""
+
+    def _accepts_replay(self) -> bool:
+        """Refuse: the timestamp tracks live transmissions only."""
+        return False
 
     @property
     def extra_restore_state_data(self) -> RestoredExtraData | None:
@@ -371,13 +400,14 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
         instead of the field-driven path we read coordinator.last_seen, which the
         non-dispatching baseline never reaches.
 
-        Reconnect replay does not advance ``coordinator.last_seen`` and must not
-        rewrite this sensor. Watchdog ``is_repaint`` only re-reads availability.
+        Checked in the base class's order: a watchdog re-paint only re-reads
+        availability, and a reconnect replay -- which does not advance
+        ``coordinator.last_seen`` -- leaves the sensor alone.
         """
-        if event.is_replay:
-            return
         if event.is_repaint:
             self.async_write_ha_state()
+            return
+        if event.is_replay:
             return
         self._attr_native_value = self._coordinator.last_seen.get(self._device_key)
         self.async_write_ha_state()
