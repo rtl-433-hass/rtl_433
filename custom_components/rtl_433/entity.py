@@ -79,12 +79,8 @@ if TYPE_CHECKING:
     from .sdr_settings import SdrSetting
 
 
-# How long a replayed value waits before it is written to the state machine.
-# The rtl_433 server re-sends its backlog in one burst on every (re)connect, so
-# a device that transmitted several times while Home Assistant was not listening
-# arrives as several frames within milliseconds. Writing each one would record
-# minutes of readings as a sawtooth stamped with a single instant; holding the
-# write for a moment lets the burst settle so only the newest value is recorded.
+# Seconds a replayed value waits before it is written, so a reconnect backlog
+# burst is recorded once (see ``Rtl433Entity._handle_dispatch``).
 REPLAY_WRITE_DELAY = 1.0
 
 # Key under which a field entity persists the server timestamp of its value in
@@ -207,19 +203,15 @@ class Rtl433Entity(RestoreEntity):
         self._unsub_dispatcher: Callable[[], None] | None = None
         self._unsub_hub_availability: Callable[[], None] | None = None
 
-        # The rtl_433 server's ``time`` for the frame the current value came
-        # from (``NormalizedEvent.event_time``), persisted in the subclasses'
-        # restore data. It decides whether a replayed frame is newer than what
-        # the entity already shows. Both sides of that comparison are the
-        # *server's* clock, so it holds even when the server and Home Assistant
-        # disagree about the time. ``None`` means unknown: no value yet, a value
-        # restored from data written before this was kept, or a server that
-        # sends no timestamps.
+        # Server ``event_time`` of the frame behind the current value, persisted
+        # in the subclasses' restore data (see ``_replay_is_newer``). ``None``
+        # means unknown: no value yet, restore data that predates it, or a
+        # server that sends no timestamps.
         self._value_time: datetime | None = None
         self._unsub_replay_write: CALLBACK_TYPE | None = None
 
     # ------------------------------------------------------------------ #
-    # Availability                                                      #
+    # Availability                                                       #
     # ------------------------------------------------------------------ #
     @property
     def available(self) -> bool:
@@ -359,12 +351,11 @@ class Rtl433Entity(RestoreEntity):
     def _replay_is_newer(self, event: NormalizedEvent) -> bool:
         """Whether a replayed frame should replace the entity's value.
 
-        An *equal* timestamp is accepted: it is the frame the held value came
-        from (or a repeat decode of it), and re-applying it is what lets a
-        reload that changed the field's transform -- a utility-meter calibration
-        -- correct a restored value straight away. A frame with no timestamp
-        cannot be placed and is never adopted; in practice it never arrives as a
-        replay, because the library classifies such a frame as live.
+        Server time is compared with server time, so clock skew between the
+        server and Home Assistant does not matter. An *equal* timestamp is
+        accepted so a reload that changed the field's transform (a utility-meter
+        calibration) re-applies it to the frame behind a restored value. A frame
+        with no timestamp is never adopted (the library classifies those live).
         """
         if not self._accepts_replay():
             return False
@@ -398,8 +389,7 @@ class Rtl433Entity(RestoreEntity):
     def _schedule_replay_write(self) -> None:
         """Write state once the backlog burst has settled.
 
-        Not re-armed while pending, so a steady stream of replayed frames (a
-        server whose clock lags far enough that every frame reads as stale) is
+        Not re-armed while pending, so a steady stream of replayed frames is
         still written at most :data:`REPLAY_WRITE_DELAY` after the first.
         """
         if self._unsub_replay_write is None:
@@ -441,16 +431,15 @@ class Rtl433Entity(RestoreEntity):
         raise NotImplementedError
 
     def _current_value(self) -> Any:
-        """Return the current value, to tell whether a replay changed it."""
-        return None
+        """Return the current value, to tell whether a replay changed it.
+
+        Overridden by every entity that takes the base replay path; the event
+        and Last seen entities replace ``_handle_dispatch`` and never reach it.
+        """
+        raise NotImplementedError
 
     def _accepts_replay(self) -> bool:
-        """Whether a replayed frame may set this entity's value.
-
-        Entities whose state marks a moment rather than holding a reading -- a
-        fired event, a detect-only sensor that switches itself off -- override
-        this to refuse.
-        """
+        """Whether a replayed frame may set this entity's value."""
         return True
 
 

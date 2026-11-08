@@ -355,10 +355,6 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
     def _apply_value(self, raw_value: Any) -> None:
         """No-op: the sentinel field_key never appears in an event."""
 
-    def _accepts_replay(self) -> bool:
-        """Refuse: the timestamp tracks live transmissions only."""
-        return False
-
     @property
     def extra_restore_state_data(self) -> RestoredExtraData | None:
         """Persist the timestamp independently of ``available``.

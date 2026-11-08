@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from pyrtl_433.library import FieldDescriptor
 from pyrtl_433.normalizer import NormalizedEvent
@@ -39,6 +39,7 @@ from custom_components.rtl_433.sensor import (
 )
 from homeassistant.components.sensor import SensorExtraStoredData
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
 
 # Nine-step historical temperature backlog (reconnect replay shape): values that
@@ -438,15 +439,13 @@ def test_sensor_restore_data_without_value_time():
 
 async def test_sensor_restore_reads_value_time(hass):
     sensor = _sensor()
-    sensor.async_get_last_extra_data = _async_return(
-        MagicMock(
-            as_dict=MagicMock(
-                return_value={
-                    "native_value": -11.0,
-                    "native_unit_of_measurement": "°C",
-                    "event_time": _T0.isoformat(),
-                }
-            )
+    sensor.async_get_last_extra_data = AsyncMock(
+        return_value=RestoredExtraData(
+            {
+                "native_value": -11.0,
+                "native_unit_of_measurement": "°C",
+                "event_time": _T0.isoformat(),
+            }
         )
     )
 
@@ -464,19 +463,10 @@ async def test_binary_restore_round_trips_value_time():
     assert stored == {"is_on": True, "event_time": _T0.isoformat()}
 
     fresh = _binary(descriptor=_door_desc(), device_key=_DOOR_KEY, model=_DOOR_MODEL)
-    fresh.async_get_last_extra_data = _async_return(
-        MagicMock(as_dict=MagicMock(return_value=stored))
-    )
+    fresh.async_get_last_extra_data = AsyncMock(return_value=RestoredExtraData(stored))
     await fresh._async_restore_state()
     assert fresh._attr_is_on is True
     assert fresh._value_time == _T0
-
-
-def _async_return(value: Any):
-    async def _inner():
-        return value
-
-    return _inner
 
 
 # --------------------------------------------------------------------------- #
@@ -635,7 +625,7 @@ def test_last_seen_does_not_seed_from_replay_only_device():
 
 
 async def test_event_entity_still_suppresses_replay(hass, hub_entry_builder):
-    """Rtl433Event must not fire on is_replay, nor adopt one when added."""
+    """Rtl433Event must not fire on is_replay (pre-existing contract)."""
     entry = hub_entry_builder(
         devices={
             "Honeywell-Doorbell-7": {
@@ -679,4 +669,3 @@ async def test_event_entity_still_suppresses_replay(hass, hub_entry_builder):
     )
     entity._handle_dispatch(replay)
     entity._trigger_event.assert_not_called()
-    assert entity._replay_is_newer(replay) is False

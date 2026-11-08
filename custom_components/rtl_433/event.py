@@ -236,10 +236,6 @@ class Rtl433Event(Rtl433Entity, EventEntity):
         """No-op: ``Rtl433Event`` overrides ``_handle_dispatch`` and never calls
         this."""
 
-    def _accepts_replay(self) -> bool:
-        """Refuse: a replayed transmission must never fire (see the dispatch)."""
-        return False
-
 
 async def async_setup_entry(
     hass: HomeAssistant,

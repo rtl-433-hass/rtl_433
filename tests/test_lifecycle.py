@@ -2095,7 +2095,7 @@ async def test_restart_replay_compared_with_restored_value_time(
 
         async def start_then_replay(self):
             await original_start(self)
-            self._client._process_event(dict(replay))
+            _feed(self, dict(replay))
 
         with patch.object(Rtl433Coordinator, "async_start", start_then_replay):
             assert await hass.config_entries.async_setup(hub.entry_id)

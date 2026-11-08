@@ -701,8 +701,9 @@ because these are the contracts the integration relies on:
   The backlog usually lands before the platforms are set up, so
   `async_added_to_hass` weighs the coordinator's cached replayed frame against
   the restored value; `__init__` seeds from a *live* cached frame only.
-  Detect-only `clear_delay` binary sensors, `Rtl433Event` and the Last seen
-  sensor refuse replays outright (`_accepts_replay`). A watchdog `is_repaint`
+  Detect-only `clear_delay` binary sensors refuse replays outright
+  (`_accepts_replay`); `Rtl433Event` and the Last seen sensor replace
+  `_handle_dispatch` and never adopt one. A watchdog `is_repaint`
   only re-writes availability and never re-applies the cached value.
 - **Post-connection device-registration gate** (HA-side, `_events.py`
   `_on_client_event` / `_maybe_register_device`, `_connection_time`,
