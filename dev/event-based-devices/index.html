@@ -700,8 +700,9 @@ is the transmitted value. Event entities stay available between presses.</p>
 <p><img alt="A doorbell device page showing an event entity with its most recent event type and the activity log of presses" src="../images/11-event-entity.png" /></p>
 <p>On reconnect or Home Assistant restart, rtl_433 replays recent event history.
 Momentary events that occurred while Home Assistant was disconnected are not
-re-fired, so an old doorbell press cannot trigger automations late. Their latest
-readings still seed ordinary sensors.</p>
+re-fired, so an old doorbell press cannot trigger automations late. Ordinary
+sensors still pick up the newest replayed reading when it is newer than the one
+they show, so a door that opened while Home Assistant was restarting reads open.</p>
 <h2 id="motion-and-occupancy">Motion and Occupancy<a class="headerlink" href="#motion-and-occupancy" title="Permanent link">&para;</a></h2>
 <p>Detect-only PIR sensors that send a trip but never an off become occupancy
 <code>binary_sensor</code> entities. The integration synthesizes the off state after a clear
