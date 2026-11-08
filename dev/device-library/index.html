@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -599,6 +599,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#alarm-system-sensors-that-show-as-opening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alarm-system sensors that show as "Opening"
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -844,6 +855,17 @@
     <span class="md-ellipsis">
       
         Retyping a single entity
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alarm-system-sensors-that-show-as-opening" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Alarm-system sensors that show as "Opening"
       
     </span>
   </a>
@@ -1158,20 +1180,42 @@ every Honeywell 5800 door sensor, window sensor, PIR and tilt sensor reports
 <h4 id="retyping-a-single-entity">Retyping a single entity<a class="headerlink" href="#retyping-a-single-entity" title="Permanent link">&para;</a></h4>
 <p>Home Assistant can change a binary sensor's <strong>device class</strong> per entity, which is
 finer than any mapping override can be. Open the entity, then its settings (the
-gear icon) → <strong>Shown as</strong>, and pick a different class. The choice lives in Home
-Assistant's entity registry, so it survives restarts and hub reloads, and the
-value the integration shipped is retained separately as the entity's original
-class — a later library update will not overwrite your choice.</p>
-<p>This is how you tell one Honeywell 5800 sensor from another. They all share a
-model string, so a <code>models:</code> entry cannot separate them, and which loop bit a
-given sensor reports on is chosen by whoever installed it:</p>
-<ul>
-<li>A door or window sensor reports on <code>contact_open</code> or <code>reed_open</code>. Both ship as
-  <strong>Opening</strong>; retype to <strong>Door</strong> or <strong>Window</strong> for the matching icon and wording.</li>
-<li>A PIR reports on the same fields, so retype it to <strong>Motion</strong> or <strong>Occupancy</strong>.</li>
-<li>The loop your sensor does <em>not</em> use still produces an entity, which simply never
-  changes state. Hide it from the same entity settings page.</li>
-</ul>
+gear icon) → <strong>Show as</strong>, and pick a different class. Every binary sensor class
+is offered, with the ones closest to the current class listed first. The choice
+lives in Home Assistant's entity registry, so it survives restarts and hub
+reloads, and the value the integration shipped is retained separately as the
+entity's original class — a later library update will not overwrite your choice.</p>
+<p><strong>Show as</strong> changes the icon and the state wording (<em>Detected</em> rather than
+<em>Open</em>), but not the entity's name. Set a name on the same page if the shipped
+one no longer fits.</p>
+<h4 id="alarm-system-sensors-that-show-as-opening">Alarm-system sensors that show as "Opening"<a class="headerlink" href="#alarm-system-sensors-that-show-as-opening" title="Permanent link">&para;</a></h4>
+<p>Wireless sensors made for alarm panels — Honeywell 5800 and compatible 2GIG
+sensors (<code>Honeywell-Security</code>), DSC (<code>DSC-Security</code>) and Visonic PowerCode
+(<code>Visonic-Powercode</code>) — often appear as an <strong>Opening</strong> sensor, or as a generic
+<strong>Safety</strong> sensor named "Alarm", even when the unit is a motion detector, glass
+break, flood or smoke sensor.</p>
+<p>That is a limit of what the sensor transmits, not a mapping mistake. These sensors
+send only "zone faulted" and "zone restored". The type of zone — door, motion,
+smoke, flood — is programmed into the alarm panel by the installer and is never
+sent over the air, and many of these transmitters have terminals for any wired
+contact. Every sensor of a given brand reports the same model string, so not even
+a <a href="#model-scoped-mappings-models"><code>models:</code> entry</a> can tell them apart. The
+library therefore uses a generic class, consistently: a fault is <strong>on</strong> and a
+restore is <strong>off</strong>, so only the type needs correcting, never the state.</p>
+<p>To correct one sensor:</p>
+<ol>
+<li>Go to <strong>Settings → Devices &amp; services → Entities</strong> and open the sensor's
+   entity (or open it from the device page).</li>
+<li>Open its settings (the gear icon) and set <strong>Show as</strong> to what the sensor
+   really is — for example <strong>Motion</strong>, <strong>Glass break</strong>, <strong>Moisture</strong> (for a flood
+   sensor), <strong>Smoke</strong>, <strong>Door</strong> or <strong>Window</strong>.</li>
+<li>Give the entity a name that matches, since its name stays as shipped (for
+   example "Opening", "Contact open" or "Alarm").</li>
+</ol>
+<p>Honeywell sensors report two loops, <code>contact_open</code> and <code>reed_open</code>, and which one
+a sensor uses depends on how it was installed. The loop your sensor does not use
+still creates an entity that never changes state; hide it from the same settings
+page.</p>
 <div class="admonition note">
 <p class="admonition-title">Entity category is not adjustable from the UI</p>
 <p>Home Assistant has no per-entity control for <strong>entity category</strong>, so a field
@@ -1504,7 +1548,7 @@ to another protocol.</p>
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "navigation.sections"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
     
   </body>
