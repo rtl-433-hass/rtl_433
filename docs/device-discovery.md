@@ -55,6 +55,11 @@ Readings that cannot be mapped to Home Assistant will not show here. See
 [Device Library](device-library.md) for information about adding support for new
 devices and fields.
 
+Alarm-system sensors (Honeywell 5800, 2GIG, DSC, Visonic) usually show as an
+**Opening** or **Alarm** reading whatever kind of sensor they are. Add them
+anyway, then correct the type in Home Assistant — see
+[Alarm-system sensors that show as "Opening"](device-library.md#alarm-system-sensors-that-show-as-opening).
+
 Select an **Area** to assign the device there, or leave it blank if that doesn't
 make sense.
 
