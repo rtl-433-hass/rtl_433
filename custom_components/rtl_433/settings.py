@@ -64,7 +64,7 @@ if TYPE_CHECKING:
 # value rather than written into a translation string, because hassfest forbids
 # literal URLs in those.
 MAPPINGS_DOCS_URL = (
-    "https://github.com/rtl-433-hass/rtl_433#device-library-and-user-overrides"
+    "https://rtl-433-hass.github.io/rtl_433/latest/device-library/"
 )
 
 
