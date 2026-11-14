@@ -1,18 +1,29 @@
-"""Mutation tests for the dispatcher-signal helpers in ``const.py``.
+"""Mutation tests for the dispatcher-signal helpers and identity grammar in ``const.py``.
 
 These helpers exist so the coordinator and entities format dispatcher signal
 strings identically. A mutation that drops an argument (e.g. ``receiver_entry_id=None``)
 produces a signal string that no longer round-trips, so we assert the exact
 formatted output and that distinct inputs produce distinct, correctly-embedded
 strings.
+
+The identity-grammar tests pin the reserved ``receiver`` marker against the real
+``pyrtl_433.naming.safe_token`` output, because that is what makes the marker a
+*reservation* rather than a convention: the token builder every ``device_key`` is
+made of would otherwise happily emit it.
 """
 
 from __future__ import annotations
 
+from pyrtl_433.naming import safe_token
+import pytest
+
 from custom_components.rtl_433.const import (
+    RECEIVER_SEGMENT,
+    RESERVED_DEVICE_KEYS,
     SIGNAL_DEVICE_UPDATE,
     SIGNAL_NEW_DEVICE,
     SIGNAL_RECEIVER_UPDATE,
+    is_reserved_device_key,
     signal_device_update,
     signal_hub_noise,
     signal_new_device,
@@ -74,3 +85,45 @@ def test_signal_hub_noise_embeds_hub_id_exactly():
 def test_signal_pending_update_embeds_hub_id_exactly():
     assert signal_pending_update("hubA") == "rtl_433_pending_update_hubA"
     assert signal_pending_update("h1") != signal_pending_update("h2")
+
+
+# ---------------------------------------------------------------------------
+# Identity grammar: the reserved ``receiver`` marker
+# ---------------------------------------------------------------------------
+
+
+def test_safe_token_can_emit_the_reserved_marker():
+    """The collision the reservation exists for is genuinely reachable.
+
+    ``safe_token`` only rewrites characters that are unsafe in an identifier, so
+    a device whose ``model`` is literally ``receiver`` mints the marker verbatim.
+    If this ever stopped being true the reservation would be dead code -- and if
+    the marker were renamed without re-checking it, silently ineffective.
+    """
+    assert safe_token("receiver") == RECEIVER_SEGMENT
+    assert is_reserved_device_key(safe_token("receiver"))
+
+
+def test_safe_token_never_emits_a_colon():
+    """The whole grammar rests on ``device_key`` never containing a separator.
+
+    Segment counting is only unambiguous because of this; ``safe_token`` maps
+    every character outside ``[alnum] - _ .`` to an underscore.
+    """
+    for value in ("a:b", "Acurite:606TX", "::", "Brand X/Model 1:2"):
+        assert ":" not in safe_token(value)
+
+
+def test_receiver_is_reserved():
+    assert RECEIVER_SEGMENT == "receiver"
+    assert RECEIVER_SEGMENT in RESERVED_DEVICE_KEYS
+    assert is_reserved_device_key(RECEIVER_SEGMENT) is True
+
+
+@pytest.mark.parametrize(
+    "device_key",
+    ["Receiver", "receivers", "receiver-1", "my_receiver", "", "Acurite-606TX-42"],
+)
+def test_reservation_is_an_exact_match_not_a_substring(device_key):
+    """Only the exact token is reserved; near misses stay usable device keys."""
+    assert is_reserved_device_key(device_key) is False

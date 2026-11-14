@@ -76,7 +76,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.trigger import TriggerActionType, TriggerInfo
 from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_DEVICES, DEVICE_EVENT_TYPES, DOMAIN
+from .const import CONF_DEVICES, DEVICE_EVENT_TYPES, DOMAIN, is_reserved_device_key
 
 # Two trigger ``type`` values per event entity: a base "triggered" (fires on any
 # transmission) and a "triggered_subtype" whose specific ``event_type`` value is
@@ -181,18 +181,37 @@ def _device_field_from_unique_id(
 ) -> tuple[str | None, str | None]:
     """Recover ``(device_key, field_key)`` from an event entity's unique_id.
 
-    The unique_id is ``f"{receiver_entry_id}:{device_key}:{object_suffix}"``
-    (``entity.py``); the ``device_key`` never contains a colon (it is built from
-    safe tokens, ``pyrtl_433.normalizer.device_key``) and an event field's
-    ``object_suffix`` equals its ``field_key`` (``pyrtl_433.library``'s
-    ``events.yaml``).
+    An event entity is always a *device field*, so its unique_id is the
+    three-segment ``f"{entry_id}:{device_key}:{object_suffix}"`` (``entity.py``);
+    the ``device_key`` never contains a colon (it is built from safe tokens,
+    ``pyrtl_433.naming.safe_token``) and an event field's ``object_suffix``
+    equals its ``field_key`` (``pyrtl_433.library``'s ``events.yaml``).
+
+    Other entities share the same colon grammar with a *different* shape, and
+    this parser must not decode those as device fields:
+
+    - ``{location_entry_id}:receiver:{receiver_subentry_id}:{object_suffix}`` --
+      a receiver control (radio controls, noise sensors, connectivity).
+    - ``{location_entry_id}:{device_key}:{receiver_subentry_id}:{object_suffix}``
+      -- a per-receiver signal entity (``rssi`` / ``snr`` / ``last_seen``).
+
+    Both are four segments, so the shape is decided by segment count first, and
+    by the reserved ``receiver`` marker second: a three-segment id whose middle
+    segment is the marker is not a device field either (``const.py``'s
+    ``RESERVED_DEVICE_KEYS``). Anything that is not an unambiguous device field
+    yields ``(None, None)``, which the callers already treat as "no event types
+    to offer" rather than guessing.
     """
     if not unique_id:
         return None, None
-    parts = unique_id.split(":", 2)
+    parts = unique_id.split(":")
     if len(parts) != 3:
+        # Four segments is a receiver control or a per-receiver signal entity;
+        # anything else is not an identity string this integration minted.
         return None, None
-    _hub_entry_id, device_key, field_key = parts
+    _entry_id, device_key, field_key = parts
+    if is_reserved_device_key(device_key):
+        return None, None
     return device_key, field_key
 
 

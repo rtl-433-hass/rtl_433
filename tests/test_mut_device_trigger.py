@@ -1,10 +1,11 @@
 """Mutation-killing tests for custom_components/rtl_433/device_trigger.py.
 
 Groups of survivors targeted:
-- _device_field_from_unique_id (8 mutants): None/empty/2-part/3-part/4-colon inputs,
-  exact (device_key, field_key) assertions; tests that distinguish split(:,2) from
-  split(:), split(:,3), rsplit(:,2), split(None,2), split(XX:XX,2), and the
-  ``if not unique_id`` / ``if len(parts) != 3`` guards.
+- _device_field_from_unique_id: None/empty/2-part/3-part/4-part inputs, exact
+  (device_key, field_key) assertions; tests that distinguish split(:) from
+  split(:,2) (the pre-hardening form, which mis-decoded the four-segment
+  receiver templates), split(None), split(XX:XX), and the ``if not unique_id``
+  / ``if len(parts) != 3`` / reserved-``receiver`` guards.
 - _event_types_for_entry (28 mutants): full .get() chain assertions with a real
   hass/entry setup; the fallback (get_capability) path; ``and`` vs ``or`` guard;
   hub_entry=None path; persisted=None shortcut; each .get() default mutation.
@@ -100,27 +101,26 @@ async def _attach(hass: HomeAssistant, trigger: dict) -> tuple[list, callable]:
 class TestDeviceFieldFromUniqueId:
     """Kill all mutants in _device_field_from_unique_id.
 
-    Mutants targeted:
+    The parser decides the shape of a colon-separated unique_id by segment
+    count first and by the reserved ``receiver`` marker second, so the mutants
+    that matter are the ones that blur either decision:
+
     - mutmut_1: ``if unique_id:`` instead of ``if not unique_id:``
-      -> valid unique_id would return None,None immediately
-    - mutmut_3: ``split(None, 2)`` instead of ``split(":", 2)``
-      -> no whitespace -> 1 part -> len != 3 -> None,None (for normal ids)
-    - mutmut_6: ``split(":")`` (no limit) instead of ``split(":", 2)``
-      -> uid with colon-in-field yields 4 parts -> None,None
-    - mutmut_7: ``rsplit(":", 2)`` instead of ``split(":", 2)``
-      -> splits from right; device_key and field_key are different
-    - mutmut_8: ``split("XX:XX", 2)`` instead of ``split(":", 2)``
-      -> no match -> 1 part -> None,None
-    - mutmut_9: ``split(":", 3)`` instead of ``split(":", 2)``
-      -> 4-colon uid: gives 4 parts -> len != 3 -> None,None
-    - mutmut_10: ``if len(parts) == 3:`` instead of ``if len(parts) != 3:``
-      -> 3-part uid returns None,None (no result ever for valid id)
-    - mutmut_11: ``if len(parts) != 4:`` instead of ``if len(parts) != 3:``
-      -> normal 3-part uid returns None,None (guard wrong)
+      -> a valid unique_id would return None,None immediately
+    - ``split(None)`` / ``split("XX:XX")`` instead of ``split(":")``
+      -> no match -> 1 part -> len != 3 -> None,None for a valid id
+    - ``split(":", 2)`` (the pre-hardening form) instead of ``split(":")``
+      -> a four-segment receiver control or per-receiver signal id would decode
+      as a device field, which is exactly the mis-parse Clarification #18 fixes
+    - ``if len(parts) == 3:`` / ``!= 4`` instead of ``!= 3``
+      -> the wrong arity is accepted
+    - dropping the ``is_reserved_device_key`` guard
+      -> ``receiver`` would be handed back as a device_key
     """
 
     def test_none_returns_none_none(self):
         """mutmut_1: if unique_id: (wrong polarity) would return None,None for valid ids.
+
         Also guards None input.
         """
         assert dt._device_field_from_unique_id(None) == (None, None)
@@ -130,12 +130,11 @@ class TestDeviceFieldFromUniqueId:
         assert dt._device_field_from_unique_id("") == (None, None)
 
     def test_valid_3part_returns_device_field(self):
-        """Core happy-path: 'hub:dev:field' -> ('dev', 'field').
+        """Core happy-path: 'entry:dev:field' -> ('dev', 'field').
 
-        Kills mutmut_1 (inverted guard), mutmut_10 (== instead of !=),
-        mutmut_11 (!=4 instead of !=3).
+        Kills mutmut_1 (inverted guard), ``== 3`` and ``!= 4`` arity mutants.
         """
-        result = dt._device_field_from_unique_id("hub:dev:field")
+        result = dt._device_field_from_unique_id("entry:dev:field")
         assert result == ("dev", "field")
 
     def test_valid_3part_exact_values(self):
@@ -146,68 +145,78 @@ class TestDeviceFieldFromUniqueId:
         assert field_key == "button"
 
     def test_2part_uid_returns_none_none(self):
-        """Only 2 colons: len(parts) == 2 != 3 -> None, None."""
-        assert dt._device_field_from_unique_id("hub:dev") == (None, None)
+        """Only 2 segments: len(parts) == 2 != 3 -> None, None."""
+        assert dt._device_field_from_unique_id("entry:dev") == (None, None)
 
-    def test_4colon_uid_stops_at_2_splits(self):
-        """uid with 3 colons: split(':',2) yields 3 parts; field_key contains extra colon.
+    def test_receiver_control_uid_is_not_a_device_field(self):
+        """``{location}:receiver:{subentry}:{suffix}`` is a receiver control.
 
-        Kills mutmut_6 (split no-limit -> 4 parts -> None,None),
-        mutmut_9 (split(:,3) -> 4 parts -> None,None).
+        Four segments, so the arity branch rejects it. Under the pre-hardening
+        ``split(":", 2)`` this decoded as device_key='receiver' with the
+        subentry id glued onto the field key -- the mis-parse Clarification #18
+        exists to prevent. Kills the ``split(":", 2)`` mutant.
         """
-        # 'hub:dev:fi:eld' split(':',2) -> ['hub','dev','fi:eld'] -> device_key='dev', field_key='fi:eld'
-        uid = "hub:dev:fi:eld"
-        device_key, field_key = dt._device_field_from_unique_id(uid)
-        assert device_key == "dev"
-        assert field_key == "fi:eld"
+        uid = "loc01:receiver:sub01:center_frequency"
+        assert dt._device_field_from_unique_id(uid) == (None, None)
 
-    def test_uid_with_colon_in_field_rsplit_gives_different_result(self):
-        """Distinguishes split(':',2) from rsplit(':',2).
+    def test_per_receiver_signal_uid_is_not_a_device_field(self):
+        """``{location}:{device_key}:{subentry}:{suffix}`` is a signal entity.
 
-        real split(':',2) on 'hub:dev:fi:eld' -> device_key='dev', field_key='fi:eld'
-        mutant rsplit(':',2)              -> parts=['hub:dev','fi','eld'] -> device_key='fi', field_key='eld'
+        Also four segments. The device_key is real, but the entity is an
+        ``rssi`` / ``snr`` / ``last_seen`` sensor rather than an event entity,
+        so the trigger parser must not claim it -- and must certainly not read
+        the subentry id as the field key.
         """
-        uid = "hub:dev:fi:eld"
-        device_key, field_key = dt._device_field_from_unique_id(uid)
-        # Real behavior: split from left, max 2 splits
-        assert device_key == "dev"  # NOT 'fi' (rsplit mutant would give 'fi')
-        assert field_key == "fi:eld"  # NOT 'eld' (rsplit mutant would give 'eld')
+        uid = "loc01:Acurite-606TX-42:sub01:rssi"
+        assert dt._device_field_from_unique_id(uid) == (None, None)
+
+    def test_reserved_receiver_token_is_never_a_device_key(self):
+        """``receiver`` is reserved: a 3-segment id carrying it is not a field.
+
+        ``pyrtl_433.naming.safe_token`` passes the word through unchanged, so a
+        device whose model is literally ``receiver`` could otherwise mint a
+        device_key that reads as the structural marker. Kills the mutant that
+        drops the ``is_reserved_device_key`` guard.
+        """
+        assert dt._device_field_from_unique_id("entry:receiver:connectivity") == (
+            None,
+            None,
+        )
+        # The reservation is exact: nothing merely containing the word is caught.
+        assert dt._device_field_from_unique_id("entry:receiver-42:battery_ok") == (
+            "receiver-42",
+            "battery_ok",
+        )
 
     def test_split_on_colon_not_on_whitespace(self):
-        """split(None,2) splits on whitespace; with ':'-only delimiter gives 1 part -> None,None.
+        """split(None) splits on whitespace; a colon-only id then yields 1 part.
 
-        mutmut_3 changes split(':', 2) -> split(None, 2); 'hub:dev:field' has no
-        whitespace -> 1 part -> len!=3 -> returns (None, None).
-        We assert the real value is returned (not None, None) to kill this mutant.
+        The mutant returns (None, None); we assert the real value to kill it.
         """
-        uid = "hub:dev:field"
+        uid = "entry:dev:field"
         result = dt._device_field_from_unique_id(uid)
         assert result == ("dev", "field")  # not (None, None)
 
     def test_split_on_colon_not_on_bogus_separator(self):
-        """split('XX:XX', 2) never matches -> 1 part -> None,None.
+        """split('XX:XX') never matches -> 1 part -> None,None.
 
-        mutmut_8 changes split(':', 2) -> split('XX:XX', 2).
         We assert the real tuple to kill this mutant.
         """
-        uid = "hub:dev:field"
+        uid = "entry:dev:field"
         result = dt._device_field_from_unique_id(uid)
         assert result == ("dev", "field")
 
     def test_exactly_3_parts_guard(self):
-        """Prove the guard is != 3 (not == 3, not != 4).
+        """Prove the guard is != 3 (not == 3, not != 4), on raw segment count.
 
-        With a plain 2-part uid, len==2, so !=3 is True -> None,None.
-        With a 3-part uid, len==3, so !=3 is False -> proceed.
-        With a 4-part uid (colon in field, split(:,2)), len==3 (limit!) -> proceed.
-        This combination kills mutmut_10 and mutmut_11.
+        Unlike the pre-hardening parser there is no maxsplit, so a fourth
+        segment is a fourth segment: it is rejected rather than absorbed into
+        the field key.
         """
-        # 2 parts -> None, None
         assert dt._device_field_from_unique_id("a:b") == (None, None)
-        # 3 parts -> valid
         assert dt._device_field_from_unique_id("a:b:c") == ("b", "c")
-        # 4 raw colons but split(:,2) gives 3 -> valid (colon absorbed into field_key)
-        assert dt._device_field_from_unique_id("a:b:c:d") == ("b", "c:d")
+        assert dt._device_field_from_unique_id("a:b:c:d") == (None, None)
+        assert dt._device_field_from_unique_id("a:b:c:d:e") == (None, None)
 
 
 # ---------------------------------------------------------------------------

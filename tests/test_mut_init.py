@@ -7,6 +7,7 @@ test_lifecycle.py (hub_entry_builder fixture, _no_socket stub, etc.).
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -998,6 +999,136 @@ async def test_remove_hub_device_returns_false(hass, hub_entry_builder):
 
     result = await async_remove_config_entry_device(hass, hub, hub_device)
     assert result is False
+
+
+async def test_remove_receiver_scoped_identifier_returns_false(hass, hub_entry_builder):
+    """A ``{location}:receiver:{subentry}`` identifier is never a device_key.
+
+    The scan classifies identifiers by the reserved ``receiver`` marker, so a
+    receiver device is refused like the entry-level device rather than being
+    decoded into a bogus ``device_key`` of ``receiver`` and silently mutating
+    ``entry.data[CONF_DEVICES]`` (Clarification #18).
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    before = dict(hub.data.get(CONF_DEVICES, {}))
+
+    fake = SimpleNamespace(
+        identifiers={(DOMAIN, f"{hub.entry_id}:receiver:subentry01")}
+    )
+    assert await async_remove_config_entry_device(hass, hub, fake) is False
+    assert hub.data.get(CONF_DEVICES, {}) == before
+
+
+async def test_reserved_marker_check_is_exact_not_a_prefix(hass, hub_entry_builder):
+    """Only the exact ``receiver`` segment is structural.
+
+    A device_key that merely starts with the word is an ordinary nested device:
+    it is removed, and it leaves the entry's devices map. Guards the marker test
+    against being widened to a ``startswith``.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    device_key = "receiver-lookalike-42"
+    hass.config_entries.async_update_entry(
+        hub,
+        data={**hub.data, CONF_DEVICES: {device_key: {CONF_MODEL: "Whatever"}}},
+    )
+    await hass.async_block_till_done()
+
+    fake = SimpleNamespace(identifiers={(DOMAIN, f"{hub.entry_id}:{device_key}")})
+    assert await async_remove_config_entry_device(hass, hub, fake) is True
+    assert device_key not in hub.data.get(CONF_DEVICES, {})
+
+
+async def test_remove_unrelated_device_leaves_the_entry_alone(hass, hub_entry_builder):
+    """A device this entry does not own is not decoded into a device_key.
+
+    Two rows that must both be skipped: one from another integration that
+    happens to carry this entry's prefix, and one of ours carrying a different
+    entry's. Neither names a device of this entry, so the scan finds nothing and
+    the whole update-and-forget block is skipped -- ``True`` here means "nothing
+    of mine to remove", not "removed".
+
+    Pins both halves of the guard. A sentinel of ``""`` rather than ``None``
+    would read as "found" and forget the empty key; joining the two conditions
+    with ``and`` would stop skipping the foreign rows and remove a device off the
+    back of another integration's identifier.
+    """
+    device_key = "EnergyMeter-2000-1234"
+    hub = await _setup_hub(
+        hass, hub_entry_builder, devices={device_key: {CONF_MODEL: "Whatever"}}
+    )
+    before = dict(hub.data[CONF_DEVICES])
+    coordinator = _coordinator(hass, hub)
+
+    fake = SimpleNamespace(
+        identifiers={
+            ("other_integration", f"{hub.entry_id}:{device_key}"),
+            (DOMAIN, f"other-entry-id:{device_key}"),
+        }
+    )
+    with patch.object(
+        coordinator, "forget_device", wraps=coordinator.forget_device
+    ) as forget_spy:
+        assert await async_remove_config_entry_device(hass, hub, fake) is True
+
+    assert hub.data[CONF_DEVICES] == before
+    forget_spy.assert_not_called()
+
+
+async def test_reserved_marker_is_read_from_the_first_segment(hass, hub_entry_builder):
+    """The segment right after the prefix decides, however many follow it.
+
+    ``device_key`` never contains a colon, so everything past the first one is
+    structure rather than part of the key. Reading the split from the right
+    instead would take ``{entry}:receiver:sub01:extra`` as a device_key of
+    ``receiver:sub01`` -- which is not the reserved marker -- and remove a
+    receiver as though it were an RF device.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    before = dict(hub.data.get(CONF_DEVICES, {}))
+
+    fake = SimpleNamespace(
+        identifiers={(DOMAIN, f"{hub.entry_id}:receiver:sub01:extra")}
+    )
+    assert await async_remove_config_entry_device(hass, hub, fake) is False
+    assert hub.data.get(CONF_DEVICES, {}) == before
+
+
+async def test_remove_nested_device_keeps_the_other_devices(hass, hub_entry_builder):
+    """Only the named key leaves; everything else the entry owns stays.
+
+    The comprehension rebuilds the whole map, so the map it reads from is what
+    gets stored back. Reading it from the wrong key would hand the comprehension
+    an empty dict and quietly wipe every other device on the entry.
+    """
+    keep, drop = "EnergyMeter-2000-1234", "EnergyMeter-2000-5678"
+    hub = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={keep: {CONF_MODEL: "A"}, drop: {CONF_MODEL: "B"}},
+    )
+
+    fake = SimpleNamespace(identifiers={(DOMAIN, f"{hub.entry_id}:{drop}")})
+    assert await async_remove_config_entry_device(hass, hub, fake) is True
+
+    assert drop not in hub.data[CONF_DEVICES]
+    assert keep in hub.data[CONF_DEVICES]
+
+
+async def test_remove_nested_device_with_no_devices_map_stored(hass, hub_entry_builder):
+    """An entry that has never stored a devices map still removes cleanly.
+
+    ``data`` only grows a ``CONF_DEVICES`` key once a device is added, so an
+    entry that has adopted nothing has no key at all -- and that default is what
+    the comprehension iterates. Without it the read returns ``None`` and the
+    removal dies on ``None.items()`` instead of returning.
+    """
+    hub = await _setup_hub(hass, hub_entry_builder)
+    assert CONF_DEVICES not in hub.data
+
+    fake = SimpleNamespace(identifiers={(DOMAIN, f"{hub.entry_id}:Some-Device-1")})
+    assert await async_remove_config_entry_device(hass, hub, fake) is True
+    assert hub.data.get(CONF_DEVICES) == {}
 
 
 async def test_remove_nested_device_returns_true(hass, hub_entry_builder, events):

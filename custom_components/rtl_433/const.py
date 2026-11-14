@@ -92,6 +92,33 @@ CONF_DEVICE_KEY: Final = "device_key"
 # The rtl_433 ``model`` string for the device (e.g. "Acurite-606TXN").
 CONF_MODEL: Final = "model"
 
+# --- Identity grammar: the reserved ``receiver`` marker ---------------------
+# Colon-separated identity strings (entity unique_ids, device-registry
+# identifiers) are parsed positionally, by segment count plus this literal
+# marker: a receiver-scoped identifier carries ``receiver`` in its second
+# segment (``{location_entry_id}:receiver:{receiver_subentry_id}``), where a
+# device-scoped one carries a ``device_key``.
+#
+# ``pyrtl_433.naming.safe_token`` -- the frozen builder every ``device_key`` is
+# made of -- maps ``:`` to ``_``, so a ``device_key`` can never contain a colon
+# and the segment count is always unambiguous. It does, however, pass
+# ``"receiver"`` through unchanged, so a device whose ``model`` is literally
+# ``receiver`` would mint a ``device_key`` that reads as the marker. The token is
+# therefore RESERVED: no ``device_key`` may equal it, and the parsers below
+# refuse to decode it as one rather than silently addressing the wrong thing.
+RECEIVER_SEGMENT: Final = "receiver"
+RESERVED_DEVICE_KEYS: Final = frozenset({RECEIVER_SEGMENT})
+
+
+def is_reserved_device_key(device_key: str) -> bool:
+    """Return whether ``device_key`` collides with a structural identity marker.
+
+    Identity parsers call this instead of comparing against the literal, so the
+    reserved set has exactly one definition (see ``RESERVED_DEVICE_KEYS``).
+    """
+    return device_key in RESERVED_DEVICE_KEYS
+
+
 # --- Hub devices-map keys ---------------------------------------------------
 # Key under a hub entry's ``data`` holding the consolidated per-device map for
 # that hub. Maps ``device_key`` -> a record with the device's model, the set of
