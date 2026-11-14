@@ -66,6 +66,7 @@ from .const import (
     LOGGER,
     MANUFACTURER,
     PLATFORMS,
+    is_reserved_device_key,
     signal_new_device,
 )
 from .coordinator import Rtl433Coordinator
@@ -495,17 +496,34 @@ async def async_remove_config_entry_device(
     un-adopts its ``device_key`` in the coordinator, so the device's next
     transmission makes it a pending candidate the user can choose to add again
     rather than silently re-creating the device they just deleted.
+
+    A nested RF device's identifier is ``(DOMAIN, f"{entry_id}:{device_key}")``,
+    but the same prefix also carries receiver-scoped identifiers of the form
+    ``f"{location_entry_id}:receiver:{receiver_subentry_id}"``. Those name a
+    *receiver*, not an RF device, so they are classified by the reserved
+    ``receiver`` marker and refused alongside the entry-level device rather than
+    being decoded into a bogus ``device_key``.
     """
     if (DOMAIN, config_entry.entry_id) in device_entry.identifiers:
         return False
 
     # Find this device's device_key from its identifier
-    # ``(DOMAIN, f"{entry_id}:{device_key}")``.
+    # ``(DOMAIN, f"{entry_id}:{device_key}")``. ``device_key`` never contains a
+    # colon (``pyrtl_433.naming.safe_token``), so the first segment after the
+    # entry prefix is the whole key -- and any further segment means this is a
+    # receiver-scoped identifier, not a device one.
+    prefix = f"{config_entry.entry_id}:"
     device_key: str | None = None
     for domain, ident in device_entry.identifiers:
-        if domain == DOMAIN and ident.startswith(f"{config_entry.entry_id}:"):
-            device_key = ident.split(":", 1)[1]
-            break
+        if domain != DOMAIN or not ident.startswith(prefix):
+            continue
+        head = ident.removeprefix(prefix).split(":", 1)[0]
+        if is_reserved_device_key(head):
+            # A receiver device. Removing one is subentry surgery, not the
+            # "forget this RF device" this handler implements.
+            return False
+        device_key = head
+        break
 
     if device_key is not None:
         devices = {
