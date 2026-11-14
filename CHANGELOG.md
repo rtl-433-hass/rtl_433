@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.23.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.22.0...v0.23.0) (2026-11-14)
+
+
+### Features
+
+* offer utility-meter calibration when a meter is added ([#297](https://github.com/rtl-433-hass/rtl_433/issues/297)) ([2d288b9](https://github.com/rtl-433-hass/rtl_433/commit/2d288b9f8a232a1eb3bc7e1a2b51e5e84acbf960))
+
+
+### Bug Fixes
+
+* do not publish reconnect replay frames as new sensor states ([#338](https://github.com/rtl-433-hass/rtl_433/issues/338)) ([0c750ca](https://github.com/rtl-433-hass/rtl_433/commit/0c750caff719376f3e0517a9385e4b6ad61650f3))
+* **identity:** reserve the receiver marker and parse identities by segment ([#355](https://github.com/rtl-433-hass/rtl_433/issues/355)) ([086a02d](https://github.com/rtl-433-hass/rtl_433/commit/086a02ddee31c8989265e2566a18c5589f461252))
+* point the mappings docs link at the published device-library guide ([#351](https://github.com/rtl-433-hass/rtl_433/issues/351)) ([b95ea26](https://github.com/rtl-433-hass/rtl_433/commit/b95ea26fbd34906b09356c51206dff16dfaa11df))
+
+
+### Documentation
+
+* explain correcting the device class of alarm-panel zones ([#345](https://github.com/rtl-433-hass/rtl_433/issues/345)) ([c12744a](https://github.com/rtl-433-hass/rtl_433/commit/c12744a9c68f6647ebebac24dcf1c4ffb38f6956))
+
 ## [0.22.0](https://github.com/rtl-433-hass/rtl_433/compare/v0.21.0...v0.22.0) (2026-11-02)
 
 
