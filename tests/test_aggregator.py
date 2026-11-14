@@ -42,6 +42,7 @@ from custom_components.rtl_433.const import (
     DOMAIN,
     signal_location_device_update,
 )
+from custom_components.rtl_433.entity import REPLAY_WRITE_DELAY
 from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -277,6 +278,12 @@ async def test_a_replay_still_seeds_a_field_nothing_has_applied_yet(hass):
     attic, _garage = _coordinators(hass, location)
     with freeze_time(_NOW):
         _feed(attic, _frame(15.0, -600))
+        await hass.async_block_till_done()
+        # Replayed values are written once the backlog burst settles, not per
+        # frame (``REPLAY_WRITE_DELAY``).
+        async_fire_time_changed(
+            hass, dt_util.utcnow() + timedelta(seconds=REPLAY_WRITE_DELAY + 1)
+        )
         await hass.async_block_till_done()
 
     assert _temperature(hass, location) == "15.0"

@@ -2105,7 +2105,7 @@ async def test_restart_replay_compared_with_restored_value_time(
     er.async_get(hass).async_get_or_create(
         "sensor",
         DOMAIN,
-        f"{receiver_id(receiver)}:{device_key}:T",
+        f"{receiver.entry_id}:{device_key}:T",
         config_entry=receiver,
         suggested_object_id="acurite_606tx_42_temperature",
     )

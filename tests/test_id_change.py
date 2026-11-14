@@ -417,7 +417,7 @@ async def test_confirming_the_repair_follows_the_new_id(
         hass, receiver_entry_builder, {OLD_KEY: OLD_RECORD}
     )
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{receiver_id(receiver)}:{OLD_KEY}"), receiver.entry_id
+        (DOMAIN, f"{receiver.entry_id}:{OLD_KEY}"), receiver.entry_id
     )
     await _announce(hass, coordinator)
     issue = _issue(hass, receiver)
