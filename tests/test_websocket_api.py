@@ -45,6 +45,7 @@ from unittest.mock import patch
 
 from freezegun import freeze_time
 from pyrtl_433.library import FieldDescriptor
+from pyrtl_433.normalizer import NormalizedEvent
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -1392,6 +1393,114 @@ async def test_settings_get_answers_with_what_the_three_forms_render(
     # Nothing overridden yet -> an empty editor, not a document holding "{}".
     assert result["mappings"] == ""
     assert result["mappings_docs_url"].startswith("https://")
+
+
+async def _needs_calibration(hass, hass_ws_client, entry, fields):
+    """Hear the meter with ``fields``, then read its ``needs_calibration`` flag."""
+    _coordinator(hass, entry).devices[_METER_KEY] = NormalizedEvent(
+        model=_METER_MODEL, device_key=_METER_KEY, identity={}, fields=fields
+    )
+    client = await hass_ws_client(hass)
+    reply, _ = await _call(
+        client, {"type": "rtl_433/settings/get", "entry_id": entry.entry_id}
+    )
+    (device,) = reply["result"]["devices"]
+    return device["needs_calibration"]
+
+
+async def test_a_detected_meter_with_no_unit_needs_calibration(
+    hass, settings_hub, hass_ws_client
+):
+    """The panel offers the post-add prompt only on this flag's say-so.
+
+    A decoded ``MeterType`` names the commodity, and the shipped library leaves
+    every consumption field unitless, so this meter's reading means nothing to
+    the Energy dashboard until someone calibrates it.
+    """
+    assert await _needs_calibration(
+        hass, hass_ws_client, settings_hub, {"MeterType": "Gas", "consumption_data": 1}
+    )
+
+
+async def test_a_meter_without_a_commodity_hint_does_not_need_calibration(
+    hass, settings_hub, hass_ws_client
+):
+    """No hint, no prompt: the panel cannot pre-fill the commodity, so it waits."""
+    assert not await _needs_calibration(
+        hass, hass_ws_client, settings_hub, {"consumption_data": 1}
+    )
+
+
+async def test_a_calibrated_meter_does_not_need_calibration(
+    hass, hub_entry_builder, no_socket, hass_ws_client
+):
+    """A calibration already stored is never asked for again."""
+    entry = await _setup_hub(
+        hass,
+        hub_entry_builder,
+        devices={
+            _METER_KEY: {
+                CONF_MODEL: _METER_MODEL,
+                DEVICE_FIELDS: ["consumption_data"],
+                DEVICE_CALIBRATION: {
+                    CALIBRATION_COMMODITY: "gas",
+                    CALIBRATION_UNIT: "m³",
+                    CALIBRATION_SCALE: 0.01,
+                },
+            }
+        },
+    )
+    assert not await _needs_calibration(
+        hass, hass_ws_client, entry, {"MeterType": "Gas", "consumption_data": 1}
+    )
+
+
+async def test_a_meter_a_mapping_already_calibrates_does_not_need_calibration(
+    hass, hub_entry_builder, no_socket, hass_ws_client
+):
+    """A unit from the device library wins over the prompt's scale-1 default.
+
+    A per-device calibration is precedence tier #1, above every mapping. A prompt
+    on a meter whose ``models:`` override already gives the consumption field a
+    unit and a 0.01 scale would pre-fill scale 1, and the filled Save button would
+    store it over the correct mapping -- a reading 100 times too high.
+    """
+    entry = hub_entry_builder(
+        availability_timeout=600,
+        devices={
+            _METER_KEY: {
+                CONF_MODEL: _METER_MODEL,
+                DEVICE_FIELDS: ["consumption_data"],
+            }
+        },
+    )
+    entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        entry,
+        data={
+            **entry.data,
+            CONF_USER_MAPPINGS: {
+                "models": {
+                    _METER_MODEL: {
+                        "consumption_data": {
+                            "platform": "sensor",
+                            "device_class": "gas",
+                            "unit_of_measurement": "m³",
+                            "state_class": "total_increasing",
+                            "value_transform": {"scale": 0.01},
+                            "object_suffix": "consumption",
+                        }
+                    }
+                }
+            },
+        },
+    )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert not await _needs_calibration(
+        hass, hass_ws_client, entry, {"MeterType": "Gas", "consumption_data": 1}
+    )
 
 
 async def test_the_hub_timeout_is_dropped_only_when_the_panel_says_none(
