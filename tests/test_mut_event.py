@@ -48,7 +48,7 @@ def _descriptor(**overrides: Any) -> FieldDescriptor:
 
 
 def _persisted(event_types: list[str]) -> dict[str, Any]:
-    """The hub entry ``devices`` map as a restart leaves it for this device."""
+    """The receiver entry ``devices`` map as a restart leaves it for this device."""
     return {
         _DEVICE_KEY: {
             "model": _MODEL,
@@ -59,11 +59,11 @@ def _persisted(event_types: list[str]) -> dict[str, Any]:
 
 
 @pytest.fixture
-async def build_event(hass, hub_entry_builder):
-    """Return a factory building one ``Rtl433Event`` against a real hub entry.
+async def build_event(hass, receiver_entry_builder):
+    """Return a factory building one ``Rtl433Event`` against a real receiver entry.
 
     The constructor reads the descriptor and ``coordinator.entry.data``, and the
-    base entity looks up the hub device for ``via_device_id``, so the hub device
+    base entity looks up the receiver device for ``via_device_id``, so the receiver device
     ``async_setup_entry`` always registers first is registered here too.
     """
 
@@ -71,7 +71,7 @@ async def build_event(hass, hub_entry_builder):
         descriptor: FieldDescriptor | None = None,
         devices: dict[str, Any] | None = None,
     ) -> Rtl433Event:
-        entry = hub_entry_builder(devices=devices)
+        entry = receiver_entry_builder(devices=devices)
         entry.add_to_hass(hass)
         dr.async_get(hass).async_get_or_create(
             config_entry_id=entry.entry_id, identifiers={(DOMAIN, entry.entry_id)}
@@ -137,7 +137,7 @@ async def test_a_field_with_no_event_map_advertises_an_empty_list(build_event):
 async def test_persisted_event_types_survive_a_restart(build_event):
     """Types learned from the air must still be offered after Home Assistant restarts.
 
-    An unmapped value seen once is persisted to the hub entry. If the
+    An unmapped value seen once is persisted to the receiver entry. If the
     constructor did not read it back, every restart would silently drop the
     trigger from the automation picker -- and any automation already using it
     would look broken until the device happened to transmit that value again.
@@ -230,22 +230,24 @@ async def test_a_non_doorbell_is_not_given_a_ring_event(build_event):
 async def test_the_entity_forwards_its_identity_to_the_base_entity(build_event):
     """Identity is what survives a restart: unique_id and the device it hangs under.
 
-    The unique_id is hub-scoped so two hubs hearing the same doorbell do not
-    collide, and the device entry carries the model and nests under the hub via
+    The unique_id is receiver-scoped so two receivers hearing the same doorbell do not
+    collide, and the device entry carries the model and nests under the receiver via
     ``via_device_id``. Get any of it wrong and the restored entity is a new one:
     the old entity id, name and automations point at nothing.
     """
     entity = build_event()
-    hub_entry_id = entity._hub_entry_id
+    receiver_entry_id = entity._receiver_entry_id
 
-    assert entity.unique_id == f"{hub_entry_id}:{_DEVICE_KEY}:{_SUFFIX}"
+    assert entity.unique_id == f"{receiver_entry_id}:{_DEVICE_KEY}:{_SUFFIX}"
     device_info = entity.device_info
-    assert device_info["identifiers"] == {(DOMAIN, f"{hub_entry_id}:{_DEVICE_KEY}")}
+    assert device_info["identifiers"] == {
+        (DOMAIN, f"{receiver_entry_id}:{_DEVICE_KEY}")
+    }
     assert device_info["model"] == _MODEL
     assert device_info["via_device_id"] == dr.async_get_device_id_by_identifier(
         entity._coordinator.hass,
-        (DOMAIN, hub_entry_id),
-        config_entry_id=hub_entry_id,
+        (DOMAIN, receiver_entry_id),
+        config_entry_id=receiver_entry_id,
     )
     assert entity.name == "Secret knock"
 
@@ -303,7 +305,7 @@ async def test_persisted_types_for_another_device_are_not_borrowed(build_event):
     """One device's learned types never leak into another's picker.
 
     The lookup is keyed by ``device_key``; keyed by anything else, every event
-    entity on the hub would advertise the same merged list of every type any
+    entity on the receiver would advertise the same merged list of every type any
     device ever transmitted.
     """
     entity = build_event(

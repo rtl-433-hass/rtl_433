@@ -17,11 +17,11 @@ them, with no cloud dependency and no polling.
 
 ## Highlights
 
-- Add one hub per rtl_433 server; decoded RF devices appear as nested Home
-  Assistant devices under that hub.
+- Add one receiver per rtl_433 server; decoded RF devices appear as nested Home
+  Assistant devices under that receiver.
 - Device support is data-driven through a YAML
   [device library](docs/device-library.md) shipped by the `pyrtl_433` dependency,
-  with per-hub user overrides available from the Home Assistant UI.
+  with per-receiver user overrides available from the Home Assistant UI.
 - Every device the receiver hears is listed for you to add or ignore; nothing is
   added to Home Assistant on its own.
 - Sets availability timeouts by device type, records Last seen timestamps,

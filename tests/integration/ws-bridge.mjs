@@ -151,7 +151,7 @@ if (fixtureEvents.length) {
 // connected WebSocket client as {"time","src","lvl","msg"} frames (>= 23.11).
 // That channel is the ONLY place rtl_433 exposes its radio noise floor — the
 // pulse detector's "Auto Level" messages, which the integration parses into the
-// hub's noise-level / minimum-detection-level sensors. The decoded-event JSON
+// receiver's noise-level / minimum-detection-level sensors. The decoded-event JSON
 // output carries no log messages at all, so the bridge tails rtl_433's
 // `-F log:<file>` output (plain "<src>: <msg>" lines) and re-frames each line
 // exactly as the HTTP server would, keeping the transport stand-in complete.

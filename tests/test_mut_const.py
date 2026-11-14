@@ -25,25 +25,30 @@ from custom_components.rtl_433.const import (
     SIGNAL_RECEIVER_UPDATE,
     is_reserved_device_key,
     signal_device_update,
-    signal_hub_noise,
     signal_new_device,
     signal_pending_update,
+    signal_receiver_noise,
     signal_receiver_update,
 )
 
 
 def test_signal_device_update_embeds_both_arguments_exactly():
-    assert signal_device_update("hubA", "devX") == "rtl_433_device_update_hubA_devX"
+    assert (
+        signal_device_update("receiverA", "devX")
+        == "rtl_433_device_update_receiverA_devX"
+    )
 
 
-def test_signal_device_update_distinguishes_hub_and_device():
+def test_signal_device_update_distinguishes_receiver_and_device():
     # If either argument were dropped/swapped, two of these would collide.
-    a = signal_device_update("hub1", "dev1")
-    b = signal_device_update("hub2", "dev1")
-    c = signal_device_update("hub1", "dev2")
+    a = signal_device_update("receiver1", "dev1")
+    b = signal_device_update("receiver2", "dev1")
+    c = signal_device_update("receiver1", "dev2")
     assert a != b and a != c and b != c
-    assert "hub1" in a and "dev1" in a
-    assert a == SIGNAL_DEVICE_UPDATE.format(receiver_entry_id="hub1", device_key="dev1")
+    assert "receiver1" in a and "dev1" in a
+    assert a == SIGNAL_DEVICE_UPDATE.format(
+        receiver_entry_id="receiver1", device_key="dev1"
+    )
 
 
 def test_signal_device_update_device_key_is_used():
@@ -51,39 +56,39 @@ def test_signal_device_update_device_key_is_used():
     assert signal_device_update("h", "the_device").endswith("_the_device")
 
 
-def test_signal_receiver_update_embeds_hub_id_exactly():
-    assert signal_receiver_update("hubA") == "rtl_433_hub_update_hubA"
-    assert signal_receiver_update("hubA") == SIGNAL_RECEIVER_UPDATE.format(
-        receiver_entry_id="hubA"
+def test_signal_receiver_update_embeds_receiver_id_exactly():
+    assert signal_receiver_update("receiverA") == "rtl_433_receiver_update_receiverA"
+    assert signal_receiver_update("receiverA") == SIGNAL_RECEIVER_UPDATE.format(
+        receiver_entry_id="receiverA"
     )
 
 
-def test_signal_receiver_update_distinct_per_hub():
+def test_signal_receiver_update_distinct_per_receiver():
     assert signal_receiver_update("h1") != signal_receiver_update("h2")
     assert "h1" in signal_receiver_update("h1")
 
 
-def test_signal_new_device_embeds_hub_id_exactly():
-    assert signal_new_device("hubA") == "rtl_433_new_device_hubA"
-    assert signal_new_device("hubA") == SIGNAL_NEW_DEVICE.format(
-        receiver_entry_id="hubA"
+def test_signal_new_device_embeds_receiver_id_exactly():
+    assert signal_new_device("receiverA") == "rtl_433_new_device_receiverA"
+    assert signal_new_device("receiverA") == SIGNAL_NEW_DEVICE.format(
+        receiver_entry_id="receiverA"
     )
 
 
-def test_signal_new_device_distinct_per_hub():
+def test_signal_new_device_distinct_per_receiver():
     assert signal_new_device("h1") != signal_new_device("h2")
     assert "h1" in signal_new_device("h1")
 
 
-def test_signal_hub_noise_embeds_hub_id_exactly():
-    assert signal_hub_noise("hubA") == "rtl_433_hub_noise_hubA"
-    assert signal_hub_noise("h1") != signal_hub_noise("h2")
-    # Its own signal: the hub-wide update must not wake the noise sensors' feed.
-    assert signal_hub_noise("hubA") != signal_receiver_update("hubA")
+def test_signal_receiver_noise_embeds_receiver_id_exactly():
+    assert signal_receiver_noise("receiverA") == "rtl_433_receiver_noise_receiverA"
+    assert signal_receiver_noise("h1") != signal_receiver_noise("h2")
+    # Its own signal: the receiver-wide update must not wake the noise sensors' feed.
+    assert signal_receiver_noise("receiverA") != signal_receiver_update("receiverA")
 
 
-def test_signal_pending_update_embeds_hub_id_exactly():
-    assert signal_pending_update("hubA") == "rtl_433_pending_update_hubA"
+def test_signal_pending_update_embeds_receiver_id_exactly():
+    assert signal_pending_update("receiverA") == "rtl_433_pending_update_receiverA"
     assert signal_pending_update("h1") != signal_pending_update("h2")
 
 

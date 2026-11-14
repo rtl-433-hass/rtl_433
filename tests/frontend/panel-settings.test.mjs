@@ -1,7 +1,7 @@
 // Node's own test runner (`node --test`), no dependencies and no build step --
 // the same constraint the panel itself is written under.
 //
-// What is under test is the hub form's availability-timeout rule. The stored
+// What is under test is the receiver form's availability-timeout rule. The stored
 // timeout has three states and only one of them is a number, so the form asks
 // which of the three you mean and sends a value to match. Getting the mapping
 // wrong is invisible on screen -- the page renders, the save succeeds, and a
@@ -79,7 +79,7 @@ test("the custom mode sends the seconds beside it", () => {
 test("a custom timeout with no number falls back to the defaults", () => {
   // A cleared field is mid-edit, not a choice. Falling back to a number of its
   // own would pin a timeout onto every device on the receiver without anyone
-  // asking for one; falling back to null leaves the hub as it was.
+  // asking for one; falling back to null leaves the receiver as it was.
   assert.equal(timeoutValue("custom", null), null);
   assert.equal(timeoutValue("custom", undefined), null);
   assert.equal(timeoutValue("custom", Number.NaN), null);
