@@ -369,6 +369,38 @@ async def test_live_frame_supersedes_pending_replay_write(hass):
     sensor.async_write_ha_state.assert_called_once()
 
 
+async def test_replay_after_cancelled_write_is_still_written(hass):
+    """Cancelling a deferred write must leave the next replay free to arm one.
+
+    A live frame drops the pending replay write; a later reconnect's backlog
+    has to schedule a fresh write rather than find a stale handle and assume
+    one is already pending.
+    """
+    sensor = _holding(hass, -13.0)
+
+    sensor._handle_dispatch(
+        _event(
+            fields={_FIELD: -12.0},
+            is_replay=True,
+            event_time=_T0 + timedelta(minutes=1),
+        )
+    )
+    sensor._handle_dispatch(
+        _event(fields={_FIELD: -10.5}, event_time=_T0 + timedelta(minutes=2))
+    )
+    sensor._handle_dispatch(
+        _event(
+            fields={_FIELD: -9.0},
+            is_replay=True,
+            event_time=_T0 + timedelta(minutes=3),
+        )
+    )
+    await _settle(hass)
+
+    assert sensor._attr_native_value == -9.0
+    assert sensor.async_write_ha_state.call_count == 2
+
+
 async def test_removal_cancels_pending_replay_write(hass):
     sensor = _holding(hass, -13.0)
     sensor._handle_dispatch(
