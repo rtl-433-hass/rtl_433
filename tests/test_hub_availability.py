@@ -133,9 +133,9 @@ def test_availability_signal_is_scoped_per_hub():
 
 
 # --------------------------------------------------------------------------- #
-# receiver_available: the gate itself                                               #
+# receiver_available: the gate itself                                         #
 # --------------------------------------------------------------------------- #
-def test_hub_available_while_connected(hass, coordinator):
+def test_receiver_available_while_connected(hass, coordinator):
     """An open socket is available, with no outage clock running."""
     assert coordinator.receiver_available is True
     assert coordinator.disconnected_since is None
