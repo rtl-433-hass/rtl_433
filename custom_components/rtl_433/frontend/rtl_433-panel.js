@@ -200,7 +200,7 @@ export const STRINGS = {
   "settings.device_intro":
     "Overrides for one device. Blank means “use the receiver's setting”.",
   "settings.adopt_intro":
-    "You added {device}. Check what it measures, then set its unit and conversion factor for the Energy dashboard. Skip for now keeps the meter added; you can calibrate it later in Device settings.",
+    "You added {device}. Set its unit and conversion factor for the Energy dashboard. You can calibrate it later in Device settings if you don't know what settings to use.",
   "settings.skip_calibration": "Skip for now",
   "settings.adopt_failed":
     "The device was added, but calibration could not be opened: {error}. You can calibrate it later in Device settings.",
