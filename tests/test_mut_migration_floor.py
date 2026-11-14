@@ -166,17 +166,21 @@ class TestCleanupPhantomUnknownDevice:
     async def test_entry_data_other_keys_preserved_on_update(
         self, hass, receiver_entry_builder
     ):
-        """Other entry.data keys (e.g. host) are preserved when devices map is written."""
+        """Other entry.data keys are preserved when the devices map is written."""
         receiver = receiver_entry_builder(
-            devices={PHANTOM_DEVICE_KEY: {CONF_MODEL: "", DEVICE_FIELDS: []}}
+            availability_timeout=42,
+            devices={PHANTOM_DEVICE_KEY: {CONF_MODEL: "", DEVICE_FIELDS: []}},
         )
         receiver.add_to_hass(hass)
         dev_reg = dr.async_get(hass)
 
         _cleanup_phantom_unknown_device(hass, receiver, dev_reg)
 
-        # Host must survive in entry data
-        assert receiver.data[CONF_HOST] == "rtl433.local"
+        # The location's own settings must survive the devices-map rewrite. The
+        # host is not among them any more -- it describes a receiver, and lives on
+        # that receiver's subentry.
+        assert receiver.data[CONF_AVAILABILITY_TIMEOUT] == 42
+        assert CONF_HOST not in receiver.data
 
     async def test_phantom_registry_device_with_correct_identifier_removed(
         self, hass, receiver_entry_builder

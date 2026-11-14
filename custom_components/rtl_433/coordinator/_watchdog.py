@@ -148,9 +148,7 @@ class _AvailabilityMixin:
                 "available again as they report in",
                 self.ws_url,
             )
-        async_dispatcher_send(
-            self.hass, signal_receiver_availability(self.entry.entry_id)
-        )
+        async_dispatcher_send(self.hass, signal_receiver_availability(self.receiver_id))
 
     def _gated_device_count(self) -> int:
         """How many devices the gate actually takes unavailable.

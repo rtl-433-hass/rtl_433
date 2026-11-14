@@ -60,11 +60,13 @@
         "description": "You are about to add a rtl_433 radio published by the {addon} add-on at `{host}:{port}`.",
         "data": {
           "manage_settings": "Manage rtl_433 settings from Home Assistant",
-          "initial_frequency": "Initial frequency (MHz)"
+          "initial_frequency": "Initial frequency (MHz)",
+          "location": "Location"
         },
         "data_description": {
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
-          "initial_frequency": "Set the radio's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
+          "initial_frequency": "Set the radio's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on.",
+          "location": "Which location this receiver belongs to. Choose an existing location to let its receivers share one view of every sensor they both hear; choose a new location for a separate site."
         }
       }
     },
@@ -72,11 +74,71 @@
       "already_configured": "This rtl_433 server is already configured.",
       "reconfigure_successful": "Connection settings updated.",
       "rebind_successful": "Radio replaced. Your devices and history are preserved.",
-      "invalid_discovery_info": "The discovery message was missing required information."
+      "invalid_discovery_info": "The discovery message was missing required information.",
+      "receiver_added": "Receiver added to the location. Its devices and history are preserved."
     },
     "error": {
       "cannot_connect": "Failed to connect. Check the host, port, and path, and that the rtl_433 server is reachable.",
       "id_in_use": "That radio ID is already used by another configured receiver."
+    }
+  },
+  "config_subentries": {
+    "receiver": {
+      "title": "Receiver",
+      "initiate_flow": {
+        "user": "Add a receiver",
+        "reconfigure": "Reconfigure this receiver"
+      },
+      "entry_type": "Receiver",
+      "step": {
+        "user": {
+          "title": "Add a receiver to this location",
+          "description": "Enter the WebSocket connection details for another rtl_433 HTTP server (started with `-F http`). Receivers in the same location share one view of every sensor they both hear.",
+          "data": {
+            "host": "Host",
+            "port": "Port",
+            "path": "WebSocket path",
+            "secure": "Secure (use wss://)",
+            "manage_settings": "Manage rtl_433 settings from Home Assistant",
+            "initial_frequency": "Initial frequency (MHz)"
+          },
+          "data_description": {
+            "host": "Hostname or IP address of the rtl_433 server.",
+            "port": "TCP port of the rtl_433 HTTP server (default 8433).",
+            "path": "WebSocket endpoint path on the server (default /ws).",
+            "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy).",
+            "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
+            "initial_frequency": "Set the radio's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
+          }
+        },
+        "reconfigure": {
+          "title": "Reconfigure rtl_433 receiver",
+          "description": "Update this receiver's connection target, or re-point it at a replacement radio. The location's devices and their history are preserved.",
+          "data": {
+            "radio_id": "New radio ID (unique_id)",
+            "host": "Host",
+            "port": "Port",
+            "path": "WebSocket path",
+            "secure": "Secure (use wss://)",
+            "manage_settings": "Manage rtl_433 settings from Home Assistant"
+          },
+          "data_description": {
+            "radio_id": "The replacement radio's stable ID, shown in the add-on log/status as its unique_id. Leave unchanged to only edit the connection below.",
+            "host": "Hostname or IP address of the rtl_433 server.",
+            "port": "TCP port of the rtl_433 HTTP server (default 8433).",
+            "path": "WebSocket endpoint path on the server (default /ws).",
+            "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy).",
+            "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched."
+          }
+        }
+      },
+      "abort": {
+        "already_configured": "This rtl_433 server is already configured.",
+        "reconfigure_successful": "Connection settings updated."
+      },
+      "error": {
+        "cannot_connect": "Failed to connect. Check the host, port, and path, and that the rtl_433 server is reachable."
+      }
     }
   },
   "options": {

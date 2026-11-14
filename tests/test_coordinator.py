@@ -33,6 +33,7 @@ from custom_components.rtl_433.const import signal_device_update, signal_pending
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator._events import _MAX_PENDING_CANDIDATES
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_subentry
 
 DISPATCH = "custom_components.rtl_433.coordinator.base.async_dispatcher_send"
 _TRACE_LOGGER = "custom_components.rtl_433"
@@ -75,6 +76,7 @@ async def coordinator(hass, receiver_entry_builder):
     return Rtl433Coordinator(
         hass,
         entry,
+        receiver_subentry(entry),
         host="rtl433.local",
         availability_timeout=600,
         skip_keys={"model", "id", "channel", "subtype", "time", "mic"},
@@ -128,7 +130,7 @@ def test_live_event_records_state_and_dispatches(hass, coordinator):
 
     dispatch.assert_called_once()
     assert dispatch.call_args.args[1] == signal_device_update(
-        coordinator.entry.entry_id, key
+        coordinator.receiver_id, key
     )
     assert dispatch.call_args.args[2].is_replay is False
 
@@ -326,7 +328,7 @@ def test_forget_device_evicts_runtime_state(hass, coordinator):
         coordinator._on_client_event(_event())
     assert key not in coordinator.devices
     assert coordinator.pending[key].count == 1
-    assert _dispatched(dispatch) == [signal_pending_update(coordinator.entry.entry_id)]
+    assert _dispatched(dispatch) == [signal_pending_update(coordinator.receiver_id)]
 
     # forget on an unknown key is a safe no-op.
     coordinator.forget_device("nonexistent-key")
@@ -422,7 +424,11 @@ async def test_client_receives_ha_configured_event_tz(hass, receiver_entry_build
     entry.add_to_hass(hass)
 
     coordinator = Rtl433Coordinator(
-        hass, entry, host="rtl433.local", availability_timeout=600
+        hass,
+        entry,
+        receiver_subentry(entry),
+        host="rtl433.local",
+        availability_timeout=600,
     )
 
     assert coordinator._client._event_tz == configured
