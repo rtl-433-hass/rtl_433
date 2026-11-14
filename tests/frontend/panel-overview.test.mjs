@@ -136,7 +136,7 @@ test("every headline it can return is a string the panel has", () => {
 
 // -- Where the rows link ------------------------------------------------------
 
-test("the registry links are filtered to the integration, not to one hub", () => {
+test("the registry links are filtered to the integration, not to one receiver", () => {
   // The bug, stated as the URL it produces: `config_entry=` here is what made
   // the count and the page it opens disagree on an instance with two receivers.
   for (const which of ["devices", "entities"]) {

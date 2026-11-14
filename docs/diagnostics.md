@@ -25,7 +25,7 @@ processing is unaffected.
 
 ## Downloadable Diagnostics
 
-Home Assistant diagnostics include the fields each hub has seen but could not map
+Home Assistant diagnostics include the fields each receiver has seen but could not map
 to entities. Download diagnostics from **Settings → Devices & Services → rtl_433
 → ⋮ → Download diagnostics** and inspect `unmatched_field_keys`.
 

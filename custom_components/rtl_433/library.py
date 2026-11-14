@@ -1,7 +1,7 @@
 """Device-library loading for the rtl_433 integration's config-entry setup.
 
 The Home-Assistant-aware layer over the pure :mod:`pyrtl_433.library` package:
-load the shipped library once (cached on ``hass.data``) and merge a hub's stored
+load the shipped library once (cached on ``hass.data``) and merge a receiver's stored
 user overrides over it. ``async_setup_entry`` calls both during setup; kept here so ``__init__``
 stays focused on the lifecycle wiring.
 """
@@ -23,8 +23,8 @@ async def _async_load_library(
 
     The glob/parse touches the filesystem, so it runs in the executor. The
     shipped ``(registry, skip_keys)`` is cached on
-    ``hass.data[DOMAIN][DATA_LIBRARY]`` so additional hubs reuse a single load.
-    Per-hub user overrides are merged over this result in
+    ``hass.data[DOMAIN][DATA_LIBRARY]`` so additional receivers reuse a single load.
+    Per-receiver user overrides are merged over this result in
     :func:`_merge_entry_library` and cached separately per entry.
     """
     domain_data = hass.data.setdefault(DOMAIN, {})
@@ -43,9 +43,9 @@ def _merge_entry_library(
     shipped_registry: Registry,
     shipped_skip_keys: set[str],
 ) -> tuple[Registry, set[str]]:
-    """Merge this hub's stored user overrides over the shipped library.
+    """Merge this receiver's stored user overrides over the shipped library.
 
-    Reads ``entry.data[CONF_USER_MAPPINGS]`` (the per-hub normalized override
+    Reads ``entry.data[CONF_USER_MAPPINGS]`` (the per-receiver normalized override
     object) and layers it over the shipped ``(registry, skip_keys)`` via the pure
     :func:`merge_overrides` (no I/O, so no executor needed). Defensive: any
     unexpected error is logged and the shipped inputs (copied) are returned so a
@@ -56,7 +56,7 @@ def _merge_entry_library(
         return merge_overrides(shipped_registry, shipped_skip_keys, overrides)
     except Exception:  # noqa: BLE001 - never let a bad override crash setup
         LOGGER.warning(
-            "Failed to merge user mappings for hub %s; using shipped library",
+            "Failed to merge user mappings for receiver %s; using shipped library",
             entry.title,
             exc_info=True,
         )

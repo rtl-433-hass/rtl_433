@@ -108,7 +108,7 @@ class IdChange:
     new_temperature: float | None = None
     signal: float | None = None
     # Old device's last frame -> candidate's first; ``None`` when the old device
-    # has not been heard since the hub connected (a restart), so it is unknown.
+    # has not been heard since the receiver connected (a restart), so it is unknown.
     gap: timedelta | None = None
 
 
@@ -181,7 +181,7 @@ def find_id_changes(
     """
     records: dict[str, dict[str, Any]] = entry.data.get(CONF_DEVICES, {})
     # When the device has not been heard this session, its silence is counted
-    # from the moment the hub connected: nothing older is known.
+    # from the moment the receiver connected: nothing older is known.
     connected_since: datetime | None = getattr(coordinator, "_connection_time", None)
 
     candidates: dict[tuple[str, ...], list[Any]] = {}
@@ -237,7 +237,7 @@ def find_id_changes(
 
 
 def _issue_id(entry: ConfigEntry, old_key: str) -> str:
-    """The per-hub, per-device issue id (the device key is HA-safe already)."""
+    """The per-receiver, per-device issue id (the device key is HA-safe already)."""
     return f"{ISSUE_ID_CHANGED}_{entry.entry_id}_{old_key}"
 
 
@@ -321,7 +321,7 @@ async def async_follow_id_change(
 def async_track_id_changes(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: Rtl433Coordinator
 ) -> Callable[[], None]:
-    """Watch one hub for devices that came back under a new id.
+    """Watch one receiver for devices that came back under a new id.
 
     Returns the unsubscribe, which also withdraws every issue this tracker raised:
     after a reload the pending list is rebuilt from live traffic, so a still-valid
@@ -377,7 +377,7 @@ class DeviceIdChangedRepairFlow(RepairsFlow):
     """Confirm that a device came back under a new id, then re-key it."""
 
     def __init__(self, entry: ConfigEntry, old_key: str, new_key: str) -> None:
-        """Remember which hub and which pair the card is about."""
+        """Remember which receiver and which pair the card is about."""
         self._entry = entry
         self._old_key = old_key
         self._new_key = new_key
