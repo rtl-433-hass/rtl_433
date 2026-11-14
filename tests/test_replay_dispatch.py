@@ -148,7 +148,7 @@ def _sensor(
 ) -> Rtl433Sensor:
     coord = coordinator or _coord()
     sensor = Rtl433Sensor(
-        coord, "hub-entry", _DEVICE_KEY, _MODEL, descriptor or _temp_desc()
+        coord, "receiver-entry", _DEVICE_KEY, _MODEL, descriptor or _temp_desc()
     )
     sensor.entity_id = f"sensor.{_DEVICE_KEY}_temperature"
     sensor.hass = hass if hass is not None else MagicMock()
@@ -174,7 +174,7 @@ def _binary(
 ) -> Rtl433BinarySensor:
     coord = coordinator or _coord()
     entity = Rtl433BinarySensor(
-        coord, "hub-entry", device_key, model, descriptor or _motion_desc()
+        coord, "receiver-entry", device_key, model, descriptor or _motion_desc()
     )
     entity.entity_id = f"binary_sensor.{device_key.lower()}"
     entity.hass = hass if hass is not None else MagicMock()
@@ -185,7 +185,7 @@ def _binary(
 
 def _last_seen(coordinator: MagicMock | None = None) -> Rtl433LastSeenSensor:
     coord = coordinator or _coord()
-    entity = Rtl433LastSeenSensor(coord, "hub-entry", _DEVICE_KEY, _MODEL)
+    entity = Rtl433LastSeenSensor(coord, "receiver-entry", _DEVICE_KEY, _MODEL)
     entity.entity_id = f"sensor.{_DEVICE_KEY}_last_seen"
     entity.hass = MagicMock()
     entity.async_write_ha_state = MagicMock()
@@ -656,9 +656,9 @@ def test_last_seen_does_not_seed_from_replay_only_device():
 # --------------------------------------------------------------------------- #
 
 
-async def test_event_entity_still_suppresses_replay(hass, hub_entry_builder):
+async def test_event_entity_still_suppresses_replay(hass, receiver_entry_builder):
     """Rtl433Event must not fire on is_replay (pre-existing contract)."""
-    entry = hub_entry_builder(
+    entry = receiver_entry_builder(
         devices={
             "Honeywell-Doorbell-7": {
                 "model": "Honeywell-Doorbell",

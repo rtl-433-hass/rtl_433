@@ -69,7 +69,7 @@ def _dispatched(dispatch) -> list[str]:
 
 
 @pytest.fixture
-def make_coordinator(hass, hub_entry_builder):
+def make_coordinator(hass, receiver_entry_builder):
     """Return a factory for a coordinator with a chosen adopted/ignored state.
 
     A factory rather than a fixture because the whole point of this module is
@@ -80,7 +80,7 @@ def make_coordinator(hass, hub_entry_builder):
     """
 
     def _make(*, adopted: set[str] | None = None, ignored: set[str] | None = None):
-        entry = hub_entry_builder(availability_timeout=600)
+        entry = receiver_entry_builder(availability_timeout=600)
         entry.add_to_hass(hass)
         coordinator = Rtl433Coordinator(
             hass,
