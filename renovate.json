@@ -12,6 +12,13 @@
     "**/examples/**",
     "**/__fixtures__/**"
   ],
+  "customDatasources": {
+    "ha-python": {
+      "description": "Python version of the latest stable Home Assistant release (HA core's master branch tracks stable)",
+      "defaultRegistryUrlTemplate": "https://raw.githubusercontent.com/home-assistant/core/master/.python-version",
+      "format": "plain"
+    }
+  },
   "customManagers": [
     {
       "customType": "regex",
@@ -24,13 +31,21 @@
     },
     {
       "customType": "regex",
-      "description": "Track Python version in pyproject.toml requires-python",
+      "description": "Track the Python version of the latest stable Home Assistant release in .python-version, which uv (and so every CI workflow) reads",
+      "managerFilePatterns": ["/^\\.python-version$/"],
+      "matchStrings": ["^(?<currentValue>\\d+\\.\\d+)"],
+      "depNameTemplate": "ha-python",
+      "datasourceTemplate": "custom.ha-python"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the Python version of the latest stable Home Assistant release in pyproject.toml requires-python",
       "managerFilePatterns": ["/^pyproject\\.toml$/"],
       "matchStrings": [
         "requires-python\\s*=\\s*\">=(?<currentValue>[\\d.]+)\""
       ],
-      "depNameTemplate": "python",
-      "datasourceTemplate": "python-version"
+      "depNameTemplate": "ha-python",
+      "datasourceTemplate": "custom.ha-python"
     }
   ],
   "packageRules": [
@@ -46,13 +61,21 @@
       ]
     },
     {
-      "matchDepNames": ["python"],
+      "description": "HA Python: track major.minor only; plain datasource has no timestamps so skip release age; review before merging",
+      "matchDatasources": ["custom.ha-python"],
+      "extractVersion": "^(?<version>\\d+\\.\\d+)",
       "groupName": "Python version",
+      "minimumReleaseAge": null,
       "automerge": false,
-      "description": "Python version is manually managed to track Home Assistant requirements",
       "prBodyNotes": [
-        "Do not automerge. This project tracks the Home Assistant Python requirement, which is the previous minor version of Python. Verify the new version matches before merging."
+        "Do not automerge. Check that the hacs.json Home Assistant floor supports this Python, and bump the `[tool.uv] environments` constraint in pyproject.toml alongside it."
       ]
+    },
+    {
+      "description": "Python version is tracked via ha-python; ignore the built-in extraction of .python-version (pyenv) and setup-python's python-version (github-actions), which propose the latest CPython instead of Home Assistant's",
+      "matchManagers": ["pyenv", "github-actions"],
+      "matchDepNames": ["python"],
+      "enabled": false
     },
     {
       "matchPackageNames": ["ruff", "pre-commit", "codespell"],
