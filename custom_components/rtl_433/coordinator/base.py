@@ -25,7 +25,7 @@ single place every runtime attribute is declared:
 The client's callbacks are wired into this coordinator: ``on_event`` ->
 :meth:`._events._EventProcessingMixin._on_client_event` (HA-side dispatch), and
 ``on_hub_update`` -> :meth:`_emit_hub_update` (connect/disconnect edge handling,
-hub-identity refresh, and the ``signal_hub_update`` dispatch). The library client
+hub-identity refresh, and the ``signal_receiver_update`` dispatch). The library client
 does not own the managed-SDR policy or the availability watchdog, so those are
 driven here off the connect edge and a HA time-interval respectively.
 
@@ -84,8 +84,8 @@ from ..const import (
     sdr_store_key,
     signal_device_update,
     signal_hub_noise,
-    signal_hub_update,
     signal_pending_update,
+    signal_receiver_update,
 )
 from ._events import PendingDevice, _EventProcessingMixin
 from ._sdr import _SdrSettingsMixin, _SdrStore
@@ -188,7 +188,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         ``device_fields``: ``dict[str, set[str]]`` field keys seen per device.
         ``connected``: ``bool`` whether the client's socket is currently open
             (delegates to the client).
-        ``hub_available``: ``bool`` whether the integration can hear this hub —
+        ``receiver_available``: ``bool`` whether the integration can hear this hub —
             the socket state, with no grace window, which takes every device
             behind the hub unavailable the moment it drops (see ``_watchdog.py``).
         ``meta``: ``dict[str, Any]`` latest SDR/meta configuration (client-sourced).
@@ -367,7 +367,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
         # reporting: the outage duration in the reconnect log line, and
         # ``disconnected_since`` in a diagnostics dump.
         self._disconnected_since: datetime | None = None
-        # Last gate state dispatched on ``signal_hub_availability``, so the
+        # Last gate state dispatched on ``signal_receiver_availability``, so the
         # repaint fires once per flip rather than on every check.
         self._devices_offline = False
         # Whether a connection has ever succeeded, so the first connect logs as a
@@ -732,7 +732,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
                 self._async_note_disconnected()
 
         self._maybe_refresh_hub_identity()
-        async_dispatcher_send(self.hass, signal_hub_update(self.entry.entry_id))
+        async_dispatcher_send(self.hass, signal_receiver_update(self.entry.entry_id))
 
     # ------------------------------------------------------------------ #
     # Receiver noise: collected per log line, published on a schedule    #

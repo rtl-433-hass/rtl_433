@@ -7,7 +7,7 @@
 
 [project]
 name = "rtl_433"
-version = "0.21.0"   # Version is managed by release-please (also updates manifest.json)
+version = "0.22.0"   # Version is managed by release-please (also updates manifest.json)
 description = "Home Assistant custom integration for the rtl_433 WebSocket API"
 requires-python = ">=3.14"
 
@@ -23,10 +23,10 @@ requires-python = ">=3.14"
 # they cannot drift apart (the same guard already used for ruff).
 [dependency-groups]
 dev = [
-    "pytest-homeassistant-custom-component==0.13.373",
-    "pyrtl_433==0.4.1",
-    "home-assistant-frontend==20260930.4",
-    "mutmut==3.8.0",
+    "pytest-homeassistant-custom-component==0.13.375",
+    "pyrtl_433==0.5.0",
+    "home-assistant-frontend==20261028.5",
+    "mutmut==3.8.1",
     "mutmut-ratchet>=0.4.0",
 ]
 
@@ -232,7 +232,7 @@ escalate_paths = [
 # render, so a mutated abort reason / error key / step id is caught by it as
 # surely as by a flow-driving test.
 "tests/test_translations.py" = ["config_flow.py", "options_flow.py"]
-"tests/test_mut_init.py" = ["__init__.py", "migration.py", "hub_settings.py"]
+"tests/test_mut_init.py" = ["__init__.py", "migration.py", "receiver_settings.py"]
 # ``settings.py`` holds the sentinel rules behind the hub / device / mapping
 # forms, and both the options flow and the panel's WebSocket commands are only
 # presentation over it -- so a change to either flow test has to reach it.
@@ -283,4 +283,13 @@ escalate_paths = [
     "sensor.py",
     "event.py",
     "diagnostics.py",
+]
+# Reconnect-replay must not publish historical readings as new HA states. The
+# stem does not auto-resolve to a single module; the contract spans entity base
+# dispatch, sensor/binary seed, LastSeen, and event suppression.
+"tests/test_replay_dispatch.py" = [
+    "entity.py",
+    "sensor.py",
+    "binary_sensor.py",
+    "event.py",
 ]

@@ -126,20 +126,47 @@ every Honeywell 5800 door sensor, window sensor, PIR and tilt sensor reports
 
 Home Assistant can change a binary sensor's **device class** per entity, which is
 finer than any mapping override can be. Open the entity, then its settings (the
-gear icon) → **Shown as**, and pick a different class. The choice lives in Home
-Assistant's entity registry, so it survives restarts and hub reloads, and the
-value the integration shipped is retained separately as the entity's original
-class — a later library update will not overwrite your choice.
+gear icon) → **Show as**, and pick a different class. Every binary sensor class
+is offered, with the ones closest to the current class listed first. The choice
+lives in Home Assistant's entity registry, so it survives restarts and hub
+reloads, and the value the integration shipped is retained separately as the
+entity's original class — a later library update will not overwrite your choice.
 
-This is how you tell one Honeywell 5800 sensor from another. They all share a
-model string, so a `models:` entry cannot separate them, and which loop bit a
-given sensor reports on is chosen by whoever installed it:
+**Show as** changes the icon and the state wording (*Detected* rather than
+*Open*), but not the entity's name. Set a name on the same page if the shipped
+one no longer fits.
 
-- A door or window sensor reports on `contact_open` or `reed_open`. Both ship as
-  **Opening**; retype to **Door** or **Window** for the matching icon and wording.
-- A PIR reports on the same fields, so retype it to **Motion** or **Occupancy**.
-- The loop your sensor does *not* use still produces an entity, which simply never
-  changes state. Hide it from the same entity settings page.
+#### Alarm-system sensors that show as "Opening"
+
+Wireless sensors made for alarm panels — Honeywell 5800 and compatible 2GIG
+sensors (`Honeywell-Security`), DSC (`DSC-Security`) and Visonic PowerCode
+(`Visonic-Powercode`) — often appear as an **Opening** sensor, or as a generic
+**Safety** sensor named "Alarm", even when the unit is a motion detector, glass
+break, flood or smoke sensor.
+
+That is a limit of what the sensor transmits, not a mapping mistake. These sensors
+send only "zone faulted" and "zone restored". The type of zone — door, motion,
+smoke, flood — is programmed into the alarm panel by the installer and is never
+sent over the air, and many of these transmitters have terminals for any wired
+contact. Every sensor of a given brand reports the same model string, so not even
+a [`models:` entry](#model-scoped-mappings-models) can tell them apart. The
+library therefore uses a generic class, consistently: a fault is **on** and a
+restore is **off**, so only the type needs correcting, never the state.
+
+To correct one sensor:
+
+1. Go to **Settings → Devices & services → Entities** and open the sensor's
+   entity (or open it from the device page).
+2. Open its settings (the gear icon) and set **Show as** to what the sensor
+   really is — for example **Motion**, **Glass break**, **Moisture** (for a flood
+   sensor), **Smoke**, **Door** or **Window**.
+3. Give the entity a name that matches, since its name stays as shipped (for
+   example "Opening", "Contact open" or "Alarm").
+
+Honeywell sensors report two loops, `contact_open` and `reed_open`, and which one
+a sensor uses depends on how it was installed. The loop your sensor does not use
+still creates an entity that never changes state; hide it from the same settings
+page.
 
 !!! note "Entity category is not adjustable from the UI"
 

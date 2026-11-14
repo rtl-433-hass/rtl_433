@@ -39,7 +39,7 @@ integration adds to Home Assistant's own WebSocket API see
     `migration.py` (config-entry v1→v2 migration + one-time legacy cleanups,
     re-exported `async_migrate_entry`), `library.py` (device-library load/merge
     over `pyrtl_433.library`, cached on `hass.data`),
-    and `hub_settings.py` (hub-entry setting resolvers: `_hub_*`,
+    and `receiver_settings.py` (hub-entry setting resolvers: `_hub_*`,
     `_calibration_map`).
 - `docs/device-library.md` — the Home-Assistant-facing device-library guide (UI
   overrides, diagnostics, workflow). The **authoritative schema reference** is
@@ -92,7 +92,7 @@ own copy of any of that; it consumes the library:
   Events arrive via the client's **`on_event`** callback →
   `_EventProcessingMixin._on_client_event` (HA-side dispatch), and connectivity /
   meta / stats / dev-info changes via **`on_hub_update`** → `_emit_hub_update`
-  (connect/disconnect edge handling, hub-identity refresh, `signal_hub_update`
+  (connect/disconnect edge handling, hub-identity refresh, `signal_receiver_update`
   fan-out). The library owns neither the managed-SDR policy nor the availability
   watchdog, so those are driven HA-side off the connect edge and a time interval.
 - **`pyrtl_433.normalizer`** — `normalize` / `device_key` / `NormalizedEvent` /
@@ -207,6 +207,16 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   or entity `unique_id`s; do not open-code a re-key elsewhere. It re-emits the
   `COMPATIBILITY_CONTRACT.md` identifier/unique_id templates verbatim (only the
   `device_key` value changes), so the contract is unaffected by a replace.
+- `id_change.py` suggests a replacement through a fixable repair when an
+  added device has gone quiet and exactly one same-model/channel/subtype pending
+  candidate fits, with at least two sightings and similar temperature/humidity
+  where both report them. Ambiguity in either direction suppresses the suggestion.
+  This is a heuristic, not proof of physical identity: replacement **always
+  requires user confirmation**, and the flow rechecks the match on submission.
+  Only `async_replace_device` rewrites identity. There is no automatic replacement
+  setting or execution path. Notices are in memory, withdrawn when no longer
+  valid, and rebuilt from live traffic after reload.
+
 - `async_migrate_entry` (`migration.py`, config-entry `VERSION` 1 → 2) performs a
   **in-place upgrade from 0.1.0**: it re-homes the legacy per-device
   config entries' registry devices/entities onto the hub entry (preserving
@@ -276,7 +286,7 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   entry **preserves** its stable radio `unique_id` by default, but the form also
   offers an optional `radio_id` field to **rebind** it to a *new* stable radio id
   — the "replace a dead dongle" path. Rebinds funnel through the module-level
-  `async_rebind_hub(hass, entry, new_unique_id, conn_updates, title=…)` helper,
+  `async_rebind_receiver(hass, entry, new_unique_id, conn_updates, title=…)` helper,
   which preserves `entry_id` (so every nested device/entity/history survives),
   aborts `already_configured` when the target id is owned by a *populated* entry,
   and adopts-and-deletes an *empty orphan* entry that already holds the target id
@@ -290,9 +300,9 @@ The integration is **rfxtrx-style**, not Battery-Notes-style:
   `async_step_reconfigure` uses `async_update_and_abort` (not
   `async_update_reload_and_abort`), the Supervisor discovery step passes
   `reload_on_update=False` to `_abort_if_unique_id_configured`, and
-  `async_rebind_hub` does not reload either. `_async_update_listener` then
+  `async_rebind_receiver` does not reload either. `_async_update_listener` then
   compares `(host, port, path, secure, unique_id)` (`_hub_connection`,
-  `hub_settings.py`) against `coordinator.connection_snapshot` and reloads once
+  `receiver_settings.py`) against `coordinator.connection_snapshot` and reloads once
   when it differs — the same snapshot-vs-live pattern as `manage_settings` /
   `calibration_snapshot` / `user_mappings_snapshot`. Never reintroduce a
   flow-side reload.
@@ -436,7 +446,7 @@ second implementation.
 
 The per-device **Last seen** sensor (`Rtl433LastSeenSensor`, `sensor.py`) is
 **synthetic** — it is *not* driven by a device-library field. Two invariants
-must survive any refactor of `async_setup_hub_platform` (`entity.py`) and of the
+must survive any refactor of `async_setup_receiver_platform` (`entity.py`) and of the
 base `async_added_to_hass` baseline:
 
 - **Created unconditionally, once per device, on the `sensor` platform only.**
@@ -444,7 +454,7 @@ base `async_added_to_hass` baseline:
   sentinel `field_key="__last_seen__"` that no rtl_433 event can carry,
   `object_suffix="last_seen"`, `device_class=timestamp`, diagnostic,
   descriptor `enabled_by_default=False`) and added via the **`per_device_factory`
-  hook** of `async_setup_hub_platform` (`async_setup_entry` passes
+  hook** of `async_setup_receiver_platform` (`async_setup_entry` passes
   `per_device_factory=Rtl433LastSeenSensor`). It is **disabled by default for
   periodic devices** but the sensor flips `_attr_entity_registry_enabled_default`
   to `True` for **event-driven devices** (`coordinator.is_event_driven_device`),
@@ -478,9 +488,9 @@ base `async_added_to_hass` baseline:
 
 `Rtl433Event` (`event.py`) is the third platform (`Platform.EVENT` in
 `PLATFORMS`). Unlike the Last seen sensor it is **field-driven** — built via
-`async_setup_hub_platform` for descriptors whose `platform == "event"`, with
+`async_setup_receiver_platform` for descriptors whose `platform == "event"`, with
 **no `per_device_factory`** — using the **unchanged shared 5-arg constructor**.
-Invariants that must survive refactors of `async_setup_hub_platform`, the
+Invariants that must survive refactors of `async_setup_receiver_platform`, the
 coordinator watchdog, and the devices map:
 
 - **Flag-based watchdog dedupe.** It overrides `_handle_dispatch` to suppress the
@@ -650,10 +660,11 @@ because these are the contracts the integration relies on:
   uses). The backlog gate is what closes the **HA-restart re-delivery** case: on
   a fresh process the high-water mark is unset, so a doorbell pressed *seconds*
   before the restart is recent enough to pass the age test, yet it predates the
-  reconnect and so must not re-fire. Any of the three outcomes
-  **seeds sensor values** but must **NOT** fire `event` entities or refresh
-  `last_seen` / `available`, so an offline device is not marked available by
-  the replay. A suppressed `event` transmission logs at **DEBUG**
+  reconnect and so must not re-fire. None of the three outcomes may fire
+  `event` entities or refresh `last_seen` / `available`, so an offline device
+  is not marked available by the replay. A replayed frame **may set a sensor or
+  binary_sensor value, but only when newer than the value the entity holds**
+  (see the next bullet). A suppressed `event` transmission logs at **DEBUG**
   (`Rtl433Event._handle_dispatch`) — it happens on every reconnect, so it is not
   logged at INFO. The classification is carried by
   `NormalizedEvent.is_replay` / `event_time` (stamped via
@@ -666,6 +677,34 @@ because these are the contracts the integration relies on:
   classification does not depend on the host process zone). **Limitation:** with server
   timestamps disabled (`report_meta notime`) there is no usable `time`, so every
   frame is treated as live and **events fire on replay**.
+- **Replayed values on field entities** (`Rtl433Entity._handle_dispatch` /
+  `_replay_is_newer`, `entity.py`). `is_replay` lumps together frames already
+  delivered, frames sent while HA was not listening, and frames from before
+  this connection; only the middle kind is news. Each field entity keeps
+  `_value_time`, the server `event_time` of the frame its value came from, and
+  persists it in its restore data (`event_time`, beside HA's own sensor keys,
+  which HA ignores on read — downgrade-safe). A replayed frame is adopted only
+  when its `event_time >= _value_time` (or `_value_time` is unknown); equal is
+  accepted so a calibration reload re-applies the new transform to the frame
+  behind the restored value. Two rules must survive refactors:
+  - **Never drop every replay.** That loses a door that opened while HA was
+    restarting, and freezes every sensor when the server clock lags HA's
+    (every frame then reads STALE-GAP). The comparison is server time against
+    server time, so clock skew does not matter.
+  - **Never write each replayed frame.** A reconnect backlog arrives within
+    milliseconds; writing each step records minutes of readings all stamped
+    "now". Adopted replays are written once, `REPLAY_WRITE_DELAY` after the
+    first, and not at all when the value did not change (a `force_update`
+    sensor would otherwise record a duplicate per reconnect). A live write
+    cancels the pending one.
+
+  The backlog usually lands before the platforms are set up, so
+  `async_added_to_hass` weighs the coordinator's cached replayed frame against
+  the restored value; `__init__` seeds from a *live* cached frame only.
+  Detect-only `clear_delay` binary sensors refuse replays outright
+  (`_accepts_replay`); `Rtl433Event` and the Last seen sensor replace
+  `_handle_dispatch` and never adopt one. A watchdog `is_repaint`
+  only re-writes availability and never re-applies the cached value.
 - **Post-connection device-registration gate** (HA-side, `_events.py`
   `_on_client_event` / `_maybe_register_device`, `_connection_time`,
   `DISCOVERY_BACKLOG_GRACE`). Distinct from the replay/event
@@ -750,7 +789,7 @@ recently a device transmitted. The hub availability check also requires a
 working connection to the server. End-user docs live in
 [docs/availability.md](docs/availability.md#hub-connection).
 
-- **`coordinator.hub_available` is exactly `self.connected`.** No grace window,
+- **`coordinator.receiver_available` is exactly `self.connected`.** No grace window,
   no debounce, no timer: the socket drops, every device behind the hub is
   unavailable on the same tick. **Do not add a delay here.** It was tried and
   removed because a delay presents readings as current while the
@@ -790,27 +829,27 @@ working connection to the server. End-user docs live in
   `available` is False and the state string is then unrestorable. Without it a
   restart during an outage strands every never-expire contact at `unknown` until
   it next transmits — possibly days.
-- **The hub's own diagnostic sensors read it too.** `Rtl433HubSensor.available`
-  returns `hub_available`: every value it renders is HTTP `/cmd`-sourced, so an
+- **The hub's own diagnostic sensors read it too.** `Rtl433ReceiverSensor.available`
+  returns `receiver_available`: every value it renders is HTTP `/cmd`-sourced, so an
   outage freezes it with nothing on the entity to say so. A key missing from a
   *live* payload still reads `unknown` (a `None` native value), not unavailable.
-  Two hub entities stay ungated: `Rtl433HubConnectivity` (it *is* the connection
+  Two hub entities stay ungated: `Rtl433ReceiverConnectivity` (it *is* the connection
   report — `available` is hardcoded `True` and it flips `off` on the drop with no
-  grace window — same as the devices now) and `Rtl433HubControl` (availability is
+  grace window — same as the devices now) and `Rtl433ReceiverControl` (availability is
   a capability gate on
   `meta`).
 - **The clock starts at `async_start`,** not at the first drop, so a Home
   Assistant restart while the server is down expires the restored states at once
   instead of leaving them available forever.
-- **Check availability on state reads; dispatch on connection changes.** Entities evaluate `hub_available` on every
+- **Check availability on state reads; dispatch on connection changes.** Entities evaluate `receiver_available` on every
   state read, so it is always correct; the coordinator only *repaints*. The
   disconnect edge and the connect edge each call it, and each watchdog tick
   re-checks as a cheap backstop in case an edge is ever missed. All
   three funnel into `_async_sync_hub_availability`, which dispatches
-  `SIGNAL_HUB_AVAILABILITY` **once per flip** (a hub-wide signal,
-  separate from `SIGNAL_HUB_UPDATE`, which also fires on every meta/stats refresh
+  `SIGNAL_RECEIVER_AVAILABILITY` **once per flip** (a hub-wide signal,
+  separate from `SIGNAL_RECEIVER_UPDATE`, which also fires on every meta/stats refresh
   and would otherwise write state for every device entity on each poll). Both
-  `Rtl433Entity` and `Rtl433HubEntity` subscribe: `SIGNAL_HUB_UPDATE` covers the
+  `Rtl433Entity` and `Rtl433ReceiverEntity` subscribe: `SIGNAL_RECEIVER_UPDATE` covers the
   connect/disconnect edges, when a gated entity's `available`
   changes.
 - **Logging.** The library logs drops at DEBUG under its own logger, which is
@@ -882,8 +921,8 @@ keep this contributor-facing.
   hide unsupported fields without touching consumers.
   - **Runtime `available` gate** (`Callable[[meta], bool]`, default `_always`):
     distinct from `capability` (evaluated once at setup to decide whether the
-    entity is *created*), `available` is read by `Rtl433HubControl.available` on
-    **every `signal_hub_update`** to decide whether the *created* control reports
+    entity is *created*), `available` is read by `Rtl433ReceiverControl.available` on
+    **every `signal_receiver_update`** to decide whether the *created* control reports
     available for the current `meta`. Two fields override it, keyed on
     `len(meta["frequencies"])` (unknown/pre-connect ⇒ available): `hop_interval`
     is available **only when hopping** (`> 1` frequency — a single frequency has
@@ -1294,9 +1333,9 @@ Full runbook:
   entities.
 - Keep `const.py` the single source of truth for config keys and defaults
   (`DEFAULT_PORT=8433`, `DEFAULT_PATH="/ws"`, `DEFAULT_AVAILABILITY_TIMEOUT=600`)
-  and for the dispatcher signals (`SIGNAL_NEW_DEVICE`, `SIGNAL_HUB_UPDATE` — the
+  and for the dispatcher signals (`SIGNAL_NEW_DEVICE`, `SIGNAL_RECEIVER_UPDATE` — the
   latter fans connectivity/meta/stats changes out to the hub entities — and
-  `SIGNAL_HUB_AVAILABILITY`, the per-flip device repaint behind the
+  `SIGNAL_RECEIVER_AVAILABILITY`, the per-flip device repaint behind the
   hub-connection gate).
 - Always run `pytest tests/` before proposing a change, and follow the
   conventional-commit and lint rules in [CONTRIBUTING.md](CONTRIBUTING.md).

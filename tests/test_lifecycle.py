@@ -40,6 +40,7 @@ from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
     mock_restore_cache,
+    mock_restore_cache_with_extra_data,
 )
 
 from custom_components.rtl_433.const import (
@@ -53,21 +54,21 @@ from custom_components.rtl_433.const import (
     CONF_DEVICES,
     CONF_ENTRY_TYPE,
     CONF_HOST,
-    CONF_HUB_ENTRY_ID,
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    CONF_RECEIVER_ENTRY_ID,
     DEVICE_CALIBRATION,
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
-    ENTRY_TYPE_HUB,
+    ENTRY_TYPE_RECEIVER,
     LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
     NOISE_PUBLISH_INTERVAL,
-    signal_hub_update,
+    signal_receiver_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
@@ -281,7 +282,7 @@ async def test_hub_connectivity_sensor(hass, hub_entry_builder):
 
     # Mark connected and notify -> state on.
     coordinator._client.connected = True
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == "on"
 
@@ -341,7 +342,7 @@ async def test_hub_diagnostic_sensors_managed(hass, hub_entry_builder):
         "frames": {"count": 12, "fsk": 3, "events": 40},
         "stats": [{"name": "Acurite", "events": 40}],
     }
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -525,7 +526,7 @@ async def test_a_burst_of_noise_lines_writes_once_per_interval(hass, hub_entry_b
     )
     hub_updates: list[None] = []
     async_dispatcher_connect(
-        hass, signal_hub_update(hub.entry_id), lambda: hub_updates.append(None)
+        hass, signal_receiver_update(hub.entry_id), lambda: hub_updates.append(None)
     )
 
     coordinator._client._handle_text_frame(_auto_level_frame(-21.0))
@@ -663,7 +664,7 @@ async def test_a_hub_refresh_after_a_noise_line_still_reaches_every_hub_entity(
     coordinator = _coordinator(hass, hub)
     hub_updates: list[None] = []
     async_dispatcher_connect(
-        hass, signal_hub_update(hub.entry_id), lambda: hub_updates.append(None)
+        hass, signal_receiver_update(hub.entry_id), lambda: hub_updates.append(None)
     )
 
     coordinator._client._handle_text_frame(_auto_level_frame(-21.0))
@@ -724,7 +725,7 @@ async def test_hub_diagnostic_sensors_unmanaged(hass, hub_entry_builder):
         "gain": "",  # empty string -> rendered as "auto"
         "ppm_error": 0,
     }
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     ent_reg = er.async_get(hass)
@@ -1126,7 +1127,7 @@ async def test_phantom_unknown_device_cleaned_up(hass, hub_entry_builder):
 # --------------------------------------------------------------------------- #
 async def test_migration_folds_legacy_device_entries_into_hub(hass):
     """A v1 hub + two v1 device entries migrate to one hub with devices map."""
-    hub_entry_id = "huboldid01"
+    receiver_entry_id = "huboldid01"
     key_a = "Acurite-606TX-42"
     key_b = "EnergyMeter-2000-1234"
 
@@ -1136,9 +1137,9 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
         title="rtl_433 (rtl433.local)",
         version=1,
         unique_id="hub:rtl433.local:8433",
-        entry_id=hub_entry_id,
+        entry_id=receiver_entry_id,
         data={
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             CONF_HOST: "rtl433.local",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
@@ -1149,10 +1150,10 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
         domain=DOMAIN,
         title="Acurite-606TX",
         version=1,
-        unique_id=f"{hub_entry_id}:{key_a}",
+        unique_id=f"{receiver_entry_id}:{key_a}",
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_entry_id,
+            CONF_RECEIVER_ENTRY_ID: receiver_entry_id,
             CONF_DEVICE_KEY: key_a,
             CONF_MODEL: "Acurite-606TX",
         },
@@ -1162,10 +1163,10 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
         domain=DOMAIN,
         title="EnergyMeter-2000",
         version=1,
-        unique_id=f"{hub_entry_id}:{key_b}",
+        unique_id=f"{receiver_entry_id}:{key_b}",
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-            CONF_HUB_ENTRY_ID: hub_entry_id,
+            CONF_RECEIVER_ENTRY_ID: receiver_entry_id,
             CONF_DEVICE_KEY: key_b,
             CONF_MODEL: "EnergyMeter-2000",
         },
@@ -1185,30 +1186,30 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
     # couple of entities each — keyed exactly as 0.1.0 created them.
     device_a_dev = dev_reg.async_get_or_create(
         config_entry_id=device_a.entry_id,
-        identifiers={(DOMAIN, f"{hub_entry_id}:{key_a}")},
+        identifiers={(DOMAIN, f"{receiver_entry_id}:{key_a}")},
     )
     device_b_dev = dev_reg.async_get_or_create(
         config_entry_id=device_b.entry_id,
-        identifiers={(DOMAIN, f"{hub_entry_id}:{key_b}")},
+        identifiers={(DOMAIN, f"{receiver_entry_id}:{key_b}")},
     )
     temp_entry = ent_reg.async_get_or_create(
         "sensor",
         DOMAIN,
-        f"{hub_entry_id}:{key_a}:T",
+        f"{receiver_entry_id}:{key_a}:T",
         config_entry=device_a,
         device_id=device_a_dev.id,
     )
     hum_entry = ent_reg.async_get_or_create(
         "sensor",
         DOMAIN,
-        f"{hub_entry_id}:{key_a}:H",
+        f"{receiver_entry_id}:{key_a}:H",
         config_entry=device_a,
         device_id=device_a_dev.id,
     )
     watts_entry = ent_reg.async_get_or_create(
         "sensor",
         DOMAIN,
-        f"{hub_entry_id}:{key_b}:watts",
+        f"{receiver_entry_id}:{key_b}:watts",
         config_entry=device_b,
         device_id=device_b_dev.id,
     )
@@ -1227,7 +1228,7 @@ async def test_migration_folds_legacy_device_entries_into_hub(hass):
     # Both devices are now associated with the hub config entry.
     for key in (key_a, key_b):
         device = dev_reg.async_get_device_by_identifier(
-            (DOMAIN, f"{hub_entry_id}:{key}"), hub_entry_id
+            (DOMAIN, f"{receiver_entry_id}:{key}"), receiver_entry_id
         )
         assert device is not None
         # One owner per device, so this also says neither legacy entry owns it.
@@ -1934,15 +1935,18 @@ async def test_fresh_event_at_reconnect_still_fires(hass, hub_entry_builder, eve
     assert dt_util.parse_datetime(after.state) > dt_util.parse_datetime(first_fired_at)
 
 
-async def test_sensor_seeds_from_replay_but_event_does_not_fire(
+async def test_sensor_seeds_newest_replay_once_and_event_does_not_fire(
     hass, hub_entry_builder, caplog
 ):
-    """A reconnect replay seeds a sensor's value while the event stays unfired.
+    """A replay burst seeds an empty sensor once, with its newest value.
 
     A device with both a measurement field (temperature) and an event field
-    (button) is fed ONLY a stale replayed frame (no prior live frame). The sensor
-    must seed its value and the device snapshot must record it, but the event
-    entity must stay ``unknown`` (never fired) and ``last_seen`` is NOT stamped.
+    (button) is fed only stale replayed frames (no prior live frame, nothing
+    restored). The sensor has no value to protect, so the backlog is the best
+    reading there is -- but it is written once, after the burst settles, and
+    only as its newest value: writing each frame would record a run of
+    historical readings all stamped "now". The event entity never fires and
+    ``last_seen`` is not stamped. A later live frame still updates at once.
     """
     device_key = "Acurite-606TX-42"
     hub = await _setup_hub(
@@ -1970,39 +1974,134 @@ async def test_sensor_seeds_from_replay_but_event_does_not_fire(
     # value shows until the timeout). A replay must not *advance* it, so capture
     # the baseline and assert the replayed frame leaves it untouched.
     baseline_seen = coordinator.last_seen[device_key]
+    # No restore cache and no prior live reading: temperature stays unknown.
+    assert hass.states.get(temp_eid).state == "unknown"
 
-    # Stale frame (frame time far behind now) -> replay: seeds sensor, no fire.
+    # Stale then live, under a fixed wall clock so classification is deterministic.
     with (
         freeze_time("2026-05-25T10:30:00+00:00"),
         caplog.at_level(logging.DEBUG, logger="custom_components.rtl_433"),
     ):
+        # Frame times far behind now -> replays: a burst of three readings.
+        for minute, temp in ((0, 21.0), (1, 21.2), (2, 21.4)):
+            _feed(
+                coordinator,
+                {
+                    "model": "Acurite-606TX",
+                    "id": 42,
+                    "temperature_C": temp,
+                    "button": "A",
+                    "time": f"2026-05-25T10:0{minute}:00Z",
+                },
+            )
+        await hass.async_block_till_done()
+
+        # Nothing is written while the burst may still be arriving ...
+        assert coordinator.devices[device_key].fields["temperature_C"] == 21.4
+        assert hass.states.get(temp_eid).state == "unknown"
+        # ... then the newest value is written once.
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=2))
+        await hass.async_block_till_done()
+        assert hass.states.get(temp_eid).state == "21.4"
+        # The event entity never fired (still unknown, no event_type).
+        button_state = hass.states.get(button_eid)
+        assert button_state.state == "unknown"
+        assert button_state.attributes["event_type"] is None
+        # Liveness was NOT refreshed by the replay: last_seen unchanged from the
+        # setup baseline (the replay must not stamp it to the frame/now time).
+        assert coordinator.last_seen[device_key] == baseline_seen
+        # The ignored event-field transmission was logged at DEBUG.
+        assert any(
+            "ignored an old/duplicate" in r.message and r.levelno == logging.DEBUG
+            for r in caplog.records
+        )
+
+        # A subsequent live frame (time ≈ frozen now) publishes the measurement.
         _feed(
             coordinator,
             {
                 "model": "Acurite-606TX",
                 "id": 42,
-                "temperature_C": 21.4,
+                "temperature_C": 22.0,
                 "button": "A",
-                "time": "2026-05-25T10:00:00Z",
+                "time": "2026-05-25T10:30:00Z",
             },
         )
         await hass.async_block_till_done()
+        assert hass.states.get(temp_eid).state == "22.0"
 
-    # The sensor seeded its value from the replay.
-    assert hass.states.get(temp_eid).state == "21.4"
-    assert coordinator.devices[device_key].fields["temperature_C"] == 21.4
-    # The event entity never fired (still unknown, no event_type).
-    button_state = hass.states.get(button_eid)
-    assert button_state.state == "unknown"
-    assert button_state.attributes["event_type"] is None
-    # Liveness was NOT refreshed by the replay: last_seen unchanged from the
-    # setup baseline (the replay must not stamp it to the frame/now time).
-    assert coordinator.last_seen[device_key] == baseline_seen
-    # The ignored event-field transmission was logged at DEBUG.
-    assert any(
-        "ignored an old/duplicate" in r.message and r.levelno == logging.DEBUG
-        for r in caplog.records
+
+@pytest.mark.parametrize(
+    ("replay_temp", "replay_time", "expected"),
+    [
+        # Older than the restored reading: already-recorded history, ignored.
+        (19.0, "2026-05-25T09:50:00Z", "20.5"),
+        # Newer: sent while Home Assistant was down, so it is the current value.
+        (23.5, "2026-05-25T10:20:00Z", "23.5"),
+    ],
+    ids=["older-replay-ignored", "newer-replay-adopted"],
+)
+async def test_restart_replay_compared_with_restored_value_time(
+    hass, hub_entry_builder, replay_temp, replay_time, expected
+):
+    """After a restart a replay wins only when newer than the restored value.
+
+    The restore data carries the server timestamp of the restored reading, and
+    the backlog arrives before the entity exists (``async_start`` runs before the
+    platforms are set up), so the decision is made from the coordinator's cached
+    frame while the entity is added.
+    """
+    device_key = "Acurite-606TX-42"
+    hub = hub_entry_builder(
+        availability_timeout=600,
+        devices={
+            device_key: {
+                CONF_MODEL: "Acurite-606TX",
+                DEVICE_FIELDS: ["temperature_C"],
+            }
+        },
     )
+    hub.add_to_hass(hass)
+    temp_eid = "sensor.acurite_606tx_42_temperature"
+    er.async_get(hass).async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{hub.entry_id}:{device_key}:T",
+        config_entry=hub,
+        suggested_object_id="acurite_606tx_42_temperature",
+    )
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(temp_eid, "20.5"),
+                {
+                    "native_value": 20.5,
+                    "native_unit_of_measurement": "°C",
+                    "event_time": "2026-05-25T10:00:00+00:00",
+                },
+            )
+        ],
+    )
+
+    replay = {
+        "model": "Acurite-606TX",
+        "id": 42,
+        "temperature_C": replay_temp,
+        "time": replay_time,
+    }
+    with freeze_time("2026-05-25T10:30:00+00:00"):
+        original_start = Rtl433Coordinator.async_start
+
+        async def start_then_replay(self):
+            await original_start(self)
+            _feed(self, dict(replay))
+
+        with patch.object(Rtl433Coordinator, "async_start", start_then_replay):
+            assert await hass.config_entries.async_setup(hub.entry_id)
+            await hass.async_block_till_done()
+
+        assert hass.states.get(temp_eid).state == expected
 
 
 # --------------------------------------------------------------------------- #
@@ -2744,7 +2843,7 @@ def _timeout_hub(options, *, minor_version=3):
         minor_version=minor_version,
         unique_id="hub:rtl433.local:8433",
         data={
-            CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+            CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             CONF_HOST: "rtl433.local",
             CONF_PORT: 8433,
             CONF_PATH: "/ws",
@@ -2990,7 +3089,7 @@ async def test_setup_wires_the_event_time_advisory(hass, hub_entry_builder):
 
     # The first event frame tells the client the server stamps nothing readable.
     _coordinator(hass, hub)._client.time_precision = TimePrecision.UNUSABLE
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     assert issue_reg.async_get_issue(DOMAIN, issue_id) is not None

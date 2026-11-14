@@ -16,7 +16,7 @@ in test_mut_init.py with fine-grained coverage of:
 - _read_legacy_overrides: file-not-found, OSError, YAML error, non-dict, empty,
   valid mapping
 - _rehome_device_objects: same-entry guard, entity re-homing, device re-homing
-- _migrate_hub_entry: children folding, model/fields, timeout/clear_delay optional
+- _migrate_receiver_entry: children folding, model/fields, timeout/clear_delay optional
 - async_migrate_entry: version guards, minor-version steps, minor-4 timeout drop
 """
 
@@ -36,10 +36,10 @@ from custom_components.rtl_433.const import (
     CONF_DEVICES,
     CONF_ENTRY_TYPE,
     CONF_HOST,
-    CONF_HUB_ENTRY_ID,
     CONF_MODEL,
     CONF_PATH,
     CONF_PORT,
+    CONF_RECEIVER_ENTRY_ID,
     CONF_USER_MAPPINGS,
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
@@ -47,7 +47,7 @@ from custom_components.rtl_433.const import (
     DEVICE_TIMEOUT_OVERRIDE,
     DOMAIN,
     ENTRY_TYPE_DEVICE,
-    ENTRY_TYPE_HUB,
+    ENTRY_TYPE_RECEIVER,
     LEGACY_DEFAULT_AVAILABILITY_TIMEOUT,
 )
 from custom_components.rtl_433.migration import (
@@ -61,8 +61,8 @@ from custom_components.rtl_433.migration import (
     _disable_existing_last_seen_sensors,
     _enable_last_seen_for_event_driven_devices,
     _migrate_doorbell_event_types,
-    _migrate_hub_entry,
     _migrate_motion_event_to_binary_sensor,
+    _migrate_receiver_entry,
     _read_legacy_overrides,
     _rehome_device_objects,
     async_migrate_entry,
@@ -1212,7 +1212,7 @@ class TestRehomeDeviceObjects:
     """Mutation-killing tests for _rehome_device_objects."""
 
     async def test_same_entry_id_returns_immediately(self, hass, hub_entry_builder):
-        """When hub_entry_id == device_entry.entry_id, nothing is done."""
+        """When receiver_entry_id == device_entry.entry_id, nothing is done."""
         hub = hub_entry_builder(devices={})
         hub.add_to_hass(hass)
         dev_reg = dr.async_get(hass)
@@ -1233,7 +1233,7 @@ class TestRehomeDeviceObjects:
         assert updated.config_entry_id == before_entry
 
     async def test_entity_config_entry_id_repointed_to_hub(self, hass):
-        """Entities owned by source entry are moved to hub_entry_id."""
+        """Entities owned by source entry are moved to receiver_entry_id."""
         hub_id = "hub-entry-1"
         source_id = "child-entry-1"
 
@@ -1348,12 +1348,12 @@ class TestRehomeDeviceObjects:
 
 
 # ===========================================================================
-# _migrate_hub_entry — fine-grained tests
+# _migrate_receiver_entry — fine-grained tests
 # ===========================================================================
 
 
 class TestMigrateHubEntry:
-    """Mutation-killing tests for _migrate_hub_entry."""
+    """Mutation-killing tests for _migrate_receiver_entry."""
 
     async def test_no_children_leaves_devices_map_unchanged(self, hass):
         """Hub with no children writes an empty devices map."""
@@ -1367,12 +1367,12 @@ class TestMigrateHubEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         hub.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         devices = hub.data.get(CONF_DEVICES, {})
         assert devices == {}
@@ -1391,7 +1391,7 @@ class TestMigrateHubEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         child = MockConfigEntry(
@@ -1400,7 +1400,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: device_key,
                 CONF_MODEL: "SensorModel-42",
             },
@@ -1409,7 +1409,7 @@ class TestMigrateHubEntry:
         hub.add_to_hass(hass)
         child.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         devices = hub.data[CONF_DEVICES]
         assert device_key in devices
@@ -1432,7 +1432,7 @@ class TestMigrateHubEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         child = MockConfigEntry(
@@ -1441,7 +1441,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: device_key,
                 CONF_MODEL: "Sensor",
             },
@@ -1450,7 +1450,7 @@ class TestMigrateHubEntry:
         hub.add_to_hass(hass)
         child.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         fields = hub.data[CONF_DEVICES][device_key][DEVICE_FIELDS]
         assert fields == sorted(["z_field", "a_field", "m_field"])
@@ -1470,7 +1470,7 @@ class TestMigrateHubEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         child_with = MockConfigEntry(
@@ -1479,7 +1479,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: key_with,
                 CONF_MODEL: "S",
             },
@@ -1494,7 +1494,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: key_without,
                 CONF_MODEL: "S2",
             },
@@ -1504,7 +1504,7 @@ class TestMigrateHubEntry:
         child_with.add_to_hass(hass)
         child_without.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         devices = hub.data[CONF_DEVICES]
         assert devices[key_with][DEVICE_TIMEOUT_OVERRIDE] == 120
@@ -1524,7 +1524,7 @@ class TestMigrateHubEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         child = MockConfigEntry(
@@ -1533,7 +1533,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: device_key,
                 CONF_MODEL: "S",
             },
@@ -1545,7 +1545,7 @@ class TestMigrateHubEntry:
         hub.add_to_hass(hass)
         child.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         assert isinstance(
             hub.data[CONF_DEVICES][device_key][DEVICE_TIMEOUT_OVERRIDE], int
@@ -1566,7 +1566,7 @@ class TestMigrateHubEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         child_with = MockConfigEntry(
@@ -1575,7 +1575,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: key_with,
                 CONF_MODEL: "PIR",
             },
@@ -1590,7 +1590,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: key_without,
                 CONF_MODEL: "Temp",
             },
@@ -1600,7 +1600,7 @@ class TestMigrateHubEntry:
         child_with.add_to_hass(hass)
         child_without.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         devices = hub.data[CONF_DEVICES]
         assert devices[key_with][DEVICE_MOTION_CLEAR_DELAY] == 30
@@ -1620,7 +1620,7 @@ class TestMigrateHubEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         child = MockConfigEntry(
@@ -1629,7 +1629,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: device_key,
                 CONF_MODEL: "PIR",
             },
@@ -1641,14 +1641,14 @@ class TestMigrateHubEntry:
         hub.add_to_hass(hass)
         child.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         assert isinstance(
             hub.data[CONF_DEVICES][device_key][DEVICE_MOTION_CLEAR_DELAY], int
         )
 
     async def test_children_only_with_matching_hub_entry_id(self, hass):
-        """Only children whose CONF_HUB_ENTRY_ID matches hub are folded."""
+        """Only children whose CONF_RECEIVER_ENTRY_ID matches hub are folded."""
         hub_id = "hub-id-1"
         other_hub_id = "hub-id-other"
         my_key = "MyDevice-1"
@@ -1663,7 +1663,7 @@ class TestMigrateHubEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         my_child = MockConfigEntry(
@@ -1672,7 +1672,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: my_key,
                 CONF_MODEL: "MyModel",
             },
@@ -1684,7 +1684,7 @@ class TestMigrateHubEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: other_hub_id,
+                CONF_RECEIVER_ENTRY_ID: other_hub_id,
                 CONF_DEVICE_KEY: other_key,
                 CONF_MODEL: "OtherModel",
             },
@@ -1694,7 +1694,7 @@ class TestMigrateHubEntry:
         my_child.add_to_hass(hass)
         other_child.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         devices = hub.data[CONF_DEVICES]
         assert my_key in devices
@@ -2072,7 +2072,7 @@ class TestAsyncMigrateEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         device = MockConfigEntry(
@@ -2081,7 +2081,7 @@ class TestAsyncMigrateEntry:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: "Sensor-1",
                 CONF_MODEL: "Sensor",
             },
@@ -2107,7 +2107,7 @@ class TestAsyncMigrateEntry:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         hub.add_to_hass(hass)
@@ -2240,7 +2240,7 @@ class TestAsyncMigrateEntry:
         assert entry.minor_version == 8
 
     async def test_v1_device_without_hub_id_still_returns_true(self, hass):
-        """A v1 device entry with no CONF_HUB_ENTRY_ID still returns True."""
+        """A v1 device entry with no CONF_RECEIVER_ENTRY_ID still returns True."""
         device = MockConfigEntry(
             domain=DOMAIN,
             title="orphan",
@@ -2249,7 +2249,7 @@ class TestAsyncMigrateEntry:
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
                 CONF_DEVICE_KEY: "Orphan-1",
                 CONF_MODEL: "Sensor",
-                # No CONF_HUB_ENTRY_ID
+                # No CONF_RECEIVER_ENTRY_ID
             },
         )
         device.add_to_hass(hass)
@@ -2795,7 +2795,7 @@ class TestKillSurvivingMutants:
         assert updated_ent.config_entry_id == hub_id
 
     async def test_rehome_entities_sets_config_entry_id(self, hass):
-        """config_entry_id is set to hub_entry_id, not None.
+        """config_entry_id is set to receiver_entry_id, not None.
 
         Kills mutmut_21: config_entry_id=None would disassociate entity.
         """
@@ -2833,7 +2833,7 @@ class TestKillSurvivingMutants:
         # config_entry_id must be hub_id, not None
         assert updated_ent.config_entry_id == hub_id
 
-    # --- _migrate_hub_entry: DOMAIN vs None, and vs or, model default ---
+    # --- _migrate_receiver_entry: DOMAIN vs None, and vs or, model default ---
 
     async def test_migrate_hub_only_gets_domain_entries(self, hass):
         """async_entries is called with DOMAIN, not None.
@@ -2850,7 +2850,7 @@ class TestKillSurvivingMutants:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         child = MockConfigEntry(
@@ -2859,7 +2859,7 @@ class TestKillSurvivingMutants:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: "Dev-1",
                 CONF_MODEL: "MyModel",
             },
@@ -2868,7 +2868,7 @@ class TestKillSurvivingMutants:
         hub.add_to_hass(hass)
         child.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         # If async_entries(None) was called, no children would be found
         assert "Dev-1" in hub.data.get(CONF_DEVICES, {})
@@ -2877,15 +2877,15 @@ class TestKillSurvivingMutants:
         """Children filter uses AND (both conditions), not OR.
 
         Kills mutmut_3: 'and' → 'or' would include the hub itself as a child.
-        With OR: hub.entry_id != hub.entry_id is False, but hub.data.get(CONF_HUB_ENTRY_ID)
-        == hub_id is False too for the hub (it has no CONF_HUB_ENTRY_ID), so OR would
+        With OR: hub.entry_id != hub.entry_id is False, but hub.data.get(CONF_RECEIVER_ENTRY_ID)
+        == hub_id is False too for the hub (it has no CONF_RECEIVER_ENTRY_ID), so OR would
         be False for hub itself. Let's use a child whose entry_id happens to match the
         hub's entry_id filter differently.
 
         Actually with OR: entries where HUB_ENTRY_ID==hub_id OR entry_id!=hub_id
         This would include all entries whose entry_id is different from hub_id,
         even those from other hubs. A non-domain entry or unrelated entry without
-        CONF_HUB_ENTRY_ID set to hub_id would also be included.
+        CONF_RECEIVER_ENTRY_ID set to hub_id would also be included.
         """
         hub_id = "hub-and-test"
         other_hub_id = "other-hub"
@@ -2898,7 +2898,7 @@ class TestKillSurvivingMutants:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         # A device child of this hub
@@ -2908,7 +2908,7 @@ class TestKillSurvivingMutants:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: "MyDev-1",
                 CONF_MODEL: "MyModel",
             },
@@ -2924,14 +2924,14 @@ class TestKillSurvivingMutants:
                 CONF_HOST: "h2",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         hub.add_to_hass(hass)
         my_child.add_to_hass(hass)
         other_entry.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         devices = hub.data.get(CONF_DEVICES, {})
         # Only my child's device should be in the hub's devices map
@@ -2959,7 +2959,7 @@ class TestKillSurvivingMutants:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
                 # Pre-existing device in the hub's data
                 CONF_DEVICES: {
                     device_key: {CONF_MODEL: "ExistingModel", DEVICE_FIELDS: ["temp"]}
@@ -2968,7 +2968,7 @@ class TestKillSurvivingMutants:
         )
         hub.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         # Pre-existing device must still be in the devices map
         assert device_key in hub.data.get(CONF_DEVICES, {})
@@ -2989,7 +2989,7 @@ class TestKillSurvivingMutants:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         # Child with NO CONF_MODEL key
@@ -2999,7 +2999,7 @@ class TestKillSurvivingMutants:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: device_key,
                 # No CONF_MODEL key at all
             },
@@ -3008,7 +3008,7 @@ class TestKillSurvivingMutants:
         hub.add_to_hass(hass)
         child.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         devices = hub.data.get(CONF_DEVICES, {})
         assert device_key in devices
@@ -3033,7 +3033,7 @@ class TestKillSurvivingMutants:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         # Child with no LEGACY_CONF_OBSERVED_FIELDS option
@@ -3043,7 +3043,7 @@ class TestKillSurvivingMutants:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: device_key,
                 CONF_MODEL: "Sensor",
             },
@@ -3052,7 +3052,7 @@ class TestKillSurvivingMutants:
         hub.add_to_hass(hass)
         child.add_to_hass(hass)
 
-        await _migrate_hub_entry(hass, hub)
+        await _migrate_receiver_entry(hass, hub)
 
         devices = hub.data.get(CONF_DEVICES, {})
         assert device_key in devices
@@ -3393,7 +3393,7 @@ class TestKillSurvivingMutants:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         device = MockConfigEntry(
@@ -3402,7 +3402,7 @@ class TestKillSurvivingMutants:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: "Sensor-1",
                 CONF_MODEL: "Sensor",
             },
@@ -3417,7 +3417,7 @@ class TestKillSurvivingMutants:
         assert device.minor_version == 2  # Exact, not 3 or None
 
     async def test_migrate_entry_v1_device_rehomes_with_correct_hub_id(self, hass):
-        """When CONF_HUB_ENTRY_ID is set, _rehome_device_objects uses that hub_id.
+        """When CONF_RECEIVER_ENTRY_ID is set, _rehome_device_objects uses that hub_id.
 
         Kills mutmut_13 (_rehome_device_objects(hass, entry, None)).
         """
@@ -3432,7 +3432,7 @@ class TestKillSurvivingMutants:
                 CONF_HOST: "h",
                 CONF_PORT: 8433,
                 CONF_PATH: "/ws",
-                CONF_ENTRY_TYPE: ENTRY_TYPE_HUB,
+                CONF_ENTRY_TYPE: ENTRY_TYPE_RECEIVER,
             },
         )
         device = MockConfigEntry(
@@ -3441,7 +3441,7 @@ class TestKillSurvivingMutants:
             version=1,
             data={
                 CONF_ENTRY_TYPE: ENTRY_TYPE_DEVICE,
-                CONF_HUB_ENTRY_ID: hub_id,
+                CONF_RECEIVER_ENTRY_ID: hub_id,
                 CONF_DEVICE_KEY: "Sensor-1",
                 CONF_MODEL: "Sensor",
             },

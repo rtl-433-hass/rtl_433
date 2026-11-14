@@ -138,9 +138,13 @@ class _EventProcessingMixin:
         — runtime state, field tracking, liveness, dispatch — runs for adopted
         devices only.
 
-        Replays and stale gap events (``is_replay=True``) still seed sensor values
-        but must NOT refresh ``last_seen`` / ``available``, so a genuinely-offline
-        device is not resurrected by the reconnect replay.
+        Replays and stale gap events (``is_replay=True``) still update
+        ``devices`` / field tracking and are dispatched, but must NOT refresh
+        ``last_seen`` / ``available``, so a genuinely-offline device is not
+        resurrected by the reconnect replay (nor do they create pending
+        candidates; see :meth:`_record_pending`). Whether a replayed value is
+        shown is each entity's call: it is adopted only when newer than the
+        value the entity holds (see ``Rtl433Entity._handle_dispatch``).
         """
         key = normalized.device_key
         is_replay = normalized.is_replay

@@ -44,7 +44,7 @@ modules plus the `coordinator/` subpackage).
 | `number.py` | HACS-only | |
 | `select.py` | HACS-only | |
 | `switch.py` | HACS-only | |
-| `hub_settings.py` | HACS-only | |
+| `receiver_settings.py` | HACS-only | |
 | `sdr_settings.py` | HACS-only | |
 | `repairs.py` | HACS-only | |
 | `options_flow.py` | HACS-only | |
@@ -85,7 +85,7 @@ the domain/coordinator established by PR1.
    from the event platform, so it cannot precede it.
 5. **`number`** — Silver/Gold. Introduces SDR controls, the write path, and
    the shared `sdr_settings` code that `select`/`switch` reuse.
-6. **`select`** — Silver/Gold. Grouped with `number`; shares the `hub_settings`/
+6. **`select`** — Silver/Gold. Grouped with `number`; shares the `receiver_settings`/
    `sdr_settings` dependency and the control-write pattern.
 7. **`switch`** — Silver/Gold. Adds the third SDR control platform using the
    shared settings code from `number`/`select`.
@@ -104,15 +104,15 @@ the domain/coordinator established by PR1.
     storage + UI half only.
 12. **`options_flow`** — Gold. Configures platform behavior; follows the platforms
     and settings it configures.
-13. **`hub_settings`** — Gold. Shared hub-level settings model; formalized alongside/after
+13. **`receiver_settings`** — Gold. Shared hub-level settings model; formalized alongside/after
     the control platforms (`number`/`select`/`switch`) that consume it.
 14. **`sdr_settings`** — Gold/Platinum. Shared SDR settings model; tracked last, with its
     supporting code included in the earlier control-platform PRs.
 
 > Ordering guidance: `diagnostics` (Silver) is intentionally pulled forward; the remaining
 > Silver items (`event`, `device_trigger`, `repairs`) precede the Gold refinement layer
-> (`calibration`, `library.py`, user mapping overrides, `options_flow`, `hub_settings`,
-> `sdr_settings`). `hub_settings`/`sdr_settings` are listed last as tracked line items even
+> (`calibration`, `library.py`, user mapping overrides, `options_flow`, `receiver_settings`,
+> `sdr_settings`). `receiver_settings`/`sdr_settings` are listed last as tracked line items even
 > though their supporting code lands with the `number`/`select`/`switch` control PRs.
 
 ## Out of scope for this workflow run

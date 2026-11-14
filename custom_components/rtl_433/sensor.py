@@ -3,7 +3,7 @@
 ``async_setup_entry`` runs once for the hub config entry. It registers the
 hub-level DIAGNOSTIC sensors (SDR/meta configuration and server statistics that
 the coordinator sources over HTTP) and then delegates to the shared
-:func:`~custom_components.rtl_433.entity.async_setup_hub_platform` helper, which
+:func:`~custom_components.rtl_433.entity.async_setup_receiver_platform` helper, which
 resolves the hub coordinator, builds a :class:`Rtl433Sensor` for every device's
 observed mapped fields whose descriptor ``platform == "sensor"``, adds new
 devices/fields at runtime, and keeps the hub's devices map current.
@@ -44,7 +44,14 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.enum import try_parse_enum
 
 from .const import DOMAIN, signal_hub_noise
-from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
+from .entity import (
+    RESTORE_EVENT_TIME,
+    Rtl433Entity,
+    Rtl433ReceiverEntity,
+    async_setup_receiver_platform,
+    restored_event_time,
+    stored_event_time,
+)
 
 if TYPE_CHECKING:
     from pyrtl_433.normalizer import NormalizedEvent
@@ -66,6 +73,23 @@ _JSON_SCALARS = (str, int, float, bool)
 def _restorable_value(value: Any) -> Any:
     """Return ``value`` in a form the restore store can persist."""
     return value if isinstance(value, _JSON_SCALARS) else str(value)
+
+
+@dataclass
+class Rtl433SensorExtraStoredData(SensorExtraStoredData):
+    """Home Assistant's sensor restore data plus the value's server timestamp.
+
+    ``event_time`` is the rtl_433 server's ``time`` for the frame the value came
+    from (ISO-8601, or ``None`` when unknown); see ``Rtl433Entity._value_time``.
+    ``SensorExtraStoredData.from_dict`` ignores keys it does not know, so data
+    written here still restores on a build that predates the field.
+    """
+
+    event_time: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the sensor data with the value timestamp beside it."""
+        return {**super().as_dict(), RESTORE_EVENT_TIME: self.event_time}
 
 
 # Entity-registry option Home Assistant's sensor base writes to freeze a sensor's
@@ -96,13 +120,13 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         device_key: str,
         model: str,
         descriptor: FieldDescriptor,
     ) -> None:
         """Initialize sensor-specific description fields."""
-        super().__init__(coordinator, hub_entry_id, device_key, model, descriptor)
+        super().__init__(coordinator, receiver_entry_id, device_key, model, descriptor)
         # Coerce the device-library's plain-string ``device_class`` /
         # ``state_class`` into their canonical enum members. Home Assistant's
         # sensor base performs its legacy temperature unit conversion behind an
@@ -121,11 +145,7 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
         self._attr_native_unit_of_measurement = descriptor.unit_of_measurement
         self._attr_force_update = descriptor.force_update
 
-        # Seed from the coordinator's last event if it already carries the field
-        # (covers a device that transmitted before its entity was added).
-        last_event = coordinator.devices.get(device_key)
-        if last_event is not None and descriptor.field_key in last_event.fields:
-            self._apply_value(last_event.fields[descriptor.field_key])
+        self._seed_from_coordinator()
 
     async def async_added_to_hass(self) -> None:
         """Restore state, then drop any stale frozen temperature unit."""
@@ -170,8 +190,12 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
         """Transform and store a raw value as the sensor's native value."""
         self._attr_native_value = apply_transform(self._descriptor, raw_value)
 
+    def _current_value(self) -> Any:
+        """Return the native value."""
+        return self._attr_native_value
+
     @property
-    def extra_restore_state_data(self) -> SensorExtraStoredData:
+    def extra_restore_state_data(self) -> Rtl433SensorExtraStoredData:
         """Persist the native value + native unit, independently of ``available``.
 
         Home Assistant writes ``unavailable`` as the *state* whenever
@@ -186,12 +210,16 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
         restore can tell what the stored number *means*: a device-library update
         that re-maps a field's native unit would otherwise have the old number
         silently reinterpreted in the new unit.
+
+        The server timestamp of the value rides along too, so that after a
+        restart a replayed frame can be compared with the restored value.
         """
-        return SensorExtraStoredData(
+        return Rtl433SensorExtraStoredData(
             _restorable_value(self._attr_native_value)
             if self._attr_native_value is not None
             else None,
             self.native_unit_of_measurement,
+            stored_event_time(self._value_time),
         )
 
     def _to_native_unit(self, value: Any, from_unit: str | None) -> Any:
@@ -255,6 +283,7 @@ class Rtl433Sensor(Rtl433Entity, RestoreSensor):
                 unit = None
             if value is not None:
                 self._attr_native_value = self._to_native_unit(value, unit)
+                self._value_time = restored_event_time(stored)
                 return
         last_state = await self.async_get_last_state()
         if last_state is not None and last_state.state not in _NON_RESTORABLE:
@@ -301,13 +330,13 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         device_key: str,
         model: str,
     ) -> None:
         """Initialize the synthetic last-seen sensor and seed a live value."""
         super().__init__(
-            coordinator, hub_entry_id, device_key, model, LAST_SEEN_DESCRIPTOR
+            coordinator, receiver_entry_id, device_key, model, LAST_SEEN_DESCRIPTOR
         )
         # Enable by default for event-driven devices (no reliable check-in), for
         # which availability never expires and this timestamp is the only
@@ -315,10 +344,12 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
         # disabled-by-default.
         if coordinator.is_event_driven_device(device_key):
             self._attr_entity_registry_enabled_default = True
-        # Seed only when a *real* event has been seen this session; the presence
-        # of a devices-map entry distinguishes a true timestamp from the base's
-        # startup baseline (which never sets coordinator.devices).
-        if coordinator.devices.get(device_key) is not None:
+        # Seed only when a *live* event has been seen this session. A
+        # devices-map entry alone is not enough: the reconnect backlog fills it
+        # too, without advancing ``last_seen``, so the timestamp there may be the
+        # base's startup baseline ("now") rather than a real transmission.
+        cached = coordinator.devices.get(device_key)
+        if cached is not None and not cached.is_replay:
             self._attr_native_value = coordinator.last_seen.get(device_key)
 
     def _apply_value(self, raw_value: Any) -> None:
@@ -364,7 +395,16 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
         Overrides the base: the synthetic field is never in ``event.fields``, so
         instead of the field-driven path we read coordinator.last_seen, which the
         non-dispatching baseline never reaches.
+
+        Checked in the base class's order: a watchdog re-paint only re-reads
+        availability, and a reconnect replay -- which does not advance
+        ``coordinator.last_seen`` -- leaves the sensor alone.
         """
+        if event.is_repaint:
+            self.async_write_ha_state()
+            return
+        if event.is_replay:
+            return
         self._attr_native_value = self._coordinator.last_seen.get(self._device_key)
         self.async_write_ha_state()
 
@@ -378,7 +418,9 @@ class Rtl433LastSeenSensor(Rtl433Entity, SensorEntity):
         frozen at whenever the integration stopped listening and would read as a
         device that has just gone quiet, which is exactly the wrong conclusion.
         """
-        return self._attr_native_value is not None and self._coordinator.hub_available
+        return (
+            self._attr_native_value is not None and self._coordinator.receiver_available
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -448,7 +490,7 @@ class HubSensorDesc:
     noise: bool = False
 
 
-HUB_SENSORS: tuple[HubSensorDesc, ...] = (
+RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
     # --- SDR/meta configuration (from coordinator.meta) ------------------- #
     HubSensorDesc(
         suffix="center_frequency",
@@ -558,11 +600,11 @@ HUB_SENSORS: tuple[HubSensorDesc, ...] = (
 )
 
 
-class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
+class Rtl433ReceiverSensor(Rtl433ReceiverEntity, SensorEntity):
     """A diagnostic sensor on the hub device, driven by a :class:`HubSensorDesc`.
 
     Reads live coordinator state via the description's callables and refreshes on
-    ``signal_hub_update`` (handled by :class:`Rtl433HubEntity`). A missing key
+    ``signal_receiver_update`` (handled by :class:`Rtl433ReceiverEntity`). A missing key
     yields a ``None`` native value (state ``unknown``) rather than raising.
     """
 
@@ -583,13 +625,13 @@ class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         desc: HubSensorDesc,
     ) -> None:
         """Initialize identity and entity-description fields from ``desc``."""
-        super().__init__(coordinator, hub_entry_id)
+        super().__init__(coordinator, receiver_entry_id)
         self._desc = desc
-        self._attr_unique_id = f"{hub_entry_id}:hub:{desc.suffix}"
+        self._attr_unique_id = f"{receiver_entry_id}:hub:{desc.suffix}"
         self._attr_name = desc.name
         self._attr_device_class = desc.device_class
         self._attr_native_unit_of_measurement = desc.native_unit
@@ -623,7 +665,7 @@ class Rtl433HubSensor(Rtl433HubEntity, SensorEntity):
         the payload, not a dead hub. The hub's Connectivity binary sensor stays
         available throughout: it is the entity that reports the outage.
         """
-        return self._coordinator.hub_available
+        return self._coordinator.receiver_available
 
     @property
     def native_value(self) -> Any:
@@ -651,11 +693,11 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][entry.entry_id]
     managed = coordinator.manage_settings
     async_add_entities(
-        Rtl433HubSensor(coordinator, entry.entry_id, desc)
-        for desc in HUB_SENSORS
+        Rtl433ReceiverSensor(coordinator, entry.entry_id, desc)
+        for desc in RECEIVER_SENSORS
         if not (managed and desc.folded_when_managing)
     )
-    await async_setup_hub_platform(
+    await async_setup_receiver_platform(
         hass,
         entry,
         async_add_entities,

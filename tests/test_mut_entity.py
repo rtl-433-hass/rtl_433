@@ -28,7 +28,7 @@ from custom_components.rtl_433.const import (
     DEVICE_EVENT_TYPES,
     DEVICE_FIELDS,
     DOMAIN,
-    signal_hub_update,
+    signal_receiver_update,
 )
 from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.coordinator.base import Rtl433Client
@@ -271,7 +271,7 @@ def test_apply_calibration_with_none_transform_creates_transform_with_scale():
 
 
 async def test_entity_unique_id_format(hass, hub_entry_builder):
-    """unique_id is {hub_entry_id}:{device_key}:{object_suffix}."""
+    """unique_id is {receiver_entry_id}:{device_key}:{object_suffix}."""
     device_key = "EnergyMeter-2000-1234"
     hub = await _setup_hub(
         hass,
@@ -284,7 +284,7 @@ async def test_entity_unique_id_format(hass, hub_entry_builder):
         },
     )
     ent_reg = er.async_get(hass)
-    # The unique_id format is exactly hub_entry_id:device_key:object_suffix
+    # The unique_id format is exactly receiver_entry_id:device_key:object_suffix
     uid = f"{hub.entry_id}:{device_key}:watts"
     eid = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
     assert eid is not None, f"Entity with unique_id {uid} not found"
@@ -308,7 +308,7 @@ async def test_entity_unique_id_two_hubs_no_collision(hass, hub_entry_builder):
         hass, hub_entry_builder, host="hub-a.local", devices=device_spec
     )
 
-    # The unique_id format is hub_entry_id:device_key:object_suffix.
+    # The unique_id format is receiver_entry_id:device_key:object_suffix.
     # Two different hub_entry_ids (always different MockConfigEntry.entry_id
     # values) guarantee no collision — verify the format property holds.
     uid_a = f"{hub_a.entry_id}:{device_key}:watts"
@@ -395,7 +395,7 @@ async def test_entity_has_entity_name_true(hass, hub_entry_builder):
 
 
 async def test_device_info_identifiers(hass, hub_entry_builder):
-    """DeviceInfo identifiers is {(DOMAIN, hub_entry_id:device_key)}."""
+    """DeviceInfo identifiers is {(DOMAIN, receiver_entry_id:device_key)}."""
     device_key = "EnergyMeter-2000-1234"
     hub = await _setup_hub(
         hass,
@@ -1489,17 +1489,17 @@ async def test_upsert_event_types_device_without_event_types_key(
 
 
 # ---------------------------------------------------------------------------
-# Rtl433HubEntity: hub-update dispatcher subscription
+# Rtl433ReceiverEntity: hub-update dispatcher subscription
 # ---------------------------------------------------------------------------
 
 
 async def test_hub_entity_subscribes_to_hub_update(hass, hub_entry_builder):
-    """A hub entity updates its state when signal_hub_update fires."""
+    """A hub entity updates its state when signal_receiver_update fires."""
     hub = await _setup_hub(hass, hub_entry_builder)
     coordinator = _coordinator(hass, hub)
     ent_reg = er.async_get(hass)
 
-    # Find the connectivity binary_sensor (a Rtl433HubEntity subclass)
+    # Find the connectivity binary_sensor (a Rtl433ReceiverEntity subclass)
     connectivity_eid = ent_reg.async_get_entity_id(
         "binary_sensor", DOMAIN, f"{hub.entry_id}:hub:connectivity"
     )
@@ -1507,12 +1507,12 @@ async def test_hub_entity_subscribes_to_hub_update(hass, hub_entry_builder):
 
     # Change coordinator.connected and fire hub_update signal
     coordinator._client.connected = True
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
     assert hass.states.get(connectivity_eid).state == "on"
 
     coordinator._client.connected = False
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
     assert hass.states.get(connectivity_eid).state == "off"
 
@@ -1538,7 +1538,7 @@ async def test_hub_entity_reload_rewires_subscription(hass, hub_entry_builder):
     coordinator2 = _coordinator(hass, hub)
     # After reload, the hub_update signal must still work
     coordinator2._client.connected = True
-    async_dispatcher_send(hass, signal_hub_update(hub.entry_id))
+    async_dispatcher_send(hass, signal_receiver_update(hub.entry_id))
     await hass.async_block_till_done()
 
     state = hass.states.get(connectivity_eid)
@@ -1566,12 +1566,12 @@ async def test_hub_entity_device_info_identifiers(hass, hub_entry_builder):
 
 
 # ---------------------------------------------------------------------------
-# Rtl433HubControl: unique_id and name
+# Rtl433ReceiverControl: unique_id and name
 # ---------------------------------------------------------------------------
 
 
 async def test_hub_control_unique_id_format(hass, hub_entry_builder):
-    """Hub control unique_id is '{hub_entry_id}:hub:{object_suffix}'."""
+    """Hub control unique_id is '{receiver_entry_id}:hub:{object_suffix}'."""
     hub = await _setup_hub(hass, hub_entry_builder)
     ent_reg = er.async_get(hass)
 
@@ -1586,7 +1586,7 @@ async def test_hub_control_entity_category_config(hass, hub_entry_builder):
     hub = await _setup_hub(hass, hub_entry_builder)
     ent_reg = er.async_get(hass)
 
-    # The gain number control is a Rtl433HubControl subclass
+    # The gain number control is a Rtl433ReceiverControl subclass
     gain_eid = ent_reg.async_get_entity_id("number", DOMAIN, f"{hub.entry_id}:hub:gain")
     if gain_eid is not None:
         entry = ent_reg.async_get(gain_eid)
@@ -1594,7 +1594,7 @@ async def test_hub_control_entity_category_config(hass, hub_entry_builder):
 
 
 # ---------------------------------------------------------------------------
-# async_setup_hub_platform: dedup, teardown, field listeners
+# async_setup_receiver_platform: dedup, teardown, field listeners
 # ---------------------------------------------------------------------------
 
 

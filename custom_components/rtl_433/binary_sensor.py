@@ -1,7 +1,7 @@
 """Binary-sensor platform for the rtl_433 hub config entry.
 
 ``async_setup_entry`` runs once for the hub config entry and delegates to the
-shared :func:`~custom_components.rtl_433.entity.async_setup_hub_platform`
+shared :func:`~custom_components.rtl_433.entity.async_setup_receiver_platform`
 helper, which resolves the hub coordinator, builds a
 :class:`Rtl433BinarySensor` for every device's observed mapped fields whose
 descriptor ``platform == "binary_sensor"`` (battery, tamper, contact/reed,
@@ -32,7 +32,14 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.restore_state import RestoredExtraData
 
 from .const import DOMAIN
-from .entity import Rtl433Entity, Rtl433HubEntity, async_setup_hub_platform
+from .entity import (
+    RESTORE_EVENT_TIME,
+    Rtl433Entity,
+    Rtl433ReceiverEntity,
+    async_setup_receiver_platform,
+    restored_event_time,
+    stored_event_time,
+)
 
 if TYPE_CHECKING:
     from pyrtl_433.library import FieldDescriptor
@@ -55,25 +62,22 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         device_key: str,
         model: str,
         descriptor: FieldDescriptor,
     ) -> None:
         """Initialize binary-sensor-specific description fields."""
-        super().__init__(coordinator, hub_entry_id, device_key, model, descriptor)
+        super().__init__(coordinator, receiver_entry_id, device_key, model, descriptor)
         self._attr_device_class = descriptor.device_class
         self._attr_force_update = descriptor.force_update
 
         # Pending synthesized-clear timer unsub handle (clear_delay descriptors).
         self._clear_unsub: CALLBACK_TYPE | None = None
 
-        # Seed from the coordinator's last event if it already carries the field.
         # ``hass`` is not set yet, so any clear timer is (re)started in
         # ``async_added_to_hass`` from the seeded ``is_on``.
-        last_event = coordinator.devices.get(device_key)
-        if last_event is not None and descriptor.field_key in last_event.fields:
-            self._apply_value(last_event.fields[descriptor.field_key])
+        self._seed_from_coordinator()
 
     def _apply_value(self, raw_value: Any) -> None:
         """Map a raw value to on/off via the descriptor's payload mapping.
@@ -94,6 +98,19 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
             and self.hass is not None
         ):
             self._schedule_clear()
+
+    def _current_value(self) -> Any:
+        """Return the on/off value."""
+        return self._attr_is_on
+
+    def _accepts_replay(self) -> bool:
+        """Refuse replays for a detect-only (``clear_delay``) descriptor.
+
+        Its ``on`` is a moment, not a held state: a replayed detection from
+        minutes ago is not occupancy now, and adopting it would re-arm the
+        synthesized-clear timer as if someone had just walked past.
+        """
+        return self._descriptor.clear_delay is None
 
     async def async_added_to_hass(self) -> None:
         """Start the clear timer if seeded/restored ``on`` before add."""
@@ -149,7 +166,12 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
         """
         if self._attr_is_on is None:
             return None
-        return RestoredExtraData({"is_on": self._attr_is_on})
+        return RestoredExtraData(
+            {
+                "is_on": self._attr_is_on,
+                RESTORE_EVENT_TIME: stored_event_time(self._value_time),
+            }
+        )
 
     async def _async_restore_state(self) -> None:
         """Restore the last known on/off state on startup.
@@ -179,25 +201,28 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
         its silence timeout when Home Assistant stopped.
         """
         extra = await self.async_get_last_extra_data()
-        if extra is not None and (stored := extra.as_dict().get("is_on")) is not None:
-            return bool(stored)
+        if extra is not None:
+            stored = extra.as_dict()
+            if (is_on := stored.get("is_on")) is not None:
+                self._value_time = restored_event_time(stored)
+                return bool(is_on)
         last_state = await self.async_get_last_state()
         if last_state is None or last_state.state in (None, "unknown", "unavailable"):
             return None
         return last_state.state == "on"
 
 
-class Rtl433HubConnectivity(Rtl433HubEntity, BinarySensorEntity):
+class Rtl433ReceiverConnectivity(Rtl433ReceiverEntity, BinarySensorEntity):
     """Reports whether the hub's WebSocket connection is currently open."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_name = "Connectivity"
 
-    def __init__(self, coordinator: Rtl433Coordinator, hub_entry_id: str) -> None:
+    def __init__(self, coordinator: Rtl433Coordinator, receiver_entry_id: str) -> None:
         """Initialize the connectivity entity with a stable unique_id."""
-        super().__init__(coordinator, hub_entry_id)
-        self._attr_unique_id = f"{hub_entry_id}:hub:connectivity"
+        super().__init__(coordinator, receiver_entry_id)
+        self._attr_unique_id = f"{receiver_entry_id}:hub:connectivity"
 
     @property
     def is_on(self) -> bool:
@@ -217,7 +242,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up rtl_433 binary sensors for every device under the hub entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([Rtl433HubConnectivity(coordinator, entry.entry_id)])
-    await async_setup_hub_platform(
+    async_add_entities([Rtl433ReceiverConnectivity(coordinator, entry.entry_id)])
+    await async_setup_receiver_platform(
         hass, entry, async_add_entities, PLATFORM, Rtl433BinarySensor
     )
