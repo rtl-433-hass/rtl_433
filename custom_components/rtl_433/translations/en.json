@@ -24,7 +24,7 @@
           "path": "WebSocket endpoint path on the server (default /ws).",
           "secure": "Connect over wss:// instead of ws:// (for a TLS reverse proxy).",
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
-          "initial_frequency": "Set the receiver's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
+          "initial_frequency": "Set the radio's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
         }
       },
       "reconfigure": {
@@ -64,7 +64,7 @@
         },
         "data_description": {
           "manage_settings": "When on, Home Assistant adopts this server's current SDR settings and re-applies them on every reconnect, and adds controls for frequency, gain, and more. Turn off to leave the server's own configuration untouched.",
-          "initial_frequency": "Set the receiver's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
+          "initial_frequency": "Set the radio's center frequency in MHz at setup. Defaults to 433.92, the band most rtl_433 sensors use. Clear the field to keep the server's current frequency instead. Only applies when \"Manage rtl_433 settings from Home Assistant\" is on."
         }
       }
     },
@@ -250,7 +250,7 @@
         "step": {
           "init": {
             "title": "Sample rate may be too low",
-            "description": "The receiver on {title} is tuned to a high-band frequency but is still sampling at the bare default rate. rtl_433 does not widen the sample rate automatically when it is retuned, so devices in the upper ISM bands may decode poorly.\n\n- **Increase the sample rate** sets the **Sample rate** to {suggested} Hz — the 1.024 MS/s rate rtl_433 itself uses by default.\n- **Keep the current rate** leaves the rate unchanged and stops this advisory from appearing again for this hub. Many devices still decode fine at the lower rate, so this is a valid choice.",
+            "description": "The radio on {title} is tuned to a high-band frequency but is still sampling at the bare default rate. rtl_433 does not widen the sample rate automatically when it is retuned, so devices in the upper ISM bands may decode poorly.\n\n- **Increase the sample rate** sets the **Sample rate** to {suggested} Hz — the 1.024 MS/s rate rtl_433 itself uses by default.\n- **Keep the current rate** leaves the rate unchanged and stops this advisory from appearing again for this hub. Many devices still decode fine at the lower rate, so this is a valid choice.",
             "menu_options": {
               "apply": "Increase the sample rate",
               "ignore": "Keep the current rate (don't warn again)"

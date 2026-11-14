@@ -563,7 +563,7 @@ RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
         # decoders are toggled), not a running total -> MEASUREMENT.
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    # --- Receiver noise floor (from the server's "Auto Level" log frames) -- #
+    # --- Radio noise floor (from the server's "Auto Level" log frames) -- #
     # rtl_433 has no structured noise getter; the pyrtl_433 client parses the
     # pulse detector's "Auto Level" log frames into these snapshots. They stay
     # ``unknown`` unless the server runs with ``-Y autolevel`` (adjustments)
@@ -571,7 +571,7 @@ RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
     # together: the periodic report carries the noise estimate alone, so
     # ``min_level`` rides the ``-Y autolevel`` adjustment line only -- which
     # upstream emits just while the estimate sits >3 dB below the configured
-    # ``minlevel`` and the new threshold moves by >1 dB. A settled receiver
+    # ``minlevel`` and the new threshold moves by >1 dB. A settled radio
     # emits none, so ``min_level`` can stay ``unknown`` indefinitely even with
     # ``autolevel`` on (see ``docs/hub-entities.md``). A busy receiver sends
     # these lines several times a second, so both sensors show what the
@@ -583,7 +583,7 @@ RECEIVER_SENSORS: tuple[HubSensorDesc, ...] = (
         value=lambda c: c.noise_level,
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         native_unit=SIGNAL_STRENGTH_DECIBELS,
-        # A live gauge of the receiver's noise floor -> MEASUREMENT, so HA
+        # A live gauge of the radio's noise floor -> MEASUREMENT, so HA
         # records long-term statistics ("is my noise creeping up?").
         state_class=SensorStateClass.MEASUREMENT,
         noise=True,

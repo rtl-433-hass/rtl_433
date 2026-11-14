@@ -36,7 +36,7 @@ stops. Playwright captures these screenshots (see `../../screenshots/`):
 | `09-home-hero.png` | The integration overview: one hub with its nested devices (docs home-page hero) |
 | `10-diagnostics.png` | A device page with the signal-diagnostic sensors (frequency / RSSI / SNR / noise) enabled and populated |
 | `11-event-entity.png` | A doorbell device page with its `event` entity and activity log |
-| `14-hub-noise.png` | The hub device's **Diagnostic** card with the receiver-noise sensors (Noise level / Minimum detection level) populated from real "Auto Level" log frames |
+| `14-hub-noise.png` | The hub device's **Diagnostic** card with the radio-noise sensors (Noise level / Minimum detection level) populated from real "Auto Level" log frames |
 
 Only the doc-referenced PNGs are copied into `docs/images/` and committed; the
 `screenshots/` output directory itself is gitignored.
@@ -151,14 +151,14 @@ stream — alive (plan Clarification #13), `rtl433-entrypoint.sh`:
    exists, then loops `cat <capture>.cu8 >&3; cat silence.cu8 >&3; sleep 1`
    forever. Holding fd 3 open across passes means the decoder never sees EOF, so
    it stays alive and keeps decoding the same capture on repeat. The silence is
-   1 MB of cu8 zero-amplitude samples (~2 s at 250k) — see "Receiver noise"
+   1 MB of cu8 zero-amplitude samples (~2 s at 250k) — see "Radio noise"
    below for why the gap is there.
 
 The ordering matters: opening the FIFO for write *before* the reader exists
 deadlocks (a FIFO write-open blocks until a reader connects). Reader-first,
 writer-second is the working pattern.
 
-## Receiver noise ("Auto Level") data
+## Radio noise ("Auto Level") data
 
 The hub's **Noise level** and **Minimum detection level** sensors have no getter
 in rtl_433's API: the receiver's noise floor is reported only in pulse-detector log
@@ -174,7 +174,7 @@ reproduces that end to end, with no synthesized values:
   the structured log frame the HTTP server would push. The plain-text log drops
   the numeric level, so it is restored per source (`Auto Level` is `LOG_WARNING`).
 - The writer loop feeds ~2 s of RF silence between capture passes. Back-to-back
-  passes keep the receiver permanently "loud": the noise estimate creeps up to
+  passes keep the radio permanently "loud": the noise estimate creeps up to
   the replayed burst level and settles, so `-Y autolevel` never sees a shift over
   1 dB and never logs an adjustment — leaving **Minimum detection level**
   `unknown`. The silence gap makes the noise floor change, so both

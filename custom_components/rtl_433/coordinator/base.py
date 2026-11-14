@@ -161,7 +161,7 @@ class Rtl433Coordinator(_SdrSettingsMixin, _EventProcessingMixin, _AvailabilityM
             server's current settings on first connect, persists the desired
             state to a ``Store``, and replays it on every reconnect; when
             ``False`` the desired-state ``Store`` is wiped on load and the
-            receiver's settings are left untouched.
+            radio's settings are left untouched.
         ``new_device_callback``: ``Callable[[str, str, bool], None] | None``.
         ``effective_timeout_resolver``: ``Callable[[str], int | None] | None``.
             Returns the device's explicit timeout (per-device override → explicit

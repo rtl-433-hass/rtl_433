@@ -1,6 +1,6 @@
 """Managed SDR-settings subsystem for the rtl_433 coordinator.
 
-When a hub has ``manage_settings`` enabled, Home Assistant owns the receiver's
+When a hub has ``manage_settings`` enabled, Home Assistant owns the radio's
 SDR settings: it adopts the server's current values on the first connect,
 persists the desired state to a per-hub ``Store`` (so a value change never churns
 the config entry), and replays that desired state on every reconnect. This
