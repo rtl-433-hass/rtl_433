@@ -32,11 +32,11 @@ surfaces two ways, and the listener guards both:
 * **HA restart** — the restore is a ``state_changed`` with ``old_state is None``
   (the entity's first appearance in the state machine).
 * **Config-entry reload** (an options change, or the "server unreachable" repair
-  forcing a reconnect) **or a hub outage** — the entity goes
+  forcing a reconnect) **or a receiver outage** — the entity goes
   value → ``unavailable`` → restored value *while the automation's listener is
   still attached* (a restart re-attaches it only after the restore), so the
   restore arrives as ``unavailable`` → ``<old event>`` rather than ``None`` →.
-  Event entities are gated on the hub connection like every other device entity
+  Event entities are gated on the receiver connection like every other device entity
   (see ``event.py``), so every socket drop produces this edge, not only a reload.
 
 A momentary event never legitimately fires from these, so the listener ignores
@@ -158,10 +158,10 @@ def _event_types_for_entry(hass: HomeAssistant, entry: er.RegistryEntry) -> list
     """
     device_key, field_key = _device_field_from_unique_id(entry.unique_id)
     if device_key is not None and field_key is not None:
-        hub_entry = hass.config_entries.async_get_entry(entry.config_entry_id)
-        if hub_entry is not None:
+        receiver_entry = hass.config_entries.async_get_entry(entry.config_entry_id)
+        if receiver_entry is not None:
             persisted = (
-                hub_entry.data.get(CONF_DEVICES, {})
+                receiver_entry.data.get(CONF_DEVICES, {})
                 .get(device_key, {})
                 .get(DEVICE_EVENT_TYPES, {})
                 .get(field_key, [])
@@ -269,7 +269,7 @@ async def _async_attach_event_trigger(
         #   (``unavailable`` / ``unknown``) -- the unload edge, not a press.
         # * ``old_state`` is ``None`` (the entity's restore / initial add at an HA
         #   restart) or ``unavailable``. The latter covers both a config-entry
-        #   reload and a hub outage: either takes the entity
+        #   reload and a receiver outage: either takes the entity
         #   value -> ``unavailable`` -> restored value *with this listener already
         #   attached* (a full restart re-attaches the listener only after restore,
         #   so it never sees that edge). Re-surfacing the restored last event from

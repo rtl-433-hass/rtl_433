@@ -104,7 +104,7 @@ the domain/coordinator established by PR1.
     storage + UI half only.
 12. **`options_flow`** — Gold. Configures platform behavior; follows the platforms
     and settings it configures.
-13. **`receiver_settings`** — Gold. Shared hub-level settings model; formalized alongside/after
+13. **`receiver_settings`** — Gold. Shared receiver-level settings model; formalized alongside/after
     the control platforms (`number`/`select`/`switch`) that consume it.
 14. **`sdr_settings`** — Gold/Platinum. Shared SDR settings model; tracked last, with its
     supporting code included in the earlier control-platform PRs.

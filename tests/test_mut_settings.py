@@ -5,14 +5,14 @@ value *means* -- when it is stored, when it clears, and whether it lands in
 ``entry.data`` or ``entry.options``. Every existing test reaches those rules
 through a caller (the options flow or the WebSocket settings handler), and a
 caller fixes several inputs at once: it always passes a real ``device_key`` that
-is already in ``entry.data[devices]``, always has a hub registry loaded, and
+is already in ``entry.data[devices]``, always has a receiver registry loaded, and
 never submits a clear on a device that has nothing stored. The edges of these
 builders are therefore reachable only by calling them directly, which is what
 this file does.
 
 The functions touch Home Assistant only through ``hass.data``, so the tests use
 a small stand-in rather than a live ``hass``; that keeps them synchronous and
-lets each one state the exact hub state it is describing.
+lets each one state the exact receiver state it is describing.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ from custom_components.rtl_433.const import (
 from custom_components.rtl_433.settings import (
     build_device_data,
     build_device_options,
-    build_hub_options,
+    build_receiver_options,
     device_defaults,
     is_motion_bearing,
 )
@@ -92,10 +92,10 @@ def _descriptor(field_key: str, *, clear_delay: int | None) -> FieldDescriptor:
     )
 
 
-# A hub registry deliberately unlike the shipped library: ``pir_trip`` exists
+# A receiver registry deliberately unlike the shipped library: ``pir_trip`` exists
 # only here, and ``contact`` auto-clears only on one model. Both are how a
 # user's own ``user_mappings`` reach the motion test.
-HUB_REGISTRY = Registry(
+RECEIVER_REGISTRY = Registry(
     flat={
         "pir_trip": _descriptor("pir_trip", clear_delay=30),
         "contact": _descriptor("contact", clear_delay=None),
@@ -132,10 +132,10 @@ class _FakeCoordinator:
 def _entry(
     *, data: dict[str, Any] | None = None, options: dict[str, Any] | None = None
 ) -> MockConfigEntry:
-    """Build a hub entry carrying exactly the state a test describes."""
+    """Build a receiver entry carrying exactly the state a test describes."""
     return MockConfigEntry(
         domain=DOMAIN,
-        title="test hub",
+        title="test receiver",
         data=data if data is not None else {},
         options=options if options is not None else {},
         version=2,
@@ -172,17 +172,20 @@ def _device_entry(
 # ---------------------------------------------------------------------------
 
 
-def test_is_motion_bearing_reads_the_hubs_own_registry_not_the_shipped_library():
+def test_is_motion_bearing_reads_the_receivers_own_registry_not_the_shipped_library():
     """A field a user mapped themselves must still earn the clear-delay knob.
 
     ``pir_trip`` exists in no shipped library file. If the test consulted the
-    default library instead of the hub's merged registry, every device whose
+    default library instead of the receiver's merged registry, every device whose
     only auto-clearing field came from the user's own ``user_mappings`` would be
     denied the knob -- the binary_sensor would turn on and stay on, with the one
     control that fixes it hidden.
     """
     entry = _device_entry({CONF_MODEL: MODEL, DEVICE_FIELDS: ["pir_trip"]})
-    assert is_motion_bearing(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE) is True
+    assert (
+        is_motion_bearing(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
+        is True
+    )
 
 
 def test_is_motion_bearing_resolves_the_field_against_the_devices_own_model():
@@ -193,7 +196,10 @@ def test_is_motion_bearing_resolves_the_field_against_the_devices_own_model():
     exactly the devices a model-scoped mapping was written for.
     """
     entry = _device_entry({CONF_MODEL: MODEL, DEVICE_FIELDS: ["contact"]})
-    assert is_motion_bearing(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE) is True
+    assert (
+        is_motion_bearing(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
+        is True
+    )
 
 
 def test_is_motion_bearing_lets_a_model_scoped_mapping_take_the_clear_delay_away():
@@ -204,7 +210,8 @@ def test_is_motion_bearing_lets_a_model_scoped_mapping_take_the_clear_delay_away
     """
     entry = _device_entry({CONF_MODEL: "Quiet-Contact", DEVICE_FIELDS: ["vibration"]})
     assert (
-        is_motion_bearing(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE) is False
+        is_motion_bearing(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
+        is False
     )
 
 
@@ -217,7 +224,8 @@ def test_is_motion_bearing_ignores_a_field_that_resolves_without_a_clear_delay()
     """
     entry = _device_entry({CONF_MODEL: "Generic-Contact", DEVICE_FIELDS: ["contact"]})
     assert (
-        is_motion_bearing(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE) is False
+        is_motion_bearing(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
+        is False
     )
 
 
@@ -234,7 +242,10 @@ def test_is_motion_bearing_is_true_when_only_one_of_several_fields_auto_clears()
             DEVICE_FIELDS: ["battery_unknown_to_the_library", "contact", "pir_trip"],
         }
     )
-    assert is_motion_bearing(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE) is True
+    assert (
+        is_motion_bearing(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
+        is True
+    )
 
 
 def test_is_motion_bearing_is_false_for_a_device_with_no_observed_fields_yet():
@@ -246,11 +257,12 @@ def test_is_motion_bearing_is_false_for_a_device_with_no_observed_fields_yet():
     """
     entry = _device_entry({CONF_MODEL: MODEL})
     assert (
-        is_motion_bearing(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE) is False
+        is_motion_bearing(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
+        is False
     )
 
 
-def test_is_motion_bearing_is_false_for_a_device_the_hub_has_never_stored():
+def test_is_motion_bearing_is_false_for_a_device_the_receiver_has_never_stored():
     """A stale device key from an open form must answer, not raise.
 
     The panel can ask about a device that has since been removed or replaced.
@@ -258,28 +270,29 @@ def test_is_motion_bearing_is_false_for_a_device_the_hub_has_never_stored():
     """
     entry = _device_entry({CONF_MODEL: MODEL, DEVICE_FIELDS: ["pir_trip"]})
     assert (
-        is_motion_bearing(_hass(entry, registry=HUB_REGISTRY), entry, "never-seen")
+        is_motion_bearing(_hass(entry, registry=RECEIVER_REGISTRY), entry, "never-seen")
         is False
     )
 
 
-def test_is_motion_bearing_is_false_before_the_hub_has_stored_any_devices():
-    """A hub that has adopted nothing has no device map at all in ``entry.data``.
+def test_is_motion_bearing_is_false_before_the_receiver_has_stored_any_devices():
+    """A receiver that has adopted nothing has no device map at all in ``entry.data``.
 
-    Reading straight through the absent key would raise on a brand-new hub, so
+    Reading straight through the absent key would raise on a brand-new receiver, so
     the missing map has to read as an empty one.
     """
     entry = _entry(data={CONF_HOST: "rtl433.local"})
     assert (
-        is_motion_bearing(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE) is False
+        is_motion_bearing(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
+        is False
     )
 
 
-def test_is_motion_bearing_is_false_while_the_hub_registry_is_still_loading():
+def test_is_motion_bearing_is_false_while_the_receiver_registry_is_still_loading():
     """Before the library is cached, "cannot tell yet" must read as "no knob".
 
     ``entry_registry`` returns ``None`` during setup. The field keys here exist
-    only in the hub registry, so a lookup made without it finds nothing -- and
+    only in the receiver registry, so a lookup made without it finds nothing -- and
     the knob simply does not appear rather than the form failing.
     """
     entry = _device_entry({CONF_MODEL: MODEL, DEVICE_FIELDS: ["pir_trip"]})
@@ -299,7 +312,7 @@ def test_device_defaults_returns_exactly_the_keys_a_settings_form_reads():
     empty and the user's stored value looks lost.
     """
     entry = _device_entry({CONF_MODEL: MODEL, DEVICE_FIELDS: ["pir_trip"]})
-    result = device_defaults(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE)
+    result = device_defaults(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
     assert set(result) == DEVICE_DEFAULT_KEYS
 
 
@@ -311,7 +324,7 @@ def test_device_defaults_describes_the_device_the_form_was_opened_for():
     wrong key or the wrong record would mislabel the page.
     """
     entry = _device_entry({CONF_MODEL: MODEL, DEVICE_FIELDS: ["pir_trip"]})
-    result = device_defaults(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE)
+    result = device_defaults(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
     assert result["device_key"] == DEVICE
     assert result["model"] == MODEL
     assert result["label"] == f"{MODEL} ({DEVICE})"
@@ -329,7 +342,7 @@ def test_device_defaults_pre_fills_the_stored_timeout_and_clear_delay():
         {CONF_MODEL: MODEL, DEVICE_FIELDS: ["pir_trip"], DEVICE_TIMEOUT_OVERRIDE: 900},
         options={CONF_DEVICES: {DEVICE: {DEVICE_MOTION_CLEAR_DELAY: 45}}},
     )
-    result = device_defaults(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE)
+    result = device_defaults(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
     assert result[DEVICE_TIMEOUT_OVERRIDE] == 900
     assert result[DEVICE_MOTION_CLEAR_DELAY] == 45
 
@@ -348,7 +361,7 @@ def test_device_defaults_prefers_a_saved_calibration_over_the_decoded_hint():
             DEVICE_CALIBRATION: STORED_CALIBRATION,
         }
     )
-    hass = _hass(entry, registry=HUB_REGISTRY, fields={"MeterType": "Gas"})
+    hass = _hass(entry, registry=RECEIVER_REGISTRY, fields={"MeterType": "Gas"})
     result = device_defaults(hass, entry, DEVICE)
     assert result["calibration"] == NORMALIZED_CALIBRATION
     assert result["commodity"] == COMMODITY_WATER
@@ -362,20 +375,22 @@ def test_device_defaults_falls_back_to_the_decoded_hint_when_nothing_is_saved():
     happens to be first in the coordinator's cache.
     """
     entry = _device_entry({CONF_MODEL: MODEL, DEVICE_FIELDS: ["pir_trip"]})
-    hass = _hass(entry, registry=HUB_REGISTRY, fields={"MeterType": "Gas"})
+    hass = _hass(entry, registry=RECEIVER_REGISTRY, fields={"MeterType": "Gas"})
     result = device_defaults(hass, entry, DEVICE)
     assert result["calibration"] is None
     assert result["commodity"] == COMMODITY_GAS
 
 
-def test_device_defaults_answers_blankly_for_a_device_the_hub_has_never_stored():
+def test_device_defaults_answers_blankly_for_a_device_the_receiver_has_never_stored():
     """An open form outliving its device must render empty, not crash the page.
 
     Every field falls back to "nothing stored" and the label degrades to the raw
     key, so the settings page still renders and the user can back out of it.
     """
     entry = _device_entry({CONF_MODEL: MODEL, DEVICE_FIELDS: ["pir_trip"]})
-    result = device_defaults(_hass(entry, registry=HUB_REGISTRY), entry, "never-seen")
+    result = device_defaults(
+        _hass(entry, registry=RECEIVER_REGISTRY), entry, "never-seen"
+    )
     assert result["model"] is None
     assert result["label"] == "never-seen (never-seen)"
     assert result[DEVICE_TIMEOUT_OVERRIDE] is None
@@ -385,14 +400,14 @@ def test_device_defaults_answers_blankly_for_a_device_the_hub_has_never_stored()
     assert result["motion"] is False
 
 
-def test_device_defaults_works_before_the_hub_has_stored_any_devices():
-    """A hub with no device map yet must not raise from the settings path.
+def test_device_defaults_works_before_the_receiver_has_stored_any_devices():
+    """A receiver with no device map yet must not raise from the settings path.
 
     ``entry.data`` carries no ``devices`` key at all until the first adoption;
-    reading straight through it would make the page fail on a new hub.
+    reading straight through it would make the page fail on a new receiver.
     """
     entry = _entry(data={CONF_HOST: "rtl433.local"})
-    result = device_defaults(_hass(entry, registry=HUB_REGISTRY), entry, DEVICE)
+    result = device_defaults(_hass(entry, registry=RECEIVER_REGISTRY), entry, DEVICE)
     assert result["model"] is None
     assert result["commodity"] == COMMODITY_NONE
 
@@ -405,7 +420,7 @@ def test_device_defaults_works_before_the_hub_has_stored_any_devices():
 def test_build_device_data_clears_an_override_and_calibration_on_a_blank_save():
     """Blanking a field has to remove it, not leave the old value behind.
 
-    A cleared timeout must fall back to the hub default and a cleared
+    A cleared timeout must fall back to the receiver default and a cleared
     calibration to the library descriptor. If either key survived the save, the
     user would blank the field, save, and find the old number still in force.
     """
@@ -442,7 +457,7 @@ def test_build_device_data_stores_the_values_it_is_given():
 
 
 def test_build_device_data_retires_a_clear_delay_left_in_data_by_the_migration():
-    """A migrated hub could otherwise never clear its motion delay.
+    """A migrated receiver could otherwise never clear its motion delay.
 
     The delay is read from options first and data second. Leave the migrated
     copy in data and blanking the field empties options, the read falls back to
@@ -476,7 +491,7 @@ def test_build_device_data_clears_cleanly_on_a_device_that_has_nothing_stored():
 
 
 def test_build_device_data_creates_the_record_for_a_device_not_yet_in_the_map():
-    """The first save on a hub must create the device map, not read through it.
+    """The first save on a receiver must create the device map, not read through it.
 
     ``entry.data`` carries no ``devices`` key until something is written there,
     and a settings save can be the thing that writes it -- a device whose
@@ -488,11 +503,11 @@ def test_build_device_data_creates_the_record_for_a_device_not_yet_in_the_map():
     assert data[CONF_DEVICES] == {DEVICE: {DEVICE_TIMEOUT_OVERRIDE: 900}}
 
 
-def test_build_device_data_leaves_the_rest_of_the_hub_alone():
-    """One device's save must not disturb the hub's other devices or its connection.
+def test_build_device_data_leaves_the_rest_of_the_receiver_alone():
+    """One device's save must not disturb the receiver's other devices or its connection.
 
     This dict replaces ``entry.data`` wholesale, so anything it drops is gone:
-    the host the hub connects to, and every other adopted device's record.
+    the host the receiver connects to, and every other adopted device's record.
     """
     entry = _entry(
         data={
@@ -539,7 +554,7 @@ def test_build_device_options_stores_the_delay_under_the_device():
 def test_build_device_options_drops_a_device_whose_last_override_is_cleared():
     """A cleared delay must leave no trace, or the per-device map grows forever.
 
-    An emptied sub-map left in place means a hub that has never kept an override
+    An emptied sub-map left in place means a receiver that has never kept an override
     still accumulates one entry per device it has ever opened a form for.
     """
     entry = _entry(
@@ -579,10 +594,10 @@ def test_build_device_options_clears_cleanly_when_nothing_was_stored():
     assert options[CONF_DEVICES] == {}
 
 
-def test_build_device_options_leaves_other_devices_and_hub_options_alone():
+def test_build_device_options_leaves_other_devices_and_receiver_options_alone():
     """This dict replaces ``entry.options``, so anything it drops is really dropped.
 
-    The hub's own availability timeout and every other device's delay have to
+    The receiver's own availability timeout and every other device's delay have to
     survive one device's save.
     """
     entry = _entry(
@@ -599,59 +614,59 @@ def test_build_device_options_leaves_other_devices_and_hub_options_alone():
 
 
 # ---------------------------------------------------------------------------
-# build_hub_options -- the hub-level save
+# build_receiver_options -- the receiver-level save
 # ---------------------------------------------------------------------------
 
 
-def test_build_hub_options_drops_a_stored_timeout_when_the_hub_returns_to_defaults():
-    """Returning to per-device-type defaults must actually remove the hub's value.
+def test_build_receiver_options_drops_a_stored_timeout_when_the_receiver_returns_to_defaults():
+    """Returning to per-device-type defaults must actually remove the receiver's value.
 
-    A hub timeout left in options keeps masking the per-device-class defaults,
+    A receiver timeout left in options keeps masking the per-device-class defaults,
     so an event-driven device -- a doorbell that has not rung in ten minutes --
     still goes unavailable even though the user switched the override off.
     """
     entry = _entry(
         data={CONF_HOST: "rtl433.local"}, options={CONF_AVAILABILITY_TIMEOUT: 300}
     )
-    options = build_hub_options(entry, None, True)
+    options = build_receiver_options(entry, None, True)
     assert CONF_AVAILABILITY_TIMEOUT not in options
     assert options[CONF_MANAGE_SETTINGS] is True
 
 
-def test_build_hub_options_clears_cleanly_when_no_timeout_was_stored():
-    """A hub that never set a timeout must still be able to save its other setting.
+def test_build_receiver_options_clears_cleanly_when_no_timeout_was_stored():
+    """A receiver that never set a timeout must still be able to save its other setting.
 
-    The hub form submits both keys every time, so "unset, and still unset" is
-    the ordinary save on most hubs.
+    The receiver form submits both keys every time, so "unset, and still unset" is
+    the ordinary save on most receivers.
     """
     entry = _entry(data={CONF_HOST: "rtl433.local"})
-    options = build_hub_options(entry, None, False)
+    options = build_receiver_options(entry, None, False)
     assert CONF_AVAILABILITY_TIMEOUT not in options
     assert options[CONF_MANAGE_SETTINGS] is False
 
 
-def test_build_hub_options_stores_zero_as_a_deliberate_never_expire():
+def test_build_receiver_options_stores_zero_as_a_deliberate_never_expire():
     """``0`` is a choice -- never expire -- not an absent value.
 
     Deciding by truthiness rather than by ``None`` would turn "never expire"
     into "use the defaults", which is close to its opposite.
     """
     entry = _entry(data={CONF_HOST: "rtl433.local"})
-    options = build_hub_options(entry, 0, True)
+    options = build_receiver_options(entry, 0, True)
     assert options[CONF_AVAILABILITY_TIMEOUT] == 0
 
 
-def test_build_hub_options_keeps_the_per_device_map_and_does_not_alias_the_entry():
-    """The hub form owns two keys; the per-device overrides live alongside them.
+def test_build_receiver_options_keeps_the_per_device_map_and_does_not_alias_the_entry():
+    """The receiver form owns two keys; the per-device overrides live alongside them.
 
-    This dict replaces ``entry.options`` wholesale, so a hub save that dropped
+    This dict replaces ``entry.options`` wholesale, so a receiver save that dropped
     the device sub-map would clear every per-device clear-delay at once.
     """
     entry = _entry(
         data={CONF_HOST: "rtl433.local"},
         options={CONF_DEVICES: {DEVICE: {DEVICE_MOTION_CLEAR_DELAY: 45}}},
     )
-    options = build_hub_options(entry, 600, True)
+    options = build_receiver_options(entry, 600, True)
     assert options[CONF_DEVICES] == {DEVICE: {DEVICE_MOTION_CLEAR_DELAY: 45}}
     assert options[CONF_AVAILABILITY_TIMEOUT] == 600
     assert options is not entry.options

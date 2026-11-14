@@ -8,7 +8,7 @@ Groups of survivors targeted:
   / ``if len(parts) != 3`` / reserved-``receiver`` guards.
 - _event_types_for_entry (28 mutants): full .get() chain assertions with a real
   hass/entry setup; the fallback (get_capability) path; ``and`` vs ``or`` guard;
-  hub_entry=None path; persisted=None shortcut; each .get() default mutation.
+  receiver_entry=None path; persisted=None shortcut; each .get() default mutation.
 - _async_attach_base_trigger (4 mutants): platform_type="device" is propagated
   into the trigger payload; assert calls[0]["trigger"]["platform"] == "device".
 - _async_attach_subtype_trigger (2 mutants): HassJob name argument is not None/empty.
@@ -46,7 +46,7 @@ from homeassistant.core import HassJob, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.trigger import async_initialize_triggers
 from homeassistant.util import dt as dt_util
-from tests.test_lifecycle import _coordinator, _feed, _setup_hub
+from tests.test_lifecycle import _coordinator, _feed, _setup_receiver
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -57,11 +57,11 @@ MODEL = "Acurite-606TX"
 DEVICE_ID = 42
 
 
-async def _setup_button_hub(hass, hub_entry_builder):
-    """Set up a hub seeded with a single ``button`` event device (types A/B)."""
-    hub = await _setup_hub(
+async def _setup_button_receiver(hass, receiver_entry_builder):
+    """Set up a receiver seeded with a single ``button`` event device (types A/B)."""
+    receiver = await _setup_receiver(
         hass,
-        hub_entry_builder,
+        receiver_entry_builder,
         devices={
             DEVICE_KEY: {
                 CONF_MODEL: MODEL,
@@ -70,7 +70,7 @@ async def _setup_button_hub(hass, hub_entry_builder):
             }
         },
     )
-    return hub
+    return receiver
 
 
 async def _attach(hass: HomeAssistant, trigger: dict) -> tuple[list, callable]:
@@ -235,9 +235,9 @@ class TestEventTypesForEntryPersisted:
     mutmut_3  (and -> or),
     mutmut_4  (device_key is None),
     mutmut_5  (field_key is None),
-    mutmut_6  (hub_entry = None),
+    mutmut_6  (receiver_entry = None),
     mutmut_7  (async_get_entry(None)),
-    mutmut_8  (hub_entry is None -> if is None:),
+    mutmut_8  (receiver_entry is None -> if is None:),
     mutmut_9  (persisted = None),
     mutmut_18 (.get(device_key,{}) key -> None),
     mutmut_19 (.get(device_key,{}) default -> None),
@@ -253,16 +253,16 @@ class TestEventTypesForEntryPersisted:
     mutmut_13 (.get(field_key,[]) default removed).
     """
 
-    async def test_returns_persisted_event_types(self, hass, hub_entry_builder):
+    async def test_returns_persisted_event_types(self, hass, receiver_entry_builder):
         """Full persisted path: assert exact returned list from hass.data.
 
-        This test provides a hub entry with the full data structure and asserts
+        This test provides a receiver entry with the full data structure and asserts
         the exact list is returned. Any mutation in the .get() chain breaks the
         lookup so the persisted data isn't found, returning [] instead of ['A','B'].
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -273,7 +273,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         assert entity_id is not None
         entry = ent_reg.async_get(entity_id)
@@ -284,7 +284,7 @@ class TestEventTypesForEntryPersisted:
         assert result == ["A", "B"]
 
     async def test_persisted_wins_over_a_distinct_capability_fallback(
-        self, hass, hub_entry_builder
+        self, hass, receiver_entry_builder
     ):
         """Persisted data must be returned over a DIFFERENT live capability.
 
@@ -298,9 +298,9 @@ class TestEventTypesForEntryPersisted:
         ``unique_id``, an ``and``->``or`` guard flip, or ``persisted = None`` falls
         through to the mocked ``['X','Y']`` and fails the assertion.
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -311,7 +311,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         assert entry is not None
@@ -325,17 +325,17 @@ class TestEventTypesForEntryPersisted:
         assert result == ["A", "B"]
 
     async def test_unique_id_none_falls_through_to_capability(
-        self, hass, hub_entry_builder
+        self, hass, receiver_entry_builder
     ):
         """mutmut_2: unique_id -> None causes _device_field_from_unique_id(None) -> (None,None).
         That makes device_key is None, so we skip persisted path -> fallback.
         With no state entity, returns [].
-        We need hub set up but an entry with no unique_id to simulate that.
+        We need receiver set up but an entry with no unique_id to simulate that.
         Instead, test with a mocked entry that has unique_id=None.
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -346,7 +346,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         assert entity_id is not None
         entry = ent_reg.async_get(entity_id)
@@ -359,7 +359,7 @@ class TestEventTypesForEntryPersisted:
         result = dt._event_types_for_entry(hass, entry)
         assert result == ["A", "B"]
 
-    async def test_both_keys_must_be_not_none(self, hass, hub_entry_builder):
+    async def test_both_keys_must_be_not_none(self, hass, receiver_entry_builder):
         """mutmut_3 (and->or), mutmut_4 (device_key is None), mutmut_5 (field_key is None).
 
         The guard ``if device_key is not None and field_key is not None:`` must
@@ -367,9 +367,9 @@ class TestEventTypesForEntryPersisted:
         return wrong data. We test that a valid unique_id (both non-None) returns
         the expected list.
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -380,23 +380,25 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
         assert result == ["C", "D"]
 
-    async def test_hub_entry_none_falls_back_to_empty(self, hass, hub_entry_builder):
-        """mutmut_6 (hub_entry=None directly) and mutmut_7 (async_get_entry(None)).
+    async def test_receiver_entry_none_falls_back_to_empty(
+        self, hass, receiver_entry_builder
+    ):
+        """mutmut_6 (receiver_entry=None directly) and mutmut_7 (async_get_entry(None)).
 
-        When hub_entry is None (entry not found), the code falls through to
+        When receiver_entry is None (entry not found), the code falls through to
         get_capability. With no loaded entity state and no capabilities, returns [].
         We mock async_get_entry to return None so the persisted path is skipped,
         and also mock get_capability to return None so we get [].
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -407,11 +409,11 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
-        # Mock async_get_entry to return None (simulates hub not found)
+        # Mock async_get_entry to return None (simulates receiver not found)
         # Also mock get_capability to avoid state-machine side effects
         with (
             patch.object(hass.config_entries, "async_get_entry", return_value=None),
@@ -421,18 +423,18 @@ class TestEventTypesForEntryPersisted:
             ),
         ):
             result = dt._event_types_for_entry(hass, entry)
-        # No persisted data accessible (hub_entry is None), no live capability -> []
+        # No persisted data accessible (receiver_entry is None), no live capability -> []
         assert result == []
 
-    async def test_persisted_empty_list_falls_back(self, hass, hub_entry_builder):
+    async def test_persisted_empty_list_falls_back(self, hass, receiver_entry_builder):
         """When persisted=[] (falsy), fallback to get_capability.
 
         This verifies the ``if persisted:`` guard (not tested as a mutant but
         confirms the path; also sets up for mutmut_9 where persisted=None).
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -443,7 +445,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
@@ -451,18 +453,18 @@ class TestEventTypesForEntryPersisted:
         assert result == []
 
     async def test_persisted_data_lookup_chain_conf_devices_key(
-        self, hass, hub_entry_builder
+        self, hass, receiver_entry_builder
     ):
         """mutmut_22/23/25: .get(CONF_DEVICES, {}) key or default changed.
 
-        To distinguish: hub.data DOES have CONF_DEVICES -> we get it.
+        To distinguish: receiver.data DOES have CONF_DEVICES -> we get it.
         If key is None (mutmut_22), .get(None, {}) returns {} -> no device -> [].
         If default is None (mutmut_23/25), irrelevant when CONF_DEVICES present.
         The assert of real ['A','B'] kills mutmut_22.
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -473,32 +475,34 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
         assert result == ["A", "B"]
 
-    async def test_missing_conf_devices_default_used(self, hass, hub_entry_builder):
+    async def test_missing_conf_devices_default_used(
+        self, hass, receiver_entry_builder
+    ):
         """mutmut_23/25: default=None breaks chained .get() when CONF_DEVICES absent.
 
-        When hub.data has NO CONF_DEVICES key, .get(CONF_DEVICES, {}) returns {}
+        When receiver.data has NO CONF_DEVICES key, .get(CONF_DEVICES, {}) returns {}
         (the default {}). If default is None (mutmut_23), .get(None) returns None,
         and .get(device_key) on None raises AttributeError.
         The real code should return [] when devices key is missing.
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
-            devices=None,  # no CONF_DEVICES in hub.data
+            receiver_entry_builder,
+            devices=None,  # no CONF_DEVICES in receiver.data
         )
         er.async_get(hass)
         # No event entities exist since no device is seeded; use a mock entry.
-        # Build a fake entry with a valid unique_id for this hub.
-        fake_uid = f"{hub.entry_id}:{DEVICE_KEY}:button"
+        # Build a fake entry with a valid unique_id for this receiver.
+        fake_uid = f"{receiver.entry_id}:{DEVICE_KEY}:button"
         mock_entry = MagicMock()
         mock_entry.unique_id = fake_uid
-        mock_entry.config_entry_id = hub.entry_id
+        mock_entry.config_entry_id = receiver.entry_id
         mock_entry.entity_id = "event.fake_button"
 
         # patch get_capability to return None so we don't error on entity lookup
@@ -508,15 +512,17 @@ class TestEventTypesForEntryPersisted:
             result = dt._event_types_for_entry(hass, mock_entry)
         assert result == []
 
-    async def test_device_key_lookup_in_conf_devices(self, hass, hub_entry_builder):
+    async def test_device_key_lookup_in_conf_devices(
+        self, hass, receiver_entry_builder
+    ):
         """mutmut_18/19/21: .get(device_key, {}) key or default changed.
 
         If key changes to None, .get(None, {}) on a dict keyed by device_key
         returns {} -> no event types -> []. Real returns ['A','B'].
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -527,21 +533,23 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
         assert result == ["A", "B"]
 
-    async def test_device_event_types_key_in_device_dict(self, hass, hub_entry_builder):
+    async def test_device_event_types_key_in_device_dict(
+        self, hass, receiver_entry_builder
+    ):
         """mutmut_14/15/17: .get(DEVICE_EVENT_TYPES, {}) key or default changed.
 
         If key changes to None, .get(None, {}) returns {} -> no field -> [].
         Real returns ['A','B'].
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -552,21 +560,23 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
         assert result == ["A", "B"]
 
-    async def test_field_key_lookup_in_event_types_dict(self, hass, hub_entry_builder):
+    async def test_field_key_lookup_in_event_types_dict(
+        self, hass, receiver_entry_builder
+    ):
         """mutmut_10/11/13: .get(field_key, []) key or default changed.
 
         If key changes to None, .get(None, []) returns [] -> no event types.
         Real returns ['A','B'].
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -577,22 +587,24 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
         assert result == ["A", "B"]
 
-    async def test_different_field_keys_are_distinct(self, hass, hub_entry_builder):
+    async def test_different_field_keys_are_distinct(
+        self, hass, receiver_entry_builder
+    ):
         """Assert that field_key selects the right sub-list (not a neighbour's).
 
         This directly kills mutmut_10 (key->None): None would fetch nothing.
         Use two valid event fields (button, secret_knock) each with distinct types.
         """
         # Two event fields: button and secret_knock (both are event platform fields)
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -607,7 +619,7 @@ class TestEventTypesForEntryPersisted:
         ent_reg = er.async_get(hass)
         # Check button entity
         button_eid = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         assert button_eid is not None, "button event entity not found"
         button_entry = ent_reg.async_get(button_eid)
@@ -615,7 +627,7 @@ class TestEventTypesForEntryPersisted:
 
         # Check secret_knock entity
         knock_eid = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:secret_knock"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:secret_knock"
         )
         assert knock_eid is not None, "secret_knock event entity not found"
         knock_entry = ent_reg.async_get(knock_eid)
@@ -624,18 +636,20 @@ class TestEventTypesForEntryPersisted:
         # are listed even though only ``ring`` was pre-seeded into the map.
         assert dt._event_types_for_entry(hass, knock_entry) == ["ring", "secret_knock"]
 
-    async def test_hub_entry_is_none_check_polarity(self, hass, hub_entry_builder):
-        """mutmut_8: ``if hub_entry is None:`` instead of ``if hub_entry is not None:``.
+    async def test_receiver_entry_is_none_check_polarity(
+        self, hass, receiver_entry_builder
+    ):
+        """mutmut_8: ``if receiver_entry is None:`` instead of ``if receiver_entry is not None:``.
 
-        With the mutant, the persisted block runs when hub_entry is None
-        (which would raise AttributeError on hub_entry.data), but SKIPS
-        when hub_entry is actually set.
-        Real: runs the block when hub_entry is not None -> returns persisted data.
+        With the mutant, the persisted block runs when receiver_entry is None
+        (which would raise AttributeError on receiver_entry.data), but SKIPS
+        when receiver_entry is actually set.
+        Real: runs the block when receiver_entry is not None -> returns persisted data.
         We assert persisted data is returned (not []).
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -646,7 +660,7 @@ class TestEventTypesForEntryPersisted:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
         result = dt._event_types_for_entry(hass, entry)
@@ -668,7 +682,7 @@ class TestEventTypesForEntryFallback:
     """
 
     async def test_fallback_returns_live_capability_attribute(
-        self, hass, hub_entry_builder
+        self, hass, receiver_entry_builder
     ):
         """get_capability returns the entity's event_types from live state.
 
@@ -686,9 +700,9 @@ class TestEventTypesForEntryFallback:
         mutmut_33 (entity_id dropped) -> wrong arity.
         mutmut_34 (list(None)) -> TypeError.
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -698,13 +712,13 @@ class TestEventTypesForEntryFallback:
             },
         )
         # Feed a transmission to populate the entity state
-        coordinator = _coordinator(hass, hub)
+        coordinator = _coordinator(hass, receiver)
         _feed(coordinator, {"model": MODEL, "id": DEVICE_ID, "button": "A"})
         await hass.async_block_till_done()
 
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         assert entity_id is not None
         ent_reg.async_get(entity_id)
@@ -714,7 +728,7 @@ class TestEventTypesForEntryFallback:
         mock_entry.unique_id = (
             None  # -> _device_field_from_unique_id(None) -> (None,None)
         )
-        mock_entry.config_entry_id = hub.entry_id
+        mock_entry.config_entry_id = receiver.entry_id
         mock_entry.entity_id = entity_id  # points to the live state
 
         result = dt._event_types_for_entry(hass, mock_entry)
@@ -730,15 +744,15 @@ class TestEventTypesForEntryFallback:
             assert result == []
 
     async def test_fallback_get_capability_uses_correct_entity_id(
-        self, hass, hub_entry_builder
+        self, hass, receiver_entry_builder
     ):
         """Assert that get_capability is called with the right entity_id.
 
         Patch get_capability and check the call args. Kills mutmut_29 (entity_id->None).
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -749,7 +763,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -763,15 +777,17 @@ class TestEventTypesForEntryFallback:
         mock_cap.assert_called_once_with(hass, entry.entity_id, ATTR_EVENT_TYPES)
         assert result == ["P", "Q"]
 
-    async def test_fallback_returns_list_of_capability(self, hass, hub_entry_builder):
+    async def test_fallback_returns_list_of_capability(
+        self, hass, receiver_entry_builder
+    ):
         """mutmut_34: list(None) raises TypeError; real list(capability) works.
 
         Assert that when get_capability returns a non-empty iterable, the result
         is a list of those elements.
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -782,7 +798,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -796,12 +812,12 @@ class TestEventTypesForEntryFallback:
         assert isinstance(result, list)
 
     async def test_fallback_none_capability_returns_empty_list(
-        self, hass, hub_entry_builder
+        self, hass, receiver_entry_builder
     ):
         """When get_capability returns None, _event_types_for_entry returns []."""
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -812,7 +828,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -825,15 +841,15 @@ class TestEventTypesForEntryFallback:
         assert result == []
 
     async def test_fallback_uses_attr_event_types_not_none(
-        self, hass, hub_entry_builder
+        self, hass, receiver_entry_builder
     ):
         """mutmut_30: ATTR_EVENT_TYPES arg changed to None -> gets wrong/no attribute.
 
         Patch get_capability to spy on the capability argument.
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -844,7 +860,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -859,14 +875,14 @@ class TestEventTypesForEntryFallback:
         assert args[2] == ATTR_EVENT_TYPES
         assert args[2] is not None
 
-    async def test_fallback_uses_hass_not_none(self, hass, hub_entry_builder):
+    async def test_fallback_uses_hass_not_none(self, hass, receiver_entry_builder):
         """mutmut_28: hass arg changed to None -> get_capability(None, ...) would fail.
 
         Spy on get_capability to assert first arg is hass (not None).
         """
-        hub = await _setup_hub(
+        receiver = await _setup_receiver(
             hass,
-            hub_entry_builder,
+            receiver_entry_builder,
             devices={
                 DEVICE_KEY: {
                     CONF_MODEL: MODEL,
@@ -877,7 +893,7 @@ class TestEventTypesForEntryFallback:
         )
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -905,18 +921,18 @@ class TestAsyncAttachBaseTrigger:
     """Verify that the base trigger passes platform_type='device' to the state trigger."""
 
     async def test_base_trigger_platform_is_device_in_payload(
-        self, hass, hub_entry_builder
+        self, hass, receiver_entry_builder
     ):
         """The trigger payload's platform field is exactly 'device' (not None/DEVICE/XXdeviceXX).
 
         Attach the base trigger for a button entity, fire one press, and assert
         the captured payload has ``trigger.platform == 'device'``.
         """
-        hub = await _setup_button_hub(hass, hub_entry_builder)
-        coordinator = _coordinator(hass, hub)
+        receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+        coordinator = _coordinator(hass, receiver)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -955,13 +971,13 @@ class TestAsyncAttachBaseTrigger:
 
         remove()
 
-    async def test_base_trigger_platform_not_none(self, hass, hub_entry_builder):
+    async def test_base_trigger_platform_not_none(self, hass, receiver_entry_builder):
         """mutmut_13: platform_type=None would set payload platform to None."""
-        hub = await _setup_button_hub(hass, hub_entry_builder)
-        coordinator = _coordinator(hass, hub)
+        receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+        coordinator = _coordinator(hass, receiver)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -1000,14 +1016,14 @@ class TestAsyncAttachBaseTrigger:
         remove()
 
     async def test_base_trigger_platform_lowercase_device(
-        self, hass, hub_entry_builder
+        self, hass, receiver_entry_builder
     ):
         """mutmut_19/20: 'XXdeviceXX'/'DEVICE' are wrong case/string."""
-        hub = await _setup_button_hub(hass, hub_entry_builder)
-        coordinator = _coordinator(hass, hub)
+        receiver = await _setup_button_receiver(hass, receiver_entry_builder)
+        coordinator = _coordinator(hass, receiver)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -1061,16 +1077,16 @@ class TestAsyncAttachBaseTrigger:
 class TestAsyncAttachSubtypeTrigger:
     """Verify that HassJob is constructed with the expected name string."""
 
-    async def test_hassjob_name_is_not_none(self, hass, hub_entry_builder):
+    async def test_hassjob_name_is_not_none(self, hass, receiver_entry_builder):
         """mutmut_8/10: HassJob name is None or missing; real is a formatted string.
 
         Patch HassJob at the device_trigger module to intercept the constructor call
         and assert the name argument starts with 'rtl_433'.
         """
-        hub = await _setup_button_hub(hass, hub_entry_builder)
+        receiver = await _setup_button_receiver(hass, receiver_entry_builder)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 
@@ -1117,12 +1133,14 @@ class TestAsyncAttachSubtypeTrigger:
         assert len(non_none_names) >= 1
         assert any("rtl_433" in str(n) for n in non_none_names)
 
-    async def test_hassjob_name_contains_rtl433_prefix(self, hass, hub_entry_builder):
+    async def test_hassjob_name_contains_rtl433_prefix(
+        self, hass, receiver_entry_builder
+    ):
         """Assert the job name is the formatted string, not just any non-None value."""
-        hub = await _setup_button_hub(hass, hub_entry_builder)
+        receiver = await _setup_button_receiver(hass, receiver_entry_builder)
         ent_reg = er.async_get(hass)
         entity_id = ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{hub.entry_id}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
         entry = ent_reg.async_get(entity_id)
 

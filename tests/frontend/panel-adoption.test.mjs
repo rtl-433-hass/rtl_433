@@ -1,5 +1,5 @@
 // Exercise the real Add handler without a DOM. The browser harness covers the
-// form itself; these checks protect asynchronous replies arriving after a hub
+// form itself; these checks protect asynchronous replies arriving after a receiver
 // switch or navigation, and ensure only a successful meter adoption opens it.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -34,7 +34,7 @@ function panelWith(call) {
   const panel = Object.create(Panel.prototype);
   Object.assign(panel, {
     isConnected: true,
-    _entryId: "hub-a",
+    _entryId: "receiver-a",
     _segment: "discovered",
     _added: new Map(),
     _busy: new Set(),
@@ -104,7 +104,7 @@ test("adding a meter opens its settings with detected calibration defaults", asy
   assert.equal(panel._settingsDevice, METER);
   assert.equal(panel._calibrationAfterAdd, METER);
   // Pushed over Discovered, so the browser's Back returns to the list.
-  assert.deepEqual(panel.navigation, { segment: "device-settings", entry: "hub-a" });
+  assert.deepEqual(panel.navigation, { segment: "device-settings", entry: "receiver-a" });
   assert.deepEqual(panel._deviceDefaults(METER), {
     device_key: METER,
     timeout_override: undefined,
@@ -139,7 +139,7 @@ test("a skipped Add never offers calibration", async () => {
 });
 
 for (const [name, change] of [
-  ["a receiver switch", (panel) => { panel._entryId = "hub-b"; }],
+  ["a receiver switch", (panel) => { panel._entryId = "receiver-b"; }],
   ["navigation away", (panel) => { panel._segment = ""; }],
   ["a detached panel", (panel) => { panel.isConnected = false; }],
 ]) {
@@ -252,7 +252,7 @@ test("saving one queued meter opens the next without refetching mid-reload", asy
 
   assert.deepEqual(types, ["rtl_433/settings/device"]);
   assert.equal(panel._calibrationAfterAdd, WATER);
-  // The cache still serves the next form, so a hub reloading after the save
+  // The cache still serves the next form, so a receiver reloading after the save
   // cannot answer `not_loaded` in the user's face.
   assert.notEqual(panel._settings, null);
   assert.equal(panel._deviceSettings(WATER).label, "Water meter");
@@ -300,7 +300,7 @@ test("switching receivers during Add cannot open the new receiver's settings", a
   let reply;
   const panel = panelWith(() => new Promise((resolve) => { reply = resolve; }));
   const add = panel._addDevice({ key: METER });
-  panel._entryId = "hub-b";
+  panel._entryId = "receiver-b";
   reply({ applied: [METER], skipped: [] });
   await add;
   assert.equal(panel._added.size, 0);
