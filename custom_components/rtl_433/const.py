@@ -56,7 +56,7 @@ CONF_RADIO_ID: Final = "radio_id"
 # Per-hub toggle: let Home Assistant manage (adopt + enforce) the SDR settings.
 # When on, the hub exposes number/select/switch controls and re-applies the
 # stored desired state after a reconnect; when off, those controls are not
-# created and the integration leaves the receiver's settings untouched.
+# created and the integration leaves the radio's settings untouched.
 CONF_MANAGE_SETTINGS: Final = "manage_settings"
 # Effective "go unavailable after this many seconds of silence" window.
 # Lives on the hub as the default and may be overridden per device.

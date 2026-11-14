@@ -95,7 +95,7 @@ ISSUE_EVENT_TIME_UNUSABLE = "event_time_unusable"
 
 # Conservative band heuristic for the sample-rate advisory. rtl_433 does not
 # auto-widen the sample rate when retuned via ``/cmd`` (unlike some CLI startup
-# paths), so a receiver moved into the upper ISM bands can be left at the bare
+# paths), so a radio moved into the upper ISM bands can be left at the bare
 # 250 kHz default. We only flag the clear-cut case — a *single* frequency at or
 # above 800 MHz captured at or below the default rate — and recommend a wider
 # rate; many devices still decode fine at 250k, so this is advisory only.
@@ -180,7 +180,7 @@ def _async_dismiss_event_time_advisory(hass: HomeAssistant, entry: ConfigEntry) 
 def _sample_rate_looks_low(meta: dict[str, Any]) -> bool:
     """Return whether meta shows a single high-band frequency at a low rate.
 
-    Guards: both values must be present and numeric, and a *hopping* receiver
+    Guards: both values must be present and numeric, and a *hopping* radio
     (more than one configured frequency) is never flagged — it spans bands and a
     single-rate recommendation would be meaningless.
     """
@@ -257,7 +257,7 @@ def async_track_sample_rate(
     """Raise / clear the low-sample-rate advisory as the hub's meta changes.
 
     Edge-triggered off ``signal_receiver_update`` (which fires on every meta refresh):
-    the advisory is raised once when the receiver enters the flagged state and
+    the advisory is raised once when the radio enters the flagged state and
     cleared when it leaves it, so a card the user dismisses while still on a low
     rate is not immediately re-raised. If the user chose "keep the current rate"
     in the fix flow, ``entry.data`` carries a persisted dismissal flag and the
@@ -502,7 +502,7 @@ class ReceiverRadioReplaceRepairFlow(RepairsFlow):
 class SampleRateRepairFlow(RepairsFlow):
     """Fix flow for the low-sample-rate advisory: a two-option menu.
 
-    The advisory is only ever a recommendation — the receiver is left at the bare
+    The advisory is only ever a recommendation — the radio is left at the bare
     default rate, which decodes fine for many devices — so the flow lets the user
     choose between two actions:
 

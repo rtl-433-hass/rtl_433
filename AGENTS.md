@@ -640,7 +640,7 @@ because these are the contracts the integration relies on:
   `_handle_log`: `src == "Auto Level"` messages are parsed
   (`pyrtl_433.autolevel`, exact upstream wording, unparsable ⇒ ignored) into
   the client's `noise_level` / `min_level` snapshots — the **only** source of
-  the receiver noise floor rtl_433 offers (no structured getter exists) — and
+  the radio noise floor rtl_433 offers (no structured getter exists) — and
   fire `on_hub_update` on change; the raw frame also reaches the optional
   `on_log` callback (unused by the integration today).
   **Every other frame is ignored** on the socket (`meta`, periodic state/stats,
@@ -927,7 +927,7 @@ keep this contributor-facing.
     `len(meta["frequencies"])` (unknown/pre-connect ⇒ available): `hop_interval`
     is available **only when hopping** (`> 1` frequency — a single frequency has
     nothing to hop between), and `center_frequency` is available **only when not
-    hopping** (`≤ 1`), mirroring the adoption hop-mode guard so a hopping receiver
+    hopping** (`≤ 1`), mirroring the adoption hop-mode guard so a hopping radio
     is never pinned. The API has no command to set the frequency *list*, so these
     modes are mutually exclusive and set in the rtl_433 config.
 - **Adoption + full enforcement on reconnect** (`coordinator/base.py`, driven
@@ -946,7 +946,7 @@ keep this contributor-facing.
     frequency even on a re-connect or after management was toggled on later, and is
     never re-applied once the user changes it via the control.
   - **Hop-mode guard:** adoption **skips `center_frequency` when
-    `len(frequencies) > 1`** so HA never pins a hopping receiver to one freq.
+    `len(frequencies) > 1`** so HA never pins a hopping radio to one freq.
   - **`/cmd`-down guard:** if `self.meta` is empty (getters failed / proxy hides
     `/cmd`) adoption seeds **nothing** and leaves the Store empty — never raises.
   - **Serialization lock:** all issuance (user write, reconnect replay,
