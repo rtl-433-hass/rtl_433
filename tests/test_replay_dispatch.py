@@ -41,6 +41,7 @@ from homeassistant.components.sensor import SensorExtraStoredData
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_scope, receiver_subentry
 
 # Nine-step historical temperature backlog (reconnect replay shape): values that
 # previously landed in the Recorder within tens of milliseconds.
@@ -668,11 +669,13 @@ async def test_event_entity_still_suppresses_replay(hass, receiver_entry_builder
     )
     entry.add_to_hass(hass)
     dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id, identifiers={("rtl_433", entry.entry_id)}
+        config_entry_id=entry.entry_id, identifiers={("rtl_433", receiver_scope(entry))}
     )
     from custom_components.rtl_433.coordinator import Rtl433Coordinator
 
-    coordinator = Rtl433Coordinator(hass, entry, host="rtl433.local")
+    coordinator = Rtl433Coordinator(
+        hass, entry, receiver_subentry(entry), host="rtl433.local"
+    )
     descriptor = FieldDescriptor(
         field_key="secret_knock",
         platform="event",
@@ -682,7 +685,7 @@ async def test_event_entity_still_suppresses_replay(hass, receiver_entry_builder
     )
     entity = Rtl433Event(
         coordinator,
-        entry.entry_id,
+        coordinator.receiver_id,
         "Honeywell-Doorbell-7",
         "Honeywell-Doorbell",
         descriptor,

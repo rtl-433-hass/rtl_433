@@ -1071,7 +1071,7 @@ class TestAsyncCreateFixFlow:
         }
 
         flow = await repairs.async_create_fix_flow(
-            hass, repairs._unreachable_issue_id(entry), data
+            hass, repairs._unreachable_issue_id(entry, receiver_id(entry)), data
         )
         assert isinstance(flow, repairs.ReceiverRadioReplaceRepairFlow)
         assert flow._entry is entry
