@@ -16,7 +16,7 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/rtl-433-hass/rtl_433/issues",
   "requirements": [
-    "pyrtl_433==0.4.1"
+    "pyrtl_433==0.5.0"
   ],
   "version": "0.22.0"
 }
