@@ -23,7 +23,7 @@ The coordinator owns no repairs policy: it exposes raw hub state and this module
 decides what is worth a card. :func:`async_track_hub_reachability` polls the
 coordinator's ``connected`` flag on an interval, and
 :func:`async_track_sample_rate` re-reads
-``coordinator.meta`` on each ``signal_hub_update``, as
+``coordinator.meta`` on each ``signal_receiver_update``, as
 :func:`async_track_event_time_precision` does for ``coordinator.time_precision``.
 ``__init__.py`` wires all three in during hub setup and registers their
 unsubscribes via ``entry.async_on_unload``.
@@ -45,7 +45,7 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_track_time_interval
 
-from .config_flow import CONF_SECURE, async_rebind_hub
+from .config_flow import CONF_SECURE, async_rebind_receiver
 from .const import (
     CONF_EVENT_TIME_DISMISSED,
     CONF_HOST,
@@ -57,7 +57,7 @@ from .const import (
     DEFAULT_PORT,
     DOMAIN,
     LOGGER,
-    signal_hub_update,
+    signal_receiver_update,
 )
 from .coordinator import CannotConnect, Rtl433Coordinator
 from .id_change import ISSUE_ID_CHANGED, DeviceIdChangedRepairFlow
@@ -256,7 +256,7 @@ def async_track_sample_rate(
 ) -> Callable[[], None]:
     """Raise / clear the low-sample-rate advisory as the hub's meta changes.
 
-    Edge-triggered off ``signal_hub_update`` (which fires on every meta refresh):
+    Edge-triggered off ``signal_receiver_update`` (which fires on every meta refresh):
     the advisory is raised once when the receiver enters the flagged state and
     cleared when it leaves it, so a card the user dismisses while still on a low
     rate is not immediately re-raised. If the user chose "keep the current rate"
@@ -285,7 +285,9 @@ def async_track_sample_rate(
             async_clear_sample_rate_low(hass, entry)
 
     _evaluate()  # meta may already be populated by the time we wire up
-    return async_dispatcher_connect(hass, signal_hub_update(entry.entry_id), _evaluate)
+    return async_dispatcher_connect(
+        hass, signal_receiver_update(entry.entry_id), _evaluate
+    )
 
 
 @callback
@@ -322,7 +324,7 @@ def async_track_event_time_precision(
 ) -> Callable[[], None]:
     """Raise / clear the unusable-event-time advisory as the hub reports in.
 
-    Edge-triggered off ``signal_hub_update``, which is the right edge for free:
+    Edge-triggered off ``signal_receiver_update``, which is the right edge for free:
     pyrtl_433 fires its ``on_hub_update`` callback the first time it observes the
     server's event-time resolution, and again whenever that observation changes
     (an operator editing ``report_meta`` mid-run). Nothing here polls.
@@ -352,7 +354,9 @@ def async_track_event_time_precision(
             async_clear_event_time_unusable(hass, entry)
 
     _evaluate()  # a precision may already have been observed by the time we wire up
-    return async_dispatcher_connect(hass, signal_hub_update(entry.entry_id), _evaluate)
+    return async_dispatcher_connect(
+        hass, signal_receiver_update(entry.entry_id), _evaluate
+    )
 
 
 @callback
@@ -420,7 +424,7 @@ def async_track_hub_reachability(
     )
 
 
-class HubRadioReplaceRepairFlow(RepairsFlow):
+class ReceiverRadioReplaceRepairFlow(RepairsFlow):
     """Fix flow for an unreachable hub: re-point it at a replacement radio.
 
     The dead radio is exactly what raised this issue, so this is the natural
@@ -466,7 +470,7 @@ class HubRadioReplaceRepairFlow(RepairsFlow):
             new_uid = (user_input.get(CONF_RADIO_ID) or "").strip() or (
                 entry.unique_id or ""
             )
-            status = await async_rebind_hub(
+            status = await async_rebind_receiver(
                 self.hass,
                 entry,
                 new_uid,
@@ -607,7 +611,7 @@ async def async_create_fix_flow(
                 entry, str(data.get("old_key")), str(data.get("new_key"))
             )
     for prefix, flow in (
-        (ISSUE_UNREACHABLE, HubRadioReplaceRepairFlow),
+        (ISSUE_UNREACHABLE, ReceiverRadioReplaceRepairFlow),
         (ISSUE_SAMPLE_RATE_LOW, SampleRateRepairFlow),
         (ISSUE_EVENT_TIME_UNUSABLE, EventTimeRepairFlow),
     ):

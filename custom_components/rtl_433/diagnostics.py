@@ -100,10 +100,10 @@ async def async_get_config_entry_diagnostics(
         TO_REDACT | {"ws_url"},
     )
     diagnostics["connected"] = coordinator.connected
-    # The connection-backed availability gate: ``hub_available`` follows the
+    # The connection-backed availability gate: ``receiver_available`` follows the
     # socket with no grace window, and is what takes every device unavailable
     # irrespective of the per-device silence verdicts below.
-    diagnostics["hub_available"] = coordinator.hub_available
+    diagnostics["receiver_available"] = coordinator.receiver_available
     diagnostics["disconnected_since"] = (
         since.isoformat()
         if (since := coordinator.disconnected_since) is not None
@@ -130,7 +130,7 @@ async def async_get_config_entry_diagnostics(
             # legs are kept separately so a dump distinguishes "the device fell
             # silent" from "the hub went away and took everything with it".
             "available": (
-                coordinator.hub_available
+                coordinator.receiver_available
                 and bool(coordinator.available.get(device_key))
             ),
             "silence_available": coordinator.available.get(device_key),

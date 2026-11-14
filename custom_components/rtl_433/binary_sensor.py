@@ -1,7 +1,7 @@
 """Binary-sensor platform for the rtl_433 hub config entry.
 
 ``async_setup_entry`` runs once for the hub config entry and delegates to the
-shared :func:`~custom_components.rtl_433.entity.async_setup_hub_platform`
+shared :func:`~custom_components.rtl_433.entity.async_setup_receiver_platform`
 helper, which resolves the hub coordinator, builds a
 :class:`Rtl433BinarySensor` for every device's observed mapped fields whose
 descriptor ``platform == "binary_sensor"`` (battery, tamper, contact/reed,
@@ -35,8 +35,8 @@ from .const import DOMAIN
 from .entity import (
     RESTORE_EVENT_TIME,
     Rtl433Entity,
-    Rtl433HubEntity,
-    async_setup_hub_platform,
+    Rtl433ReceiverEntity,
+    async_setup_receiver_platform,
     restored_event_time,
     stored_event_time,
 )
@@ -62,13 +62,13 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        hub_entry_id: str,
+        receiver_entry_id: str,
         device_key: str,
         model: str,
         descriptor: FieldDescriptor,
     ) -> None:
         """Initialize binary-sensor-specific description fields."""
-        super().__init__(coordinator, hub_entry_id, device_key, model, descriptor)
+        super().__init__(coordinator, receiver_entry_id, device_key, model, descriptor)
         self._attr_device_class = descriptor.device_class
         self._attr_force_update = descriptor.force_update
 
@@ -212,17 +212,17 @@ class Rtl433BinarySensor(Rtl433Entity, BinarySensorEntity):
         return last_state.state == "on"
 
 
-class Rtl433HubConnectivity(Rtl433HubEntity, BinarySensorEntity):
+class Rtl433ReceiverConnectivity(Rtl433ReceiverEntity, BinarySensorEntity):
     """Reports whether the hub's WebSocket connection is currently open."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_name = "Connectivity"
 
-    def __init__(self, coordinator: Rtl433Coordinator, hub_entry_id: str) -> None:
+    def __init__(self, coordinator: Rtl433Coordinator, receiver_entry_id: str) -> None:
         """Initialize the connectivity entity with a stable unique_id."""
-        super().__init__(coordinator, hub_entry_id)
-        self._attr_unique_id = f"{hub_entry_id}:hub:connectivity"
+        super().__init__(coordinator, receiver_entry_id)
+        self._attr_unique_id = f"{receiver_entry_id}:hub:connectivity"
 
     @property
     def is_on(self) -> bool:
@@ -242,7 +242,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up rtl_433 binary sensors for every device under the hub entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([Rtl433HubConnectivity(coordinator, entry.entry_id)])
-    await async_setup_hub_platform(
+    async_add_entities([Rtl433ReceiverConnectivity(coordinator, entry.entry_id)])
+    await async_setup_receiver_platform(
         hass, entry, async_add_entities, PLATFORM, Rtl433BinarySensor
     )
