@@ -435,8 +435,8 @@ second implementation.
   an error banner at the moment the user succeeded.
 - **Author CSS beats the user agent's `[hidden]` rule.** Any selector in the
   panel's stylesheet that sets `display` needs its own `[hidden]` rule, or the
-  `hidden` property does nothing — this is what kept the single-receiver receiver
-  picker on screen until it was fixed. There is no JS test harness in this
+  `hidden` property does nothing — this is what kept the receiver
+  picker on screen with a single receiver until it was fixed. There is no JS test harness in this
   repository, by choice: the panel is covered by the Python registration test
   and by the container harness, whose `STAGE=panel` capture
   (`17-discovery-panel.png`) is also the only check that a real browser loads
