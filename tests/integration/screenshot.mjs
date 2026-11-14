@@ -9,8 +9,8 @@
 // page, once the devices are added), 09 (integration overview / docs home
 // hero), 02 (device page), 11 (doorbell event entity), 07 (Receiver settings
 // dialog), 05 (Device mappings editor), 08 (Device settings dialog), 10 (device
-// page with the signal-diagnostic sensors enabled and populated), 14 (the receiver
-// device's Diagnostic card with the receiver-noise sensors), 04 (unavailable).
+// page with the signal-diagnostic sensors enabled and populated), 14 (the
+// receiver device's Diagnostic card with the radio-noise sensors), 04 (unavailable).
 // The doorbell / energy meter / door / leak devices come from ws-bridge
 // replaying tests/fixtures.
 //

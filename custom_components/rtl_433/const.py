@@ -41,6 +41,9 @@ PLATFORMS: Final[list[Platform]] = [
 # entry per device; the current model is a single receiver entry with nested
 # devices, so setup no longer branches on this. ``migration.py`` still reads
 # ENTRY_TYPE_DEVICE to re-home those legacy per-device entries onto the receiver.
+# The stored value is the frozen legacy v1 spelling: the discriminator was
+# written into config entries before the vocabulary rename, so the *name* moved
+# to "receiver" while the *value* stays "hub" for the entries already on disk.
 CONF_ENTRY_TYPE: Final = "entry_type"
 ENTRY_TYPE_RECEIVER: Final = "hub"
 ENTRY_TYPE_DEVICE: Final = "device"
@@ -84,6 +87,8 @@ CONF_EVENT_TIME_DISMISSED: Final = "event_time_advisory_dismissed"
 # --- Per-device config-entry keys ------------------------------------------
 # entry id of the parent receiver entry; enables cascade removal when a receiver is
 # deleted (a device entry records which receiver it belongs to).
+# As with ``ENTRY_TYPE_RECEIVER``, the key spelling is frozen legacy v1 data --
+# only the constant's name follows the receiver vocabulary.
 CONF_RECEIVER_ENTRY_ID: Final = "hub_entry_id"
 # Deterministic device identity derived from ``model`` plus the present subset
 # of identity fields (id / channel / subtype). Used to scope unique_ids and

@@ -1,10 +1,10 @@
 """Mutation tests for the dispatcher-signal helpers and identity grammar in ``const.py``.
 
-These helpers exist so the coordinator and entities format dispatcher signal
-strings identically. A mutation that drops an argument (e.g. ``receiver_entry_id=None``)
-produces a signal string that no longer round-trips, so we assert the exact
-formatted output and that distinct inputs produce distinct, correctly-embedded
-strings.
+The signal helpers exist so the coordinator and entities format dispatcher
+signal strings identically. A mutation that drops an argument (e.g.
+``receiver_entry_id=None``) produces a signal string that no longer round-trips,
+so we assert the exact formatted output and that distinct inputs produce
+distinct, correctly-embedded strings.
 
 The identity-grammar tests pin the reserved ``receiver`` marker against the real
 ``pyrtl_433.naming.safe_token`` output, because that is what makes the marker a
