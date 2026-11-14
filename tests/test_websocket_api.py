@@ -917,7 +917,7 @@ async def test_receivers_lists_every_configured_receiver_loaded_or_not(
 
 
 @pytest.mark.receiver_disconnected
-async def test_receivers_reports_a_loaded_receiver_with_no_socket_as_disconnected(
+async def test_receivers_report_a_loaded_receiver_with_no_socket_as_disconnected(
     hass, receiver, hass_ws_client
 ):
     """Loaded and connected are two different answers, and both are reported.

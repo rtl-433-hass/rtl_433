@@ -565,7 +565,7 @@ RECEIVER_SENSORS: tuple[ReceiverSensorDesc, ...] = (
         # decoders are toggled), not a running total -> MEASUREMENT.
         state_class=SensorStateClass.MEASUREMENT,
     ),
-    # --- Radio noise floor (from the server's "Auto Level" log frames) -- #
+    # --- Radio noise floor (from the server's "Auto Level" log frames) ----- #
     # rtl_433 has no structured noise getter; the pyrtl_433 client parses the
     # pulse detector's "Auto Level" log frames into these snapshots. They stay
     # ``unknown`` unless the server runs with ``-Y autolevel`` (adjustments)
