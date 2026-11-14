@@ -122,7 +122,7 @@ new event arrives within the timeout.
 ## Last Seen Sensor
 
 Every device gets a diagnostic timestamp sensor per receiver, named **Last seen**
-followed by the receiver's name. It reports when *that receiver* last heard the
+followed by the receiver's name. It reports when *that receiver* last received the
 device, and restores its previous value across restarts.
 
 Last seen is enabled by default for event-driven devices because they never
@@ -134,8 +134,8 @@ silent, so it can drive staleness automations. It does go unavailable while its
 receiver's connection is down, because the timestamp then only records when the
 integration stopped listening.
 
-Last seen is one of the three per-receiver link fields, so a device heard by two
+Last seen is one of the three per-receiver link fields, so a device received by two
 receivers has a **Last seen** entity for each of them — "when did *the attic*
 last hear this sensor" is a different question from "when did *the garage*". For
-the merged, whichever-heard-it-last answer, read the device's availability, or
+the merged, whichever-received-it-last answer, read the device's availability, or
 the **Signal coverage** page.
