@@ -133,9 +133,15 @@ class _StubCoordinator:
         self.pending: dict[str, PendingDevice] = pending or {}
         self.ignored: set[str] = set()
         self.ignored_models: dict[str, str] = {}
-        self.adopted: dict[str, Any] = {}
+        # A set of keys, matching the real coordinator: the merge unions the
+        # adopted keys of every receiver at the location.
+        self.adopted: set[str] = set()
         self.devices: dict[str, Any] = {}
         self.emitted = 0
+        # The merge reports each candidate's per-receiver coverage, and a
+        # receiver that is down still has to appear -- as not connected rather
+        # than as missing -- so this flag is read for every sighting.
+        self.receiver_available = True
 
     def pending_candidates(self) -> list[PendingDevice]:
         """Most recently heard first, the order the discovery panel renders."""
@@ -145,7 +151,7 @@ class _StubCoordinator:
         """Move a key off the pending list, as the real adoption seam does."""
         record = self.pending.pop(device_key, None)
         if record is not None:
-            self.adopted[device_key] = record
+            self.adopted.add(device_key)
         return record
 
     def ignore_device(self, device_key: str) -> None:
