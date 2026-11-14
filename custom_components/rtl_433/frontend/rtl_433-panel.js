@@ -199,6 +199,11 @@ export const STRINGS = {
     "Settings for this receiver as a whole. Individual devices can override the timeout.",
   "settings.device_intro":
     "Overrides for one device. Blank means “use the receiver's setting”.",
+  "settings.adopt_intro":
+    "You added {device}. Set its unit and conversion factor for the Energy dashboard. You can calibrate it later in Device settings if you don't know what settings to use.",
+  "settings.skip_calibration": "Skip for now",
+  "settings.adopt_failed":
+    "The device was added, but calibration could not be opened: {error}. You can calibrate it later in Device settings.",
   "settings.device_empty":
     "No devices have been added yet. Add one from this page first, and its settings will appear here.",
   "settings.mappings_intro":
@@ -810,6 +815,12 @@ class Rtl433Panel extends HTMLElement {
     // because editing several devices in a row is the normal way to use it,
     // and re-picking from a list of thirty each time is not.
     this._settingsDevice = "";
+    // The post-add calibration prompt: the meter it is asking about, the meters
+    // added while it was open (asked next, in order), and whether opening it
+    // pushed a history entry of its own over Discovered.
+    this._calibrationAfterAdd = null;
+    this._calibrationQueue = [];
+    this._promptPushed = false;
 
     // Device keys with a command in flight, so their buttons can be disabled.
     this._busy = new Set();
@@ -993,6 +1004,20 @@ class Rtl433Panel extends HTMLElement {
    * mean the same thing, and all three were pushing.
    */
   _goUp() {
+    // The post-add prompt is a chain when several meters were added: leaving
+    // one, by Save or Skip, asks about the next rather than dropping it.
+    if (this._calibrationAfterAdd && this._calibrationQueue.length) {
+      this._openCalibration(this._calibrationQueue.shift(), this._entryId);
+      return;
+    }
+    this._leaveCalibrationPrompt();
+    if (this._promptPushed) {
+      // The prompt pushed its own entry over Discovered. Unwinding it is what
+      // the browser's Back does too, so both land on the same list.
+      this._promptPushed = false;
+      window.history.back();
+      return;
+    }
     if (this._pushed) {
       this._pushed = false;
       // `popstate` re-reads the URL and renders, so this needs no follow-up.
@@ -1327,11 +1352,30 @@ class Rtl433Panel extends HTMLElement {
       .catch(() => {});
   }
 
-  async _subscribe() {
+  /**
+   * (Re-)open the device subscription.
+   *
+   * `sameHub` is a re-subscribe to the receiver already showing -- after a save,
+   * whose reload replaces the coordinator the old subscription was attached to.
+   * Everything below describes *this* hub, so it survives that: clearing it is
+   * what made Save on the post-add prompt drop the meter's green card and any
+   * area still waiting to be applied.
+   */
+  async _subscribe({ sameHub = false } = {}) {
     this._teardownSubscription();
     this._retries = 0;
     this._data = null;
     this._banner = null;
+    if (!sameHub) {
+      this._forgetHubState();
+    }
+    this._status = this._t("common.loading");
+    this._render();
+    await this._openSubscription();
+  }
+
+  /** Drop everything that belongs to the receiver the panel was showing. */
+  _forgetHubState() {
     // The green cards describe adoptions made against *this* hub, so they are
     // meaningless once the panel is pointed at another one.
     this._added.clear();
@@ -1345,9 +1389,7 @@ class Rtl433Panel extends HTMLElement {
     // receiver's devices under this receiver's name.
     this._settings = null;
     this._settingsDevice = "";
-    this._status = this._t("common.loading");
-    this._render();
-    await this._openSubscription();
+    this._leaveCalibrationPrompt();
   }
 
   /**
@@ -1508,7 +1550,7 @@ class Rtl433Panel extends HTMLElement {
       if (result.skipped && result.skipped.length) {
         this._setBanner(skippedMessage, "notice");
       } else if (onApplied) {
-        onApplied();
+        await onApplied();
       }
     } catch (error) {
       this._setBanner(this._describeError(error), "error");
@@ -1520,17 +1562,21 @@ class Rtl433Panel extends HTMLElement {
 
   /** Add one candidate, keeping its card on screen in the adopted state. */
   _addDevice(row) {
+    const entryId = this._entryId;
     // Read the area *before* sending the command. Adding a device makes the
     // backend push an updated pending list, and that push arrives ahead of the
     // command's own reply -- rendering it removes this card and forgets its
     // picker. Reading the area in the reply handler therefore always found
     // nothing, and the area the user chose was silently dropped.
     const areaId = this._areaChoiceFor(row.key);
-    this._act(
+    return this._act(
       "rtl_433/devices/add",
       row.key,
       this._t("action.already_added", { device: row.key }),
-      () => {
+      async () => {
+        if (this._entryId !== entryId || !this.isConnected) {
+          return;
+        }
         // Snapshot the row: it is about to leave the pending list, and this is
         // the only copy of what the card should keep showing.
         this._added.set(row.key, { row, deviceId: null });
@@ -1538,8 +1584,97 @@ class Rtl433Panel extends HTMLElement {
           this._pendingAreas.set(row.key, areaId);
           this._applyPendingAreas();
         }
+        await this._offerCalibration(row.key);
       }
     );
+  }
+
+  /**
+   * Whether a just-added meter may be asked about now.
+   *
+   * From Discovered, where Add was pressed; or from the prompt itself, when a
+   * second Add finishes while the first meter's prompt is open -- that meter is
+   * queued rather than silently left uncalibrated. Anywhere else, the user has
+   * moved on and an answer arriving late must not drag them back.
+   */
+  _canOfferCalibration(entryId) {
+    return (
+      this.isConnected &&
+      this._entryId === entryId &&
+      (this._segment === "discovered" ||
+        (this._segment === "device-settings" && Boolean(this._calibrationAfterAdd)))
+    );
+  }
+
+  /** Reuse Device settings for a newly added meter, with its detected defaults. */
+  async _offerCalibration(deviceKey) {
+    const entryId = this._entryId;
+    if (!this._canOfferCalibration(entryId)) {
+      return;
+    }
+    let settings;
+    try {
+      settings = await this._call({
+        type: "rtl_433/settings/get",
+        entry_id: entryId,
+      });
+    } catch (error) {
+      if (this._canOfferCalibration(entryId)) {
+        this._setBanner(
+          this._t("settings.adopt_failed", { error: this._describeError(error) }),
+          "notice"
+        );
+      }
+      return;
+    }
+    if (!this._canOfferCalibration(entryId)) {
+      return;
+    }
+    this._settings = settings;
+    this._settingsFor = entryId;
+    const device = settings.devices.find((item) => item.device_key === deviceKey);
+    // The backend decides: a meter a mapping already gives a unit is not asked,
+    // because the form's scale-1 default would override that mapping on Save.
+    if (!device || !device.needs_calibration) {
+      return;
+    }
+    if (this._calibrationAfterAdd) {
+      if (
+        deviceKey !== this._calibrationAfterAdd &&
+        !this._calibrationQueue.includes(deviceKey)
+      ) {
+        this._calibrationQueue.push(deviceKey);
+      }
+      return;
+    }
+    this._openCalibration(deviceKey, entryId);
+  }
+
+  /** Show the post-add prompt for one meter. */
+  _openCalibration(deviceKey, entryId) {
+    // Released so the form is rebuilt for this meter rather than kept for the
+    // previous one; the cached payload already holds its row.
+    this._settingsAttempt = null;
+    this._settingsDevice = deviceKey;
+    this._calibrationAfterAdd = deviceKey;
+    if (this._segment === "device-settings") {
+      // The next meter in a chain takes the prompt's place, not a new entry.
+      this._navigate("device-settings", { entry: entryId, replace: true });
+      return;
+    }
+    // Pushed over Discovered, so the browser's Back returns to the list just as
+    // Skip does. The entry is the prompt's own: what Discovered owes the
+    // overview -- nothing, if it was opened directly by URL -- is unchanged.
+    const pushed = this._pushed;
+    this._navigate("device-settings", { entry: entryId });
+    this._pushed = pushed;
+    this._promptPushed = true;
+  }
+
+  /** Leave the post-add prompt, and any meters still queued behind it. */
+  _leaveCalibrationPrompt() {
+    this._calibrationAfterAdd = null;
+    this._calibrationQueue = [];
   }
 
   /**
@@ -2123,6 +2258,13 @@ class Rtl433Panel extends HTMLElement {
       "filled"
     );
     this._el.settingsActions.append(this._el.settingsSave);
+    this._el.settingsSkip = haButton(
+      this._t("settings.skip_calibration"),
+      "ghost settings-skip"
+    );
+    this._el.settingsSkip.hidden = true;
+    this._el.settingsSkip.addEventListener("click", () => this._goUp());
+    this._el.settingsActions.prepend(this._el.settingsSkip);
 
     // The two list actions are built rather than templated so they can be Home
     // Assistant's buttons. They are appended in the order they read on the page,
@@ -2213,6 +2355,10 @@ class Rtl433Panel extends HTMLElement {
       this._settingsAttempt = null;
       this._settingsForm = null;
       this._settingsData = null;
+      // Left by any route -- the browser's Back included, which pops the
+      // prompt's own entry -- so there is nothing left for `_goUp` to unwind.
+      this._leaveCalibrationPrompt();
+      this._promptPushed = false;
       // Dropped so the next visit builds a fresh form: the schema it needs
       // depends on the payload, which is re-fetched after every save.
       this._el.settingsFormEl = null;
@@ -3176,12 +3322,34 @@ class Rtl433Panel extends HTMLElement {
     this._el.settingsActions.hidden = !show;
   }
 
+  /**
+   * The device form's intro and Skip button, which differ on the post-add prompt.
+   *
+   * The one place that decides them, for building the form and for moving its
+   * device picker alike. A prompt whose device is no longer in the payload --
+   * deleted by another admin between Add and the form -- falls back to the
+   * plain form on the first device rather than throwing and leaving it blank.
+   */
+  _showDeviceIntro() {
+    const key = this._calibrationAfterAdd;
+    const device = key ? this._deviceSettings(key) : null;
+    if (key && !device) {
+      this._leaveCalibrationPrompt();
+      this._settingsDevice = "";
+    }
+    this._el.settingsSkip.hidden = !device;
+    this._el.settingsIntro.textContent = device
+      ? this._t("settings.adopt_intro", { device: device.label })
+      : this._t("settings.device_intro");
+  }
+
   _buildSettingsForm(kind) {
     const body = this._el.settingsBody;
     body.textContent = "";
     this._el.settingsIntro.textContent = "";
     this._showSettingsSave(true);
     this._settingsForm = kind;
+    this._el.settingsSkip.hidden = true;
 
     if (kind === "hub") {
       this._el.settingsIntro.textContent = this._t("settings.hub_intro");
@@ -3192,7 +3360,7 @@ class Rtl433Panel extends HTMLElement {
         this._settingsData = {};
         return;
       }
-      this._el.settingsIntro.textContent = this._t("settings.device_intro");
+      this._showDeviceIntro();
     } else {
       // The one intro that needs a link, so it is built rather than assigned.
       this._el.settingsIntro.textContent = this._t("settings.mappings_intro");
@@ -3359,6 +3527,9 @@ class Rtl433Panel extends HTMLElement {
       next.device_key !== previous.device_key
     ) {
       this._settingsDevice = next.device_key;
+      // Picking a different device leaves the post-add prompt.
+      this._leaveCalibrationPrompt();
+      this._showDeviceIntro();
       this._settingsData = this._deviceDefaults(next.device_key);
       this._renderSettingsForm();
       return;
@@ -3449,8 +3620,9 @@ class Rtl433Panel extends HTMLElement {
 
     this._el.settingsSave.disabled = true;
     this._el.settingsProblem.hidden = true;
+    let saved;
     try {
-      await this._call(message);
+      saved = await this._call(message);
     } catch (error) {
       this._el.settingsProblem.textContent = this._describeError(error);
       this._el.settingsProblem.hidden = false;
@@ -3459,14 +3631,27 @@ class Rtl433Panel extends HTMLElement {
       this._el.settingsSave.disabled = false;
     }
 
-    this._settings = null;
+    if (kind === "device" && this._calibrationQueue.length && this._settings && saved) {
+      // Another meter is queued behind this one, and its form is drawn from the
+      // cache rather than a refetch: a calibration save reloads the hub, which
+      // answers `not_loaded` for a second. Only the saved row has changed, and
+      // the reply is that row.
+      this._settings = {
+        ...this._settings,
+        devices: this._settings.devices.map((device) =>
+          device.device_key === saved.device_key ? saved : device
+        ),
+      };
+    } else {
+      this._settings = null;
+    }
     this._goUp();
     // Re-subscribe *before* the banner, not after. A hub reloads when its
     // calibration, mappings or manage-settings toggle changes, and the old
     // subscription would go on pushing a replaced coordinator's state -- but
     // `_subscribe` also clears the banner on its way past, so a "saved" set
     // first is wiped before anyone reads it.
-    this._subscribe();
+    this._subscribe({ sameHub: true });
     this._setBanner(this._t("settings.saved"), "notice");
   }
 

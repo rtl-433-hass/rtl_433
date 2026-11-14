@@ -406,7 +406,10 @@
         "commodity": "Setting a commodity turns this device's counter into an Energy-dashboard sensor. “none” leaves it as the library describes it.",
         "unit": "One unit of what the counter counts.",
         "scale": "Multiplier on the raw counter, to reach one base unit."
-      }
+      },
+      "adopt_intro": "You added {device}. Set its unit and conversion factor for the Energy dashboard. You can calibrate it later in Device settings if you don't know what settings to use.",
+      "skip_calibration": "Skip for now",
+      "adopt_failed": "The device was added, but calibration could not be opened: {error}. You can calibrate it later in Device settings."
     }
   }
 }
