@@ -11,7 +11,7 @@ shutdown instead of waiting for a silence timeout.
 
 ## SDR and Meta Diagnostics
 
-Read-only diagnostic sensors report the receiver's current configuration:
+Read-only diagnostic sensors report the radio's current configuration:
 
 - Center frequency.
 - Sample rate.
@@ -23,12 +23,12 @@ Read-only diagnostic sensors report the receiver's current configuration:
 The configured `frequencies` and `hop_times` arrays appear as attributes on the
 center-frequency sensor.
 
-## Receiver Noise
+## Radio Noise
 
-Two diagnostic sensors track the receiver's noise floor, so you can graph RF
+Two diagnostic sensors track the radio's noise floor, so you can graph RF
 noise over time and alert when it climbs high enough to drown out your devices:
 
-- **Noise level** — the receiver's estimated noise level in dB.
+- **Noise level** — the radio's estimated noise level in dB.
 - **Minimum detection level** — the auto-adjusted pulse-detection threshold in
   dB; transmissions weaker than this are not decoded.
 
@@ -54,7 +54,7 @@ estimated noise sits more than 3 dB below the configured `minlevel` (default
 -12.1 dB, so roughly below -15 dB) *and* the new threshold differs from the
 current one by more than 1 dB. As a result:
 
-- On a receiver whose noise floor is above about -15 dB, `autolevel` never
+- On a radio whose noise floor is above about -15 dB, `autolevel` never
   engages and **Minimum detection level** stays `unknown` however long you wait.
   Check **Noise level** first: it decides whether the threshold can move at all.
 - rtl_433 adjusts the threshold several times at startup, then stops once it
@@ -102,7 +102,7 @@ controls below stay available so you can change settings while disconnected.
 
 ## Managing SDR Settings from Home Assistant
 
-By default a new hub adopts and manages the receiver's SDR settings. With
+By default a new hub adopts and manages the radio's SDR settings. With
 **Manage rtl_433 settings from Home Assistant** enabled, the hub exposes controls
 under the hub device in the config entity category:
 
@@ -141,12 +141,12 @@ To pick up direct rtl_433 config edits:
 
 - The `/cmd` endpoint must be reachable at the server root.
 - Hopping setups keep center frequency unmanaged so Home Assistant never pins a
-  receiver to one frequency.
+  radio to one frequency.
 - The frequency list itself can only be set in the rtl_433 config.
 - Multi-stage gain strings are not supported by the single gain control.
 - Retuning does not widen the sample rate automatically; high-frequency bands may
   require manually increasing sample rate.
 
 Turning management off removes the controls, stops Home Assistant from sending
-commands, and clears its stored desired state. The receiver's settings are left
+commands, and clears its stored desired state. The radio's settings are left
 untouched.

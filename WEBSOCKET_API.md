@@ -127,7 +127,7 @@ unset when no SDR device is open, such as `-D manual`.
 
 ### Live SDR control (applied immediately)
 
-These call into the SDR driver and take effect on the running receiver. Each
+These call into the SDR driver and take effect on the running radio. Each
 returns `{"result": "Ok"}` on success.
 
 The Home Assistant integration exercises these live SDR controls and the

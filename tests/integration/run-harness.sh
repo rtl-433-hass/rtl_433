@@ -87,7 +87,7 @@ shots() {
     node ./screenshot.mjs
 }
 
-# Capture the hub's Diagnostic card with both receiver-noise sensors populated.
+# Capture the hub's Diagnostic card with both radio-noise sensors populated.
 # Restart the decoder first: `-M noise` reports the noise level periodically, but
 # `-Y autolevel` only logs the adjustment line behind "Minimum detection level"
 # while its estimate is still converging — a burst over the first seconds of a

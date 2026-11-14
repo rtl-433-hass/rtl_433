@@ -35,7 +35,7 @@ Add a hub from **Settings → Devices & Services → Add Integration → rtl_433
 | **Port** | `8433` | The rtl_433 HTTP API port. |
 | **Path** | `/ws` | The WebSocket path on the rtl_433 HTTP server. |
 | **Secure** | off | Connect with `wss://` instead of `ws://`. |
-| **Manage rtl_433 settings from Home Assistant** | on | Expose SDR controls and let Home Assistant adopt and enforce receiver settings. |
+| **Manage rtl_433 settings from Home Assistant** | on | Expose SDR controls and let Home Assistant adopt and enforce radio settings. |
 | **Initial frequency (MHz)** | `433.92` | Center frequency to apply once on first connect when managed settings are enabled. |
 
 The integration validates that the WebSocket can be reached before creating the

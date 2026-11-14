@@ -50,7 +50,7 @@
 //              already-running harness (hub already added); for iterating.
 //   hub      - re-capture only the Receiver settings and Device mappings
 //              dialogs against an already-running harness; for iterating.
-//   hubnoise - re-capture only the hub Diagnostic card (receiver-noise sensors)
+//   hubnoise - re-capture only the hub Diagnostic card (radio-noise sensors)
 //              against an already-running harness; for iterating.
 //   full     - add, then unavail (the orchestrator stops replay in between).
 //
@@ -223,7 +223,7 @@ async function addHubAndCapture(page) {
   // --- Per-device signal diagnostics ---------------------------------------
   // Run last: it enables disabled-by-default entities and reloads the hub.
   await enableAndCaptureDiagnostics(page);
-  // The hub's receiver-noise capture is a separate step (STAGE=hubnoise): it
+  // The hub's radio-noise capture is a separate step (STAGE=hubnoise): it
   // needs the orchestrator to restart the decoder first — see captureHubNoise.
 }
 
@@ -938,7 +938,7 @@ async function run() {
       // running harness (hub already added). Not part of the full pipeline.
       await captureDeviceSettings(page);
     } else if (STAGE === "hubnoise") {
-      // Iterate only the hub device page / receiver-noise capture against an
+      // Iterate only the hub device page / radio-noise capture against an
       // already running harness (hub already added).
       await captureHubNoise(page);
     } else if (STAGE === "panel") {
