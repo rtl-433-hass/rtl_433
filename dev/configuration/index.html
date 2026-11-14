@@ -597,14 +597,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../hub-entities/" class="md-nav__link">
+      <a href="../receiver-entities/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Hub Entities
+    Receiver Entities
   
 
     
@@ -790,9 +790,9 @@
 
 
 <h1 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h1>
-<p>There are two ways to create a hub: automatically through
+<p>There are two ways to create a receiver: automatically through
 <a href="#home-assistant-os-add-on-discovery">add-on discovery</a> (recommended), or
-<a href="#manual-configuration">manually</a> for any other rtl_433 server. Each hub points
+<a href="#manual-configuration">manually</a> for any other rtl_433 server. Each receiver points
 at one rtl_433 server's WebSocket endpoint.</p>
 <h2 id="home-assistant-os-add-on-discovery">Home Assistant OS Add-On Discovery<a class="headerlink" href="#home-assistant-os-add-on-discovery" title="Permanent link">&para;</a></h2>
 <p>If you run the
@@ -804,12 +804,12 @@ card. Click <strong>Add</strong> and confirm; no host or port needs to be typed.
 when the add-on starts — install the integration, restart Home Assistant, and
 then start the add-on. If you started the add-on first and no card appeared,
 restart the add-on so it republishes discovery.</p>
-<p>Discovered radios use the add-on's stable per-radio identifier, so the same hub
+<p>Discovered radios use the add-on's stable per-radio identifier, so the same receiver
 and nested-device history can survive add-on restarts and USB port changes. For
 multi-dongle setups, stability is best when each dongle stays in a fixed USB port
 or has a unique serial.</p>
 <h2 id="manual-configuration">Manual Configuration<a class="headerlink" href="#manual-configuration" title="Permanent link">&para;</a></h2>
-<p>Add a hub from <strong>Settings → Devices &amp; Services → Add Integration → rtl_433</strong>.</p>
+<p>Add a receiver from <strong>Settings → Devices &amp; Services → Add Integration → rtl_433</strong>.</p>
 <p><img alt="The rtl_433 config flow form with host, port, WebSocket path, secure toggle, managed-settings toggle, and initial frequency" src="../images/06-config-user.png" /></p>
 <table>
 <thead>
@@ -843,7 +843,7 @@ or has a unique serial.</p>
 <tr>
 <td><strong>Manage rtl_433 settings from Home Assistant</strong></td>
 <td>on</td>
-<td>Expose SDR controls and let Home Assistant adopt and enforce receiver settings.</td>
+<td>Expose SDR controls and let Home Assistant adopt and enforce radio settings.</td>
 </tr>
 <tr>
 <td><strong>Initial frequency (MHz)</strong></td>
@@ -853,7 +853,7 @@ or has a unique serial.</p>
 </tbody>
 </table>
 <p>The integration validates that the WebSocket can be reached before creating the
-hub. Manual hub identity is derived from <code>host:port</code>, so the same server cannot
+receiver. Manual receiver identity is derived from <code>host:port</code>, so the same server cannot
 be added twice.</p>
 <h2 id="manual-rtl_433-configuration">Manual rtl_433 Configuration<a class="headerlink" href="#manual-rtl_433-configuration" title="Permanent link">&para;</a></h2>
 <p>The integration connects to rtl_433's HTTP/WebSocket server. Start rtl_433 with
@@ -918,7 +918,7 @@ on each reconnect.</p>
 <p>or, on the command line, <code>-M time:iso:usec:tz</code>. A sub-second stamp also lets the
 integration separate two transmissions from the same device inside one second.</p>
 <h2 id="reconfigure-vs-configure">Reconfigure vs Configure<a class="headerlink" href="#reconfigure-vs-configure" title="Permanent link">&para;</a></h2>
-<p>Use <strong>Reconfigure</strong> to point an existing hub at the same server's new address:
+<p>Use <strong>Reconfigure</strong> to point an existing receiver at the same server's new address:
 host, port, path, or secure mode. Devices and their history are preserved.</p>
 <p>Use <strong>Configure</strong> to open the rtl_433 page. It is where devices are added and
 ignored — see <a href="../device-discovery/">Adding Devices to Home Assistant</a> — and it
@@ -931,7 +931,7 @@ includes three settings pages:</p>
 <li><strong>Device mappings</strong>: this receiver's mapping overrides.</li>
 </ul>
 <p><strong>Receiver settings</strong> configures the default availability timeout for every
-device on the hub, and whether Home Assistant manages the server's SDR settings.
+device on the receiver, and whether Home Assistant manages the server's SDR settings.
 Choose one of three timeout modes:</p>
 <ul>
 <li><strong>Per-device-type defaults</strong> — the default, and what keeps event-driven
@@ -941,17 +941,17 @@ Choose one of three timeout modes:</p>
 <li><strong>A fixed timeout</strong> — a count of seconds that applies to every device without
   an override of its own.</li>
 </ul>
-<p><img alt="The Receiver settings page, with the availability-timeout choice set to the per-device-type defaults and the managed-settings toggle below it" src="../images/07-hub-settings.png" /></p>
+<p><img alt="The Receiver settings page, with the availability-timeout choice set to the per-device-type defaults and the managed-settings toggle below it" src="../images/07-receiver-settings.png" /></p>
 <p><strong>Device settings</strong> targets one device for a timeout override, motion clear
 delay, or utility-meter calibration.</p>
 <p><img alt="The Device settings page with the device picker, availability timeout override, and meter commodity selector" src="../images/08-device-settings.png" /></p>
 <p>Changing timeout options applies live. Changing the managed-settings toggle
-reloads the hub because the entity set changes.</p>
+reloads the receiver because the entity set changes.</p>
 <h2 id="ws-wss-and-authentication">ws, wss, and Authentication<a class="headerlink" href="#ws-wss-and-authentication" title="Permanent link">&para;</a></h2>
 <p>By default the integration connects to <code>ws://host:port/path</code>. Turning on
 <strong>Secure</strong> connects with <code>wss://</code>.</p>
 <p>rtl_433's built-in HTTP server does not terminate TLS. To use <code>wss://</code>, put a
-TLS reverse proxy such as nginx or Caddy in front of rtl_433 and point the hub at
+TLS reverse proxy such as nginx or Caddy in front of rtl_433 and point the receiver at
 the proxy.</p>
 <p>rtl_433's HTTP API is unauthenticated, and the integration sends no credentials.
 If you need access control, restrict it on your network or place it behind a

@@ -468,10 +468,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#hub-connection" class="md-nav__link">
+  <a href="#receiver-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hub Connection
+        Receiver Connection
       
     </span>
   </a>
@@ -580,14 +580,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../hub-entities/" class="md-nav__link">
+      <a href="../receiver-entities/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Hub Entities
+    Receiver Entities
   
 
     
@@ -692,10 +692,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#hub-connection" class="md-nav__link">
+  <a href="#receiver-connection" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Hub Connection
+        Receiver Connection
       
     </span>
   </a>
@@ -786,14 +786,14 @@ its availability timeout, its entities become <code>unavailable</code>.</p>
 </table>
 <p>Periodic devices use finite timeouts. Event-driven devices default to never
 expiring because a long silence is normal and does not imply failure.</p>
-<h2 id="hub-connection">Hub Connection<a class="headerlink" href="#hub-connection" title="Permanent link">&para;</a></h2>
-<p>When the connection to the rtl_433 server drops, every device on that hub
+<h2 id="receiver-connection">Receiver Connection<a class="headerlink" href="#receiver-connection" title="Permanent link">&para;</a></h2>
+<p>When the connection to the rtl_433 server drops, every device on that receiver
 immediately becomes <code>unavailable</code>. This includes event-driven devices and
 <strong>Last seen</strong> sensors, regardless of their timeout settings. While disconnected,
 the integration cannot tell whether a device is still transmitting.</p>
 <p>When the connection returns, devices show their last received values and the
 usual silence timeouts resume.</p>
-<p>If you want an automation to tolerate short blips, condition it on the hub's
+<p>If you want an automation to tolerate short blips, condition it on the receiver's
 <strong>Connectivity</strong> binary sensor with a <code>for:</code> delay rather than reacting to each
 device going unavailable.</p>
 <p>The <strong>rtl_433 server unreachable</strong> repair notification waits 90 seconds, so a
@@ -801,11 +801,11 @@ routine server restart does not produce a notification.</p>
 <p>For <code>event</code> entities (buttons, doorbells, remotes), use the <code>event.received</code>
 trigger. It ignores transitions out of <code>unavailable</code>, so reconnecting does not
 trigger an automation for an old press.</p>
-<p>The hub's SDR controls (<strong>Gain</strong>, <strong>Sample rate</strong>, <strong>Frequency correction</strong>,
+<p>The receiver's SDR controls (<strong>Gain</strong>, <strong>Sample rate</strong>, <strong>Frequency correction</strong>,
 <strong>Hop interval</strong>, <strong>Conversion mode</strong>) stay available so you can change settings
 while disconnected. With <strong>Manage SDR settings</strong> on, these appear as
 <code>number</code>/<code>select</code> entities. Turning it off replaces them with read-only diagnostic
-sensors, which become unavailable on disconnect along with the hub's other
+sensors, which become unavailable on disconnect along with the receiver's other
 diagnostic sensors.</p>
 <p>The <strong>Connectivity</strong> binary sensor is the entity that reports the outage: it
 reads the socket state directly and stays available throughout. The Home
@@ -817,14 +817,14 @@ INFO  rtl_433 reconnected to ws://rtl433.local:8433/ws after 184s
 <p>The effective availability timeout is resolved in this order:</p>
 <ol>
 <li>Per-device override from <strong>Device settings</strong>.</li>
-<li>Hub default from <strong>Receiver settings</strong>, if set.</li>
+<li>Receiver default from <strong>Receiver settings</strong>, if set.</li>
 <li>Device-class default.</li>
 <li>600 second fallback.</li>
 </ol>
 <p>Set a timeout to <code>0</code> to make a device never expire. This is already the automatic
 default for event-driven devices.</p>
 <p><strong>Receiver settings</strong> offers <em>Per-device-type defaults</em>, <em>Never expire</em>, or
-<em>a fixed timeout</em>. Choosing a fixed timeout of 600 seconds applies that hub
+<em>a fixed timeout</em>. Choosing a fixed timeout of 600 seconds applies that receiver
 default at step 2, including to event-driven devices. The 600-second fallback at
 step 4 applies only when no earlier rule supplies a timeout.</p>
 <h2 id="restart-behavior">Restart Behavior<a class="headerlink" href="#restart-behavior" title="Permanent link">&para;</a></h2>
@@ -840,7 +840,7 @@ expire and the timestamp is their freshness signal. It is disabled by default fo
 periodic devices, whose availability already conveys freshness.</p>
 <p>Unlike measurement sensors, Last seen stays available after the device falls
 silent, so it can drive staleness automations. It does go unavailable while the
-hub connection is down, because the timestamp then only records when the
+receiver connection is down, because the timestamp then only records when the
 integration stopped listening.</p>
 
 

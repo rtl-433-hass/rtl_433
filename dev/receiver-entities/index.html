@@ -8,7 +8,7 @@
       
       
       
-        <link rel="canonical" href="https://rtl-433-hass.github.io/rtl_433/dev/hub-entities/">
+        <link rel="canonical" href="https://rtl-433-hass.github.io/rtl_433/dev/receiver-entities/">
       
       
         <link rel="prev" href="../diagnostics/">
@@ -25,7 +25,7 @@
     
     
       
-        <title>Hub Entities - rtl_433 for Home Assistant</title>
+        <title>Receiver Entities - rtl_433 for Home Assistant</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#hub-entities" class="md-skip">
+        <a href="#receiver-entities" class="md-skip">
           Skip to content
         </a>
       
@@ -116,7 +116,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Hub Entities
+              Receiver Entities
             
           </span>
         </div>
@@ -494,7 +494,7 @@
   <span class="md-ellipsis">
     
   
-    Hub Entities
+    Receiver Entities
   
 
     
@@ -512,7 +512,7 @@
   <span class="md-ellipsis">
     
   
-    Hub Entities
+    Receiver Entities
   
 
     
@@ -560,10 +560,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#receiver-noise" class="md-nav__link">
+  <a href="#radio-noise" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Receiver Noise
+        Radio Noise
       
     </span>
   </a>
@@ -731,10 +731,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#receiver-noise" class="md-nav__link">
+  <a href="#radio-noise" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Receiver Noise
+        Radio Noise
       
     </span>
   </a>
@@ -811,15 +811,15 @@
   
 
 
-<h1 id="hub-entities">Hub Entities<a class="headerlink" href="#hub-entities" title="Permanent link">&para;</a></h1>
-<p>Each hub exposes diagnostic entities on the hub device so you can observe the
+<h1 id="receiver-entities">Receiver Entities<a class="headerlink" href="#receiver-entities" title="Permanent link">&para;</a></h1>
+<p>Each receiver exposes diagnostic entities on the receiver device so you can observe the
 rtl_433 server itself.</p>
 <h2 id="connectivity">Connectivity<a class="headerlink" href="#connectivity" title="Permanent link">&para;</a></h2>
-<p>The <strong>Connectivity</strong> binary sensor is on while the hub's WebSocket connection is
+<p>The <strong>Connectivity</strong> binary sensor is on while the receiver's WebSocket connection is
 open and off otherwise. It flips off immediately when the server announces a
 shutdown instead of waiting for a silence timeout.</p>
 <h2 id="sdr-and-meta-diagnostics">SDR and Meta Diagnostics<a class="headerlink" href="#sdr-and-meta-diagnostics" title="Permanent link">&para;</a></h2>
-<p>Read-only diagnostic sensors report the receiver's current configuration:</p>
+<p>Read-only diagnostic sensors report the radio's current configuration:</p>
 <ul>
 <li>Center frequency.</li>
 <li>Sample rate.</li>
@@ -830,11 +830,11 @@ shutdown instead of waiting for a silence timeout.</p>
 </ul>
 <p>The configured <code>frequencies</code> and <code>hop_times</code> arrays appear as attributes on the
 center-frequency sensor.</p>
-<h2 id="receiver-noise">Receiver Noise<a class="headerlink" href="#receiver-noise" title="Permanent link">&para;</a></h2>
-<p>Two diagnostic sensors track the receiver's noise floor, so you can graph RF
+<h2 id="radio-noise">Radio Noise<a class="headerlink" href="#radio-noise" title="Permanent link">&para;</a></h2>
+<p>Two diagnostic sensors track the radio's noise floor, so you can graph RF
 noise over time and alert when it climbs high enough to drown out your devices:</p>
 <ul>
-<li><strong>Noise level</strong> — the receiver's estimated noise level in dB.</li>
+<li><strong>Noise level</strong> — the radio's estimated noise level in dB.</li>
 <li><strong>Minimum detection level</strong> — the auto-adjusted pulse-detection threshold in
   dB; transmissions weaker than this are not decoded.</li>
 </ul>
@@ -856,13 +856,13 @@ estimated noise sits more than 3 dB below the configured <code>minlevel</code> (
 -12.1 dB, so roughly below -15 dB) <em>and</em> the new threshold differs from the
 current one by more than 1 dB. As a result:</p>
 <ul>
-<li>On a receiver whose noise floor is above about -15 dB, <code>autolevel</code> never
+<li>On a radio whose noise floor is above about -15 dB, <code>autolevel</code> never
   engages and <strong>Minimum detection level</strong> stays <code>unknown</code> however long you wait.
   Check <strong>Noise level</strong> first: it decides whether the threshold can move at all.</li>
 <li>rtl_433 adjusts the threshold several times at startup, then stops once it
   stabilizes. The event stream carries no backlog, so a server that settled before
   Home Assistant connected leaves the sensor <code>unknown</code> until the noise floor
-  drifts by more than 1 dB. To force an update, nudge the hub's <strong>Gain</strong> number
+  drifts by more than 1 dB. To force an update, nudge the receiver's <strong>Gain</strong> number
   entity far enough to move the floor, then set it back.</li>
 </ul>
 <p>rtl_433 can send these readings several times a second: the estimate jitters
@@ -877,7 +877,7 @@ straight away.</p>
 <p>Unlike the sensors below, this data arrives over the event stream itself
 (rtl_433 ≥ 23.11), so it works even when <code>/cmd</code> is proxied away behind a
 WebSocket-only proxy.</p>
-<p><img alt="The hub device's Diagnostic card: Noise level -36.4 dB and Minimum detection level -33.4 dB alongside Connectivity Connected, with the sensors fetched over /cmd reading Unknown" src="../images/14-hub-noise.png" /></p>
+<p><img alt="The receiver device's Diagnostic card: Noise level -36.4 dB and Minimum detection level -33.4 dB alongside Connectivity Connected, with the sensors fetched over /cmd reading Unknown" src="../images/14-receiver-noise.png" /></p>
 <p>That capture is from a server reachable only over its WebSocket stream, which is
 why the two noise sensors report while the <code>/cmd</code>-sourced sensors described below
 read <code>unknown</code>.</p>
@@ -885,19 +885,19 @@ read <code>unknown</code>.</p>
 <p>Server statistics include cumulative decoded events, OOK frames, FSK frames, and
 enabled decoders. Per-protocol <code>stats[]</code> and the <code>since</code> timestamp appear as
 attributes on the decoded-events sensor.</p>
-<p>Hub configuration and statistics are fetched over HTTP from the rtl_433
+<p>Receiver configuration and statistics are fetched over HTTP from the rtl_433
 server's <code>/cmd</code> endpoint at the server root, <code>http(s)://host:port/cmd</code>, independent of the
 configured WebSocket path. If a reverse proxy exposes only the WebSocket path and
 not <code>/cmd</code>, these sensors read <code>unknown</code> while the event stream and
 connectivity sensor keep working.</p>
-<p>The diagnostic and statistics sensors become <code>unavailable</code> when the hub
-connection drops. See <a href="../availability/#hub-connection">Availability</a>. The
+<p>The diagnostic and statistics sensors become <code>unavailable</code> when the receiver
+connection drops. See <a href="../availability/#receiver-connection">Availability</a>. The
 Connectivity sensor stays available to report the connection state, and the SDR
 controls below stay available so you can change settings while disconnected.</p>
 <h2 id="managing-sdr-settings-from-home-assistant">Managing SDR Settings from Home Assistant<a class="headerlink" href="#managing-sdr-settings-from-home-assistant" title="Permanent link">&para;</a></h2>
-<p>By default a new hub adopts and manages the receiver's SDR settings. With
-<strong>Manage rtl_433 settings from Home Assistant</strong> enabled, the hub exposes controls
-under the hub device in the config entity category:</p>
+<p>By default a new receiver adopts and manages the radio's SDR settings. With
+<strong>Manage rtl_433 settings from Home Assistant</strong> enabled, the receiver exposes controls
+under the receiver device in the config entity category:</p>
 <ul>
 <li><strong>Center frequency</strong> number in MHz, available only for single-frequency setups.</li>
 <li><strong>Sample rate</strong> number in Hz.</li>
@@ -930,14 +930,14 @@ stored values on the next reconnect.</p>
 <ul>
 <li>The <code>/cmd</code> endpoint must be reachable at the server root.</li>
 <li>Hopping setups keep center frequency unmanaged so Home Assistant never pins a
-  receiver to one frequency.</li>
+  radio to one frequency.</li>
 <li>The frequency list itself can only be set in the rtl_433 config.</li>
 <li>Multi-stage gain strings are not supported by the single gain control.</li>
 <li>Retuning does not widen the sample rate automatically; high-frequency bands may
   require manually increasing sample rate.</li>
 </ul>
 <p>Turning management off removes the controls, stops Home Assistant from sending
-commands, and clears its stored desired state. The receiver's settings are left
+commands, and clears its stored desired state. The radio's settings are left
 untouched.</p>
 
 
