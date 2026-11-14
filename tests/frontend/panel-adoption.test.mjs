@@ -41,6 +41,8 @@ function panelWith(call) {
     _pendingAreas: new Map(),
     _settingsDevice: "old-selection",
     _calibrationAfterAdd: null,
+    _calibrationQueue: [],
+    _promptPushed: false,
     _render: () => {},
     _areaChoiceFor: () => null,
     _t: (key) => key,

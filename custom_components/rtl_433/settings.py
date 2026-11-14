@@ -46,6 +46,7 @@ from .const import (
     CONF_MANAGE_SETTINGS,
     CONF_MODEL,
     CONF_USER_MAPPINGS,
+    CONSUMPTION_FIELD_KEYS,
     DATA_ENTRY_LIBRARY,
     DEVICE_CALIBRATION,
     DEVICE_FIELDS,
@@ -166,6 +167,44 @@ def is_motion_bearing(hass: HomeAssistant, entry: ConfigEntry, device_key: str) 
     )
 
 
+def needs_calibration(hass: HomeAssistant, entry: ConfigEntry, device_key: str) -> bool:
+    """Return ``True`` when a meter should be asked for its calibration.
+
+    Three things must all hold. The device has no calibration stored. Its decoded
+    ``MeterType`` / ``ert_type`` names a commodity, so the question can be asked
+    with the answer pre-filled. And no device-library mapping already gives its
+    consumption field a unit.
+
+    The last condition is the one that matters. A per-device calibration is the
+    highest precedence tier, above every mapping, so asking about a meter whose
+    ``models:`` override already sets a unit and scale invites the user to save
+    the form's scale-1 default straight over the correct mapping. The shipped
+    library leaves every consumption field unitless, so a unit there means
+    somebody has already answered this question.
+
+    ``False`` while the hub's library is still loading: this decides whether to
+    interrupt the user, and "cannot tell" is not a reason to.
+    """
+    record: dict[str, Any] = entry.data.get(CONF_DEVICES, {}).get(device_key, {})
+    if normalize_calibration(record.get(DEVICE_CALIBRATION)) is not None:
+        return False
+    if commodity_hint(hass, entry, device_key) == COMMODITY_NONE:
+        return False
+    registry = entry_registry(hass, entry)
+    if registry is None:
+        return False
+    model = record.get(CONF_MODEL)
+    consumption = [
+        lookup(field_key, model, registry)
+        for field_key in record.get(DEVICE_FIELDS, [])
+        if field_key in CONSUMPTION_FIELD_KEYS
+    ]
+    return bool(consumption) and not any(
+        descriptor is not None and descriptor.unit_of_measurement
+        for descriptor in consumption
+    )
+
+
 def device_label(
     hass: HomeAssistant, entry: ConfigEntry, device_key: str, record: dict[str, Any]
 ) -> str:
@@ -226,6 +265,7 @@ def device_defaults(
         DEVICE_MOTION_CLEAR_DELAY: device_clear_delay(entry, device_key),
         "motion": is_motion_bearing(hass, entry, device_key),
         "calibration": existing,
+        "needs_calibration": needs_calibration(hass, entry, device_key),
         "commodity": (
             existing[CALIBRATION_COMMODITY]
             if existing is not None

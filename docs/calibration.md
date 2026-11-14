@@ -20,6 +20,13 @@ calibration.
 Closing the page without saving also keeps the meter added. You can calibrate
 it later.
 
+If you add more meters while this page is open, each one is offered in turn
+after you save or skip the current one.
+
+A meter is only offered here when it does not have a unit yet. If a device
+mapping already gives its consumption reading a unit, that mapping is left in
+charge and the page does not open; a calibration would override it.
+
 To calibrate a meter you added earlier, or to change a calibration, open
 **Settings → Devices & Services → rtl_433 → Configure → Device settings** and
 pick the meter.

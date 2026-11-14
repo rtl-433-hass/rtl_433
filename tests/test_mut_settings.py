@@ -112,6 +112,7 @@ DEVICE_DEFAULT_KEYS = {
     DEVICE_MOTION_CLEAR_DELAY,
     "motion",
     "calibration",
+    "needs_calibration",
     "commodity",
 }
 
