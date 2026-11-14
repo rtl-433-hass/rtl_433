@@ -226,6 +226,12 @@ DATA_LIBRARY: Final = "_library"
 # stored ``CONF_USER_MAPPINGS`` overrides merged in. The coordinator, entity
 # platforms, options flow, and diagnostics read their receiver's entry here.
 DATA_ENTRY_LIBRARY: Final = "_entry_library"
+# Key under ``hass.data[DOMAIN]`` holding the per-entry location aggregators
+# ``{entry_id: Rtl433LocationAggregator}`` -- the fan-in that unions every
+# receiver's view of one RF device (see ``aggregator.py``). Keyed by the location
+# entry id rather than by a receiver, because the union is the one piece of
+# runtime state that is explicitly *not* per receiver.
+DATA_AGGREGATOR: Final = "_aggregator"
 # Key under ``hass.data[DOMAIN]`` holding the tables Home Assistant describes its
 # own entities with: each platform's ``icons.json`` device-class map, and its
 # ``entity_component`` strings (names, and a binary entity's on/off words).
@@ -339,6 +345,32 @@ def signal_device_update(receiver_id: str, device_key: str) -> str:
     rather than formatting the template independently.
     """
     return SIGNAL_DEVICE_UPDATE.format(receiver_id=receiver_id, device_key=device_key)
+
+
+# Location-level per-device update signal. The location aggregator
+# (``aggregator.py``) subscribes to every receiver's ``SIGNAL_DEVICE_UPDATE`` for a
+# device and re-emits the deduped, receiver-agnostic result on this one, so a
+# merged device's field entities hear one stream however many receivers decoded
+# the transmission. Carries the same
+# :class:`~pyrtl_433.normalizer.NormalizedEvent`, narrowed to the fields the
+# union actually accepted (the per-receiver link fields ``rssi`` / ``snr`` /
+# ``last_seen`` are stripped, and a duplicate or stale value is dropped), so a
+# subscriber reads it exactly as it reads the per-receiver form.
+SIGNAL_LOCATION_DEVICE_UPDATE: Final = (
+    "rtl_433_location_device_update_{location_id}_{device_key}"
+)
+
+
+def signal_location_device_update(location_id: str, device_key: str) -> str:
+    """Return the location-scoped update signal name for one merged device.
+
+    ``location_id`` is the location config entry's id -- the scope the merged
+    device's identity is minted in -- so the aggregator and the entities agree on
+    the key without either of them knowing which receiver heard the frame.
+    """
+    return SIGNAL_LOCATION_DEVICE_UPDATE.format(
+        location_id=location_id, device_key=device_key
+    )
 
 
 # Receiver-level "an adopted device needs building" signal. The coordinator's

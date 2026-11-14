@@ -26,7 +26,7 @@ from custom_components.rtl_433.coordinator import Rtl433Coordinator
 from custom_components.rtl_433.event import Rtl433Event
 from homeassistant.components.event import DoorbellEventType, EventDeviceClass
 from homeassistant.helpers import device_registry as dr
-from tests.conftest import receiver_id, receiver_scope, receiver_subentry
+from tests.conftest import receiver_id, receiver_subentry
 
 _DEVICE_KEY = "Honeywell-Doorbell-7"
 _MODEL = "Honeywell-Doorbell"
@@ -76,7 +76,7 @@ async def build_event(hass, receiver_entry_builder):
         entry.add_to_hass(hass)
         dr.async_get(hass).async_get_or_create(
             config_entry_id=entry.entry_id,
-            identifiers={(DOMAIN, receiver_scope(entry))},
+            identifiers={(DOMAIN, entry.entry_id)},
         )
         coordinator = Rtl433Coordinator(
             hass, entry, receiver_subentry(entry), host="rtl433.local"
@@ -240,7 +240,7 @@ async def test_the_entity_forwards_its_identity_to_the_base_entity(build_event):
     the old entity id, name and automations point at nothing.
     """
     entity = build_event()
-    scope = entity._receiver_id
+    scope = entity._location_id
 
     assert entity.unique_id == f"{scope}:{_DEVICE_KEY}:{_SUFFIX}"
     device_info = entity.device_info
@@ -248,8 +248,8 @@ async def test_the_entity_forwards_its_identity_to_the_base_entity(build_event):
     assert device_info["model"] == _MODEL
     assert device_info["via_device_id"] == dr.async_get_device_id_by_identifier(
         entity._coordinator.hass,
-        (DOMAIN, entity._coordinator.receiver_identity),
-        config_entry_id=entity._coordinator.entry.entry_id,
+        (DOMAIN, scope),
+        config_entry_id=scope,
     )
     assert entity.name == "Secret knock"
 
@@ -321,3 +321,26 @@ async def test_persisted_types_for_another_device_are_not_borrowed(build_event):
     )
 
     assert entity.event_types == ["secret_knock"]
+
+
+async def test_event_repaints_on_its_receiver_connection_change(hass, build_event):
+    """An event built before aggregation still follows its receiver's connection."""
+    from unittest.mock import patch
+
+    from custom_components.rtl_433.const import signal_receiver_availability
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    entity = build_event(_descriptor(event_map={}))
+    entity.hass = hass
+    entity.entity_id = "event.test_receiver_connection"
+    await entity.async_added_to_hass()
+    try:
+        with patch.object(entity, "async_write_ha_state") as write_state:
+            async_dispatcher_send(
+                hass,
+                signal_receiver_availability(receiver_id(entity._coordinator.entry)),
+            )
+            await hass.async_block_till_done()
+        write_state.assert_called_once_with()
+    finally:
+        await entity.async_will_remove_from_hass()
