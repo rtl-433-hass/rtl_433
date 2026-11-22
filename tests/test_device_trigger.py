@@ -43,7 +43,6 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.trigger import async_initialize_triggers
 from homeassistant.util import dt as dt_util
-from tests.conftest import receiver_id
 
 # Module-local helpers from the lifecycle suite (not injectable fixtures): a
 # single receiver set up through ``async_setup_entry`` with the WebSocket stubbed,
@@ -79,7 +78,7 @@ def _resolve_device_id(hass: HomeAssistant, receiver) -> str:
     ids, which is why both are passed.
     """
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}"), receiver.entry_id
+        (DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}"), receiver.entry_id
     )
     assert device is not None
     return device.id
@@ -143,7 +142,7 @@ async def test_async_get_triggers_enumerates_base_and_subtypes(
     ent_reg = er.async_get(hass)
     button_entry = ent_reg.async_get(
         ent_reg.async_get_entity_id(
-            "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+            "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
         )
     )
     assert button_entry is not None
@@ -236,7 +235,7 @@ async def test_triggers_do_not_fire_on_restore_at_startup(hass, receiver_entry_b
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+        "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
     )
 
     triggers = await async_get_triggers(hass, device_id)
@@ -296,7 +295,7 @@ async def test_triggers_do_not_fire_on_config_entry_reload(
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+        "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
     )
 
     # A real press so the entity has a last fired event HA restores on reload.
@@ -369,7 +368,7 @@ async def test_triggers_do_not_fire_on_receiver_reconnect(hass, receiver_entry_b
 
     ent_reg = er.async_get(hass)
     entity_id = ent_reg.async_get_entity_id(
-        "event", DOMAIN, f"{receiver_id(receiver)}:{DEVICE_KEY}:button"
+        "event", DOMAIN, f"{receiver.entry_id}:{DEVICE_KEY}:button"
     )
 
     await _feed_presses(hass, coordinator, ["A"])

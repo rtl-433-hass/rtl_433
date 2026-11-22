@@ -242,12 +242,14 @@ def _issue_id(receiver_id: str, old_key: str) -> str:
     return f"{ISSUE_ID_CHANGED}_{receiver_id}_{old_key}"
 
 
-def _device_name(
-    hass: HomeAssistant, entry: ConfigEntry, receiver_id: str, key: str
-) -> str:
-    """The name the user knows the device by, falling back to its key."""
+def _device_name(hass: HomeAssistant, entry: ConfigEntry, key: str) -> str:
+    """The name the user knows the device by, falling back to its key.
+
+    Nested devices are location-scoped: one device per physical sensor, however
+    many of the location's receivers decode it.
+    """
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{receiver_id}:{key}"), entry.entry_id
+        (DOMAIN, f"{entry.entry_id}:{key}"), entry.entry_id
     )
     if device is None:
         return key
@@ -274,7 +276,7 @@ def _placeholders(
         return "unknown" if value is None else f"{value:.1f} °C"
 
     return {
-        "device": _device_name(hass, entry, receiver_id, change.old_key),
+        "device": _device_name(hass, entry, change.old_key),
         "old_key": change.old_key,
         "new_key": change.new_key,
         "old_temperature": _temp(change.old_temperature),
@@ -298,9 +300,9 @@ async def async_follow_id_change(
     the entry, which tears this module's tracker down and builds a new one.
     """
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{receiver_id}:{old_key}"), entry.entry_id
+        (DOMAIN, f"{entry.entry_id}:{old_key}"), entry.entry_id
     )
-    name = _device_name(hass, entry, receiver_id, old_key)
+    name = _device_name(hass, entry, old_key)
     await async_replace_device(hass, entry, old_key, new_key)
     LOGGER.info(
         "rtl_433 %s changed its transmitter id (%s -> %s)",
@@ -425,9 +427,7 @@ class DeviceIdChangedRepairFlow(RepairsFlow):
             step_id="confirm",
             data_schema=vol.Schema({}),
             description_placeholders={
-                "device": _device_name(
-                    self.hass, self._entry, self._receiver_id, self._old_key
-                ),
+                "device": _device_name(self.hass, self._entry, self._old_key),
                 "old_key": self._old_key,
                 "new_key": self._new_key,
             },

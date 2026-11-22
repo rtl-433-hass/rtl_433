@@ -41,7 +41,7 @@ from homeassistant.components.sensor import SensorExtraStoredData
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.restore_state import RestoredExtraData
 from homeassistant.util import dt as dt_util
-from tests.conftest import receiver_scope, receiver_subentry
+from tests.conftest import receiver_subentry
 
 # Nine-step historical temperature backlog (reconnect replay shape): values that
 # previously landed in the Recorder within tens of milliseconds.
@@ -669,7 +669,7 @@ async def test_event_entity_still_suppresses_replay(hass, receiver_entry_builder
     )
     entry.add_to_hass(hass)
     dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id, identifiers={("rtl_433", receiver_scope(entry))}
+        config_entry_id=entry.entry_id, identifiers={("rtl_433", entry.entry_id)}
     )
     from custom_components.rtl_433.coordinator import Rtl433Coordinator
 
