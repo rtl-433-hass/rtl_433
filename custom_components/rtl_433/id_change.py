@@ -15,9 +15,9 @@ What makes a battery swap recognisable is that every clue lines up at once, and
   changes on a battery swap. A device whose key has no ``id`` (channel-only
   devices) cannot change it this way and is never considered.
 - **The old device has gone quiet,** for at least :data:`SILENCE`, and has not
-  been heard since the candidate first appeared. A neighbour's sensor of the same
+  been received since the candidate first appeared. A neighbour's sensor of the same
   model shows up *while* yours is still transmitting, which rules it out.
-- **The candidate is real:** heard at least :data:`MIN_SIGHTINGS` times, so a
+- **The candidate is real:** received at least :data:`MIN_SIGHTINGS` times, so a
   single bad decode (or the id a sensor showed for a moment while its batteries
   were being seated) never qualifies.
 - **The readings carry on.** Where both report a temperature, the candidate's
@@ -74,7 +74,7 @@ SILENCE: Final = timedelta(minutes=10)
 
 # Sightings a candidate needs before it is considered. One is a bad decode as
 # often as it is a device; the ids a sensor shows while its batteries are being
-# seated are heard once each and never again.
+# seated are received once each and never again.
 MIN_SIGHTINGS: Final = 2
 
 # How far the candidate's temperature may be from the old device's last reading.
@@ -109,7 +109,7 @@ class IdChange:
     new_temperature: float | None = None
     signal: float | None = None
     # Old device's last frame -> candidate's first; ``None`` when the old device
-    # has not been heard since the receiver connected (a restart), so it is unknown.
+    # has not been received since the receiver connected (a restart), so it is unknown.
     gap: timedelta | None = None
 
 
@@ -181,7 +181,7 @@ def find_id_changes(
     pair survives only if it passes all of them.
     """
     records: dict[str, dict[str, Any]] = entry.data.get(CONF_DEVICES, {})
-    # When the device has not been heard this session, its silence is counted
+    # When the device has not been received this session, its silence is counted
     # from the moment the receiver connected: nothing older is known.
     connected_since: datetime | None = getattr(coordinator, "_connection_time", None)
 
@@ -202,13 +202,13 @@ def find_id_changes(
         kind = _kind(model, old_key)
         if kind is None or kind not in candidates:
             continue
-        heard = coordinator.last_seen.get(old_key)
-        quiet_since = heard or connected_since
+        last_received = coordinator.last_seen.get(old_key)
+        quiet_since = last_received or connected_since
         if quiet_since is None or now - quiet_since < SILENCE:
             continue
         old_fields = last_event.fields if last_event else None
         for pending in candidates[kind]:
-            if heard is not None and heard >= pending.first_seen:
+            if last_received is not None and last_received >= pending.first_seen:
                 # Still transmitting after the candidate appeared: two devices.
                 continue
             if not _readings_agree(old_fields, pending.fields):
@@ -220,7 +220,9 @@ def find_id_changes(
                     old_temperature=_temperature(old_fields),
                     new_temperature=_temperature(pending.fields),
                     signal=pending.signal,
-                    gap=None if heard is None else pending.first_seen - heard,
+                    gap=None
+                    if last_received is None
+                    else pending.first_seen - last_received,
                 )
             )
 
@@ -332,7 +334,7 @@ def async_track_id_changes(
 
     Returns the unsubscribe, which also withdraws every issue this tracker raised:
     after a reload the pending list is rebuilt from live traffic, so a still-valid
-    card is simply raised again once the candidate has been re-heard.
+    card is simply raised again once the candidate has been received again.
     """
     raised: set[str] = set()
     receiver_id = coordinator.receiver_id

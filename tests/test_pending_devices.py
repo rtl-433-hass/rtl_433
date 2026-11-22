@@ -248,7 +248,7 @@ async def test_pending_frame_touches_no_adopted_runtime_state(hass, make_coordin
     assert _dispatched(dispatch) == [signal_pending_update(coordinator.entry.entry_id)]
 
     # Long past any timeout: the watchdog has nothing to say about a device that
-    # was only ever heard.
+    # was only ever received.
     with freeze_time(start + timedelta(seconds=3600)), patch(DISPATCH) as dispatch:
         await coordinator._async_watchdog(dt_util.utcnow())
     assert coordinator.available == {}

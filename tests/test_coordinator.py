@@ -442,7 +442,7 @@ def test_pending_candidate_cap_is_the_documented_value():
     """The ceiling is a deliberate number, not an incidental one.
 
     Pinned explicitly so a change to it is a change to this test: it is sized far
-    above what a busy receiver hears, and the whole point is that it is generous
+    above what a busy receiver receives, and the whole point is that it is generous
     enough never to touch a real install.
     """
     assert MAX_PENDING_CANDIDATES == 512
@@ -456,7 +456,7 @@ def _assert_nothing_tracks(coordinator, key):
     seventh added later is covered by this without anyone remembering to.
 
     ``calibration_snapshot`` and ``user_mappings_snapshot`` are excluded: they
-    mirror the user's stored options rather than what the radio has been heard
+    mirror the user's stored options rather than what the radio has been received
     saying, and deleting a device is not meant to discard its configuration.
     """
     config_mirrors = {"calibration_snapshot", "user_mappings_snapshot"}
