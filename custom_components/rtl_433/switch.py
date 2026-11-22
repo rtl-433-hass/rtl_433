@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .entity import Rtl433ReceiverControl, async_setup_receiver_controls
 
@@ -45,11 +45,10 @@ class Rtl433SwitchControl(Rtl433ReceiverControl, SwitchEntity):
     def __init__(
         self,
         coordinator: Rtl433Coordinator,
-        receiver_entry_id: str,
         setting: SdrSetting,
     ) -> None:
         """Initialize the switch control from the setting."""
-        super().__init__(coordinator, receiver_entry_id, setting)
+        super().__init__(coordinator, setting)
 
     @property
     def is_on(self) -> bool | None:
@@ -78,9 +77,9 @@ class Rtl433SwitchControl(Rtl433ReceiverControl, SwitchEntity):
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Register the receiver's managed Switch controls (only when managing)."""
+    """Register every receiver's managed Switch controls (only when managing)."""
     await async_setup_receiver_controls(
         hass, entry, async_add_entities, PLATFORM, Rtl433SwitchControl
     )

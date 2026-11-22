@@ -61,6 +61,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_DEVICES, CONF_MODEL, DOMAIN, LOGGER, signal_pending_update
 from .device_replace import DeviceReplaceError, async_replace_device
+from .receiver_settings import receiver_coordinator
 
 if TYPE_CHECKING:
     from .coordinator import Rtl433Coordinator
@@ -236,15 +237,17 @@ def find_id_changes(
     ]
 
 
-def _issue_id(entry: ConfigEntry, old_key: str) -> str:
+def _issue_id(receiver_id: str, old_key: str) -> str:
     """The per-receiver, per-device issue id (the device key is HA-safe already)."""
-    return f"{ISSUE_ID_CHANGED}_{entry.entry_id}_{old_key}"
+    return f"{ISSUE_ID_CHANGED}_{receiver_id}_{old_key}"
 
 
-def _device_name(hass: HomeAssistant, entry: ConfigEntry, key: str) -> str:
+def _device_name(
+    hass: HomeAssistant, entry: ConfigEntry, receiver_id: str, key: str
+) -> str:
     """The name the user knows the device by, falling back to its key."""
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{entry.entry_id}:{key}"), entry.entry_id
+        (DOMAIN, f"{receiver_id}:{key}"), entry.entry_id
     )
     if device is None:
         return key
@@ -263,7 +266,7 @@ def _duration(gap: timedelta | None) -> str:
 
 
 def _placeholders(
-    hass: HomeAssistant, entry: ConfigEntry, change: IdChange
+    hass: HomeAssistant, entry: ConfigEntry, receiver_id: str, change: IdChange
 ) -> dict[str, str]:
     """What the repair card and its confirm step show."""
 
@@ -271,7 +274,7 @@ def _placeholders(
         return "unknown" if value is None else f"{value:.1f} °C"
 
     return {
-        "device": _device_name(hass, entry, change.old_key),
+        "device": _device_name(hass, entry, receiver_id, change.old_key),
         "old_key": change.old_key,
         "new_key": change.new_key,
         "old_temperature": _temp(change.old_temperature),
@@ -284,6 +287,7 @@ def _placeholders(
 async def async_follow_id_change(
     hass: HomeAssistant,
     entry: ConfigEntry,
+    receiver_id: str,
     old_key: str,
     new_key: str,
 ) -> None:
@@ -294,9 +298,9 @@ async def async_follow_id_change(
     the entry, which tears this module's tracker down and builds a new one.
     """
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{entry.entry_id}:{old_key}"), entry.entry_id
+        (DOMAIN, f"{receiver_id}:{old_key}"), entry.entry_id
     )
-    name = _device_name(hass, entry, old_key)
+    name = _device_name(hass, entry, receiver_id, old_key)
     await async_replace_device(hass, entry, old_key, new_key)
     LOGGER.info(
         "rtl_433 %s changed its transmitter id (%s -> %s)",
@@ -308,6 +312,7 @@ async def async_follow_id_change(
         EVENT_DEVICE_ID_CHANGED,
         {
             "entry_id": entry.entry_id,
+            "receiver_id": receiver_id,
             "device_id": device.id if device is not None else None,
             "name": name,
             "old_key": old_key,
@@ -328,12 +333,13 @@ def async_track_id_changes(
     card is simply raised again once the candidate has been re-heard.
     """
     raised: set[str] = set()
+    receiver_id = coordinator.receiver_id
 
     @callback
     def _evaluate(*_: Any) -> None:
         live: set[str] = set()
         for change in find_id_changes(entry, coordinator, dt_util.utcnow()):
-            issue_id = _issue_id(entry, change.old_key)
+            issue_id = _issue_id(receiver_id, change.old_key)
             live.add(issue_id)
             ir.async_create_issue(
                 hass,
@@ -343,9 +349,12 @@ def async_track_id_changes(
                 is_persistent=False,
                 severity=ir.IssueSeverity.WARNING,
                 translation_key=ISSUE_ID_CHANGED,
-                translation_placeholders=_placeholders(hass, entry, change),
+                translation_placeholders=_placeholders(
+                    hass, entry, receiver_id, change
+                ),
                 data={
                     "entry_id": entry.entry_id,
+                    "receiver_id": receiver_id,
                     "old_key": change.old_key,
                     "new_key": change.new_key,
                 },
@@ -356,9 +365,7 @@ def async_track_id_changes(
         raised.update(live)
 
     unsubs = [
-        async_dispatcher_connect(
-            hass, signal_pending_update(entry.entry_id), _evaluate
-        ),
+        async_dispatcher_connect(hass, signal_pending_update(receiver_id), _evaluate),
         async_track_time_interval(hass, _evaluate, EVALUATE_INTERVAL),
     ]
 
@@ -376,9 +383,12 @@ def async_track_id_changes(
 class DeviceIdChangedRepairFlow(RepairsFlow):
     """Confirm that a device came back under a new id, then re-key it."""
 
-    def __init__(self, entry: ConfigEntry, old_key: str, new_key: str) -> None:
+    def __init__(
+        self, entry: ConfigEntry, receiver_id: str, old_key: str, new_key: str
+    ) -> None:
         """Remember which receiver and which pair the card is about."""
         self._entry = entry
+        self._receiver_id = receiver_id
         self._old_key = old_key
         self._new_key = new_key
 
@@ -389,7 +399,9 @@ class DeviceIdChangedRepairFlow(RepairsFlow):
     async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> Any:
         """Show the pair; on submit, run the replace."""
         if user_input is not None:
-            coordinator = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+            coordinator = receiver_coordinator(
+                self.hass, self._entry, self._receiver_id
+            )
             if coordinator is None or not any(
                 change.old_key == self._old_key and change.new_key == self._new_key
                 for change in find_id_changes(
@@ -401,6 +413,7 @@ class DeviceIdChangedRepairFlow(RepairsFlow):
                 await async_follow_id_change(
                     self.hass,
                     self._entry,
+                    self._receiver_id,
                     self._old_key,
                     self._new_key,
                 )
@@ -412,7 +425,9 @@ class DeviceIdChangedRepairFlow(RepairsFlow):
             step_id="confirm",
             data_schema=vol.Schema({}),
             description_placeholders={
-                "device": _device_name(self.hass, self._entry, self._old_key),
+                "device": _device_name(
+                    self.hass, self._entry, self._receiver_id, self._old_key
+                ),
                 "old_key": self._old_key,
                 "new_key": self._new_key,
             },

@@ -48,6 +48,7 @@ from custom_components.rtl_433.settings import (
     is_motion_bearing,
 )
 from homeassistant.const import CONF_HOST, UnitOfVolume
+from tests.conftest import build_receiver_subentry, receiver_id
 
 DEVICE = "acme-pir-7"
 OTHER_DEVICE = "acme-therm-3"
@@ -139,6 +140,7 @@ def _entry(
         data=data if data is not None else {},
         options=options if options is not None else {},
         version=2,
+        subentries_data=[build_receiver_subentry()],
     )
 
 
@@ -153,7 +155,7 @@ def _hass(
     if registry is not None:
         domain_data[DATA_ENTRY_LIBRARY] = {entry.entry_id: (registry, set())}
     if fields is not None:
-        domain_data[entry.entry_id] = _FakeCoordinator({DEVICE: _FakeEvent(fields)})
+        domain_data[receiver_id(entry)] = _FakeCoordinator({DEVICE: _FakeEvent(fields)})
     return _FakeHass({DOMAIN: domain_data})
 
 

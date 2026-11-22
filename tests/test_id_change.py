@@ -40,6 +40,7 @@ from custom_components.rtl_433.id_change import (
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from homeassistant.util import dt as dt_util
+from tests.conftest import receiver_id
 
 MODEL = "Acurite-606TX"
 OLD_KEY = f"{MODEL}-24-ch1"
@@ -96,7 +97,7 @@ async def _setup_receiver(hass: HomeAssistant, receiver_entry_builder, devices):
     receiver.add_to_hass(hass)
     assert await hass.config_entries.async_setup(receiver.entry_id)
     await hass.async_block_till_done()
-    return receiver, hass.data[DOMAIN][receiver.entry_id]
+    return receiver, hass.data[DOMAIN][receiver_id(receiver)]
 
 
 def _quiet(
@@ -339,7 +340,7 @@ async def test_a_device_not_heard_this_session_counts_from_the_connection(
 # --------------------------------------------------------------------------- #
 def _issue(hass, receiver):
     return ir.async_get(hass).async_get_issue(
-        DOMAIN, f"{ISSUE_ID_CHANGED}_{receiver.entry_id}_{OLD_KEY}"
+        DOMAIN, f"{ISSUE_ID_CHANGED}_{receiver_id(receiver)}_{OLD_KEY}"
     )
 
 
@@ -379,6 +380,7 @@ async def test_a_match_raises_a_fixable_repair(hass, receiver_entry_builder, no_
     assert issue.is_fixable
     assert issue.data == {
         "entry_id": receiver.entry_id,
+        "receiver_id": receiver_id(receiver),
         "old_key": OLD_KEY,
         "new_key": NEW_KEY,
     }
@@ -415,7 +417,7 @@ async def test_confirming_the_repair_follows_the_new_id(
         hass, receiver_entry_builder, {OLD_KEY: OLD_RECORD}
     )
     device = dr.async_get(hass).async_get_device_by_identifier(
-        (DOMAIN, f"{receiver.entry_id}:{OLD_KEY}"), receiver.entry_id
+        (DOMAIN, f"{receiver_id(receiver)}:{OLD_KEY}"), receiver.entry_id
     )
     await _announce(hass, coordinator)
     issue = _issue(hass, receiver)
@@ -435,6 +437,7 @@ async def test_confirming_the_repair_follows_the_new_id(
     assert [e.data for e in fired] == [
         {
             "entry_id": receiver.entry_id,
+            "receiver_id": receiver_id(receiver),
             "device_id": device.id,
             "name": device.name_by_user or device.name,
             "old_key": OLD_KEY,
@@ -453,7 +456,9 @@ async def test_confirming_a_stale_repair_aborts(
     receiver, _coordinator = await _setup_receiver(
         hass, receiver_entry_builder, {OLD_KEY: OLD_RECORD}
     )
-    flow = DeviceIdChangedRepairFlow(receiver, "Acurite-606TX-1-ch1", NEW_KEY)
+    flow = DeviceIdChangedRepairFlow(
+        receiver, receiver_id(receiver), "Acurite-606TX-1-ch1", NEW_KEY
+    )
     flow.hass = hass
 
     result = await flow.async_step_confirm({})
@@ -492,7 +497,7 @@ async def test_confirmation_rechecks_the_suggestion(
         hass, receiver_entry_builder, {OLD_KEY: OLD_RECORD}
     )
     await _announce(hass, coordinator)
-    flow = DeviceIdChangedRepairFlow(receiver, OLD_KEY, NEW_KEY)
+    flow = DeviceIdChangedRepairFlow(receiver, receiver_id(receiver), OLD_KEY, NEW_KEY)
     flow.hass = hass
     assert (await flow.async_step_init())["type"] == "form"
 
@@ -506,12 +511,12 @@ async def test_confirmation_rechecks_the_suggestion(
     elif change == "ignored":
         coordinator.pending.pop(NEW_KEY)
     else:
-        hass.data[DOMAIN].pop(receiver.entry_id)
+        hass.data[DOMAIN].pop(receiver_id(receiver))
     fired = async_capture_events(hass, EVENT_DEVICE_ID_CHANGED)
 
     result = await flow.async_step_confirm({})
     if change == "unloaded":
-        hass.data[DOMAIN][receiver.entry_id] = coordinator
+        hass.data[DOMAIN][receiver_id(receiver)] = coordinator
 
     assert result["type"] == "abort"
     assert result["reason"] == "device_id_change_stale"
