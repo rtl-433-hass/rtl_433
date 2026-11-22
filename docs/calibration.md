@@ -58,7 +58,7 @@ Choose the unit and scale carefully before calibrating. Changing them later can
 interrupt the meter's long-term statistics in Home Assistant. The entity keeps
 its ID, but earlier statistics may no longer be linked to the new readings.
 
-Saving a calibration briefly reloads the receiver so the sensor can use the
+Saving a calibration briefly reloads the location so the sensor can use the
 new settings.
 
 ## Model-Scoped Mappings
