@@ -367,7 +367,11 @@ def async_track_id_changes(
         raised.update(live)
 
     unsubs = [
-        async_dispatcher_connect(hass, signal_pending_update(receiver_id), _evaluate),
+        # The pending-list signal is location-wide; each receiver's tracker
+        # re-checks its own pending map when any of them changes.
+        async_dispatcher_connect(
+            hass, signal_pending_update(entry.entry_id), _evaluate
+        ),
         async_track_time_interval(hass, _evaluate, EVALUATE_INTERVAL),
     ]
 
